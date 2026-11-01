@@ -5,7 +5,9 @@ Python SDK of the umiak public API (S7 §15.3). Python ≥ 3.11, httpx + attrs.
 ```python
 from umiak_sdk import Umiak, ExitEvent
 
-with Umiak(base_url="https://api.example.com", api_key="umiak_...") as umiak:  # or the credential chain
+with Umiak(
+    base_url="https://api.example.com", api_key="umiak_..."
+) as umiak:  # or the credential chain
     sb = umiak.sandboxes.create(template="linux", labels={"session": "42"}, wait=True)
     r = sb.exec("npm test", cwd="app", timeout_seconds=600)  # stdout, stderr, exit_code
     for ev in sb.run("npm run build"):  # OutputEvent ... ExitEvent

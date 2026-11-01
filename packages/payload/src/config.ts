@@ -62,7 +62,7 @@ export interface UmiakCustomConfig {
 const noEmail: EmailAdapter = () => ({
 	name: "none",
 	defaultFromAddress: "noreply@invalid",
-	defaultFromName: "umiak",
+	defaultFromName: "Umiak",
 	sendEmail: async () => {
 		throw new Error("email is not configured");
 	},

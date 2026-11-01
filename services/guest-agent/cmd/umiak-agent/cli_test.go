@@ -56,6 +56,8 @@ func startCLIAgent(t *testing.T) *cliAgent {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	l := paths.ForRoot(dir)
+	// Keep the longer Umiak layout out of macOS AF_UNIX socket paths.
+	l.ShimSockDir = filepath.Join(dir, "s")
 	l.AdminSocket = filepath.Join(dir, "a.sock")
 	l.EnvSocket = filepath.Join(dir, "e.sock")
 	l.LogDir = filepath.Join(l.RunDir, "..", "logs")

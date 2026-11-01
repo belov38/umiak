@@ -45,6 +45,9 @@ describe.skipIf(skipPg())("R1 namespace migration", () => {
 			await db.pool.query(
 				"ALTER TABLE public.umiak_schema_migrations RENAME TO sbx_schema_migrations",
 			);
+			await db.pool.query(
+				"ALTER TABLE public.sbx_schema_migrations RENAME CONSTRAINT umiak_schema_migrations_pkey TO sbx_schema_migrations_pkey",
+			);
 			const result = await migrate(db.pool);
 			expect(result.applied).toEqual(["0500_umiak_names.sql"]);
 			const after = await db.pool.query(
@@ -55,6 +58,10 @@ describe.skipIf(skipPg())("R1 namespace migration", () => {
 				"SELECT to_regclass('public.sbx_schema_migrations') AS t",
 			);
 			expect(old.rows[0].t).toBeNull();
+			const oldIndex = await db.pool.query(
+				"SELECT to_regclass('public.sbx_schema_migrations_pkey') AS t",
+			);
+			expect(oldIndex.rows[0].t).toBeNull();
 			expect((await migrate(db.pool)).applied).toEqual([]);
 			for (const { body } of (await activeNotifyBodies(db.pool)).rows)
 				expect(body).not.toContain("sbx_");

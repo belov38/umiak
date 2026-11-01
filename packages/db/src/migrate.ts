@@ -112,6 +112,12 @@ export async function migrate(
 			   RAISE EXCEPTION 'both legacy and Umiak migration journals exist';
 			  END IF;
 			  ALTER TABLE public.sbx_schema_migrations RENAME TO umiak_schema_migrations;
+			  IF EXISTS (SELECT 1 FROM pg_constraint
+			    WHERE conrelid='public.umiak_schema_migrations'::regclass
+			      AND conname='sbx_schema_migrations_pkey') THEN
+			   ALTER TABLE public.umiak_schema_migrations
+			    RENAME CONSTRAINT sbx_schema_migrations_pkey TO umiak_schema_migrations_pkey;
+			  END IF;
 			 END IF;
 			END $$`);
 			await client.query(CREATE_TABLE);

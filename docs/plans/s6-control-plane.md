@@ -1,5 +1,7 @@
 # S6 Control plane: план реализации
 
+> Исторический план до R1. Действующие имена и контракты — `docs/specs/rename-umiak.md`.
+
 > **Для исполнителей:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development (по задаче на субагента, после каждой задачи — ревью свежим субагентом) и superpowers:test-driven-development. Шаги — чекбоксы `- [ ]`.
 
 **Цель:** реализовать S6 по `docs/specs/s6-control-plane.md`: модель данных `runtime` с миграциями, машины состояний, сервисный слой `SandboxService` для S7, `apps/worker` на pg-boss (операции, warm pool, контроллеры), шифрование env и секретов, и локальный стек `deploy/compose`.

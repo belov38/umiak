@@ -21,8 +21,8 @@ from ._async import (
     AsyncPorts,
     AsyncSandbox,
     AsyncSandboxes,
-    AsyncUmiak,
     AsyncSnapshots,
+    AsyncUmiak,
 )
 from ._async.client import SDK_VERSION
 from ._errors import (
@@ -51,7 +51,7 @@ from ._events import (
     TruncatedEvent,
 )
 from ._gen import models
-from ._sync import Command, Files, Ports, Sandbox, Sandboxes, Umiak, Snapshots
+from ._sync import Command, Files, Ports, Sandbox, Sandboxes, Snapshots, Umiak
 
 __version__ = SDK_VERSION
 
@@ -73,8 +73,8 @@ __all__ = [
     "AsyncPorts",
     "AsyncSandbox",
     "AsyncSandboxes",
-    "AsyncUmiak",
     "AsyncSnapshots",
+    "AsyncUmiak",
     "Command",
     "DownloadResult",
     "ExecResult",
@@ -88,9 +88,9 @@ __all__ = [
     "Sandbox",
     "SandboxFailedError",
     "Sandboxes",
-    "Umiak",
-    "UmiakError",
     "Snapshots",
     "TruncatedEvent",
+    "Umiak",
+    "UmiakError",
     "models",
 ]

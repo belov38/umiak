@@ -45,7 +45,7 @@
 
 ### 4.1 Пользователь, токен, pool
 
-- Пользователь `umiak@pve` (без пароля), токен `umiak@pve!poc` с `privsep=1`.
+- Пользователь `umiak@pve` (без пароля), токен `umiak@pve!dev` с `privsep=1`.
 - Роль `UmiakPoC`: `VM.Allocate`, `VM.Audit`, `VM.Clone`, `VM.Config.CDROM`, `VM.Config.CPU`, `VM.Config.Cloudinit`, `VM.Config.Disk`, `VM.Config.HWType`, `VM.Config.Memory`, `VM.Config.Network`, `VM.Config.Options`, `VM.PowerMgmt`, `VM.GuestAgent.Audit`, `VM.GuestAgent.FileRead`, `VM.GuestAgent.FileWrite`, `VM.GuestAgent.FileSystemMgmt`, `VM.GuestAgent.Unrestricted`, `Pool.Audit`.
 - Pool `sandbox`.
 - ACL (на пользователя и на токен, так как privsep):
@@ -233,7 +233,7 @@ Dev control plane (2026-10-30): CT 590 на `pve` с compose-стеком, ег�
 | Переменная | Назначение | Дефолт PoC |
 |---|---|---|
 | `UMIAK_PVE_URL` | Proxmox API | `https://pve:8006` (свой адрес Proxmox — через env, в compose — `deploy/compose/.env`) |
-| `UMIAK_PVE_TOKEN_ID` | id токена | `umiak@pve!poc` |
+| `UMIAK_PVE_TOKEN_ID` | id токена | `umiak@pve!dev` |
 | `UMIAK_PVE_TOKEN_SECRET_FILE` | секрет токена | `~/.config/umiak/pve-token` (права 600) |
 | `UMIAK_PVE_CA_FILE` | CA хоста (`pve-root-ca.pem`), TLS проверяется | `~/.config/umiak/pve-root-ca.pem` |
 | `UMIAK_PVE_TLS_NAME` | имя, по которому проверяется сертификат `:8006` | `pve` |
@@ -287,7 +287,7 @@ interface QuiesceHook {
 
 - **create(template, size, opts)**:
   1. Выделить VMID и MAC (§6.5).
-  2. `POST /nodes/pve/qemu` без дисков: `vmid`, `pool=sandbox`, `name=umiak-<vmid>`, `tags=umiak`; железо копируется из конфига шаблона по белому списку ключей (`machine`, `cpu`, `bios`, `ostype`, `scsihw`, `agent`, `serial0`, `vga`, `tablet`); размер по умолчанию 2 vCPU / 2 GB, `balloon=0`; `net0=virtio=<MAC>,bridge=umiak0,firewall=1`; `ide2=local-lvm:cloudinit`, `ipconfig0=ip=dhcp`, `ciuser=umiak` без ключей и пароля (в S1 доступ к гостю только через QGA); `ciupgrade=0` (дефолт Proxmox 1: cloud-init делает `apt upgrade` при первой загрузке и через ~2 минуты перезапускает `qemu-guest-agent`, который забывает PID запущенных exec); `vmgenid` новый; `smbios1` от вызывающего или новый от Proxmox (§6.4).
+  2. `POST /nodes/pve/qemu` без дисков: `vmid`, `pool=umiak`, `name=umiak-<vmid>`, `tags=umiak`; железо копируется из конфига шаблона по белому списку ключей (`machine`, `cpu`, `bios`, `ostype`, `scsihw`, `agent`, `serial0`, `vga`, `tablet`); размер по умолчанию 2 vCPU / 2 GB, `balloon=0`; `net0=virtio=<MAC>,bridge=umiak0,firewall=1`; `ide2=local-lvm:cloudinit`, `ipconfig0=ip=dhcp`, `ciuser=umiak` без ключей и пароля (в S1 доступ к гостю только через QGA); `ciupgrade=0` (дефолт Proxmox 1: cloud-init делает `apt upgrade` при первой загрузке и через ~2 минуты перезапускает `qemu-guest-agent`, который забывает PID запущенных exec); `vmgenid` новый; `smbios1` от вызывающего или новый от Proxmox (§6.4).
   3. `driver.cloneFromTemplate`.
   4. `PUT config`: подключить диски с опциями, `boot=order=scsi0`.
   5. Firewall: options и `GROUP umiak-egress` (§4.4).
@@ -352,7 +352,7 @@ interface QuiesceHook {
    6. **Delete** A, F и снапшота. Проверка отсутствия следов (§6.3 delete, плюс LV `umiak-snap-<id>`).
 2. **Параллелизм**: для k из `--parallel` (дефолт 1, 2, 4) k одновременных `create → start → waitReady`, затем delete всех. По умолчанию 4 × 2 GB = ровно лимит.
 3. **`--clone-only 8`**: 8 одновременных create без start (RAM не тратится), затем delete. Цель — конкуренция за блокировки LVM и pmxcfs; ошибки и повторы записываются.
-4. **Базовая линия** (выключается `--no-baseline`): create через `POST /qemu/599/clone` (`full=0`, `pool=sandbox`, тот же VMID из аллокатора), затем тот же config и firewall; N раз, плюс параллельно k=4 без start. Delete тем же путём.
+4. **Базовая линия** (выключается `--no-baseline`): create через `POST /qemu/599/clone` (`full=0`, `pool=umiak`, тот же VMID из аллокатора), затем тот же config и firewall; N раз, плюс параллельно k=4 без start. Delete тем же путём.
 5. «Мир после»: `umiak-node inventory`, сравнение с «миром до». Разница должна быть пустой.
 
 Где виден serial: после create стенд ищет тестовый serial в конфиге VM (через API), в journal хоста и в task log (через `umiak-node inventory`, только факт найден/не найден, без вывода значения) и пишет итог в JSON и §11.

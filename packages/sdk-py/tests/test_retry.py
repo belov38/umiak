@@ -340,7 +340,11 @@ def test_a_failing_token_provider_sends_nothing() -> None:
 
 def test_explicit_credentials_beat_the_environment() -> None:
     s = Script(httpx.Response(200, json=SANDBOX))
-    env = {"UMIAK_API_KEY": "umiak_env", "UMIAK_ACCESS_TOKEN": "jwt", "UMIAK_API_URL": "https://env.test"}
+    env = {
+        "UMIAK_API_KEY": "umiak_env",
+        "UMIAK_ACCESS_TOKEN": "jwt",
+        "UMIAK_API_URL": "https://env.test",
+    }
     umiak(s, env=env).sandboxes.get("x")
     assert s.requests[-1].headers["Authorization"] == "Bearer umiak_test"
     assert str(s.requests[-1].url).startswith(API)

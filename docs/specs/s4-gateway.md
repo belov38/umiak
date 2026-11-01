@@ -95,7 +95,7 @@ Sandbox не имеет публичного IP, весь входящий тр�
 | `ssh.<domain>` | SSH gateway | IP `gateway-edge` |
 | `<domain>`, `app.<domain>`, `api.<domain>` | web, API, oauth2-proxy | обычный ingress, не gateway |
 
-Суффикс публичных URL задаётся конфигом (`UMIAK_GATEWAY_UMIAK_DOMAIN`). По умолчанию это `umiak.<domain>`. Поддерживается и отдельный регистрируемый домен (например, `example-umiak.net`): в коде это только значение конфига и режим cookie (§8.2). Риски выбора — §14.1.
+Суффикс публичных URL задаётся конфигом (`UMIAK_GATEWAY_PREVIEW_DOMAIN`). По умолчанию это `umiak.<domain>`. Поддерживается и отдельный регистрируемый домен (например, `example-umiak.net`): в коде это только значение конфига и режим cookie (§8.2). Риски выбора — §14.1.
 
 ### 4.2 Грамматика метки
 
@@ -664,7 +664,7 @@ SSH-лог: `sessionId`, `clientIp`, `actor` (`userId` или `apiKeyId`), `fing
 4. Сессии IdP и oauth2-proxy никогда не выставляются на домене umiak: режим `sso` использует одноразовый код (§8.4).
 5. Состояние доступа к порту привязано к `authEpoch` и label, а не только к наличию cookie.
 
-**Остаточный риск, принят:** CSRF между sandbox одного родительского сайта. Приложение в sandbox A может заставить браузер посетителя слать запросы с его cookie в sandbox B. Защита от CSRF внутри приложения — забота приложения, как и в любом хостинге. Полностью риск снимает отдельный регистрируемый домен (`UMIAK_GATEWAY_UMIAK_DOMAIN`, §4.1) и, если домен публичный, внесение его в Public Suffix List. Цена: покупка домена и ненадёжная работа cookie в iframe в Safari (§8.2). Илья проинформирован и может выбрать отдельный домен позже; код от этого не меняется.
+**Остаточный риск, принят:** CSRF между sandbox одного родительского сайта. Приложение в sandbox A может заставить браузер посетителя слать запросы с его cookie в sandbox B. Защита от CSRF внутри приложения — забота приложения, как и в любом хостинге. Полностью риск снимает отдельный регистрируемый домен (`UMIAK_GATEWAY_PREVIEW_DOMAIN`, §4.1) и, если домен публичный, внесение его в Public Suffix List. Цена: покупка домена и ненадёжная работа cookie в iframe в Safari (§8.2). Илья проинформирован и может выбрать отдельный домен позже; код от этого не меняется.
 
 ### 14.2 Прочее
 
@@ -774,7 +774,7 @@ SSH-лог: `sessionId`, `clientIp`, `actor` (`userId` или `apiKeyId`), `fing
 
 | Переменная | Назначение |
 |---|---|
-| `UMIAK_GATEWAY_UMIAK_DOMAIN`, `UMIAK_GATEWAY_TUNNEL_HOST`, `UMIAK_GATEWAY_SSH_HOST` | имена (§4.1) |
+| `UMIAK_GATEWAY_PREVIEW_DOMAIN`, `UMIAK_GATEWAY_TUNNEL_HOST`, `UMIAK_GATEWAY_SSH_HOST` | имена (§4.1) |
 | `UMIAK_GATEWAY_TLS_PREVIEW_CERT_FILE`/`_KEY_FILE`, `UMIAK_GATEWAY_TLS_TUNNEL_CERT_FILE`/`_KEY_FILE` | сертификаты |
 | `UMIAK_GATEWAY_PROXY_PROTOCOL` (`off`/`v2`), `UMIAK_GATEWAY_PROXY_PROTOCOL_CIDRS`, `UMIAK_GATEWAY_TRUSTED_PROXY_CIDRS` | IP клиента |
 | `UMIAK_GATEWAY_HTTP_LISTEN` | plain-режим (§5.2), пусто — выключен |

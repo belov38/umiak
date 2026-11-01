@@ -196,18 +196,18 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	c.HTTPListen = l.listen("HTTP_LISTEN", "")
 	c.MetricsListen = l.str("METRICS_LISTEN", ":9090")
 
-	c.UmiakDomain = l.str("UMIAK_DOMAIN", "")
+	c.UmiakDomain = l.str("PREVIEW_DOMAIN", "")
 	c.TunnelHost = l.str("TUNNEL_HOST", "")
 	c.SSHHost = l.str("SSH_HOST", "")
 
 	if c.TLSListen != "" {
-		c.UmiakCertFile = l.required("TLS_UMIAK_CERT_FILE")
-		c.UmiakKeyFile = l.required("TLS_UMIAK_KEY_FILE")
+		c.UmiakCertFile = l.required("TLS_PREVIEW_CERT_FILE")
+		c.UmiakKeyFile = l.required("TLS_PREVIEW_KEY_FILE")
 		c.TunnelCertFile = l.required("TLS_TUNNEL_CERT_FILE")
 		c.TunnelKeyFile = l.required("TLS_TUNNEL_KEY_FILE")
 	} else {
-		c.UmiakCertFile = l.str("TLS_UMIAK_CERT_FILE", "")
-		c.UmiakKeyFile = l.str("TLS_UMIAK_KEY_FILE", "")
+		c.UmiakCertFile = l.str("TLS_PREVIEW_CERT_FILE", "")
+		c.UmiakKeyFile = l.str("TLS_PREVIEW_KEY_FILE", "")
 		c.TunnelCertFile = l.str("TLS_TUNNEL_CERT_FILE", "")
 		c.TunnelKeyFile = l.str("TLS_TUNNEL_KEY_FILE", "")
 	}
@@ -309,7 +309,7 @@ func (c Config) ValidateServe() error {
 			errs = append(errs, fmt.Errorf("%s%s: is required", envPrefix, name))
 		}
 	}
-	need("UMIAK_DOMAIN", c.UmiakDomain)
+	need("PREVIEW_DOMAIN", c.UmiakDomain)
 	need("TUNNEL_HOST", c.TunnelHost)
 	if c.DatabaseURL == "" {
 		errs = append(errs, fmt.Errorf("%sDATABASE_URL (or DATABASE_URL): is required", envPrefix))

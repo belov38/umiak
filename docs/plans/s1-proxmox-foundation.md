@@ -1,5 +1,7 @@
 # S1 Proxmox foundation: план реализации
 
+> Исторический план до R1. Действующие имена и контракты — `docs/specs/rename-umiak.md`.
+
 > **Для исполнителей:** REQUIRED SUB-SKILL: superpowers:executing-plans (или subagent-driven-development для независимых задач). Шаги — чекбоксы `- [ ]`.
 
 **Цель:** реализовать S1 по `docs/specs/s1-proxmox-foundation.md`: подготовить `pve`, написать `sbx-node`, `packages/pve`, `sbx-bench`, получить зелёный прогон `sbx-bench s1` и записать цифры в §11 спецификации.

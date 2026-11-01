@@ -721,7 +721,7 @@ QGA (S1) — запасной канал, когда туннеля нет. Че
 | `PTY` | `creack/pty` | ConPTY (`winproc/conpty_windows.go`) |
 | Командная строка | `argv` как есть, `shell` = `bash -lc` (`-c` без login) | `wincmd`: правила MSVCRT, `.cmd`/`.bat` через `cmd.exe /d /s /c` (BatBadBut → `unsafe_batch_args`), `shell` = `pwsh -EncodedCommand` с эпилогом кода выхода (S9 §12.6) |
 | `IdentitySource` (machineId, BS, vmgenid, bootId) | DMI sysfs, `/proc/sys/kernel/random/boot_id`; vmgenid нет | `ident/source_windows.go`: `GetSystemFirmwareTable('RSMB')` (`ident/smbios.go`), bootId = UUIDv5(machineId, счётчик `BootId` в реестре), запасной — volatile-ключ реестра; vmgenid не читается |
-| `IdentityResetter` | machine-id, host keys, hostname | `ident/{apply,reset,early,seal}_windows.go`: `MachineGuid`, host keys встроенного OpenSSH, имя `UMIAK<12 hex>`, пароль `user` только на клоне шаблона; `identity apply --specialize`, `early` (startup-скрипт `umiak-early.cmd`) |
+| `IdentityResetter` | machine-id, host keys, hostname | `ident/{apply,reset,early,seal}_windows.go`: `MachineGuid`, host keys встроенного OpenSSH, имя `UMI<12 hex>`, пароль `user` только на клоне шаблона; `identity apply --specialize`, `early` (startup-скрипт `umiak-early.cmd`) |
 | `Quiescer` | Docker pause + FIFREEZE | `quiesce/{freeze,hooks}_windows.go`: только хуки `quiesce.d\*.ps1` и очистка файлов секретов; FS замораживает QGA VSS из worker |
 | `PortScanner` | `/proc/net/tcp{,6}` | `ports/scan_windows.go`: `GetExtendedTcpTable` раз в 1 s, фильтр по процессам (`ports/filter.go`) |
 | `Metrics` | `gopsutil` | `gopsutil` |

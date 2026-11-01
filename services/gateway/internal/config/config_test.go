@@ -76,7 +76,7 @@ func newFixture(t *testing.T) *fixture {
 		"UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS_FILE": loginCAFile,
 		"UMIAK_GATEWAY_API_TOKEN_FILE":         writeFile(t, dir, "api.token", "  api-secret\n"),
 		"UMIAK_GATEWAY_API_URL":                "http://api:3000",
-		"UMIAK_GATEWAY_UMIAK_DOMAIN":           "umiak.example.com",
+		"UMIAK_GATEWAY_PREVIEW_DOMAIN":         "umiak.example.com",
 		"UMIAK_GATEWAY_TUNNEL_HOST":            "tunnel.example.com",
 		"UMIAK_GATEWAY_SSH_HOST":               "ssh.example.com",
 		"UMIAK_GATEWAY_DATABASE_URL":           "postgres://x",
@@ -433,7 +433,7 @@ func TestValidateServe(t *testing.T) {
 		mutate func(*Config)
 		want   string
 	}{
-		{"no domain", func(c *Config) { c.UmiakDomain = "" }, "UMIAK_GATEWAY_UMIAK_DOMAIN"},
+		{"no domain", func(c *Config) { c.UmiakDomain = "" }, "UMIAK_GATEWAY_PREVIEW_DOMAIN"},
 		{"no tunnel host", func(c *Config) { c.TunnelHost = "" }, "UMIAK_GATEWAY_TUNNEL_HOST"},
 		{"no database", func(c *Config) { c.DatabaseURL = "" }, "UMIAK_GATEWAY_DATABASE_URL"},
 		{"no api url", func(c *Config) { c.APIURL = "" }, "UMIAK_GATEWAY_API_URL"},

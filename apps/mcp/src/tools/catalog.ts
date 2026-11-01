@@ -17,7 +17,7 @@ export const limitsGet = defineTool({
 	name: "limits_get",
 	title: "Show identity and limits",
 	description:
-		"Shows who you are, the team, scopes, quota with usage and remaining, can_create, and the sizes allowed now per template (with the reason when not). Call before creating many sandboxes or after quota_exceeded.",
+		"Shows your identity, team, scopes, quota usage and remaining, can_create, and allowed sizes per template (with denial reasons). Call before creating many sandboxes or after quota_exceeded.",
 	toolset: "core",
 	scopes: [],
 	annotations: {

@@ -65,7 +65,20 @@ remote() {
 	{
 		printf '%sset -euo pipefail\n' "$prefix"
 		cat
-	} | ssh -o BatchMode=yes "$HOST" 'f=$(mktemp); cat >"$f"; bash "$f" </dev/null; rc=$?; rm -f "$f"; exit $rc'
+	} | ssh -o BatchMode=yes "$HOST" 'python3 -c '"'"'"""Run the deployment'"'"'"'"'"'"'"'"'s stdin script without shell-embedded temporary-file cleanup."""
+import os
+import subprocess
+import sys
+import tempfile
+
+with tempfile.NamedTemporaryFile(delete=False) as script:
+    script.write(sys.stdin.buffer.read())
+try:
+    result = subprocess.run(["bash", script.name], stdin=subprocess.DEVNULL, check=False)
+finally:
+    os.unlink(script.name)
+raise SystemExit(result.returncode)
+'"'"''
 }
 
 # local_run prints or runs a local command.
@@ -269,8 +282,10 @@ step_node() {
 		pub=$(cat "$key.pub")
 	fi
 	remote "PUB=$pub" <<'EOF'
-install -m 0755 /usr/local/bin/umiak-node.new /usr/local/bin/umiak-node && rm -f /usr/local/bin/umiak-node.new
-install -m 0644 /etc/umiak-node.toml.new /etc/umiak-node.toml && rm -f /etc/umiak-node.toml.new
+install -m 0755 /usr/local/bin/umiak-node.new /usr/local/bin/umiak-node
+rm -f /usr/local/bin/umiak-node.new
+install -m 0644 /etc/umiak-node.toml.new /etc/umiak-node.toml
+rm -f /etc/umiak-node.toml.new
 line="restrict,command=\"/usr/local/bin/umiak-node --stdio\" $PUB"
 ak=/etc/pve/priv/authorized_keys
 if ! grep -qF "umiak S1 umiak-node" "$ak"; then

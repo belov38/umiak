@@ -1,5 +1,7 @@
 # S9 Windows Implementation Plan
 
+> Исторический план до R1. Действующие имена и контракты — `docs/specs/rename-umiak.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `sbx-tpl build windows` builds a Windows 11 sandbox template (VMID 598) from Ilia's ISO with no console work, and the guest agent runs on it as a Windows service with the S3 API (commands, ConPTY, files, ports, claim and secrets, quiesce, identity change, self-update), verified on `pve` with create and fork timings.

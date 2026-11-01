@@ -56,7 +56,7 @@ func envFor(dir string) map[string]string {
 	return map[string]string{
 		"UMIAK_GATEWAY_INTERNAL_URL":           "http://gateway:7000",
 		"UMIAK_GATEWAY_DATABASE_URL":           "postgres://umiak:umiak@postgres:5432/umiak",
-		"UMIAK_GATEWAY_UMIAK_DOMAIN":           "umiak.localhost",
+		"UMIAK_GATEWAY_PREVIEW_DOMAIN":         "umiak.localhost",
 		"UMIAK_GATEWAY_TUNNEL_HOST":            "tunnel.localhost",
 		"UMIAK_GATEWAY_SSH_HOST":               "ssh.localhost",
 		"UMIAK_GATEWAY_API_URL":                "http://api:8082",
@@ -103,6 +103,7 @@ func TestDevSecretsIdempotent(t *testing.T) {
 		"tunnel.key", "tunnel.pem", "worker-gateway-token",
 	}
 	slices.Sort(created)
+	slices.Sort(want)
 	if !slices.Equal(created, want) {
 		t.Fatalf("created %v\nwant %v", created, want)
 	}
@@ -187,7 +188,7 @@ func TestDevSecretsRecreatesOnlyMissing(t *testing.T) {
 	}
 	created := generate(t, dir)
 	slices.Sort(created)
-	if want := []string{"login-ca-keys", "umiak.key", "umiak.pem", "ssh_user_ca.pub", "worker-gateway-token"}; !slices.Equal(created, want) {
+	if want := []string{"login-ca-keys", "ssh_user_ca.pub", "umiak.key", "umiak.pem", "worker-gateway-token"}; !slices.Equal(created, want) {
 		t.Fatalf("created %v, want %v", created, want)
 	}
 	after := snapshot(t, dir)

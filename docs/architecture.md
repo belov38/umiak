@@ -86,7 +86,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - **Files.** read, write (поток), list, stat, delete, mkdir, move, chmod, каталог одним tar-потоком туда и обратно (`/files/archive`).
 - **Ports.** Список слушающих портов; проксирование входящих потоков на `localhost:port` (127.0.0.1, затем ::1, затем адреса интерфейсов).
 - **Хуки снапшота.** `quiesce` (Docker pause, fsfreeze / VSS) и `thaw`, с watchdog авто-разморозки. QEMU guest agent fsfreeze — запасной путь, когда агента нет.
-- **Смена идентичности.** При загрузке, до старта сети, агент видит смену `machineId` в smbios (fork, VM из saved snapshot) и меняет hostname, machine-id и SSH host keys, стирает своё состояние. На Windows вместо этого — имя компьютера `UMIAK<12 hex>`, `MachineGuid` и host keys; переименование требует одной перезагрузки, поэтому hostname из claim на Windows не применяется (S9 §11). Признак смены — `machineId`; vmgenid на Windows читается, но только информационно.
+- **Смена идентичности.** При загрузке, до старта сети, агент видит смену `machineId` в smbios (fork, VM из saved snapshot) и меняет hostname, machine-id и SSH host keys, стирает своё состояние. На Windows вместо этого — имя компьютера `UMI<12 hex>`, `MachineGuid` и host keys; переименование требует одной перезагрузки, поэтому hostname из claim на Windows не применяется (S9 §11). Признак смены — `machineId`; vmgenid на Windows читается, но только информационно.
 - **Health.** Heartbeat, CPU/RAM/disk, признак простоя.
 - **Self-update.** Подписанный ed25519 пакет (бинарник + бандл tunnel CA) приходит через туннель; неудачная версия откатывается сама.
 

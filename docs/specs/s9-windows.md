@@ -37,7 +37,7 @@
 ## 3. Ограничения
 
 - Хост `pve`: Proxmox VE 9.2.21, ядро 7.0.14, CPU Intel Core Ultra 9 285HX (nested virtualization включена на хосте), `pve-edk2-firmware` 4.2026.08, `swtpm` 0.8.0. PoC: VMID 500–599, RAM всех VM платформы ≤ 8 GB, `local-lvm`, сеть `umiak0` (S1 §4.3).
-- Доступ сборщика — токен `umiak@pve!poc` и `umiak-node` (S5 §3). Root SSH не используется. Новые права и операции — только из §18.1.
+- Доступ сборщика — токен `umiak@pve!dev` и `umiak-node` (S5 §3). Root SSH не используется. Новые права и операции — только из §18.1.
 - ISO Windows и лицензия — ответственность пользователя (решение Ильи). Платформа даёт пайплайн, проверяет checksum и ничего не активирует сама.
 - Проверено 2026-10-29 (при реализации перепроверить; в коммит идёт результат `umiak-tpl versions --update`):
   - Windows 11 26H2 — сборка 26300, GA с 2026-09-29; Evaluation Center отдаёт Windows 11 Enterprise 26H2 Evaluation (90 дней);
@@ -302,7 +302,7 @@ build/
 ### 10.2 `umiak-unattend.xml` (ответы для клонов)
 
 - `generalize`: `PersistAllDeviceInstalls=true` (драйверы virtio не переустанавливаются, specialize короче), `SkipRearm=0`.
-- `specialize`: `RunSynchronous` → `"C:\Program Files\umiak-agent\current\umiak-agent.exe" identity apply --specialize` (§11.2), затем `reg.exe add` `Start=4` для `dmwappushservice` (§10.3). В Shell-Setup — заглушка `ComputerName=UMIAKTEMPLATE`: Setup всегда перезаписывает имя, заданное в specialize, поэтому `UMIAK<12 hex>` ставит агент одной перезагрузкой после setup (R16).
+- `specialize`: `RunSynchronous` → `"C:\Program Files\umiak-agent\current\umiak-agent.exe" identity apply --specialize` (§11.2), затем `reg.exe add` `Start=4` для `dmwappushservice` (§10.3). В Shell-Setup — заглушка `ComputerName=UMIAKTEMPLATE`: Setup всегда перезаписывает имя, заданное в specialize, поэтому `UMI<12 hex>` ставит агент одной перезагрузкой после setup (R16).
 - `oobeSystem`: все экраны OOBE скрыты (`HideEULAPage`, `HideLocalAccountScreen`, `HideOEMRegistrationScreen`, `HideOnlineAccountScreens`, `HideWirelessSetupInOOBE`, `ProtectYourPC=3`) и пропущены (`SkipMachineOOBE`, `SkipUserOOBE`: без них OOBE останавливается на «Who's going to use this device?»), локаль en-US, UTC. Новых учётных записей нет (`user` уже существует), autologon здесь не задаётся (его пишет агент).
 - `SystemLocale` нет ни в одном проходе: он переписывает кодовые страницы.
 - **Скрипт первой загрузки клона.** Generalize, specialize и OOBE сбрасывают часть настроек образа. `90-cleanup` ставит `C:\Windows\Setup\Scripts\SetupComplete.cmd` (`files/SetupComplete-clone.cmd`) и `C:\ProgramData\umiak-template\firstboot.ps1` (ACL: SYSTEM и Administrators — полный доступ, Users — чтение). Setup запускает его от SYSTEM после OOBE, до первого входа: службы §8.1 (список `lib.ps1`, `CDPSvc`, `dmwappushservice`) → Disabled, ACP/OEMCP/MACCP = 65001 (действуют со следующей загрузки — перезагрузки на переименование), `reagentc /disable`, BCD `recoveryenabled no` и `bootstatuspolicy ignoreallfailures`, NetBIOS выключен, политика firewall `AllowLocalPolicyMerge=0` и `DoNotAllowExceptions=1`. Ошибки только пишутся в `C:\ProgramData\umiak-template\firstboot.log` (без секретов, последняя строка `done`), выход всегда 0. Последнее действие — `C:\ProgramData\umiak-template\firstboot.done` (время UTC), и после ошибок тоже; в образе его нет (`90-cleanup`). Агент запускается параллельно со `SetupComplete.cmd`: пока `SetupComplete.cmd` есть, а `firstboot.done` нет, он ждёт маркер (до 5 мин, потом предупреждение в журнале) перед шагом загрузки и перед перезагрузкой на переименование, иначе перезагрузка обрывает `firstboot.ps1`.
@@ -325,7 +325,7 @@ build/
 
 1. Specialize: `identity apply --specialize` (§11.2), без перезагрузки от агента.
 2. OOBE по ответам, без экранов (`SkipMachineOOBE`, `SkipUserOOBE`); `SetupComplete.cmd` → `firstboot.ps1` (§10.2).
-3. Setup перезаписал имя на `UMIAKTEMPLATE`: агент переименовывает machine в `UMIAK<12 hex>` одной перезагрузкой (§11.2 п. 8, R16).
+3. Setup перезаписал имя на `UMIAKTEMPLATE`: агент переименовывает machine в `UMI<12 hex>` одной перезагрузкой (§11.2 п. 8, R16).
 4. Обычная загрузка: startup-скрипт `umiak-agent early` (идентичность совпадает, очистка секретов), служба `umiak-agent` запускает sshd, подключается к туннелю.
 5. `windows`: autologon `user` → первый вход создаёт профиль → `\umiak\session` запускает `umiak-session` → фаза `desktop: ready` (§13). *Как сделано: только autologon и профиль; helper и фаза `desktop` — S10.*
 6. Фаза `pool_ready` (§12.13) → S6 переводит machine в спящий режим (§14). *Не реализуется в MVP (решение Ильи 2026-10-31): после готовности агента — сразу claim (холодный create).*
@@ -337,7 +337,7 @@ build/
 1. Стереть состояние агента (как S3 §7.2 п. 1) и каталог секретов (§12.8); `env` пустой; `umiak_user_ca.pub` — копия шаблонной.
 2. `MachineGuid` (`HKLM\SOFTWARE\Microsoft\Cryptography`) = `machineId`.
 3. SSH host keys: удалить `C:\ProgramData\ssh\ssh_host_*`, создать новые (`ssh-keygen -A` из встроенного OpenSSH), выставить ACL, которых требует sshd.
-4. Имя компьютера `UMIAK` + последние 12 hex `machineId` в верхнем регистре (15 символов — предел NetBIOS) через `SetComputerNameExW(ComputerNamePhysicalDnsHostname)`.
+4. Имя компьютера `UMI` + последние 12 hex `machineId` в верхнем регистре (15 символов — предел NetBIOS) через `SetComputerNameExW(ComputerNamePhysicalDnsHostname)`.
 5. **Только для клона шаблона** (`identity.json` нет, то есть первая загрузка после `seal`): новый случайный пароль `user` (32 символа), `L$umiak_user`, у `windows` — ещё `DefaultPassword` и ключи Winlogon (`AutoAdminLogon=1`, `DefaultUserName=user`, `DefaultDomainName=.`). Профиля `user` в этот момент ещё нет, поэтому ничего не теряется. **Fork и VM из saved snapshot пароль не меняют:** сброс пароля администратором делает недоступными данные DPAPI пользователя (Credential Manager, токены `gh`, cookies Edge), а fork — копия той же машины. LSA secret копируется вместе с диском, autologon и токены агента продолжают работать.
 6. Удалить `C:\Windows\System32\Sysprep\umiak-unattend.xml`, если он ещё есть.
 7. Записать `identity.json` с `resetPending` (FlushFileBuffers).
@@ -349,7 +349,7 @@ SID машины не меняется: домена нет, а дубликат
 
 ### 11.3 Hostname из claim
 
-На Windows не применяется (решение master): переименование требует перезагрузки, а claim должен занимать доли секунды. Имя остаётся `UMIAK<12 hex>`. Агент отвечает на claim `hostname_applied = false` и отдаёт действующее имя в `System/Info.hostname`. Значение из claim доступно командам как env `UMIAK_HOSTNAME`.
+На Windows не применяется (решение master): переименование требует перезагрузки, а claim должен занимать доли секунды. Имя остаётся `UMI<12 hex>`. Агент отвечает на claim `hostname_applied = false` и отдаёт действующее имя в `System/Info.hostname`. Значение из claim доступно командам как env `UMIAK_HOSTNAME`.
 
 ## 12. Агент на Windows
 
@@ -588,7 +588,7 @@ Stop пользовательской sandbox через `suspend --todisk` со
 `verify` создаёт machine из шаблона примитивом S1 (тестовый `smbios1` с `family`), загружает её (specialize), проверяет через QGA и удаляет со следами (включая LV состояния спящего режима, §18.1). Команды от `user` выполняются через `umiak-agent exec --user user` (§12.14), то есть тем же путём, что команды агента.
 
 1. ОС: редакция и сборка = рецепт/манифест; `Get-ComputerInfo`.
-2. **Specialize:** имя `UMIAK<12 hex>` тестового `machineId`; `MachineGuid` = `machineId`; число загрузок первой загрузки не больше, чем у setup без агента, плюс одна плановая перезагрузка `umiak-agent.exe` на переименование (R16; по журналу событий, ID 6005/1074); `firstboot.log` кончается `done`; `umiak-unattend.xml` удалён; в `Panther` нет пароля.
+2. **Specialize:** имя `UMI<12 hex>` тестового `machineId`; `MachineGuid` = `machineId`; число загрузок первой загрузки не больше, чем у setup без агента, плюс одна плановая перезагрузка `umiak-agent.exe` на переименование (R16; по журналу событий, ID 6005/1074); `firstboot.log` кончается `done`; `umiak-unattend.xml` удалён; в `Panther` нет пароля.
 3. **Сокеты:** TCP-слушатели только из allow-list рецепта: `127.0.0.1:22`, `[::1]:22`, 135 и динамические RPC 49664–49670 (`lsass`, `wininit`, `services`, `svchost`, `spoolsv`, `System`). Портов 3389, 5985, 5986, 445, 139, 5357, 7680 нет. UDP: DHCP-клиент, mDNS и LLMNR выключены.
 4. **Firewall:** включён во всех профилях, входящие по умолчанию запрещены, ни одного действующего разрешающего входящего правила: в ActiveStore `AllowInboundRules=False` во всех трёх профилях (оставшиеся разрешающие правила не применяются и только перечисляются) или нет ни одного включённого разрешающего входящего правила (при `AllowLocalPolicyMerge=0` — в `-PolicyStore ActiveStore`), `NotifyOnListen=False`.
 5. **sshd:** `sshd -T` — `passwordauthentication no`, `trustedusercakeys`, оба `listenaddress`; служба работает (её запустил агент); host keys созданы в эту загрузку; `DefaultShell` = pwsh 7. Вход по сертификату с тестовым CA: `ssh -i <key> -o CertificateFile=<cert> user@127.0.0.1 "$env:UMIAK"` (CA подкладывается через `umiak_user_ca.pub` на время проверки).

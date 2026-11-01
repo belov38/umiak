@@ -1,0 +1,2 @@
+# Windows startup wrappers are stored verbatim with CRLF; validate CR at EOL.
+infra/templates/_windows/files/*.cmd -text whitespace=cr-at-eol

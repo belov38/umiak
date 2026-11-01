@@ -3,7 +3,7 @@
 from .commands import AsyncCommand
 from .files import AsyncFiles
 from .sandbox import AsyncPorts, AsyncSandbox
-from .umiak import AsyncSandboxes, AsyncUmiak, AsyncSnapshots
+from .umiak import AsyncSandboxes, AsyncSnapshots, AsyncUmiak
 
 __all__ = [
     "AsyncCommand",
@@ -11,6 +11,6 @@ __all__ = [
     "AsyncPorts",
     "AsyncSandbox",
     "AsyncSandboxes",
-    "AsyncUmiak",
     "AsyncSnapshots",
+    "AsyncUmiak",
 ]

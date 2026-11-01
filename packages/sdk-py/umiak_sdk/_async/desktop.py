@@ -100,7 +100,10 @@ class AsyncDesktop:
         return {
             "bytes": response.content,
             "content_type": response.headers["content-type"],
-            "screen": {"width": number("Umiak-Screen-Width"), "height": number("Umiak-Screen-Height")},
+            "screen": {
+                "width": number("Umiak-Screen-Width"),
+                "height": number("Umiak-Screen-Height"),
+            },
             "image": {"width": number("Umiak-Image-Width"), "height": number("Umiak-Image-Height")},
             "cursor": {"x": number("Umiak-Cursor-X"), "y": number("Umiak-Cursor-Y")},
         }

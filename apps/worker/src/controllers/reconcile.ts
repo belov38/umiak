@@ -66,7 +66,7 @@ export const RECONCILE_DELETE_STALE_S = 300;
 export const RETIRE_AGAIN_AFTER_S = 60;
 /** §11.3: a second unexpected stop within this window stops the sandbox. */
 export const UNEXPECTED_STOP_WINDOW_S = 3600;
-export const SANDBOX_POOL = "sandbox";
+export const SANDBOX_POOL = "umiak";
 export const UMIAK_TAG = "umiak";
 const SHUTDOWN_TIMEOUT_S = 60;
 

@@ -73,7 +73,7 @@ const SECRET_PATTERNS: [RegExp, string][] = [
 	// smbios1=<value> up to whitespace or a quote (the value contains commas).
 	[/smbios1=[^\s"']*/g, `smbios1=${REDACTED}`],
 	[/serial=[^\s,"'&]*/g, `serial=${REDACTED}`],
-	[/c2J4MTo[A-Za-z0-9+/_-]*={0,2}/g, REDACTED],
+	[/dW1pYWsxO[A-Za-z0-9+/_-]*={0,2}/g, REDACTED],
 	[/umiak1:[^\s,"']*/g, REDACTED],
 ];
 

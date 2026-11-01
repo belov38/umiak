@@ -1,5 +1,7 @@
 # S8 Web (Payload): план реализации
 
+> Исторический план до R1. Действующие имена и контракты — `docs/specs/rename-umiak.md`.
+
 > **Для исполнителей:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development (по задаче на субагента, после каждой задачи — ревью свежим субагентом) и superpowers:test-driven-development. Шаги — чекбоксы `- [ ]`.
 
 **Цель:** реализовать MVP S8 по `docs/specs/s8-web.md`: `packages/payload` (коллекции, хуки `NOTIFY`, JIT, `PayloadIdentityStore`, `PayloadConfigReader`, синхронизация с Keycloak), `apps/web` (Next.js 16 + Payload 3: `/admin`, `/cms-api`, дашборд `/app`, server actions, dev-прокси), операторские ручки C3 в `apps/api`/`packages/core`, переключение `api` и `worker` на Payload, `web` в `deploy/compose` и `infra/dev-cp`, E2E на Playwright.

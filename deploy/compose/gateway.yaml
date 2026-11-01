@@ -49,7 +49,7 @@ services:
       DATABASE_URL: postgres://umiak:umiak@postgres:5432/umiak
       # The registered internal URL: the worker (and later api) call it.
       UMIAK_GATEWAY_INTERNAL_URL: http://gateway:7000
-      UMIAK_GATEWAY_UMIAK_DOMAIN: umiak.localhost
+      UMIAK_GATEWAY_PREVIEW_DOMAIN: umiak.localhost
       UMIAK_GATEWAY_TUNNEL_HOST: tunnel.localhost
       UMIAK_GATEWAY_SSH_HOST: ssh.localhost
       # The api internal listener (route lookups, SSH auth, agent events).

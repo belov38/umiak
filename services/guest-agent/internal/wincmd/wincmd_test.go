@@ -288,7 +288,7 @@ func TestMergeEnvCaseInsensitive(t *testing.T) {
 	platform := []string{"PATH=C:\\umiak", "UMIAK=1"}
 	spec := []string{"temp=b", "Empty="}
 	got := MergeEnv(base, platform, spec)
-	want := []string{"=C:=C:\\", "Empty=", "Path=C:\\umiak", "UMIAK=1", "TEMP=b", "USERPROFILE=C:\\Users\\user"}
+	want := []string{"=C:=C:\\", "Empty=", "Path=C:\\umiak", "TEMP=b", "UMIAK=1", "USERPROFILE=C:\\Users\\user"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("MergeEnv = %q, want %q", got, want)
 	}

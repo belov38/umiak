@@ -1,5 +1,7 @@
 # E2E на dev control plane (CT 590)
 
+> Исторический план до R1. Действующие имена и контракты — `docs/specs/rename-umiak.md`.
+
 Первый подъём всего стека MVP (S1–S7) на CT 590 и сценарий Ильи с Mac: `sbx login` → `create` (шаблон 597, `linux 20261030.16`) → exec → файлы → превью → ssh → fork → snapshot → stop/resume → delete, плюс TS и Python SDK. Ветка `e2e-devcp`.
 
 ## Что сделано

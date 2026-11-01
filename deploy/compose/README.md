@@ -350,7 +350,7 @@ curl -sk --connect-to x-3000.umiak.localhost:443:127.0.0.1:8443 https://x-3000.u
 | `UMIAK_OAUTH2_PROXY_COOKIE_NAME` | `_umiak_session` | имя cookie сессии; за TLS — `__Host-umiak_session` |
 | `UMIAK_OAUTH2_PROXY_COOKIE_SECURE` | `false` | `true` за TLS (обязательно для `__Host-`) |
 | `UMIAK_OAUTH2_PROXY_REVERSE_PROXY` | `false` | `true`, если перед oauth2-proxy стоит прокси с `X-Forwarded-*` |
-| `UMIAK_PREVIEW_DOMAIN` | `umiak.localhost` | `api` `/v1/meta` `umiakDomain` (домен портов), `web` (CSP `frame-src`). У gateway — свой `UMIAK_GATEWAY_UMIAK_DOMAIN` в `gateway.yaml`: при смене нужен и override gateway с тем же значением |
+| `UMIAK_PREVIEW_DOMAIN` | `umiak.localhost` | `api` `/v1/meta` `umiakDomain` (домен портов), `web` (CSP `frame-src`). У gateway — свой `UMIAK_GATEWAY_PREVIEW_DOMAIN` в `gateway.yaml`: при смене нужен и override gateway с тем же значением |
 | `UMIAK_SSH_HOST`, `UMIAK_SSH_PORT` | `ssh.localhost`, `${GATEWAY_SSH_PORT:-2222}` | `/v1/meta` `ssh` и `umiak ssh`. Хост gateway — свой `UMIAK_GATEWAY_SSH_HOST` в `gateway.yaml`: при смене `UMIAK_SSH_HOST` нужен и override gateway; порт по умолчанию следует за опубликованным `GATEWAY_SSH_PORT` |
 | `UMIAK_API_TRUSTED_PROXY_CIDRS` | пусто | `X-Forwarded-For` идёт в `clientIp` лога `api` только от этих адресов, иначе адрес соединения |
 

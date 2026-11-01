@@ -12,6 +12,6 @@ __all__ = [
     "Ports",
     "Sandbox",
     "Sandboxes",
-    "Umiak",
     "Snapshots",
+    "Umiak",
 ]
