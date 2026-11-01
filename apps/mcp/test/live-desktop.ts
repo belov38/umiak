@@ -63,6 +63,25 @@ export async function verifyLiveDesktopMcp(
 				OPEN_RUN_DIALOG,
 			]);
 			await new Promise((done) => setTimeout(done, 1000));
+		} else {
+			// Programs do not survive stop or fork (S10 6.4): open a terminal of
+			// our own on this desktop and focus it, as the source step does.
+			await sandbox.exec([
+				"env",
+				"XDG_RUNTIME_DIR=/run/user/1000",
+				"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
+				"systemd-run",
+				"--user",
+				"--collect",
+				`--unit=s10-mcp-terminal-${Date.now()}`,
+				"--setenv=DISPLAY=:0",
+				"--setenv=XAUTHORITY=/home/user/.Xauthority",
+				"xfce4-terminal",
+				"--disable-server",
+				"--geometry=100x25+100+100",
+			]);
+			await new Promise((done) => setTimeout(done, 1500));
+			await call("computer_click", { x: 400, y: 300, screenshot_after: false });
 		}
 		await call("computer_type", {
 			text: windows
