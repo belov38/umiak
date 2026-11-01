@@ -552,6 +552,25 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		expect(vm.status).toBe("running");
 	});
 
+	it("power_drift: a hard stop after a shutdown timeout clears clean_stop (S6 §7.8)", async () => {
+		const w = await createWorld(db);
+		const r = await stoppedSandbox(w, opsEnv(w));
+		expect((await row(w, "machines", r.machineId)).clean_stop).toBe(true);
+		const vmid = (await row(w, "machines", r.machineId)).vmid as number;
+		const vm = w.infra.vms.get(vmid);
+		if (!vm) throw new Error("no VM");
+		vm.status = "running";
+		hookInfra(w, { shutdown: async () => "timeout" });
+		const actions = await reconcile(w);
+		expect(kinds(actions)).toEqual([["power_drift", `machine:${r.machineId}`]]);
+		expect(actions[0]?.applied).toBe(true);
+		expect(vm.status).toBe("stopped");
+		expect(await row(w, "machines", r.machineId)).toMatchObject({
+			state: "stopped",
+			clean_stop: false,
+		});
+	});
+
 	it("power_drift: a resume that begins while reconcile waits for the power lock gets no shutdown or stop", async () => {
 		const w = await createWorld(db);
 		const r = await stoppedSandbox(w, opsEnv(w));

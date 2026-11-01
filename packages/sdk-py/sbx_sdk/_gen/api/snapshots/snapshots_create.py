@@ -82,7 +82,9 @@ def sync_detailed(
      Takes a snapshot of the sandbox (ready or stopped) under `name` and answers 202 with the snapshot in
     `creating` and the `save_snapshot` operation of the sandbox; wait with GET
     /v1/operations/{operation}?waitSeconds=. A ready snapshot with the same name is replaced once the
-    new one is ready. Send an Idempotency-Key to retry safely.
+    new one is ready. A running Windows sandbox is saved only from a stopped VM: send `forceStop: true`
+    to stop it, save and start it again, otherwise 409 `snapshot_requires_stop`. Send an Idempotency-Key
+    to retry safely.
 
     Args:
         idempotency_key (str | Unset): 1-255 printable ASCII characters; a repeat with the same
@@ -121,7 +123,9 @@ def sync(
      Takes a snapshot of the sandbox (ready or stopped) under `name` and answers 202 with the snapshot in
     `creating` and the `save_snapshot` operation of the sandbox; wait with GET
     /v1/operations/{operation}?waitSeconds=. A ready snapshot with the same name is replaced once the
-    new one is ready. Send an Idempotency-Key to retry safely.
+    new one is ready. A running Windows sandbox is saved only from a stopped VM: send `forceStop: true`
+    to stop it, save and start it again, otherwise 409 `snapshot_requires_stop`. Send an Idempotency-Key
+    to retry safely.
 
     Args:
         idempotency_key (str | Unset): 1-255 printable ASCII characters; a repeat with the same
@@ -155,7 +159,9 @@ async def asyncio_detailed(
      Takes a snapshot of the sandbox (ready or stopped) under `name` and answers 202 with the snapshot in
     `creating` and the `save_snapshot` operation of the sandbox; wait with GET
     /v1/operations/{operation}?waitSeconds=. A ready snapshot with the same name is replaced once the
-    new one is ready. Send an Idempotency-Key to retry safely.
+    new one is ready. A running Windows sandbox is saved only from a stopped VM: send `forceStop: true`
+    to stop it, save and start it again, otherwise 409 `snapshot_requires_stop`. Send an Idempotency-Key
+    to retry safely.
 
     Args:
         idempotency_key (str | Unset): 1-255 printable ASCII characters; a repeat with the same
@@ -192,7 +198,9 @@ async def asyncio(
      Takes a snapshot of the sandbox (ready or stopped) under `name` and answers 202 with the snapshot in
     `creating` and the `save_snapshot` operation of the sandbox; wait with GET
     /v1/operations/{operation}?waitSeconds=. A ready snapshot with the same name is replaced once the
-    new one is ready. Send an Idempotency-Key to retry safely.
+    new one is ready. A running Windows sandbox is saved only from a stopped VM: send `forceStop: true`
+    to stop it, save and start it again, otherwise 409 `snapshot_requires_stop`. Send an Idempotency-Key
+    to retry safely.
 
     Args:
         idempotency_key (str | Unset): 1-255 printable ASCII characters; a repeat with the same

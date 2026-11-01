@@ -48,6 +48,14 @@ function isSbxError(e: unknown): e is SbxError {
 	);
 }
 
+/**
+ * 409 of a fork or saved snapshot of a running Windows sandbox without
+ * `forceStop` (S9 §24.8): ask the user, then retry with `forceStop: true`.
+ */
+export function isSnapshotRequiresStop(e: unknown): boolean {
+	return isSbxError(e) && e.code === "snapshot_requires_stop";
+}
+
 /** No answer from the API: network, a proxy page instead of the API, or a pod going away. */
 export function isApiUnavailable(e: unknown): boolean {
 	if (!isSbxError(e)) return false;
@@ -133,6 +141,11 @@ function textOf(e: SbxError): { message: string; retry?: boolean } {
 			return { message: "The saved snapshot does not exist anymore." };
 		case "snapshot_name_taken":
 			return { message: "A saved snapshot with this name already exists." };
+		case "snapshot_requires_stop":
+			return {
+				message:
+					"This Windows sandbox is running: it is snapshotted only from a stopped VM. Stop it first, or confirm a stop and restart.",
+			};
 		case "validation":
 			return { message: issuesText(d, e.message) };
 		case "forbidden":

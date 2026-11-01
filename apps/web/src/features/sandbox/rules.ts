@@ -65,6 +65,26 @@ export function canSaveSnapshot(s: SandboxData): boolean {
 	return (s.state === "ready" || s.state === "stopped") && !s.blocked;
 }
 
+/** What the user confirms before a forced fork or saved snapshot (S9 §24.8). */
+export const FORCE_STOP_TEXT =
+	"This stops the sandbox, takes the snapshot and starts it again. Running commands and sessions are interrupted.";
+
+/**
+ * A running Windows sandbox is forked and saved only from a stopped VM: the
+ * request needs `forceStop: true` and the user's consent first. The OS comes
+ * from the template catalog; an unknown template is false (the API's 409
+ * `snapshot_requires_stop` then asks instead).
+ */
+export function needsForceStop(
+	s: SandboxData,
+	templates: readonly { slug: string; os: string }[] | undefined,
+): boolean {
+	if (s.state !== "ready") return false;
+	return (templates ?? []).some(
+		(t) => t.slug === s.template && t.os === "windows",
+	);
+}
+
 /** Rename (PATCH slug): not going away, not blocked. */
 export function canRename(s: SandboxData): boolean {
 	return !gone(s) && !s.blocked;

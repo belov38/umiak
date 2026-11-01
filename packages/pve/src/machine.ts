@@ -195,6 +195,20 @@ export class QgaUnavailableError extends Error {
 	}
 }
 
+/**
+ * A running Windows VM without an explicit `crashConsistent`: S1 does not
+ * pick between a QGA/VSS freeze (can deadlock) and a crash-consistent copy
+ * on its own; an external hook does not freeze NTFS either.
+ */
+export class SnapshotModeRequiredError extends Error {
+	constructor(vmid: number) {
+		super(
+			`VM ${vmid} is a running Windows VM; snapshot refused without an explicit crashConsistent (true: crash-consistent, false: QGA/VSS freeze)`,
+		);
+		this.name = "SnapshotModeRequiredError";
+	}
+}
+
 export class TracesRemainError extends Error {
 	readonly vmid: number;
 	readonly problems: string[];
@@ -686,10 +700,12 @@ export class Machines {
 	): Promise<SnapshotRef> {
 		const config = await this.config(vmid);
 		const running = (await this.status(vmid)) === "running";
-		// Windows QGA/VSS can deadlock even with a sub-second snapshot window.
-		// Default to the explicit crash fallback; false is a diagnostic opt-in.
-		const crash =
-			opts.crashConsistent ?? String(config.ostype ?? "").startsWith("win");
+		const windows = String(config.ostype ?? "").startsWith("win");
+		// Windows QGA/VSS can deadlock even with a sub-second snapshot window,
+		// and a crash-consistent copy loses cached writes: the caller chooses.
+		if (running && windows && opts.crashConsistent === undefined)
+			throw new SnapshotModeRequiredError(vmid);
+		const crash = opts.crashConsistent === true;
 		let hook: QuiesceHook = { freeze: async () => {}, thaw: async () => {} };
 		if (opts.hook) {
 			// External quiesce (S3 agent): QGA is not involved.
@@ -697,7 +713,7 @@ export class Machines {
 		} else if (running && !crash) {
 			if (!(await this.qga.ping(vmid))) throw new QgaUnavailableError(vmid);
 			// Only Windows (VSS) thaws by itself.
-			const selfThaw = String(config.ostype ?? "").startsWith("win");
+			const selfThaw = windows;
 			hook = {
 				freeze: () => this.qga.fsfreezeFreeze(vmid),
 				thaw: () => this.qga.fsfreezeThaw(vmid, { selfThaw }),

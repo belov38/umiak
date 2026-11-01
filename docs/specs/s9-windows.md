@@ -703,7 +703,7 @@ Stop пользовательской sandbox через `suspend --todisk` со
 7. **Повторная отправка секретов:** `UpdateSecrets` и при `readiness.changed{secrets: pending}` без смены `boot_id` (перезапуск или обновление агента на Windows), а не только после перезагрузки.
 8. Hostname: для Windows поле sandbox не применяется в госте; действующее имя берётся из `System/Info`. `user` = `root` в командах маппится агентом на `SYSTEM`.
 9. Дедлайны §7.9 и `boot_timeout_s` — подтверждены (§14.5).
-10. **Stop Windows:** шаг `prepare` (`System/PrepareStop`, 10 s) на Windows стирает файлы секретов и отвечает `secret_files_wiped` (§12.8); тайм-аут `shutdown` для `os = windows` — 120 s вместо 60 s (очистка pagefile при выключении, §8.1), затем жёсткий `stop`, как сейчас.
+10. **Stop Windows:** шаг `prepare` (`System/PrepareStop`, 10 s) на Windows стирает файлы секретов и отвечает `secret_files_wiped` (§12.8); тайм-аут `shutdown` для `os = windows` — 120 s вместо 60 s (очистка pagefile при выключении, §8.1), затем жёсткий `stop`, как сейчас. С 2026-11-01 — 300 s (§24.9 п. 7).
 
 ### 18.7 S7
 
@@ -851,7 +851,7 @@ packages/pve/, services/node-agent/   + §18.1
 
 ### 24.5 Контракты для соседних областей
 
-Исторический список приёмки; актуальные решения follow-ups, включая замену QGA/VSS на crash fallback, — §24.7.
+Исторический список приёмки; актуальные решения follow-ups, включая замену QGA/VSS на crash fallback, — §24.7; snapshot Windows только из остановленной VM (заменяет crash fallback) — §24.8.
 
 - **S6.** Сделано в worker (S9 Task 4): тайм-аут shutdown для `os = windows` — 120 s; составной quiesce-хук (агент `fs: false`, `wipe_secret_files` для `kind = saved`, затем QGA VSS); результат `PrepareStop{secret_files_wiped}` пишется в прогресс stop. Осталось S6:
   - `machines.secret_files_on_disk` и правила saved snapshot (§18.6 п. 5): `secrets_in_use` → `snapshot_requires_stop`, остановленная machine с `true` → `snapshot_requires_clean_stop`;
@@ -897,6 +897,7 @@ packages/pve/, services/node-agent/   + §18.1
 ### 24.7 S9 follow-ups (2026-11-01 NZ)
 
 **Решение по snapshot: Windows использует crash-consistent fallback без QGA/VSS.**
+*Заменено §24.8: fork и saved snapshot Windows снимаются только из остановленной VM; crash fallback из публичного пути убран.*
 `Machines.snapshot` по `ostype=win*` по умолчанию не вызывает QGA freeze/thaw;
 многодисковый snapshot по-прежнему делает pause → LVM snapshots → resume.
 Новые метаданные содержат `consistency=crash` (остановленная VM — `powered_off`).
@@ -999,3 +1000,64 @@ pause-window: 1040/815, 1745/1067, 791/562 ms. Это проверка **fallbac
 sbx-agent нужно доставить существующим гостям через обновление либо будущую
 сборку шаблона; перестройки 598 в этой ветке не было и для crash fallback
 она не требуется.
+
+### 24.8 Fork и saved snapshot Windows только из остановленной VM (`win-force-stop`, 2026-11-01 NZ)
+
+**Решение Ильи.** QGA/VSS thaw зависает (§24.5–§24.7), а crash-consistent снимок работающей VM (§24.7) теряет или обнуляет недавние записи из кэша гостя. Поэтому fork и saved snapshot Windows делаются только из остановленной VM; crash fallback из публичного пути убран. Значение `consistency = crash` осталось в схеме для старых снапшотов и для Linux после hard stop (§24.9); Windows-снапшотов с ним платформа не создаёт.
+
+**Контракт.**
+
+- Работающая (`ready`) Windows-sandbox: `POST /v1/sandboxes/{sandbox}/fork` и `POST /v1/snapshots` без `forceStop: true` → `409`, ничего не создано:
+
+  ```json
+  {"error": {"code": "snapshot_requires_stop",
+    "message": "Windows sandboxes are forked from a stopped VM; stop it first or retry with forceStop: true (CLI --force-stop), which stops the sandbox, takes the snapshot and starts it again",
+    "retryable": false,
+    "details": {"reason": "windows_running", "retryWith": {"forceStop": true}, "cli": "--force-stop"},
+    "requestId": "req_..."}}
+  ```
+
+  У save сообщение начинается с «Windows snapshots are saved from a stopped VM; …». CLI печатает сообщение и `hint: use --force-stop …`; MCP (`force_stop` у `sandbox_fork` и `snapshot_save`) — подсказку «retry with force_stop: true …»; SDK отдают `SbxError` с `code` и `details`; web показывает подтверждение и шлёт флаг (S8 §9.7).
+- `forceStop: true`: worker в той же операции fork / save_snapshot делает stop (PrepareStop со стиранием secret-файлов, shutdown до 300 s без hard stop; тайм-аут → `shutdown_timeout`, снапшота нет, источник запускается снова, §24.9), снапшот остановленной VM (`powered_off`), запуск источника (с `retryOnVmLock` для lock qmeventd), ожидание агента на новой загрузке и повторную доставку env/секретов, затем продолжает fork (передача снапшота цели). Шаги, прогресс, RAM и дедлайны — S6 §7.8, §7.9, §8.1. Операция отдаёт `forceStop {sourceStopped, sourceRestarted, restartError}` (S7 §8.4).
+- Неудачный перезапуск источника после снапшота fork не роняет (ни ошибка, ни истёкший дедлайн): источник `error` / `resume_failed`, machine `stopped`, снапшот цел; поднимается обычным resume. Временные ошибки перезапуска повторяются. Провал до снапшота компенсируется, компенсация запускает источник.
+- Остановленная Windows — без флага, как раньше. Linux — без изменений (live quiesced); `forceStop` принимается и игнорируется (в операцию не пишется).
+
+**Живая проверка на `pve`** (2026-10-31 23:06–23:12 UTC, opt-in тест `apps/worker/test/pve-force-stop.test.ts`, `SBX_PVE_FORCE_STOP=1`). Настоящие операции worker (cold create, fork с `forceStop`, stop, create цели fork, delete) через настоящий адаптер PVE; клон шаблона **598**, VMID 580/581, одна 4 GB VM за раз (проверка `qm list` перед каждым стартом; параллельно работала VM S10). Агентский порт — `ConnectAgentPort` с транспортом через QGA (`sbx-agent call` на admin-сокет агента), сессии туннеля эмулирует опрос `System/Info` по QGA: gateway и туннель не нужны, CT 590 не трогался.
+
+| Шаг | Время |
+|---|---|
+| Cold create источника → ready | 128.5 s |
+| fork без флага | `409 snapshot_requires_stop` (тело выше), VM продолжает работать |
+| Запись 20 000 байт в `C:\sbx-force-stop.txt` (`WriteAllText`, без flush) → сразу forced fork | — |
+| Forced fork, вся операция | 79.8 s |
+| · PrepareStop + shutdown (clean, `secretFilesWiped: true`) | ≈ 61 s (shutdown 60.2 s) |
+| · snapshot остановленной VM (`powered_off`) | 0.73 s |
+| · S1 start | 1.2 s |
+| · start → агент готов на новой загрузке, provision | ≈ 16 s |
+| Source после операции | `ready`, machine `running`, новый boot id, имя прежнее `SBX83E1650251FA` |
+| Create цели fork (clone из снапшота → start → агент → claim) | 61.8 s; fork загрузился как `SBX7B666382CEC3` |
+| Файл в fork | SHA-256 совпал (`ecbdbf07…a9c8c`), запись цела |
+
+Перед стартом цели источник останавливался обычным stop (22.7 s) только ради правила одной 4 GB VM. Уборка: обе VM удалены через delete worker, снапшот fork_source удалён `snapshot-op`; `qm list` (нет 580–589), `lvs` (нет `vm-58x-*` и `sbx-snap-*` прогона), лизы прогона — 0. В первом из шести прогонов cold create источника упал сразу после подключения сессии; лог ошибки тогда не печатался, в следующих прогонах тот же шаг проходил. Остальные неудачи прогонов — ошибки самого харнесса (лимит `input-data` QGA 65 536 символов, stdin PowerShell через QGA без EOF, квота RAM команды теста).
+
+### 24.9 Исправления приёмки `win-force-stop` (`win-force-stop-fix`, 2026-11-01 NZ)
+
+Решения master-сессии по находкам независимой приёмки (следуют решению Ильи: crash-consistent снапшотов Windows нет).
+
+1. **Shutdown timeout не даёт crash-снапшот с меткой `powered_off`.** Бюджет graceful shutdown — `SHUTDOWN_TIMEOUT_S` (`apps/worker/src/ops/stop.ts`): Windows 300 s, Linux 60 s, и для обычного stop, и для forced (п. 7); у forced своё переопределение `timing.forceStopShutdownTimeoutS`. Тайм-аут → операция `failed`, `shutdown_timeout`, `retryable: true`, сообщение «the guest did not shut down cleanly within N s; nothing was snapshotted, the sandbox is started again». Hard stop делает компенсация (machine в `stopping`), затем запускает источник. Обычный stop после бюджета по-прежнему делает hard stop (без `clean_stop`).
+2. **Снапшот после hard stop не бывает `powered_off` ни на одном пути.** Новый `machines.clean_stop` (миграция `0208`, триггер сброса) — S6 §7.8. Остановленная Windows без чистого выключения → `snapshot_requires_clean_stop`; Linux → `consistency = crash`. Пути, где это срабатывает: stop с hard stop после тайм-аута или в `stop_verify`, machine после неудачного resume / restart (компенсация hard-stop-ит), VM, остановленная reconcile после ручного запуска, упавшая VM.
+3. **Перезапуск после снапшота не роняет операцию.** Бюджет перезапуска = max(дедлайн resume, `boot_timeout_s` + 5 min) (для шаблона 598 с 1200 s — 25 min). После `progress.snapshotTaken` дедлайн больше не применяется: истёкший дедлайн во время `restart_agent` ведёт к успешному fork, а при неудаче перезапуска — к `sourceRestarted: false`, снапшот не удаляется.
+4. **Временные ошибки перезапуска повторяются** (любая ошибка не `retryable: false`, включая `ECONNRESET` и lock qmeventd) с паузой 5 s до продлённого дедлайна; только потом источник → `error`.
+5. **S1 без молчаливого crash.** `Machines.snapshot` работающей Windows без явного `crashConsistent` (с hook или без) → `SnapshotModeRequiredError` (worker: `snapshot_requires_stop`, permanent). Worker всегда передаёт `crashConsistent: false`. Bench S9 явно передаёт `true` (замер crash fallback), проверка шаблона Windows (`template-builder`) — `false` для попыток VSS (как задумано и как ждут её тесты; после 4c55eba7 она молча получала crash), затем явный `true` для fallback с WARN.
+6. **MCP `sandbox_fork`** после ожидания перечитывает `sourceOperation` forced fork и, как `snapshot_save`, пишет «the copy is made, but the source sandbox did not start again after the forced stop (code: message); call sandbox_resume on the source».
+
+
+7. **Обычный stop Windows: shutdown 300 s** (было 120 s), Linux 60 s без изменений. Дедлайн stop Windows 5 → 7 min (300 s shutdown + PrepareStop 10 s, повторы VM lock, verify); forced fork/save Windows соответственно 10 / 12 min до снапшота. 120 s в §18.6 п. 10 и §24.5 этим заменены.
+8. **Shutdown, не взявший VM lock, больше не считается тайм-аутом гостя.** Наблюдение live-прогона (00:21:27 UTC): обычный stop сразу после hard stop + start (компенсация сценария тайм-аута) шёл «shutdown 10.3 s, затем stop 4.2 s». Журнал задач PVE: `qmshutdown` упал через 10 s с `can't lock file '/var/lock/qemu-server/lock-580.conf' - got timeout` (lock держал qmeventd после hard stop в 00:21:10), гость ACPI-запрос не получал; адаптер увидел `running` и вернул `timeout`, stop сделал hard stop. Метка была честной (`shutdown: hard`, `clean_stop = false`), но hard stop — лишний; в forced-пути то же дало бы ложный `shutdown_timeout`. Теперь `PveNodeInfra.shutdown` повторяет такую задачу (`retryOnVmLock`, 5 попыток по 10 s, fence перепроверяется в паузах и под power lock) и возвращает `timeout` только при настоящем тайм-ауте гостя; исчерпанные повторы — временная ошибка, задание повторяется. `clean_stop`: чистый shutdown после повтора → `true`, hard stop (тайм-аут гостя или VM, ещё работающая в `stop_verify`) → `false`.
+9. **Не проверено вживую:** template-builder (проверка шаблона Windows) теперь действительно пробует VSS с freeze budget и retry, затем явный crash fallback с WARN (п. 5). Проверить при следующей пересборке шаблона Windows.
+
+**Живая проверка на `pve`** (2026-11-01 00:18–00:22 UTC, тот же opt-in тест `apps/worker/test/pve-force-stop.test.ts`, клон шаблона 598, VMID 580/581, одна 4 GB VM за раз; параллельно работала VM 500 S10). Cold create источника 114.8 s; fork без флага — `409 snapshot_requires_stop`; forced fork 48.4 s: shutdown гостя **28.7 s** (clean, бюджет 300 s), snapshot 0.68 s (`powered_off`), start 1.2 s, агент и provision ≈ 17 s, `sourceRestarted: true`. Сценарий тайм-аута: forced save с бюджетом shutdown 5 s → `failed shutdown_timeout`, `retryable: true`, 22.4 s; снапшот `failed`, `consistency` null, LV с его тегом нет; компенсация: hard stop 0.35 s, start 0.9 s, источник `ready`, machine `running`. Цель fork загрузилась за 44.3 s под новым именем, SHA-256 незафлашенного файла совпал. Уборка через delete worker: VM в 580–589 нет, лиз 0, `sbx-snap-*` LV нет.
+
+Linux: forceStop и отказ без флага для Linux покрыты только юнит-тестами (fake PVE: `ops-force-stop.test.ts`, «Linux ignores forceStop», «Linux after a hard stop … crash»); живой Linux-fork не запускался: в шаблоне 597 старый агент (`sbx-agent: unknown command "call"`), шаблоны не пересобирались.
+
+**Живая проверка обычного stop** (2026-11-01 00:38–00:42 UTC, тот же opt-in тест, `-t "plain stop"`, клон 598, VMID 580/581, одна 4 GB VM за раз; параллельно работала VM 595 S10). Cold create 108.7 s; обычный stop 13.6 s: shutdown гостя **13.2 s**, clean, hard stop 0, `secretFilesWiped: true`, machine `stopped`, `clean_stop = true`. Fork без флага из остановленной: 409 нет, операция 1.3 s, снапшот `powered_off` 0.89 s, источник остаётся `stopped`; цель fork загрузилась за 59.7 s. Уборка: VM в 580–589 нет, лиз 0, `sbx-snap-*` LV нет.

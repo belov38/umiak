@@ -92,7 +92,9 @@ def sync_detailed(
 
      Creates a new sandbox from a snapshot of this one (disk and env/secrets copied; the request's sets
     merge on top). Answers 202 with the new sandbox, its `create` operation and the `fork` operation on
-    the source. Send an Idempotency-Key to retry safely.
+    the source. A running Windows sandbox is forked only from a stopped VM: send `forceStop: true` to
+    stop it, snapshot it and start it again, otherwise 409 `snapshot_requires_stop`. Send an
+    Idempotency-Key to retry safely.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -133,7 +135,9 @@ def sync(
 
      Creates a new sandbox from a snapshot of this one (disk and env/secrets copied; the request's sets
     merge on top). Answers 202 with the new sandbox, its `create` operation and the `fork` operation on
-    the source. Send an Idempotency-Key to retry safely.
+    the source. A running Windows sandbox is forked only from a stopped VM: send `forceStop: true` to
+    stop it, snapshot it and start it again, otherwise 409 `snapshot_requires_stop`. Send an
+    Idempotency-Key to retry safely.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -169,7 +173,9 @@ async def asyncio_detailed(
 
      Creates a new sandbox from a snapshot of this one (disk and env/secrets copied; the request's sets
     merge on top). Answers 202 with the new sandbox, its `create` operation and the `fork` operation on
-    the source. Send an Idempotency-Key to retry safely.
+    the source. A running Windows sandbox is forked only from a stopped VM: send `forceStop: true` to
+    stop it, snapshot it and start it again, otherwise 409 `snapshot_requires_stop`. Send an
+    Idempotency-Key to retry safely.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -208,7 +214,9 @@ async def asyncio(
 
      Creates a new sandbox from a snapshot of this one (disk and env/secrets copied; the request's sets
     merge on top). Answers 202 with the new sandbox, its `create` operation and the `fork` operation on
-    the source. Send an Idempotency-Key to retry safely.
+    the source. A running Windows sandbox is forked only from a stopped VM: send `forceStop: true` to
+    stop it, snapshot it and start it again, otherwise 409 `snapshot_requires_stop`. Send an
+    Idempotency-Key to retry safely.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.

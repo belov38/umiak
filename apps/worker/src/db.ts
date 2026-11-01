@@ -29,6 +29,8 @@ export interface MachineRow {
 	ready_boot_id: string | null;
 	provisioned_boot_id: string | null;
 	secret_files_on_disk: boolean;
+	/** The last stop was a clean guest shutdown (reset by any state but `stopped`). */
+	clean_stop: boolean;
 	secrets_generation: number;
 	provisioned_secrets_generation: number;
 	agent_phase: string | null;

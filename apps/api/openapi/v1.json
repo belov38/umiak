@@ -1193,6 +1193,10 @@
 				"additionalProperties": false,
 				"description": "A ready snapshot with this name is replaced once the new one is ready",
 				"properties": {
+					"forceStop": {
+						"description": "Windows only: a running Windows sandbox is snapshotted from a stopped VM. With true, the source is stopped (running commands, sessions and connections end), snapshotted and started again; the operation's `forceStop` reports the restart. Without it, a running Windows source answers 409 `snapshot_requires_stop`. Ignored for Linux (snapshotted while running) and for a stopped source.",
+						"type": "boolean"
+					},
 					"name": {
 						"description": "Name within the team: `^[a-z0-9][a-z0-9-]{0,62}$`",
 						"example": "web-stack",
@@ -1745,6 +1749,10 @@
 				"properties": {
 					"env": {
 						"$ref": "#/components/schemas/EnvVarsPatch"
+					},
+					"forceStop": {
+						"description": "Windows only: a running Windows sandbox is snapshotted from a stopped VM. With true, the source is stopped (running commands, sessions and connections end), snapshotted and started again; the operation's `forceStop` reports the restart. Without it, a running Windows source answers 409 `snapshot_requires_stop`. Ignored for Linux (snapshotted while running) and for a stopped source.",
+						"type": "boolean"
 					},
 					"idleTimeoutSeconds": {
 						"description": "Stop after this many idle seconds (at least 60); null disables idle-stop",
@@ -2558,6 +2566,49 @@
 							"null"
 						]
 					},
+					"forceStop": {
+						"description": "fork and save_snapshot sent with `forceStop: true` on a running Windows sandbox: the stop and restart of the source; null otherwise",
+						"properties": {
+							"restartError": {
+								"properties": {
+									"code": {
+										"type": "string"
+									},
+									"message": {
+										"type": "string"
+									}
+								},
+								"required": [
+									"code",
+									"message"
+								],
+								"type": [
+									"object",
+									"null"
+								]
+							},
+							"sourceRestarted": {
+								"description": "The source was started again; null while that has not happened yet. false: the restart failed (see restartError; the sandbox shows the error, resume it), the snapshot is still good",
+								"type": [
+									"boolean",
+									"null"
+								]
+							},
+							"sourceStopped": {
+								"description": "The source VM was stopped by this operation",
+								"type": "boolean"
+							}
+						},
+						"required": [
+							"sourceStopped",
+							"sourceRestarted",
+							"restartError"
+						],
+						"type": [
+							"object",
+							"null"
+						]
+					},
 					"id": {
 						"example": "op_01jbx2v7d3m6c8q9w0e4r5t6y7",
 						"type": "string"
@@ -2614,6 +2665,7 @@
 					"state",
 					"step",
 					"error",
+					"forceStop",
 					"createdAt",
 					"startedAt",
 					"finishedAt"
@@ -3429,7 +3481,7 @@
 				"description": "A saved snapshot; create a sandbox from it with POST /v1/sandboxes {from: {snapshot: name}}",
 				"properties": {
 					"consistency": {
-						"description": "quiesced: filesystems frozen in a running VM; powered_off: taken from a stopped VM; crash: a running VM paused without a filesystem freeze (Windows), like a power loss; null until ready",
+						"description": "quiesced: filesystems frozen in a running VM; powered_off: taken from a VM stopped by a clean guest shutdown; crash: disks as after a power loss (a Linux VM after a hard stop, or an older Windows snapshot); null until ready",
 						"enum": [
 							"quiesced",
 							"powered_off",
@@ -8604,7 +8656,7 @@
 		},
 		"/v1/sandboxes/{sandbox}/fork": {
 			"post": {
-				"description": "Creates a new sandbox from a snapshot of this one (disk and env/secrets copied; the request's sets merge on top). Answers 202 with the new sandbox, its `create` operation and the `fork` operation on the source. Send an Idempotency-Key to retry safely.",
+				"description": "Creates a new sandbox from a snapshot of this one (disk and env/secrets copied; the request's sets merge on top). Answers 202 with the new sandbox, its `create` operation and the `fork` operation on the source. A running Windows sandbox is forked only from a stopped VM: send `forceStop: true` to stop it, snapshot it and start it again, otherwise 409 `snapshot_requires_stop`. Send an Idempotency-Key to retry safely.",
 				"operationId": "sandboxes.fork",
 				"parameters": [
 					{
@@ -8690,7 +8742,7 @@
 								}
 							}
 						},
-						"description": "`invalid_state`, `operation_in_progress`, `slug_taken` or `idempotency_key_reused`"
+						"description": "`invalid_state`, `operation_in_progress`, `slug_taken`, `idempotency_key_reused` or `snapshot_requires_stop` (a running Windows sandbox without `forceStop`; details `{reason: windows_running, retryWith: {forceStop: true}, cli: --force-stop}`)"
 					},
 					"503": {
 						"content": {
@@ -10106,7 +10158,7 @@
 				]
 			},
 			"post": {
-				"description": "Takes a snapshot of the sandbox (ready or stopped) under `name` and answers 202 with the snapshot in `creating` and the `save_snapshot` operation of the sandbox; wait with GET /v1/operations/{operation}?waitSeconds=. A ready snapshot with the same name is replaced once the new one is ready. Send an Idempotency-Key to retry safely.",
+				"description": "Takes a snapshot of the sandbox (ready or stopped) under `name` and answers 202 with the snapshot in `creating` and the `save_snapshot` operation of the sandbox; wait with GET /v1/operations/{operation}?waitSeconds=. A ready snapshot with the same name is replaced once the new one is ready. A running Windows sandbox is saved only from a stopped VM: send `forceStop: true` to stop it, save and start it again, otherwise 409 `snapshot_requires_stop`. Send an Idempotency-Key to retry safely.",
 				"operationId": "snapshots.create",
 				"parameters": [
 					{
@@ -10181,7 +10233,7 @@
 								}
 							}
 						},
-						"description": "`invalid_state` (details.state), `operation_in_progress` (retryable) or `idempotency_key_reused`"
+						"description": "`invalid_state` (details.state), `operation_in_progress` (retryable), `idempotency_key_reused` or `snapshot_requires_stop` (a running Windows sandbox without `forceStop`; details `{reason: windows_running, retryWith: {forceStop: true}, cli: --force-stop}`)"
 					},
 					"default": {
 						"content": {

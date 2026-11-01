@@ -56,13 +56,28 @@ export interface StepFence {
 /**
  * True when the operation has a deadline and it passed. A NULL deadline means
  * "none" for delete and "not set yet" for a fork target's create (the fork
- * sets it when its snapshot is ready, §7.7): never passed.
+ * sets it when its snapshot is ready, §7.7): never passed. A forced fork or
+ * save past its snapshot (S9 §24.8) never fails on its deadline: only the
+ * source's restart is left, and it reports its own failure.
  */
 export function deadlinePassed(
-	op: { deadlineAt: Date | null },
+	op: {
+		deadlineAt: Date | null;
+		request?: Record<string, unknown>;
+		progress?: Record<string, unknown>;
+	},
 	now: Date = new Date(),
 ): boolean {
+	if (forcedSnapshotTaken(op)) return false;
 	return op.deadlineAt !== null && op.deadlineAt.getTime() <= now.getTime();
+}
+
+/** A forced fork/save_snapshot whose snapshot is done (`progress.snapshotTaken`). */
+export function forcedSnapshotTaken(op: {
+	request?: Record<string, unknown>;
+	progress?: Record<string, unknown>;
+}): boolean {
+	return op.request?.forceStop === true && op.progress?.snapshotTaken === true;
 }
 
 export interface OperationError {

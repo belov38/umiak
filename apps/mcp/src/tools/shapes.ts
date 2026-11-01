@@ -91,3 +91,11 @@ export const idleTimeoutShape = z
 	.max(MAX_SECONDS)
 	.optional()
 	.describe("Stop after this many idle seconds; default: never");
+
+/** fork and snapshot_save of a running Windows sandbox (S9 §24.8). */
+export const forceStopShape = z
+	.boolean()
+	.optional()
+	.describe(
+		"Running Windows: stop VM (ends commands/sessions), snapshot, restart. Linux: no-op",
+	);

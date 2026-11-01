@@ -245,9 +245,17 @@ export class Output {
 	}
 }
 
+/** The next step for a person after an API error, by its code (stderr only). */
+const HINTS: Record<string, string> = {
+	// A running Windows sandbox is forked or saved only from a stopped VM (S9 §24.8).
+	snapshot_requires_stop:
+		"use --force-stop to stop the sandbox, take the snapshot and start it again (running commands and sessions are interrupted)",
+};
+
 function humanError(p: ErrorPayload): string {
 	const extra = [p.code, p.requestId].filter((x) => x !== null).join(", ");
-	return `sbx: ${p.message} (${extra})`;
+	const hint = HINTS[p.code];
+	return `sbx: ${p.message} (${extra})${hint === undefined ? "" : `\nhint: ${hint}`}`;
 }
 
 /** Plain text of a value: `key: value` lines, nested objects indented. */

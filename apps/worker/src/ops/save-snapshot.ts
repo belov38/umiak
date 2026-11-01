@@ -1,8 +1,15 @@
 import { DELETE_RETRY_LIMIT } from "@sbx/core";
 import type { Tx } from "@sbx/db";
 import type { WorkerCtx } from "../context.ts";
-import type { Fenced, OperationError } from "../steps.ts";
+import type { Fenced, OperationError, Step } from "../steps.ts";
 import { runOp } from "./common.ts";
+import {
+	extendDeadlineForRestart,
+	forceStopSteps,
+	isForced,
+	restartForcedSource,
+	restartSteps,
+} from "./force-stop.ts";
 import type { SandboxOpHandler } from "./kind.ts";
 import {
 	deleteSnapshotLvs,
@@ -12,7 +19,7 @@ import {
 
 // save_snapshot (S6 §7.8): the API inserted the `saved` row (`creating`,
 // `pending_name`) and put its id in `request.snapshotId`. Steps: `snapshot`
-// (as fork), then one fenced transaction: the team's `ready` snapshot of that
+// (as fork; forced Windows: stop before, restart after, force-stop.ts), then one fenced transaction: the team's `ready` snapshot of that
 // name → `deleting` (+ snapshot-op delete), the new one `ready` with the
 // name. On failure the name stays with the old snapshot. No secrets are in
 // the snapshot: the agent keeps them in tmpfs only.
@@ -87,18 +94,38 @@ async function compensateSave(
 ): Promise<void> {
 	const snapshotId = snapshotIdOf(fenced);
 	await deleteSnapshotLvs(ctx, fenced, snapshotId, ["creating"]);
+	await restartForcedSource(ctx, fenced);
 	await fenced.finish("failed", error, (tx) =>
 		markSnapshot(tx, snapshotId, "failed", ["creating"]),
 	);
 }
 
+function saveSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
+	const snapshotId = snapshotIdOf(fenced);
+	const snapshot: Step = {
+		name: "snapshot",
+		run: async () => {
+			const taken = await takeSnapshot(ctx, fenced, snapshotId);
+			if (!isForced(fenced)) return taken;
+			await extendDeadlineForRestart(ctx, fenced);
+			// From here on the operation does not fail (force-stop.ts).
+			return { ...taken, snapshotTaken: true };
+		},
+	};
+	// S9 §24.8: a forced save stops the source, snapshots it and starts it again.
+	if (!isForced(fenced)) return [snapshot];
+	return [
+		...forceStopSteps(ctx, fenced),
+		snapshot,
+		...restartSteps(ctx, fenced),
+	];
+}
+
 export const SAVE_SNAPSHOT_OP: SandboxOpHandler = {
 	run: (ctx, fenced) => {
 		const snapshotId = snapshotIdOf(fenced);
-		return runOp(
-			fenced,
-			[{ name: "snapshot", run: () => takeSnapshot(ctx, fenced, snapshotId) }],
-			(tx) => finishSave(ctx, tx, snapshotId),
+		return runOp(fenced, saveSteps(ctx, fenced), (tx) =>
+			finishSave(ctx, tx, snapshotId),
 		);
 	},
 	compensate: compensateSave,

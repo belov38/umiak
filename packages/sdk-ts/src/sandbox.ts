@@ -297,7 +297,16 @@ export class Sandbox implements SandboxRef {
 		return op;
 	}
 
-	/** A copy of this sandbox; `wait`: until the copy is ready. */
+	/**
+	 * A copy of this sandbox; `wait`: until the copy is ready.
+	 *
+	 * A running Windows sandbox is forked only from a stopped VM: without
+	 * `input.forceStop` it throws SbxError 409 `snapshot_requires_stop`
+	 * (`details.retryWith: {forceStop: true}`). `forceStop: true` stops this
+	 * sandbox (running commands and sessions are interrupted), takes the
+	 * snapshot and starts it again; the fork operation's `forceStop` reports
+	 * the restart. Ignored for Linux and for a stopped sandbox.
+	 */
 	async fork(
 		input: ForkInput = {},
 		opts: ActionOptions = {},

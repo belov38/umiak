@@ -70,11 +70,11 @@ export function RowActions({
 				sbx.raw.POST("/v1/sandboxes/{sandbox}/resume", { ...path, body: {} }),
 			`Resuming ${sandbox.slug}`,
 		);
-	const forkNow = useFork(teamId, sandbox, refresh);
+	const forking = useFork(teamId, sandbox, refresh);
 	const fork = async () => {
 		setBusy(true);
 		try {
-			await forkNow();
+			await forking.fork();
 		} finally {
 			setBusy(false);
 		}
@@ -133,6 +133,7 @@ export function RowActions({
 					</DropdownMenuItem>
 				</DropdownMenuContent>
 			</DropdownMenu>
+			{forking.dialog}
 			<DeleteSandboxDialog
 				teamId={teamId}
 				sandbox={sandbox}

@@ -241,6 +241,7 @@ export const machines = runtime.table("machines", {
 		.default([]),
 	provisionedBootId: text("provisioned_boot_id"),
 	secretFilesOnDisk: boolean("secret_files_on_disk").notNull().default(false),
+	cleanStop: boolean("clean_stop").notNull().default(false),
 	secretsGeneration: integer("secrets_generation").notNull().default(0),
 	provisionedSecretsGeneration: integer("provisioned_secrets_generation")
 		.notNull()

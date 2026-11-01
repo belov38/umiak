@@ -5,10 +5,12 @@ import {
 	canConfigure,
 	canRead,
 	canWork,
+	FORCE_STOP_TEXT,
 	formatBytes,
 	formatSeconds,
 	headerActions,
 	modeString,
+	needsForceStop,
 	portProblem,
 	portUrl,
 } from "@/features/sandbox/rules";
@@ -125,5 +127,31 @@ describe("formatting", () => {
 		expect(formatBytes(1229)).toBe("1.2 KB");
 		expect(modeString("dir", 0o755)).toBe("drwxr-xr-x");
 		expect(modeString("file", 0o644)).toBe("-rw-r--r--");
+	});
+});
+
+describe("force stop of a running Windows sandbox (S9 §24.8)", () => {
+	const catalog = [
+		{ slug: "linux", os: "linux" },
+		{ slug: "win11", os: "windows" },
+	];
+
+	it("asks for a ready Windows sandbox only", () => {
+		expect(needsForceStop(sb({ template: "win11" }), catalog)).toBe(true);
+		expect(needsForceStop(sb({ template: "linux" }), catalog)).toBe(false);
+		expect(
+			needsForceStop(sb({ template: "win11", state: "stopped" }), catalog),
+		).toBe(false);
+	});
+
+	it("an unknown template or a catalog not loaded yet is left to the API's 409", () => {
+		expect(needsForceStop(sb({ template: "win11" }), undefined)).toBe(false);
+		expect(needsForceStop(sb({ template: "other" }), catalog)).toBe(false);
+	});
+
+	it("the confirm text says what happens", () => {
+		expect(FORCE_STOP_TEXT).toBe(
+			"This stops the sandbox, takes the snapshot and starts it again. Running commands and sessions are interrupted.",
+		);
 	});
 });

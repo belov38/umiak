@@ -35,6 +35,30 @@ export const OperationSchema = z
 			})
 			.nullable()
 			.openapi({ description: "Why the operation failed; null otherwise" }),
+		forceStop: z
+			.object({
+				sourceStopped: z.boolean().openapi({
+					description: "The source VM was stopped by this operation",
+				}),
+				sourceRestarted: z
+					.boolean()
+					.nullable()
+					.openapi({
+						description:
+							"The source was started again; null while that has not happened yet. " +
+							"false: the restart failed (see restartError; the sandbox shows the error, " +
+							"resume it), the snapshot is still good",
+					}),
+				restartError: z
+					.object({ code: z.string(), message: z.string() })
+					.nullable(),
+			})
+			.nullable()
+			.openapi({
+				description:
+					"fork and save_snapshot sent with `forceStop: true` on a running Windows " +
+					"sandbox: the stop and restart of the source; null otherwise",
+			}),
 		createdAt: Timestamp,
 		startedAt: NullableTimestamp,
 		finishedAt: NullableTimestamp,

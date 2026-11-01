@@ -775,7 +775,7 @@ export interface paths {
         put?: never;
         /**
          * Fork a sandbox
-         * @description Creates a new sandbox from a snapshot of this one (disk and env/secrets copied; the request's sets merge on top). Answers 202 with the new sandbox, its `create` operation and the `fork` operation on the source. Send an Idempotency-Key to retry safely.
+         * @description Creates a new sandbox from a snapshot of this one (disk and env/secrets copied; the request's sets merge on top). Answers 202 with the new sandbox, its `create` operation and the `fork` operation on the source. A running Windows sandbox is forked only from a stopped VM: send `forceStop: true` to stop it, snapshot it and start it again, otherwise 409 `snapshot_requires_stop`. Send an Idempotency-Key to retry safely.
          */
         post: operations["sandboxes.fork"];
         delete?: never;
@@ -1103,7 +1103,7 @@ export interface paths {
         put?: never;
         /**
          * Save a snapshot of a sandbox
-         * @description Takes a snapshot of the sandbox (ready or stopped) under `name` and answers 202 with the snapshot in `creating` and the `save_snapshot` operation of the sandbox; wait with GET /v1/operations/{operation}?waitSeconds=. A ready snapshot with the same name is replaced once the new one is ready. Send an Idempotency-Key to retry safely.
+         * @description Takes a snapshot of the sandbox (ready or stopped) under `name` and answers 202 with the snapshot in `creating` and the `save_snapshot` operation of the sandbox; wait with GET /v1/operations/{operation}?waitSeconds=. A ready snapshot with the same name is replaced once the new one is ready. A running Windows sandbox is saved only from a stopped VM: send `forceStop: true` to stop it, save and start it again, otherwise 409 `snapshot_requires_stop`. Send an Idempotency-Key to retry safely.
          */
         post: operations["snapshots.create"];
         delete?: never;
@@ -1581,6 +1581,8 @@ export interface components {
         };
         /** @description A ready snapshot with this name is replaced once the new one is ready */
         CreateSnapshotRequest: {
+            /** @description Windows only: a running Windows sandbox is snapshotted from a stopped VM. With true, the source is stopped (running commands, sessions and connections end), snapshotted and started again; the operation's `forceStop` reports the restart. Without it, a running Windows source answers 409 `snapshot_requires_stop`. Ignored for Linux (snapshotted while running) and for a stopped source. */
+            forceStop?: boolean;
             /**
              * @description Name within the team: `^[a-z0-9][a-z0-9-]{0,62}$`
              * @example web-stack
@@ -1767,6 +1769,8 @@ export interface components {
         /** @description Sets merge onto a copy of the source's sets; the source is not changed */
         ForkSandboxRequest: {
             env?: components["schemas"]["EnvVarsPatch"];
+            /** @description Windows only: a running Windows sandbox is snapshotted from a stopped VM. With true, the source is stopped (running commands, sessions and connections end), snapshotted and started again; the operation's `forceStop` reports the restart. Without it, a running Windows source answers 409 `snapshot_requires_stop`. Ignored for Linux (snapshotted while running) and for a stopped source. */
+            forceStop?: boolean;
             /** @description Stop after this many idle seconds (at least 60); null disables idle-stop */
             idleTimeoutSeconds?: number | null;
             labels?: components["schemas"]["Labels"] & unknown;
@@ -2062,6 +2066,17 @@ export interface components {
              * @description ISO 8601 UTC with milliseconds
              */
             finishedAt: string | null;
+            /** @description fork and save_snapshot sent with `forceStop: true` on a running Windows sandbox: the stop and restart of the source; null otherwise */
+            forceStop: {
+                restartError: {
+                    code: string;
+                    message: string;
+                } | null;
+                /** @description The source was started again; null while that has not happened yet. false: the restart failed (see restartError; the sandbox shows the error, resume it), the snapshot is still good */
+                sourceRestarted: boolean | null;
+                /** @description The source VM was stopped by this operation */
+                sourceStopped: boolean;
+            } | null;
             /** @example op_01jbx2v7d3m6c8q9w0e4r5t6y7 */
             id: string;
             /** @enum {string} */
@@ -2349,7 +2364,7 @@ export interface components {
         /** @description A saved snapshot; create a sandbox from it with POST /v1/sandboxes {from: {snapshot: name}} */
         Snapshot: {
             /**
-             * @description quiesced: filesystems frozen in a running VM; powered_off: taken from a stopped VM; crash: a running VM paused without a filesystem freeze (Windows), like a power loss; null until ready
+             * @description quiesced: filesystems frozen in a running VM; powered_off: taken from a VM stopped by a clean guest shutdown; crash: disks as after a power loss (a Linux VM after a hard stop, or an older Windows snapshot); null until ready
              * @enum {string|null}
              */
             consistency: "quiesced" | "powered_off" | "crash" | null | (string & {});
@@ -5514,7 +5529,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `invalid_state`, `operation_in_progress`, `slug_taken` or `idempotency_key_reused` */
+            /** @description `invalid_state`, `operation_in_progress`, `slug_taken`, `idempotency_key_reused` or `snapshot_requires_stop` (a running Windows sandbox without `forceStop`; details `{reason: windows_running, retryWith: {forceStop: true}, cli: --force-stop}`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6576,7 +6591,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `invalid_state` (details.state), `operation_in_progress` (retryable) or `idempotency_key_reused` */
+            /** @description `invalid_state` (details.state), `operation_in_progress` (retryable), `idempotency_key_reused` or `snapshot_requires_stop` (a running Windows sandbox without `forceStop`; details `{reason: windows_running, retryWith: {forceStop: true}, cli: --force-stop}`) */
             409: {
                 headers: {
                     [name: string]: unknown;

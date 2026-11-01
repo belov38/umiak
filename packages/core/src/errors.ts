@@ -19,6 +19,8 @@ export const ERROR_CODES = [
 	"snapshot_name_taken",
 	"agent_unavailable",
 	"retries_exhausted",
+	// A running Windows sandbox is forked or saved only with forceStop (S9 §24.8).
+	"snapshot_requires_stop",
 	// S8 C3: operator rights and blocks; `details.reason` says which
 	// (operator_required, sandbox_blocked, port_blocked).
 	"forbidden",
@@ -161,6 +163,31 @@ export function snapshotNotFound(name: string): SbxError {
 		`saved snapshot '${name}' not found`,
 		{
 			details: { name },
+		},
+	);
+}
+
+/**
+ * Fork or saved snapshot of a running Windows sandbox without `forceStop`
+ * (S9 §24.8): Windows disks are snapshotted only from a stopped VM. The
+ * message and details tell the client how to retry.
+ */
+export function windowsSnapshotRequiresStop(
+	kind: "fork" | "save_snapshot",
+): SbxError {
+	const what =
+		kind === "fork"
+			? "Windows sandboxes are forked from a stopped VM"
+			: "Windows snapshots are saved from a stopped VM";
+	return new SbxError(
+		"snapshot_requires_stop",
+		`${what}; stop it first or retry with forceStop: true (CLI --force-stop), which stops the sandbox, takes the snapshot and starts it again`,
+		{
+			details: {
+				reason: "windows_running",
+				retryWith: { forceStop: true },
+				cli: "--force-stop",
+			},
 		},
 	);
 }

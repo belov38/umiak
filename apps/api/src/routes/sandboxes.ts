@@ -366,7 +366,9 @@ const forkSandbox = createRoute({
 		description:
 			"Creates a new sandbox from a snapshot of this one (disk and env/secrets copied; the " +
 			"request's sets merge on top). Answers 202 with the new sandbox, its `create` " +
-			"operation and the `fork` operation on the source. Send an Idempotency-Key to retry safely.",
+			"operation and the `fork` operation on the source. A running Windows sandbox is forked " +
+			"only from a stopped VM: send `forceStop: true` to stop it, snapshot it and start it " +
+			"again, otherwise 409 `snapshot_requires_stop`. Send an Idempotency-Key to retry safely.",
 	}),
 	middleware: [requireScope("sandboxes:write")] as const,
 	request: {
@@ -382,7 +384,9 @@ const forkSandbox = createRoute({
 		403: errorResponse("`quota_exceeded`"),
 		404: notFound404,
 		409: errorResponse(
-			"`invalid_state`, `operation_in_progress`, `slug_taken` or `idempotency_key_reused`",
+			"`invalid_state`, `operation_in_progress`, `slug_taken`, `idempotency_key_reused` or " +
+				"`snapshot_requires_stop` (a running Windows sandbox without `forceStop`; details " +
+				"`{reason: windows_running, retryWith: {forceStop: true}, cli: --force-stop}`)",
 		),
 		503: errorResponse("`out_of_capacity` (retryable)"),
 		...ERROR_RESPONSES,

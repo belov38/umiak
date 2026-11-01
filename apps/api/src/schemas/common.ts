@@ -146,3 +146,16 @@ export function compact<T extends object>(
 	for (const [k, v] of Object.entries(o)) if (v !== undefined) out[k] = v;
 	return out as { [K in keyof T]?: Exclude<T[K], undefined> };
 }
+
+/** S9 §24.8: fork and saved snapshot of a running Windows sandbox. */
+export const ForceStopField = z
+	.boolean()
+	.optional()
+	.openapi({
+		description:
+			"Windows only: a running Windows sandbox is snapshotted from a stopped VM. With true, " +
+			"the source is stopped (running commands, sessions and connections end), snapshotted " +
+			"and started again; the operation's `forceStop` reports the restart. Without it, a " +
+			"running Windows source answers 409 `snapshot_requires_stop`. Ignored for Linux " +
+			"(snapshotted while running) and for a stopped source.",
+	});

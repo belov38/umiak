@@ -41,6 +41,7 @@ export function operationResource(op: FakeOperation) {
 		state: op.state,
 		step: op.step,
 		error: op.error,
+		forceStop: op.forceStop,
 		createdAt: iso(op.createdAt),
 		startedAt: isoOrNull(op.startedAt),
 		finishedAt: isoOrNull(op.finishedAt),
@@ -165,6 +166,7 @@ export function startOperation(
 		state: "running",
 		step,
 		error: null,
+		forceStop: null,
 		createdAt: now,
 		startedAt: now,
 		finishedAt: null,
@@ -172,6 +174,65 @@ export function startOperation(
 	fake.state.operations.set(op.id, op);
 	sb.activeOperationId = op.id;
 	return op;
+}
+
+/**
+ * Fork and saved snapshot of a running Windows sandbox (S9 §24.8): 409
+ * `snapshot_requires_stop` without `forceStop`; true when the source is
+ * stopped for the snapshot and started again. Linux and a stopped source
+ * ignore the flag.
+ */
+export function forceStopFor(
+	fake: Fake,
+	sb: FakeSandbox,
+	kind: "fork" | "save_snapshot",
+	forceStop: unknown,
+): boolean {
+	if (sb.state !== "ready" || templateOf(fake, sb.template)?.os !== "windows") {
+		return false;
+	}
+	if (forceStop === true) return true;
+	const what =
+		kind === "fork"
+			? "Windows sandboxes are forked from a stopped VM"
+			: "Windows snapshots are saved from a stopped VM";
+	throw new FakeApiError(
+		409,
+		"snapshot_requires_stop",
+		`${what}; stop it first or retry with forceStop: true (CLI --force-stop), which stops the sandbox, takes the snapshot and starts it again`,
+		{
+			details: {
+				reason: "windows_running",
+				retryWith: { forceStop: true },
+				cli: "--force-stop",
+			},
+		},
+	);
+}
+
+/**
+ * A forced operation: the source was stopped and started again, or its
+ * restart failed (`state.forceStopRestartError`; the source is then `error`).
+ */
+export function markForceStopped(
+	fake: Fake,
+	op: FakeOperation,
+	src: FakeSandbox,
+): void {
+	const restartError = fake.state.forceStopRestartError;
+	op.forceStop = {
+		sourceStopped: true,
+		sourceRestarted: restartError === null,
+		restartError,
+	};
+	if (restartError !== null) {
+		src.state = "error";
+		src.error = {
+			code: "resume_failed",
+			message: `the restart after the forced snapshot failed: ${restartError.message}`,
+		};
+		src.updatedAt = new Date();
+	}
 }
 
 export function finishOperation(

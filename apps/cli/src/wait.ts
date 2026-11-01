@@ -6,6 +6,7 @@
 
 import {
 	DEFAULT_RETRY_BUDGET_MS,
+	type OperationData,
 	type SandboxData,
 	SandboxFailedError,
 	SbxError,
@@ -148,4 +149,21 @@ export async function reportWait(
 		(v) => `${v.sandbox.slug} (${v.sandbox.id}) is ${target}`,
 	);
 	return sb;
+}
+
+/**
+ * Warns when a fork or save with --force-stop could not start its source
+ * again (S9 §24.8): the snapshot is good, the source is in `error` until it
+ * is resumed.
+ */
+export function warnForceStop(ctx: Context, op: OperationData): void {
+	const f = op.forceStop;
+	if (f === null || f.sourceRestarted !== false) return;
+	const why =
+		f.restartError === null
+			? ""
+			: `: ${f.restartError.message} (${f.restartError.code})`;
+	ctx.out.warn(
+		`the source sandbox was stopped for the snapshot but failed to start again${why}; resume it: sbx resume ${op.sandboxId}`,
+	);
 }

@@ -17,6 +17,7 @@ import {
 } from "./sandbox-view.ts";
 import {
 	DEFAULT_WAIT_SECONDS,
+	forceStopShape,
 	idempotencyKeyShape,
 	waitShape,
 } from "./shapes.ts";
@@ -119,6 +120,7 @@ export const snapshotSave = defineTool({
 			.describe(
 				"Snapshot name, [a-z0-9-], up to 63 characters, e.g. web-stack",
 			),
+		force_stop: forceStopShape,
 		...waitShape(true),
 		idempotency_key: idempotencyKeyShape,
 	},
@@ -127,7 +129,13 @@ export const snapshotSave = defineTool({
 		const { modelKey, apiKey } = keyFor("snapshot_save", args.idempotency_key);
 		const r = await withUnknownOutcome(ctx, modelKey, () =>
 			ctx.sbx().raw.POST("/v1/snapshots", {
-				body: { sandbox: args.sandbox, name: args.name },
+				body: {
+					sandbox: args.sandbox,
+					name: args.name,
+					...(args.force_stop === undefined
+						? {}
+						: { forceStop: args.force_stop }),
+				},
 				idempotencyKey: apiKey,
 				...ctx.call,
 			}),
@@ -166,6 +174,12 @@ export const snapshotSave = defineTool({
 			header.operation_id = op.id;
 			notes.unshift(
 				`state not final yet: call snapshot_save again with this idempotency_key and wait_seconds=50, or check snapshot_list until the state is ready`,
+			);
+		}
+		if (op.forceStop?.sourceRestarted === false) {
+			const e = op.forceStop.restartError;
+			notes.push(
+				`the snapshot is saved, but the sandbox did not start again after the forced stop${e === null ? "" : ` (${safeLine(e.code)}: ${safeLine(e.message)})`}; call sandbox_resume.`,
 			);
 		}
 		if (replayed) {

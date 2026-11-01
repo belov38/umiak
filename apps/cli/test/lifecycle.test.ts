@@ -458,6 +458,98 @@ describe("sandbox lifecycle", () => {
 		);
 	});
 
+	describe("--force-stop of a running Windows sandbox (S9 §24.8)", () => {
+		let windowsMachine: string | undefined;
+		const setOs = (machineId: string, os: "linux" | "windows") =>
+			w.db.pool.query(
+				"UPDATE runtime.template_builds SET os = $2 WHERE id = (SELECT template_build_id FROM runtime.machines WHERE id = $1)",
+				[machineId, os],
+			);
+		afterEach(async () => {
+			if (windowsMachine !== undefined) await setOs(windowsMachine, "linux");
+			windowsMachine = undefined;
+		});
+		const windowsSandbox = async () => {
+			const sb = await w.readySandbox();
+			const r = await w.db.pool.query<{ machine_id: string }>(
+				"SELECT machine_id FROM runtime.sandboxes WHERE slug = $1",
+				[sb.slug],
+			);
+			windowsMachine = r.rows[0]?.machine_id as string;
+			await setOs(windowsMachine, "windows");
+			return sb;
+		};
+
+		it("fork without --force-stop prints the API message and the hint; with it the request carries forceStop", async () => {
+			const sb = await windowsSandbox();
+			const r = await sbx(["fork", sb.slug]);
+			expect(r.code).toBe(1);
+			expect(r.last()).toMatchObject({
+				event: "error",
+				code: "snapshot_requires_stop",
+				details: { retryWith: { forceStop: true }, cli: "--force-stop" },
+			});
+			expect(r.stderr).toContain(
+				"sbx: Windows sandboxes are forked from a stopped VM; stop it first or retry with forceStop: true",
+			);
+			expect(r.stderr).toContain("\nhint: use --force-stop");
+			const tty = await sbx(["fork", sb.slug], { tty: true });
+			expect(tty.stderr).toContain("hint: use --force-stop");
+
+			const ok = await sbx(["fork", sb.slug, "--force-stop"]);
+			expect(ok.code, ok.stderr).toBe(0);
+			expect(JSON.parse(ok.stdout)).toMatchObject({
+				sourceOperation: { kind: "fork", forceStop: { sourceStopped: false } },
+			});
+		});
+
+		it("snapshot save: the hint without --force-stop; with --wait a failed restart is a warning", async () => {
+			const sb = await windowsSandbox();
+			const name = `snap-${crypto.randomUUID().slice(0, 8)}`;
+			const no = await sbx(["snapshot", "save", sb.slug, name]);
+			expect(no.code).toBe(1);
+			expect(no.last()).toMatchObject({ code: "snapshot_requires_stop" });
+			expect(no.stderr).toContain(
+				"sbx: Windows snapshots are saved from a stopped VM",
+			);
+			expect(no.stderr).toContain("hint: use --force-stop");
+
+			const save = sbx([
+				"snapshot",
+				"save",
+				sb.slug,
+				name,
+				"--force-stop",
+				"--wait",
+			]);
+			await until(async () => {
+				const r = await w.db.pool.query(
+					`UPDATE runtime.operations
+					 SET progress = progress || '{"forceStopped": true, "sourceRestarted": false,
+					   "restartError": {"code": "agent_timeout", "message": "no agent"}}'::jsonb
+					 WHERE sandbox_id = (SELECT source_sandbox_id FROM runtime.snapshots WHERE pending_name = $1)
+					   AND kind = 'save_snapshot' AND state IN ('pending', 'running')`,
+					[name],
+				);
+				return r.rowCount ? true : undefined;
+			});
+			await w.markSnapshotReady(name);
+			const s = await save;
+			expect(s.code, s.stderr).toBe(0);
+			expect(s.lines()[0]).toMatchObject({
+				event: "accepted",
+				operation: {
+					kind: "save_snapshot",
+					forceStop: { sourceStopped: false },
+				},
+			});
+			expect(s.lines().at(-1)).toMatchObject({ event: "ready" });
+			expect(s.stderr).toContain(
+				"warning: the source sandbox was stopped for the snapshot but failed to start again: no agent (agent_timeout); resume it: sbx resume sb_",
+			);
+		});
+	});
+
 	it("templates, sizes and limits", async () => {
 		const t = await sbx(["templates"]);
 		expect(t.code, t.stderr).toBe(0);

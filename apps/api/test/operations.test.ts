@@ -43,6 +43,7 @@ describe.skipIf(skipPg())("GET /v1/operations/{operation}", () => {
 			state: "pending",
 			step: null,
 			error: null,
+			forceStop: null,
 			createdAt: op.createdAt,
 			startedAt: null,
 			finishedAt: null,

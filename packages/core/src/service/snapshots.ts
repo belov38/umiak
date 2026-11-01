@@ -1,3 +1,4 @@
+import type { TemplateOs } from "@sbx/config";
 import { withTx } from "@sbx/db";
 import { requestHash } from "../canonical.ts";
 import { checkQuota } from "../capacity.ts";
@@ -9,6 +10,7 @@ import {
 	SbxError,
 	snapshotNotFound,
 	validation,
+	windowsSnapshotRequiresStop,
 } from "../errors.ts";
 import { claimIdempotencyKey } from "../idempotency.ts";
 import { uuidv7 } from "../ids.ts";
@@ -19,7 +21,7 @@ import {
 	type SavedSnapshot,
 	snapshotFromRow,
 } from "../rows.ts";
-import { sandboxNext } from "../states.ts";
+import { type SandboxState, sandboxNext } from "../states.ts";
 import {
 	activeOperation,
 	buildOs,
@@ -42,6 +44,23 @@ export const SNAPSHOT_SCOPE = "snapshots.create";
 
 /** S7: `^[a-z0-9][a-z0-9-]{0,62}$`. */
 const SNAPSHOT_NAME_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+/**
+ * S9 §24.8: Windows disks are snapshotted only from a stopped VM. A `ready`
+ * (running) Windows source needs `forceStop`, which the worker applies (stop,
+ * snapshot, start again); otherwise `snapshot_requires_stop`. Returns whether
+ * the operation is forced. Linux and stopped sources ignore the flag.
+ */
+export function forceStopApplies(
+	kind: "fork" | "save_snapshot",
+	os: TemplateOs,
+	state: SandboxState,
+	forceStop: boolean | undefined,
+): boolean {
+	if (os !== "windows" || state !== "ready") return false;
+	if (forceStop !== true) throw windowsSnapshotRequiresStop(kind);
+	return true;
+}
 
 export interface SaveSnapshotResult {
 	snapshot: SavedSnapshot;
@@ -75,8 +94,12 @@ export async function saveSnapshot(
 	idOrSlug: string,
 	name: string,
 	idemKey?: string,
+	opts: { forceStop?: boolean } = {},
 ): Promise<SaveSnapshotResult> {
 	validateSnapshotName(name);
+	if (opts.forceStop !== undefined && typeof opts.forceStop !== "boolean") {
+		throw validation([{ path: "forceStop", message: "must be a boolean" }]);
+	}
 	// The sandbox is part of the idempotency hash (S7 §20.2 item 11).
 	const sourceId = (
 		await findSandboxRow(deps.pool, p, idOrSlug, { write: true })
@@ -93,6 +116,10 @@ export async function saveSnapshot(
 				requestHash: requestHash(deps.keys, SNAPSHOT_SCOPE, {
 					sandbox: sourceId,
 					name,
+					// Absent unless set: keys of earlier requests keep their hash.
+					...(opts.forceStop !== undefined
+						? { forceStop: opts.forceStop }
+						: {}),
 				}),
 				sandboxId: sourceId,
 				operationId,
@@ -111,6 +138,13 @@ export async function saveSnapshot(
 		const active = await activeOperation(tx.client, src.id);
 		if (active !== null) throw operationInProgress(active);
 		sandboxNext(src.state, "save_snapshot");
+		const os = await buildOs(tx.client, src.template_build_id);
+		const forceStop = forceStopApplies(
+			"save_snapshot",
+			os,
+			src.state,
+			opts.forceStop,
+		);
 		const machine = await machineInfo(tx.client, src.machine_id);
 		if (machine === null) throw notFound("source machine");
 
@@ -138,14 +172,13 @@ export async function saveSnapshot(
 				snapshotId.replaceAll("-", ""),
 			],
 		);
-		const os = await buildOs(tx.client, src.template_build_id);
 		await insertOperation(tx, {
 			id: operationId,
 			sandboxId: src.id,
 			kind: "save_snapshot",
-			request: { name, snapshotId },
+			request: { name, snapshotId, ...(forceStop ? { forceStop: true } : {}) },
 			principal: p,
-			deadlineMs: operationDeadline("save_snapshot", os),
+			deadlineMs: operationDeadline("save_snapshot", os, { forceStop }),
 		});
 		await sendSandboxOp(tx, deps.jobs, operationId, src.id);
 		return loadSaveResult(tx.client, operationId);

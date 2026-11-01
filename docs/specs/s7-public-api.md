@@ -180,6 +180,7 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 | 409 | `sandbox_starting` | да | sandbox в `creating`/`starting` дольше 60 s ожидания (§8.1) |
 | 409 | `operation_in_progress` | да | активна другая операция; `details {operationId, kind}` |
 | 409 | `idempotency_key_reused` | нет | тот же ключ, другое тело |
+| 409 | `snapshot_requires_stop` | нет | fork или saved snapshot работающей Windows-sandbox без `forceStop` (S9 §24.8); `details {reason: "windows_running", retryWith: {forceStop: true}, cli: "--force-stop"}`, сообщение подсказывает повтор с `forceStop: true` |
 | 409 | `slug_taken`, `snapshot_name_taken`, `ssh_key_in_use`, `already_exists` | нет | |
 | 409 | `agent_outdated` | нет | у агента нет capability; `details.capability` |
 | 409 | `command_exited` | нет | input/resize для завершённой команды |
@@ -538,7 +539,7 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 **Действия** (ответ `202 {sandbox, operation}`):
 - `POST /stop`;
 - `POST /resume {size?, ttlSeconds?, env?, secrets?, secretFiles?}`;
-- `POST /fork {name?, slug?, labels?, ttlSeconds?, idleTimeoutSeconds?, size?, env?, secrets?, secretFiles?}` (`Idempotency-Key`): ответ `{sandbox: <новая>, operation: <create цели>, sourceOperation: <fork на источнике>}`;
+- `POST /fork {name?, slug?, labels?, ttlSeconds?, idleTimeoutSeconds?, size?, forceStop?, env?, secrets?, secretFiles?}` (`Idempotency-Key`): ответ `{sandbox: <новая>, operation: <create цели>, sourceOperation: <fork на источнике>}`. Работающая Windows-sandbox форкается только из остановленной VM (S9 §24.8): без `forceStop: true` — `409 snapshot_requires_stop` с подсказкой; с ним fork на источнике останавливает его (обычный stop: PrepareStop, стирание secret-файлов; команды, PTY и сессии прерываются), снимает снапшот (`consistency: powered_off`), запускает источник снова и только потом передаёт снапшот цели. `sourceOperation.forceStop` сообщает итог перезапуска (§8.4). Linux снимается вживую и флаг игнорирует; остановленный источник тоже;
 - `POST /recover`;
 - `DELETE /v1/sandboxes/{sandbox}` → `202 {sandbox, operation}`; на `deleted` → `200 {sandbox, operation: null}`.
 - `POST /extend {ttlSeconds?}` → `200 Sandbox` (без операции, S6 §7.8).
@@ -581,6 +582,8 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 ```
 
 `kind`: `create | fork | stop | resume | recover | delete | save_snapshot` (внутренние `reprovision` наружу не отдаются; в `activeOperation` они выглядят как `null`). `state`: `pending | running | succeeded | failed | superseded`. `error`: `{code, message, retryable}`. `step` — для отладки, значения не входят в контракт.
+
+`forceStop` (S9 §24.8): `null`, кроме fork и save_snapshot, принятых с `forceStop: true` для работающей Windows-sandbox: `{sourceStopped, sourceRestarted, restartError}`. `sourceStopped` — источник остановлен этой операцией; `sourceRestarted` — `true` после запуска, `null` пока не дошло, `false` — запуск не удался: операция всё равно `succeeded` (снапшот цел, fork продолжается), а источник в `error` с `resume_failed` (`restartError {code, message}`), его поднимают обычным `resume`. Если операция упала до снапшота, источник запускается снова её компенсацией; гость, не выключившийся за 300 s, даёт `error {code: "shutdown_timeout", retryable: true}` без снапшота (S9 §24.9).
 
 ## 9. Команды
 
@@ -858,10 +861,10 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
   - `usage` и счётчики пула — метод S6 (добавление, §20.2; счётчики пула — фаза 2).
 - **`GET /v1/meta`** (без auth) → `{apiVersion: "v1", build, appUrl, apiUrl, sbxDomain, oidc: {issuer, clientId: "sbx-cli", audience: "sbx-api"}, ssh: {host, port, hostKeys}, minCliVersion, latestCliVersion}`.
 - **Saved snapshots** (адресуются по имени внутри команды; имя `^[a-z0-9][a-z0-9-]{0,62}$`):
-  - `POST /v1/snapshots {sandbox, name}` (`Idempotency-Key`) → `202 {snapshot, operation}`. Существующий снапшот с тем же именем заменяется, когда новый станет `ready` (S6 §7.8).
+  - `POST /v1/snapshots {sandbox, name, forceStop?}` (`Idempotency-Key`) → `202 {snapshot, operation}`. Существующий снапшот с тем же именем заменяется, когда новый станет `ready` (S6 §7.8). Работающая Windows-sandbox сохраняется только из остановленной VM: без `forceStop: true` — `409 snapshot_requires_stop` (сообщение «Windows snapshots are saved from a stopped VM; …»), с ним — stop → snapshot → start, как у fork (§8.2, S9 §24.8). Linux и остановленный источник флаг игнорируют.
   - `GET /v1/snapshots` → список, включая `creating` (их `name` — ожидаемое имя) и `failed` за последние сутки; `GET /v1/snapshots/{name}` → ready-снапшот или создающийся с этим именем.
   - `DELETE /v1/snapshots/{name}` → `204` (S6 сразу освобождает имя).
-  - Ресурс: `{id: "snap_...", name, state: "creating"|"ready"|"failed"|"deleting", sourceSandboxId, template, templateVersion, size, consistency: "quiesced"|"powered_off"|"crash", error, createdAt, readyAt}`.
+  - Ресурс: `{id: "snap_...", name, state: "creating"|"ready"|"failed"|"deleting", sourceSandboxId, template, templateVersion, size, consistency: "quiesced"|"powered_off"|"crash", error, createdAt, readyAt}`. Linux, снятый вживую, — `quiesced`; остановленный источник и любой Windows — `powered_off`. `crash` остаётся в схеме для совместимости со снапшотами, снятыми до S9 §24.8; новых `crash` платформа не создаёт.
   - Create из снапшота — `POST /v1/sandboxes {from: {snapshot: name}}`.
 - **API-ключи:**
   - `GET /v1/api-keys` — все ключи команды запроса; видят все участники и ключ с `keys:admin`;
@@ -885,7 +888,7 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
 | `sbx login [--no-browser] [--key-stdin] [--api-url] [--credential-store]`, `logout [--revoke]`, `whoami`, `auth token [--json]` | §7.6; `whoami` = `/me`; `auth token` — для SDK и MCP |
 | `sbx create [--template] [--size] [--name] [--slug] [--label k=v] [--env K=V] [--secret K=V] [--env-file f] [--ttl] [--idle] [--from snap] [--fail-fast] [--wait]` | create; `--wait` ждёт `ready` и печатает его; `--fail-fast` — §8.2, **фаза 2, вне публичного контракта MVP (решение Ильи 2026-10-29)**, в CLI MVP флага нет |
 | `sbx list [--state] [--label]`, `sbx info <sb>` | |
-| `sbx stop\|resume\|recover <sb> [--wait]`, `sbx fork <sb> [--name] [--wait]`, `sbx rm <sb>... [--yes]` | `resume` и `fork` принимают `--env K=V`, `--secret K=V`, `--env-file f` (§8.2); `rm` спрашивает подтверждение в TTY без `--yes` и шлёт `Sbx-Confirm-Delete` (§5.12); без TTY и без `--yes` — ошибка аргументов |
+| `sbx stop\|resume\|recover <sb> [--wait]`, `sbx fork <sb> [--name] [--force-stop] [--wait]`, `sbx rm <sb>... [--yes]` | `resume` и `fork` принимают `--env K=V`, `--secret K=V`, `--env-file f` (§8.2); `fork --force-stop` и `snapshot save --force-stop` шлют `forceStop: true` (работающая Windows, S9 §24.8); на `409 snapshot_requires_stop` CLI печатает сообщение API и подсказку `use --force-stop`; `rm` спрашивает подтверждение в TTY без `--yes` и шлёт `Sbx-Confirm-Delete` (§5.12); без TTY и без `--yes` — ошибка аргументов |
 | `sbx current [<sb> \| --clear]` | печатает текущую sandbox этого shell; с `<sb>` — делает её текущей |
 | `sbx rename <sb> <slug>`, `sbx extend <sb> [--ttl]`, `sbx label <sb> k=v...` | |
 | `sbx env <sb> [--set K=V] [--secret K=V] [--unset K]` | `GET`/`PUT /env` (в реализации `GET`/`PATCH /env`: флаги — merge, §23.7) |
@@ -898,7 +901,7 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
 | `sbx cp [-r] <src> <dst>` | `sb:path` с любой стороны; файлы больше 64 MiB — загрузка чанками с докачкой, скачивание — с `Range`; `-r` — каталог через `/files/archive` (§11.1) |
 | `sbx push [dir] <sb>:<path>` | в git-репозитории — файлы из `git ls-files -co --exclude-standard`, иначе весь каталог; tar.gz потоком в `PUT /files/archive` |
 | `sbx port <sb> <port> [--public\|--sso\|--token]`, `sbx ports <sb>`, `sbx unport <sb> <port>`, `sbx port-token <sb> <port>` | печатает URL (с токеном, если выпущен) |
-| `sbx snapshot save <sb> <name> [--wait]`, `snapshot list\|rm` | `save --wait` ждёт, пока снапшот станет `ready` (лимит `--wait-timeout`, по умолчанию 5 min), и печатает его; ошибка сохранения — код `1`, таймаут ожидания или временная ошибка (`retryable`) — `75` |
+| `sbx snapshot save <sb> <name> [--force-stop] [--wait]`, `snapshot list\|rm` | `--force-stop` — как у `fork`; `save --wait` ждёт, пока снапшот станет `ready` (лимит `--wait-timeout`, по умолчанию 5 min), и печатает его; ошибка сохранения — код `1`, таймаут ожидания или временная ошибка (`retryable`) — `75` |
 | `sbx templates`, `sbx sizes`, `sbx limits` | |
 | `sbx keys list\|create [--preset] [--scope]...\|rotate\|rm` | командные ключи; `create`, `rotate` — только `owner` с входом Keycloak |
 | `sbx run [create flags] [--push dir] [--keep] -- <cmd...>` | create → push → exec → delete; код выхода — код команды |

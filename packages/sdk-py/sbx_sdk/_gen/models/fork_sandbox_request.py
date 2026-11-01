@@ -25,6 +25,10 @@ class ForkSandboxRequest:
         env (EnvVarsPatch | Unset): Variables `[A-Za-z_][A-Za-z0-9_]{0,127}`: up to 100, each value up to 32 KiB without
             NUL, 256 KiB per set. `SBX_` is reserved except SBX_API_KEY, SBX_API_URL, SBX_TEAM, SBX_PROFILE. Values with a
             newline are not visible in SSH sessions. Merged by key: null deletes the key.
+        force_stop (bool | Unset): Windows only: a running Windows sandbox is snapshotted from a stopped VM. With true,
+            the source is stopped (running commands, sessions and connections end), snapshotted and started again; the
+            operation's `forceStop` reports the restart. Without it, a running Windows source answers 409
+            `snapshot_requires_stop`. Ignored for Linux (snapshotted while running) and for a stopped source.
         idle_timeout_seconds (int | None | Unset): Stop after this many idle seconds (at least 60); null disables idle-
             stop
         labels (ForkSandboxRequestLabels | Unset):
@@ -39,6 +43,7 @@ class ForkSandboxRequest:
     """
 
     env: EnvVarsPatch | Unset = UNSET
+    force_stop: bool | Unset = UNSET
     idle_timeout_seconds: int | None | Unset = UNSET
     labels: ForkSandboxRequestLabels | Unset = UNSET
     name: None | str | Unset = UNSET
@@ -52,6 +57,8 @@ class ForkSandboxRequest:
         env: dict[str, Any] | Unset = UNSET
         if not isinstance(self.env, Unset):
             env = self.env.to_dict()
+
+        force_stop = self.force_stop
 
         idle_timeout_seconds: int | None | Unset
         if isinstance(self.idle_timeout_seconds, Unset):
@@ -92,6 +99,8 @@ class ForkSandboxRequest:
         field_dict.update({})
         if env is not UNSET:
             field_dict["env"] = env
+        if force_stop is not UNSET:
+            field_dict["forceStop"] = force_stop
         if idle_timeout_seconds is not UNSET:
             field_dict["idleTimeoutSeconds"] = idle_timeout_seconds
         if labels is not UNSET:
@@ -125,6 +134,8 @@ class ForkSandboxRequest:
             env = UNSET
         else:
             env = EnvVarsPatch.from_dict(_env)
+
+        force_stop = d.pop("forceStop", UNSET)
 
         def _parse_idle_timeout_seconds(data: object) -> int | None | Unset:
             if data is None:
@@ -180,6 +191,7 @@ class ForkSandboxRequest:
 
         fork_sandbox_request = cls(
             env=env,
+            force_stop=force_stop,
             idle_timeout_seconds=idle_timeout_seconds,
             labels=labels,
             name=name,

@@ -73,6 +73,7 @@ OPERATION: dict[str, Any] = {
     "state": "pending",
     "step": None,
     "error": None,
+    "forceStop": None,
     "createdAt": "2026-10-30T07:48:37.791Z",
     "startedAt": None,
     "finishedAt": None,
@@ -837,6 +838,88 @@ async def test_async_run_reattaches_after_a_break(monkeypatch: pytest.MonkeyPatc
         f"POST {SB_PATH}/commands",
         f"GET {SB_PATH}/commands/{CMD}/stream",
     ]
+
+
+# --- forceStop of fork and saved snapshot (S9 §24.8) ---
+
+REQUIRES_STOP_DETAILS = {
+    "reason": "windows_running",
+    "retryWith": {"forceStop": True},
+    "cli": "--force-stop",
+}
+
+
+def requires_stop() -> httpx.Response:
+    return httpx.Response(
+        409,
+        json={
+            "error": {
+                "code": "snapshot_requires_stop",
+                "message": "Windows sandboxes are forked from a stopped VM; stop it first or retry with forceStop: true",
+                "retryable": False,
+                "details": REQUIRES_STOP_DETAILS,
+                "requestId": "req_1",
+            }
+        },
+    )
+
+
+def test_force_stop_goes_into_the_fork_and_snapshot_bodies(clock: FakeClock) -> None:
+    op = {
+        **OPERATION,
+        "kind": "fork",
+        "forceStop": {"sourceStopped": True, "sourceRestarted": None, "restartError": None},
+    }
+    s = Script(
+        httpx.Response(200, json=SANDBOX),
+        httpx.Response(
+            202, json={"sandbox": SANDBOX, "operation": OPERATION, "sourceOperation": op}
+        ),
+    )
+    client = sbx(s)
+    client.sandboxes.get("x").fork({"name": "copy"}, force_stop=True)
+    assert json.loads(s.requests[1].content) == {"name": "copy", "forceStop": True}
+
+    snap = {
+        "id": "snap_1",
+        "name": "s",
+        "state": "creating",
+        "consistency": None,
+        "createdAt": "2026-10-30T07:48:37.791Z",
+        "error": None,
+        "readyAt": None,
+        "size": None,
+        "sourceSandboxId": SANDBOX["id"],
+        "template": "windows",
+        "templateVersion": None,
+    }
+    s2 = Script(
+        httpx.Response(202, json={"snapshot": snap, "operation": {**op, "kind": "save_snapshot"}})
+    )
+    sbx(s2).snapshots.create(sandbox="x", name="s", force_stop=True)
+    assert json.loads(s2.requests[0].content) == {"sandbox": "x", "name": "s", "forceStop": True}
+
+
+def test_snapshot_requires_stop_raises_with_message_and_details(clock: FakeClock) -> None:
+    s = Script(httpx.Response(200, json=SANDBOX), requires_stop())
+    client = sbx(s)
+    with pytest.raises(SbxError) as e:
+        client.sandboxes.get("x").fork()
+    assert (e.value.status, e.value.code, e.value.retryable) == (
+        409,
+        "snapshot_requires_stop",
+        False,
+    )
+    assert "forceStop: true" in e.value.message
+    assert e.value.details == REQUIRES_STOP_DETAILS
+    assert len(s.requests) == 2  # not retried
+
+    s2 = Script(requires_stop())
+    with pytest.raises(SbxError) as e2:
+        sbx(s2).snapshots.create(sandbox="x", name="s")
+    assert e2.value.code == "snapshot_requires_stop"
+    assert e2.value.details["retryWith"] == {"forceStop": True}
+    assert "forceStop" not in json.loads(s2.requests[0].content)
 
 
 def test_freshness_of_the_generated_code() -> None:

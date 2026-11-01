@@ -7,9 +7,11 @@ import {
 	activeOperation,
 	claimIdempotency,
 	finishOperation,
+	forceStopFor,
 	iso,
 	isoOrNull,
 	lookupSandbox,
+	markForceStopped,
 	operationResource,
 	startOperation,
 	templateOf,
@@ -61,7 +63,11 @@ export function registerSnapshotRoutes(app: FakeApp, fake: Fake): void {
 
 	app.post("/v1/snapshots", async (c) => {
 		const p = c.get("principal");
-		const b = c.get("json") as { sandbox: string; name: string };
+		const b = c.get("json") as {
+			sandbox: string;
+			name: string;
+			forceStop?: boolean;
+		};
 		const claim = claimIdempotency(fake, c, "snapshots.create", b);
 		if (claim?.replay) {
 			const snap = state.snapshots.get(
@@ -105,6 +111,7 @@ export function registerSnapshotRoutes(app: FakeApp, fake: Fake): void {
 				},
 			);
 		}
+		const forced = forceStopFor(fake, sb, "save_snapshot", b.forceStop);
 		const replaced = byName(p.teamId, b.name);
 		if (
 			!replaced &&
@@ -146,10 +153,18 @@ export function registerSnapshotRoutes(app: FakeApp, fake: Fake): void {
 		});
 		const wasReady = sb.state === "ready";
 		const op = startOperation(fake, sb, "save_snapshot", "copying");
+		if (forced) {
+			op.forceStop = {
+				sourceStopped: false,
+				sourceRestarted: null,
+				restartError: null,
+			};
+		}
 		fake.later(state.readyAfterMs, () => {
 			snap.state = "ready";
 			snap.readyAt = new Date();
-			snap.consistency = wasReady ? "quiesced" : "powered_off";
+			snap.consistency = wasReady && !forced ? "quiesced" : "powered_off";
+			if (forced) markForceStopped(fake, op, sb);
 			// The new snapshot replaces a ready one of the same name.
 			for (const other of state.snapshots.values()) {
 				if (

@@ -181,7 +181,7 @@ export async function forkSnapshot(
 	const reasons: string[] = [];
 	for (let i = 0; i < 2; i++) {
 		try {
-			const s = await machines.snapshot(vmid);
+			const s = await machines.snapshot(vmid, { crashConsistent: false });
 			if (!s.autoThawed) return { snap: s };
 			track(s);
 			reasons.push(

@@ -5,6 +5,7 @@ import { extensibleEnum } from "../openapi/registry.ts";
 import {
 	EnvPatchFields,
 	EnvVars,
+	ForceStopField,
 	IdleTimeoutSeconds,
 	Labels,
 	NullableTimestamp,
@@ -282,6 +283,7 @@ export const ForkSandboxRequest = z
 		size: z.string().optional().openapi({
 			description: "Default: the source's size",
 		}),
+		forceStop: ForceStopField,
 		...EnvPatchFields,
 	})
 	.openapi("ForkSandboxRequest", {

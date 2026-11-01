@@ -142,6 +142,12 @@ export interface FakeOperation {
 	state: "pending" | "running" | "succeeded" | "failed" | "superseded";
 	step: string | null;
 	error: { code: string; message: string; retryable: boolean } | null;
+	/** fork / save_snapshot with forceStop of a running Windows sandbox (S9 §24.8). */
+	forceStop: {
+		sourceStopped: boolean;
+		sourceRestarted: boolean | null;
+		restartError: { code: string; message: string } | null;
+	} | null;
 	createdAt: Date;
 	startedAt: Date | null;
 	finishedAt: Date | null;
@@ -329,6 +335,8 @@ export interface IdempotencyRecord {
 export interface FakeState {
 	/** Mutable: creating/starting -> ready delay. */
 	readyAfterMs: number;
+	/** Mutable: the restart after a forced stop fails with this (S9 §24.8). */
+	forceStopRestartError: { code: string; message: string } | null;
 	sandboxes: Map<string, FakeSandbox>;
 	operations: Map<string, FakeOperation>;
 	commands: Map<string, FakeCommand>;
@@ -412,6 +420,7 @@ export function createState(
 	const fsCache = new Map<string, SandboxFs>();
 	return {
 		readyAfterMs: o.readyAfterMs,
+		forceStopRestartError: null,
 		sandboxes: new Map(),
 		operations: new Map(),
 		commands: new Map(),

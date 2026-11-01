@@ -348,12 +348,25 @@ class Sandbox:
         wait_timeout: float | None = None,
         retry_budget: float | None = None,
         idempotency_key: str | None = None,
+        force_stop: bool | None = None,
     ) -> Sandbox:
-        """A copy of this sandbox (keyed POST; ``wait``: until the copy is ready)."""
+        """A copy of this sandbox (keyed POST; ``wait``: until the copy is ready).
+
+        A running Windows sandbox is forked only from a stopped VM: without
+        ``force_stop`` it raises SbxError 409 ``snapshot_requires_stop``
+        (``details["retryWith"] == {"forceStop": True}``). ``force_stop=True``
+        stops this sandbox (running commands and sessions are interrupted),
+        takes the snapshot and starts it again; the fork operation's
+        ``force_stop`` reports the restart. Ignored for Linux and for a
+        stopped sandbox."""
+        body = input
+        if force_stop is not None:
+            body = input.to_dict() if hasattr(input, "to_dict") else dict(input or {})
+            body["forceStop"] = force_stop
         fork = self.core.call(
             sandboxes_fork,
             self.id,
-            body=body_of(input),
+            body=body_of(body),
             retry_budget=retry_budget,
             idempotency_key=idempotency_key or new_idempotency_key(),
         )

@@ -3,6 +3,8 @@
 // (`{sandbox, operation}`, fork also `sourceOperation`); with --wait the
 // JSON Lines `accepted`, `state`…, last `ready` (`stopped` for stop).
 // An explicit <sb> becomes current; fork makes the copy current.
+// fork --force-stop: a running Windows source is stopped for the snapshot and
+// started again (S9 §24.8); with --wait a failed restart is a warning.
 
 import { newIdempotencyKey } from "@sbx/sdk";
 import type { Command } from "commander";
@@ -11,7 +13,7 @@ import type { Context } from "../context.ts";
 import { sandboxRef, writeCurrent } from "../current.ts";
 import { sandboxLine } from "../format.ts";
 import type { Runner } from "../program.ts";
-import { reportWait } from "../wait.ts";
+import { reportWait, warnForceStop } from "../wait.ts";
 
 interface WaitFlags {
 	wait?: boolean;
@@ -23,6 +25,10 @@ interface SetFlags {
 	secret?: string[];
 	envFile?: string[];
 }
+
+/** Help of --force-stop of fork and snapshot save. */
+export const FORCE_STOP_HELP =
+	"stop a running Windows sandbox, take the snapshot and start it again (running commands and sessions are interrupted; ignored for Linux)";
 
 function waitTimeout(f: WaitFlags): number | undefined {
 	return f.waitTimeout === undefined
@@ -162,7 +168,8 @@ export function register(program: Command, run: Runner): void {
 				)
 				.option("--size <slug>", "size of the copy")
 				.option("--ttl <duration>", "lifetime of the copy from ready")
-				.option("--idle <duration>", "stop the copy after this long idle"),
+				.option("--idle <duration>", "stop the copy after this long idle")
+				.option("--force-stop", FORCE_STOP_HELP),
 			"ready",
 		),
 	).action(
@@ -175,6 +182,7 @@ export function register(program: Command, run: Runner): void {
 					size?: string;
 					ttl?: string;
 					idle?: string;
+					forceStop?: boolean;
 				};
 			const body: Record<string, unknown> = { ...setsPatch(f) };
 			if (f.name !== undefined) body.name = f.name;
@@ -185,6 +193,7 @@ export function register(program: Command, run: Runner): void {
 			if (f.idle !== undefined) {
 				body.idleTimeoutSeconds = parseDuration(f.idle, "--idle");
 			}
+			if (f.forceStop === true) body.forceStop = true;
 			const ref = sandboxRef(ctx, args[0] as string | undefined);
 			const { data } = await ctx
 				.sbx()
@@ -196,6 +205,15 @@ export function register(program: Command, run: Runner): void {
 			writeCurrent(ctx, data.sandbox.id);
 			if (f.wait === true) {
 				await reportWait(ctx, data, "ready", waitTimeout(f));
+				if (data.sourceOperation.forceStop !== null) {
+					// Final by now: the fork succeeds before the copy is created.
+					const { data: src } = await ctx
+						.sbx()
+						.raw.GET("/v1/operations/{operation}", {
+							params: { path: { operation: data.sourceOperation.id } },
+						});
+					warnForceStop(ctx, src);
+				}
 				return;
 			}
 			ctx.out.result(data, (v) => `Forking into ${sandboxLine(v.sandbox)}`);

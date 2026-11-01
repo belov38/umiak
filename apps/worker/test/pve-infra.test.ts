@@ -114,7 +114,7 @@ async function setup(
 }
 
 describe("PveInfraRegistry", () => {
-	it("preserves S1's Windows crash consistency without QGA, including an agent-only preparation hook", async () => {
+	it("a running Windows snapshot needs an explicit crashConsistent, also with an agent-only preparation hook", async () => {
 		const e = await setup();
 		const m = randomUUID();
 		const vm = await e.infra.create({
@@ -128,13 +128,35 @@ describe("PveInfraRegistry", () => {
 		config.ostype = "win11";
 		await e.infra.start(vm.vmid, { expectedOwner: m, beforeAct: noFence });
 		e.api.agentUp = false;
+		const hook = {
+			freeze: async () => {
+				trace.push("agent.prepare");
+			},
+			thaw: async () => {
+				trace.push("agent.restore");
+			},
+		};
+		const trace: string[] = [];
+		for (const o of [{}, { hook }]) {
+			await expect(
+				e.infra.snapshot(vm.vmid, {
+					lvId: randomUUID().replaceAll("-", ""),
+					...o,
+				}),
+			).rejects.toMatchObject({
+				code: "snapshot_requires_stop",
+				retryable: false,
+			});
+		}
+		expect(trace).toEqual([]);
 		const first = await e.infra.snapshot(vm.vmid, {
 			lvId: randomUUID().replaceAll("-", ""),
+			crashConsistent: true,
 		});
 		expect(first.consistency).toBe("crash");
-		const trace: string[] = [];
 		const second = await e.infra.snapshot(vm.vmid, {
 			lvId: randomUUID().replaceAll("-", ""),
+			crashConsistent: true,
 			hook: {
 				freeze: async () => {
 					trace.push("agent.prepare");
@@ -698,6 +720,43 @@ describe("PveNodeInfra lifecycle", () => {
 		);
 		expect(await e.infra.status(vmid)).toBe("running");
 		await e.infra.stop(vmid, { expectedOwner: m });
+		expect(await e.infra.status(vmid)).toBe("stopped");
+	});
+
+	it("shutdown that hit the VM lock is repeated, not reported as a guest timeout", async () => {
+		let key = "";
+		let slept = 0;
+		const e = await setup({
+			vmLockSleep: async (ms) => {
+				slept += ms;
+				if (slept >= 10_000) delete e.api.fail[key];
+			},
+		});
+		const m = randomUUID();
+		const { vmid } = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: SIZE,
+			smbios: smbiosFor(m),
+		});
+		await e.infra.start(vmid, { expectedOwner: m, beforeAct: noFence });
+		key = `POST /nodes/${e.name}/qemu/${vmid}/status/shutdown`;
+		// As on pve right after a hard stop and a start (qmeventd holds the lock).
+		e.api.fail[key] = new PveTaskError(
+			"UPID:x",
+			`can't lock file '/var/lock/qemu-server/lock-${vmid}.conf' - got timeout`,
+		);
+		let fenceChecks = 0;
+		expect(
+			await e.infra.shutdown(vmid, 300, {
+				expectedOwner: m,
+				beforeAct: async () => {
+					fenceChecks += 1;
+				},
+			}),
+		).toBe("stopped");
+		expect(slept).toBe(10_000);
+		expect(fenceChecks).toBeGreaterThan(1);
 		expect(await e.infra.status(vmid)).toBe("stopped");
 	});
 

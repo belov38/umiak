@@ -201,6 +201,7 @@ export interface SandboxService {
 		idOrSlug: string,
 		name: string,
 		idemKey?: string,
+		opts?: { forceStop?: boolean },
 	): Promise<SaveSnapshotResult>;
 	deleteSavedSnapshot(
 		p: Principal,
@@ -413,8 +414,9 @@ export class SandboxServiceImpl implements SandboxService {
 		idOrSlug: string,
 		name: string,
 		idemKey?: string,
+		opts?: { forceStop?: boolean },
 	): Promise<SaveSnapshotResult> {
-		return saveSnapshot(this.deps, p, idOrSlug, name, idemKey);
+		return saveSnapshot(this.deps, p, idOrSlug, name, idemKey, opts);
 	}
 
 	deleteSavedSnapshot(
