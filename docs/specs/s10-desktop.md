@@ -1084,3 +1084,19 @@ behaviour are not characterised by this acceptance.
 - **Сессия**: `register-session.ps1` регистрирует задачи `\sbx\session` и `\sbx\cua-driver`
   (Interactive, `user`, триггер AtLogOn) при каждом старте агента; запуск сразу — только если
   `user` уже вошёл, иначе их запускает триггер автологона.
+- **Видео (спайк W, §19.2)**: `hw.vga: std` (Microsoft Basic Display Adapter), без смены
+  адаптера. Его режим задаёт GOP OVMF, по умолчанию 1280×800, а `ChangeDisplaySettingsEx`
+  его не меняет. Шаг `65-streamer` пишет NVRAM-переменную OVMF `PlatformConfig`
+  (GUID `7235c51c-…`, 1920×1080) в efidisk сборочной VM; efidisk копируется в шаблон и клоны,
+  поэтому каждая загрузка сразу идёт в 1920×1080. Проверено на клоне: Basic Display Adapter
+  1920×1080, скриншот API 1920×1080, захват Sunshine `ddx` идёт. `vga: virtio` + `viogpudo`
+  проверен и отклонён: драйвер берёт тот же режим 1280×800, а смена режима из сессии
+  зависала. Verify проверяет `desktop_display` (1920×1080).
+- **ACL на Windows**: `icacls <dir> /inheritance:r /grant:r <sid>:(OI)(CI)F /T` оставляет
+  файлам внутри пустой DACL (флаги наследования для файлов отбрасываются), и даже SYSTEM
+  не может их прочитать. Агент и установщик ставят наследуемые права только на каталог,
+  дочерние элементы сбрасываются на наследование (`icacls <child> /reset /T`).
+- **Старт стримера на Windows**: Sunshine перед прослушиванием тестирует энкодеры, первый
+  `Open` занимает ~16–20 s; gateway в это время отвечает retryable `503 desktop_starting`,
+  вкладка Desktop и `e2e-desktop.ts` повторяют со свежим билетом через 2 s.
+- Лог moonlight-web на Windows: `state\desktop-moonlight\web-server.log` (последний запуск).
