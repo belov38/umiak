@@ -175,3 +175,14 @@ Run 14: natural page close without EndStreams, cold create 14.4 s, idle-stop 98.
 fork/resume/revoke/delete checks PASS. The e2e helper now closes the last transport
 naturally when an idle hold is requested. pve after runs: only 596 in S10 slots, all
 clones and snapshots removed. Next: rebase on main (S9), Windows desktop.
+
+Rebase on main 2b44850 (2026-11-01): 40 commits replayed; Payload desktop migration regenerated as
+20261101_010000_desktop_defaults after 20261101_000000_windows_template (idempotent column add);
+runtime SQL stays 0401-0403 (S10 range 0400-0499). Serial TS tests, lint, typecheck, build, Go
+race/vet/golangci-lint (native and GOOS=windows) green after rebase.
+
+Windows desktop (2026-11-01): recipe windows-desktop (extends windows, slot 595), linux-desktop on
+596 only. Builds: 1 aborted (register-session.ps1 syntax, caught by the fake test), 2 failed verify
+(desktop config ACL), 3 passed verify but live showed 1280x800 and unreadable streamer config
+(icacls (OI)(CI) /T), 4 = 20261101.1 with the agent ACL fix and OVMF PlatformConfig 1920x1080:
+verify 110/0 on rerun. Full live acceptance on CT 590 PASS (see spec). Linux regression PASS.

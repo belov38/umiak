@@ -1100,3 +1100,30 @@ behaviour are not characterised by this acceptance.
   `Open` занимает ~16–20 s; gateway в это время отвечает retryable `503 desktop_starting`,
   вкладка Desktop и `e2e-desktop.ts` повторяют со свежим билетом через 2 s.
 - Лог moonlight-web на Windows: `state\desktop-moonlight\web-server.log` (последний запуск).
+
+### Windows live acceptance — 2026-11-01
+
+`windows-desktop 20261101.1`, VM 595, agent `0.1.0+20261101.a17c0d7b`, `hw.vga: std` +
+OVMF `PlatformConfig` 1920×1080.
+
+- Сборка 31.8 min (сборка + первый verify), диск 17.1 GiB. `verify: windows-desktop`:
+  110 проверок, 0 FAIL (базовый профиль S9 + группа `desktop`, включая `desktop_display`).
+  Первый verify этой сборки прервался потерей QGA на fork сразу после готовности агента
+  (перезагрузка переименования S9, R16); повторный `sbx-tpl verify` прошёл полностью.
+  В сборке 3 тот же шаг прошёл с первого раза.
+- Публичный холодный create до `ready` с фазой `desktop`: 139 s и 146 s (лимит 5 min).
+  Первое открытие стримера: 22 s (тест энкодеров Sunshine), повторные — < 1 s.
+- Скриншот 1920×1080, ввод мышью и клавиатурой меняет кадр, Unicode (`S10 экран 世界`) через
+  `KEYEVENTF_UNICODE` в окне «Выполнить» доходит до pwsh, буфер обмена туда и обратно.
+- Все MCP `computer_*` и `desktop_url` против настоящего API.
+- Стрим через gateway CT 590: WebSocket и relay↔relay WebRTC через TURN по UDP, TCP и TLS,
+  меняющиеся кадры, ещё раз после удержания.
+- Удержание зрителя 3 min без вызовов API: `desktopStreams = 1` весь интервал (UDP-сокеты
+  moonlight-web), sandbox не остановлен. После естественного закрытия страницы idle-stop
+  (`idle_timeout = 60 s`) через 105 s.
+- Fork получает новые креды стримера; stop/resume — desktop ready; старая cookie — 401;
+  удаление чистит всё. VM гостя ходит к TURN только по UDP 3478, TCP/TLS закрыты.
+- Регрессия Linux тем же сценарием после правок e2e: зелёная, create 17.9 s.
+
+Не заявлено для Windows: 30-минутное удержание (проверено 3 min; на Linux — 30 min),
+производительность и задержка, несколько зрителей, звук.

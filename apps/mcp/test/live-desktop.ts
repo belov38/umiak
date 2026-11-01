@@ -6,6 +6,9 @@ import {
 } from "@modelcontextprotocol/client";
 import type { Sandbox } from "@sbx/sdk";
 
+/** Opens the Run dialog in the interactive session of user (exec runs in session 0). */
+const OPEN_RUN_DIALOG = `$a=New-ScheduledTaskAction -Execute explorer.exe -Argument 'shell:::{2559a1f3-21d7-11d4-bdaf-00c04f60b9f0}';$p=New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\\user" -LogonType Interactive;Register-ScheduledTask -TaskName s10-run -TaskPath '\\sbx\\' -Action $a -Principal $p -Force|Out-Null;Start-ScheduledTask -TaskName s10-run -TaskPath '\\sbx\\';Start-Sleep 2;Unregister-ScheduledTask -TaskName s10-run -TaskPath '\\sbx\\' -Confirm:$false`;
+
 export async function verifyLiveDesktopMcp(
 	sandbox: Sandbox,
 	url: string,
@@ -53,8 +56,13 @@ export async function verifyLiveDesktopMcp(
 		const proofText = "MCP Привет 世界";
 		if (windows) {
 			// The Run dialog of the console session executes the typed pwsh line.
-			await call("computer_key", { keys: "meta+r", screenshot_after: false });
-			await new Promise((done) => setTimeout(done, 1500));
+			await sandbox.exec([
+				"C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+				"-NoProfile",
+				"-Command",
+				OPEN_RUN_DIALOG,
+			]);
+			await new Promise((done) => setTimeout(done, 1000));
 		}
 		await call("computer_type", {
 			text: windows

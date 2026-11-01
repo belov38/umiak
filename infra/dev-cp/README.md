@@ -264,3 +264,10 @@ Linux acceptance (2026-11-01, build 20261031.6 in 596, agent 0.1.0+20261031.4865
 UDP/TCP/TLS frame diffs, 30 min viewer hold without API calls. With a 60 s idle timeout
 the sandbox stopped 78.1 s after EndStreams and 98.8 s after a natural page close. Fork
 credentials, resume, old-cookie 401 and deletion passed.
+
+Windows acceptance (2026-11-01, `windows-desktop 20261101.1` in 595): run
+`SBX_E2E_TEMPLATE=windows-desktop infra/dev-cp/e2e-desktop.sh`. The Windows variant types into
+the Run dialog (opened by a one-shot interactive task, since exec runs in session 0), reads
+agent state through QGA as SYSTEM and retries `503 desktop_starting` with a fresh ticket.
+Create 139–146 s, first stream open ~22 s. `SBX_E2E_SANDBOX=<slug>` reuses an existing sandbox
+for diagnostics (it is not deleted; idle observation needs the `e2e=desktop` label).

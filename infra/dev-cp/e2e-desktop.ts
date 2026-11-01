@@ -49,6 +49,8 @@ function guestRoot(
 	const r = JSON.parse(raw) as { exitcode?: number; "out-data"?: string };
 	return { exitcode: r.exitcode ?? -1, out: r["out-data"] ?? "" };
 }
+/** Opens the Run dialog in the interactive session of user (exec runs in session 0). */
+const OPEN_RUN_DIALOG = `$a=New-ScheduledTaskAction -Execute explorer.exe -Argument 'shell:::{2559a1f3-21d7-11d4-bdaf-00c04f60b9f0}';$p=New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\\user" -LogonType Interactive;Register-ScheduledTask -TaskName s10-run -TaskPath '\\sbx\\' -Action $a -Principal $p -Force|Out-Null;Start-ScheduledTask -TaskName s10-run -TaskPath '\\sbx\\';Start-Sleep 2;Unregister-ScheduledTask -TaskName s10-run -TaskPath '\\sbx\\' -Confirm:$false`;
 const PWSH = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
 const pwsh = (script: string, ...args: string[]) => [
 	PWSH,
@@ -164,13 +166,13 @@ try {
 	const proofText = "S10 экран 世界";
 	let baseline: typeof before;
 	if (windows) {
-		// Win+R runs a pwsh line typed with KEYEVENTF_UNICODE in the console session of user.
+		// The Run dialog (opened in the console session of user) executes a pwsh
+		// line typed with KEYEVENTF_UNICODE; a Win+R hotkey races Start on a fresh logon.
 		baseline = await sb.desktop.screenshot({ cursor: "false" });
+		await sb.exec(pwsh(OPEN_RUN_DIALOG));
 		await sb.desktop.act({
 			actions: [
-				{ type: "click", x: 960, y: 540 },
-				{ type: "key", keys: ["meta", "r"] },
-				{ type: "wait", ms: 1500 },
+				{ type: "wait", ms: 1000 },
 				{
 					type: "type",
 					text: `pwsh -NoProfile -Command "Set-Content -NoNewline -Encoding utf8 $env:USERPROFILE\\s10-input-proof '${proofText}'"`,
