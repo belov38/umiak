@@ -41,6 +41,14 @@ if (-not [SbxFirmware]::SetFirmwareEnvironmentVariableExW('PlatformConfig', '{72
     throw "PlatformConfig: error $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
 }
 Write-BuildLog 'OVMF PlatformConfig 1920x1080'
+# Windows keeps the desktop size per display (GraphicsDrivers\Configuration) and, on the next
+# boots, shows the stored 1280x800 scaled onto the new 1920x1080 mode. Without stored entries it
+# takes the native mode; the later build boots then store 1920x1080 for the template.
+$graphics = 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers'
+foreach ($store in @('Configuration', 'Connectivity')) {
+    Get-ChildItem -Path (Join-Path $graphics $store) -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+}
+Write-BuildLog 'stored display configurations cleared'
 
 # Edge is the browser of the Windows desktop: no first-run, sign-in, sync or default-browser prompts.
 $edge = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'

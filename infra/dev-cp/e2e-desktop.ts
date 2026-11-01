@@ -398,7 +398,11 @@ try {
 		(await sb.desktop.status()).state === "ready",
 		"stop/resume desktop ready",
 	);
-	await sb.desktop.screenshot();
+	const resumed = await sb.desktop.screenshot();
+	check(
+		resumed.screen.width === 1920 && resumed.screen.height === 1080,
+		"resumed desktop screenshot 1920x1080",
+	);
 	const revoked = await fetch(url, {
 		redirect: "manual",
 		headers: { cookie: [...jar.values()].join("; ") },

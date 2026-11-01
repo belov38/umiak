@@ -56,10 +56,16 @@ function Test-Desktop {
     $listen = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in $StreamerPorts })
     Report desktop_streamer_stopped ($listen.Count -eq 0) $(if ($listen.Count) { ($listen | ForEach-Object { "$($_.LocalAddress):$($_.LocalPort)" }) -join ', ' } else { 'no listener' })
 
-    # The template's OVMF PlatformConfig gives the Basic Display Adapter 1920x1080.
+    # OVMF PlatformConfig gives the Basic Display Adapter 1920x1080, and the stored desktop
+    # size (what later boots show) matches it instead of a scaled 1280x800.
     $vc = @(Get-CimInstance -ClassName Win32_VideoController)
-    $ok = $vc.Count -ge 1 -and $vc[0].CurrentHorizontalResolution -eq 1920 -and $vc[0].CurrentVerticalResolution -eq 1080
-    Report desktop_display $ok (($vc | ForEach-Object { "$($_.Name) $($_.CurrentHorizontalResolution)x$($_.CurrentVerticalResolution)" }) -join '; ')
+    $stored = @(Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Configuration' -Recurse -ErrorAction SilentlyContinue |
+            ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath } |
+            Where-Object { $null -ne $_.'PrimSurfSize.cx' } |
+            ForEach-Object { "$($_.'PrimSurfSize.cx')x$($_.'PrimSurfSize.cy')" } | Sort-Object -Unique)
+    $ok = $vc.Count -ge 1 -and $vc[0].CurrentHorizontalResolution -eq 1920 -and $vc[0].CurrentVerticalResolution -eq 1080 -and
+        ($stored.Count -eq 0 -or ($stored.Count -eq 1 -and $stored[0] -eq '1920x1080'))
+    Report desktop_display $ok "$(($vc | ForEach-Object { "$($_.Name) $($_.CurrentHorizontalResolution)x$($_.CurrentVerticalResolution)" }) -join '; '); stored desktop: $(if ($stored.Count) { $stored -join ', ' } else { 'none' })"
 
     # Edge first-run and sign-in prompts are off (spec S10 section 7).
     $edge = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' -ErrorAction SilentlyContinue
