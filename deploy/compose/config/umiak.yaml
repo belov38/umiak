@@ -79,5 +79,31 @@ topology:
               driver: lvmthin
               dataMaxPct: 80
               metaMaxPct: 70
-  # R1 cutover: register verified Umiak builds before enabling create.
-  templateBuilds: []
+  # Verified Umiak builds; catalog remains disabled on the stand until all four are ready.
+  templateBuilds:
+    - templateSlug: linux
+      version: "20261101.1"
+      os: linux
+      node: pve
+      storage: local-lvm
+      pveVmid: 597
+      bootTimeoutS: 300
+      agentVersion: 0.1.0+20261101.087b3f3a
+      diskLayout:
+        scsi0:
+          size: 64G
+          discard: on
+          iothread: "1"
+          ssd: "1"
+      hw:
+        machine: q35
+        cpu: host
+        bios: seabios
+        ostype: l26
+        scsihw: virtio-scsi-single
+        agent: enabled=1
+        serial0: socket
+        vga: std
+        tablet: "0"
+        rng0: source=/dev/urandom
+        cloudinit: false
