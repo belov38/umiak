@@ -49,8 +49,8 @@ describe("loadRecipe: real linux recipe", () => {
 		]);
 	});
 
-	it("builds into the Linux slots 597 and 599, never the Windows slot 598", () => {
-		expect(r.vmids).toEqual([597, 599]);
+	it("builds only into its assigned Linux slot 597", () => {
+		expect(r.vmids).toEqual([597]);
 	});
 
 	it("normalizes hw, disk and build vm", () => {
