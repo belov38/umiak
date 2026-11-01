@@ -71,6 +71,7 @@ services:
 
   gateway:
     environment:
+      <<: *devcp-db-env
       UMIAK_GATEWAY_PREVIEW_DOMAIN: ${UMIAK_PORT_DOMAIN:?set by deploy.sh}
       UMIAK_GATEWAY_TUNNEL_HOST: ${UMIAK_DEVCP_TUNNEL_HOST:?set by deploy.sh}
       UMIAK_GATEWAY_SSH_HOST: ${UMIAK_DEVCP_SSH_HOST:?set by deploy.sh}
