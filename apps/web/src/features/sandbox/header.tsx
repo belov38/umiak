@@ -1,4 +1,5 @@
 "use client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 // Header of the sandbox page (S8 §9.6): name, slug with rename, state,
 // health, activity, template, size, origin, labels, TTL, idle timeout; the
 // actions Stop/Resume/Fork/Recover/Extend/Save snapshot/Delete; the bar of
@@ -7,7 +8,6 @@
 // and Save snapshot of a running Windows sandbox ask before they stop and
 // restart it (S9 §24.8).
 import type { SandboxData } from "@umiak/sdk";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	ArchiveIcon,
 	ChevronLeftIcon,

@@ -1,9 +1,9 @@
 "use client";
+import { useQueryClient } from "@tanstack/react-query";
 // Row/card actions (S8 §9.4): open detail, plus a menu for Stop/Resume,
 // Fork, terminal and Delete. Operator blocks keep read/stop/delete available;
 // successful mutations refresh both the list and quota.
 import type { SandboxData } from "@umiak/sdk";
-import { useQueryClient } from "@tanstack/react-query";
 import { ChevronRightIcon, EllipsisIcon } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";

@@ -124,7 +124,9 @@ function EnvironmentForm({
 				setErrors(r.errors);
 				return false;
 			}
-			const { data } = await umiak.raw.POST("/v1/environments", { body: r.body });
+			const { data } = await umiak.raw.POST("/v1/environments", {
+				body: r.body,
+			});
 			onCreated?.(data.id);
 			toast.success(`Environment ${r.body.name} created`);
 			return true;
