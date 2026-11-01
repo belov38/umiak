@@ -321,7 +321,7 @@ func TestPlainHandlerDispatch(t *testing.T) {
 		"TUNNEL.Test:8080": "tunnel",
 		"tunnel.test.":     "tunnel",
 		"TUNNEL.TEST.:80":  "tunnel",
-		"a-80.umiak.test":    "umiak",
+		"a-80.umiak.test":  "umiak",
 		"x.tunnel.test":    "umiak",
 		"":                 "umiak",
 	} {

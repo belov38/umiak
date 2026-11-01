@@ -13,7 +13,7 @@ func build(f func(string) string, root string) Layout {
 		state = `C:\ProgramData\umiak-agent\state`
 		run   = `C:\ProgramData\umiak-agent\run`
 		logs  = `C:\ProgramData\umiak-agent\logs`
-		umiak   = `C:\ProgramData\umiak`
+		umiak = `C:\ProgramData\umiak`
 		ssh   = `C:\ProgramData\ssh`
 	)
 	j := filepath.Join

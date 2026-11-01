@@ -283,7 +283,7 @@ const ethers = "02:01:00:00:02:57,10.88.0.100\n02:01:00:00:01:f4,10.88.0.101\n"
 func TestDHCPReleaseRemovesStaleEthersLine(t *testing.T) {
 	h := newHarness(fstest.MapFS{
 		"var/lib/misc/dnsmasq.umiak.leases": {Data: []byte(leases)},
-		"etc/pve/sdn/mac-cache.json":      {Data: []byte(`{"macs":{"02:01:00:00:02:57":{"ip4":"10.88.0.100"}}}`)},
+		"etc/pve/sdn/mac-cache.json":        {Data: []byte(`{"macs":{"02:01:00:00:02:57":{"ip4":"10.88.0.100"}}}`)},
 		"etc/dnsmasq.d/umiak/ethers":        {Data: []byte(ethers)},
 	})
 	files := &fakeFiles{files: map[string][]byte{"/etc/dnsmasq.d/umiak/ethers": []byte(ethers)}}

@@ -62,7 +62,7 @@ export function AppShell({
 			<header className="border-b">
 				<div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2">
 					<Link href="/app" className="font-semibold tracking-tight">
-						umiak
+						Umiak
 					</Link>
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>

@@ -42,8 +42,8 @@ const (
 const (
 	FileCACert         = "ca.pem"
 	FileCAKey          = "ca.key"
-	FileUmiakCert        = "umiak.pem"
-	FileUmiakKey         = "umiak.key"
+	FileUmiakCert      = "umiak.pem"
+	FileUmiakKey       = "umiak.key"
 	FileTunnelCert     = "tunnel.pem"
 	FileTunnelKey      = "tunnel.key"
 	FileCookieKeys     = "cookie-keys"

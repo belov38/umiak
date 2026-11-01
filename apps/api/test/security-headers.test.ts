@@ -133,7 +133,7 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 				"broken CRC",
 				`Bearer ${w.secret.slice(0, -1)}${w.secret.endsWith("A") ? "B" : "A"}`,
 			],
-			["sandbox key prefix", `Bearer umiaks_${w.secret.slice(4)}`],
+			["sandbox key prefix", `Bearer umiaks_${w.secret.slice(6)}`],
 			["not a JWT", "Bearer a.b.c"],
 			["revoked key", `Bearer ${revoked.secret}`],
 		];

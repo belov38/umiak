@@ -99,14 +99,14 @@ jobs:
           fi
       - name: Breaking changes
         # Run from the repo root: actions/checkout creates no local main branch,
-        # so compare against the remote-tracking ref. Skipped while main has no
-        # proto/umiak/agent yet.
+        # so compare against the remote-tracking ref. R1 intentionally changes the
+        # namespace; after its merge the same check enforces the new baseline.
         working-directory: .
         run: |
-          if git cat-file -e origin/main:proto/umiak/agent 2>/dev/null; then
+          if git cat-file -e origin/main:proto/buf.yaml 2>/dev/null; then
             buf breaking proto --against '.git#ref=refs/remotes/origin/main,subdir=proto'
           else
-            echo "origin/main has no proto/umiak/agent yet, skipping buf breaking"
+            echo "origin/main has no proto/buf.yaml yet, skipping buf breaking"
           fi
 
   integration:

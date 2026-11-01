@@ -67,13 +67,13 @@ type Config struct {
 	MetricsListen string
 
 	// Names.
-	UmiakDomain  string
-	TunnelHost string
-	SSHHost    string
+	UmiakDomain string
+	TunnelHost  string
+	SSHHost     string
 
 	// TLS files (required when TLSListen is set).
-	UmiakCertFile    string
-	UmiakKeyFile     string
+	UmiakCertFile  string
+	UmiakKeyFile   string
 	TunnelCertFile string
 	TunnelKeyFile  string
 

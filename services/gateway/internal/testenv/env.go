@@ -41,9 +41,9 @@ import (
 
 // Names and tokens of the test platform.
 const (
-	UmiakDomain  = "umiak.test"
-	TunnelHost = "tunnel.test"
-	SSHHost    = "ssh.test"
+	UmiakDomain = "umiak.test"
+	TunnelHost  = "tunnel.test"
+	SSHHost     = "ssh.test"
 
 	APIToken    = "test-api-token"
 	WorkerToken = "test-worker-token"
@@ -165,12 +165,12 @@ func (e *Env) InstanceConfig(instanceID, internalURL string) config.Config {
 		MetricsListen: "127.0.0.1:0",
 		SSHListen:     "127.0.0.1:0",
 
-		UmiakDomain:  UmiakDomain,
-		TunnelHost: TunnelHost,
-		SSHHost:    SSHHost,
+		UmiakDomain: UmiakDomain,
+		TunnelHost:  TunnelHost,
+		SSHHost:     SSHHost,
 
-		UmiakCertFile:    e.PKI.UmiakCertFile,
-		UmiakKeyFile:     e.PKI.UmiakKeyFile,
+		UmiakCertFile:  e.PKI.UmiakCertFile,
+		UmiakKeyFile:   e.PKI.UmiakKeyFile,
 		TunnelCertFile: e.PKI.TunnelCertFile,
 		TunnelKeyFile:  e.PKI.TunnelKeyFile,
 

@@ -325,7 +325,7 @@ describe.skipIf(skipPg())("team API keys", () => {
 				createdByUserId: null,
 				createdVia: "api",
 				secretHash: apiKeyHash(secret),
-				prefix: secret.slice(4, 12),
+				prefix: secret.slice(6, 14),
 				last4: secret.slice(-4),
 			});
 			await eventually(async () => (await call()).status === 200);

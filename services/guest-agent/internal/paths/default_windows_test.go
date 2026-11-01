@@ -10,7 +10,7 @@ import (
 var emptyFields = map[string]bool{
 	"BinLink":        true,
 	"CmdSpecDir":     true,
-	"UmiakEnvFile":     true,
+	"UmiakEnvFile":   true,
 	"MachineIDFile":  true,
 	"DbusMachineID":  true,
 	"HostnameFile":   true,
@@ -24,7 +24,7 @@ func TestWindowsDefaultLayout(t *testing.T) {
 		etc   = `C:\ProgramData\umiak-agent`
 		state = `C:\ProgramData\umiak-agent\state`
 		run   = `C:\ProgramData\umiak-agent\run`
-		umiak   = `C:\ProgramData\umiak`
+		umiak = `C:\ProgramData\umiak`
 		ssh   = `C:\ProgramData\ssh`
 	)
 	want := map[string]string{

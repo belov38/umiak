@@ -89,7 +89,7 @@ func TestUmiakerrJSON(t *testing.T) {
 			t.Errorf("accept %q: Content-Type = %q", accept, ct)
 		}
 		for h, v := range map[string]string{
-			"Umiak-Error":     "rate_limited",
+			"Umiak-Error":   "rate_limited",
 			"Cache-Control": "no-store",
 			"X-Robots-Tag":  "noindex, nofollow",
 			"Retry-After":   "12",

@@ -30,13 +30,13 @@ const accessPublic = "public"
 
 // Config configures the proxy. Metrics and AccessLog may be nil.
 type Config struct {
-	UmiakDomain  string
-	Grammar    routes.Grammar
-	Routes     *routes.Cache
-	Auth       *portauth.Auth
-	Limits     *ratelimit.Limits
-	Upstream   *upstream.Dialer
-	Transports *upstream.AppTransports
+	UmiakDomain string
+	Grammar     routes.Grammar
+	Routes      *routes.Cache
+	Auth        *portauth.Auth
+	Limits      *ratelimit.Limits
+	Upstream    *upstream.Dialer
+	Transports  *upstream.AppTransports
 	// TrustedProxies are the peers whose X-Forwarded-For is believed
 	// (plain mode behind an ingress, spec 5.2). They are ignored for
 	// requests that arrived over TLS: the gateway is the edge there.

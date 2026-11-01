@@ -79,13 +79,13 @@ func loopClient(c *cluster, front *testenv.Inst) *http.Client {
 
 // result is one answer of the gateway.
 type result struct {
-	status   int
+	status     int
 	umiakError string
-	retry    string
-	body     string
-	err      error
-	start    time.Time
-	took     time.Duration
+	retry      string
+	body       string
+	err        error
+	start      time.Time
+	took       time.Duration
 }
 
 func (r result) String() string {

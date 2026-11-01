@@ -49,10 +49,10 @@ func TestLvTagTemplateRefusesOthers(t *testing.T) {
 func TestLvScanAndUsageRefuseUntaggedAndDevInfra(t *testing.T) {
 	h, opened := scanHarness(t, []byte("anything"))
 	h.lvm.lvs = append(h.lvm.lvs,
-		lvm.LV{Name: "vm-590-disk-0", Tags: []string{}},                    // dev control plane CT
-		lvm.LV{Name: "vm-501-disk-0", Tags: []string{}},                    // a guest in our range, not ours
+		lvm.LV{Name: "vm-590-disk-0", Tags: []string{}},                        // dev control plane CT
+		lvm.LV{Name: "vm-501-disk-0", Tags: []string{}},                        // a guest in our range, not ours
 		lvm.LV{Name: "vm-502-disk-0", Tags: []string{"umiak", "umiak-vm-501"}}, // wrong owner tag
-		lvm.LV{Name: "base-598-disk-0", Tags: []string{}},                  // template slot, untagged
+		lvm.LV{Name: "base-598-disk-0", Tags: []string{}},                      // template slot, untagged
 	)
 	for _, name := range []string{"vm-590-disk-0", "vm-501-disk-0", "vm-502-disk-0", "base-598-disk-0"} {
 		if r := h.call(t, "lv.scan", map[string]any{"name": name, "patterns": []string{"12345678"}}); r.OK {

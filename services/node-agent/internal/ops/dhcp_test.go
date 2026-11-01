@@ -74,7 +74,7 @@ func TestDHCPReleaseSurvivesAnEmptyLeaseRead(t *testing.T) {
 
 func TestDHCPReleaseSendsReleaseForTheEthersIP(t *testing.T) {
 	h := newHarness(fstest.MapFS{
-		leaseFile:                  {Data: []byte("")},
+		leaseFile:                    {Data: []byte("")},
 		"etc/dnsmasq.d/umiak/ethers": {Data: []byte(ethers)},
 	})
 	files := &fakeFiles{files: map[string][]byte{"/etc/dnsmasq.d/umiak/ethers": []byte(ethers)}}

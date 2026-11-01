@@ -37,7 +37,7 @@ type PKI struct {
 	// Tunnel is the certificate of TunnelHost.
 	Tunnel tls.Certificate
 
-	UmiakCertFile, UmiakKeyFile       string
+	UmiakCertFile, UmiakKeyFile   string
 	TunnelCertFile, TunnelKeyFile string
 }
 

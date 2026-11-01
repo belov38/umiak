@@ -88,11 +88,11 @@ type recorder struct {
 	onHijack func(net.Conn)
 	in       *atomic.Int64 // request bytes, shared with the body counter
 
-	status   int // final status; 0 until the header is written
+	status     int // final status; 0 until the header is written
 	umiakError string
-	ttfb     time.Duration
-	hijacked bool
-	out      atomic.Int64
+	ttfb       time.Duration
+	hijacked   bool
+	out        atomic.Int64
 }
 
 func (w *recorder) Header() http.Header { return w.rw.Header() }

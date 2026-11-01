@@ -61,16 +61,16 @@ const maxStateCookies = 8
 
 // Config configures Auth.
 type Config struct {
-	Codec     *Codec
-	API       cpapi.Client
-	AuthURL   string // UMIAK_GATEWAY_AUTH_URL; may carry its own query
+	Codec       *Codec
+	API         cpapi.Client
+	AuthURL     string // UMIAK_GATEWAY_AUTH_URL; may carry its own query
 	UmiakDomain string
-	CrossSite bool // SameSite=None; Partitioned instead of SameSite=Lax
-	TokenTTL  time.Duration
-	SSOTTL    time.Duration
-	StateTTL  time.Duration
-	Limits    *ratelimit.Limits // nil disables the auth-failure limit
-	Metrics   *obs.Metrics      // nil disables metrics
+	CrossSite   bool // SameSite=None; Partitioned instead of SameSite=Lax
+	TokenTTL    time.Duration
+	SSOTTL      time.Duration
+	StateTTL    time.Duration
+	Limits      *ratelimit.Limits // nil disables the auth-failure limit
+	Metrics     *obs.Metrics      // nil disables metrics
 }
 
 // Auth runs the token and sso checks. It is safe for concurrent use.

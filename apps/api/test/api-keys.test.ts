@@ -119,7 +119,7 @@ describe.skipIf(skipPg())("team API keys (S7 §7.2, §13)", () => {
 				sandboxId: null,
 				teamId: encodeUuid("team", w.teamId),
 				name: "ci-main",
-				prefix: secret.slice(4, 12),
+				prefix: secret.slice(6, 14),
 				last4: secret.slice(-4),
 				scopes: [...PRESETS.ci],
 				createdBy: {
@@ -308,7 +308,7 @@ describe.skipIf(skipPg())("team API keys (S7 §7.2, §13)", () => {
 				id: apiKey.id,
 				scopes: apiKey.scopes,
 				expiresAt: apiKey.expiresAt,
-				prefix: next.secret.slice(4, 12),
+				prefix: next.secret.slice(6, 14),
 				last4: next.secret.slice(-4),
 			});
 			// Another pod that had the old key cached drops it on NOTIFY.

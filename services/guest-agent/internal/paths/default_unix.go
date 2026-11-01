@@ -10,7 +10,7 @@ func build(f func(string) string, root string) Layout {
 		lib   = "/usr/local/lib/umiak-agent"
 		state = "/var/lib/umiak-agent"
 		run   = "/run/umiak-agent"
-		umiak   = "/run/umiak"
+		umiak = "/run/umiak"
 		etc   = "/etc/umiak-agent"
 		ssh   = "/etc/ssh"
 	)
@@ -43,7 +43,7 @@ func build(f func(string) string, root string) Layout {
 		SecretFilesDir:   f(j(umiak, "secrets", "files")),
 		SecretsStateFile: f(j(umiak, "secrets.json")),
 		CmdSpecDir:       f(j(umiak, "cmd-spec")),
-		UmiakEnvFile:       f("/etc/umiak/env"),
+		UmiakEnvFile:     f("/etc/umiak/env"),
 
 		EtcDir:          f(etc),
 		ConfigFile:      f(j(etc, "agent.toml")),

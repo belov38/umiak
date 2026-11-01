@@ -135,7 +135,7 @@ type Instance struct {
 	// The public servers: plain (behind an ingress) and, behind the TLS
 	// dispatcher, umiak and tunnel.
 	plain     *http.Server
-	umiakSrv    *http.Server
+	umiakSrv  *http.Server
 	tunnelSrv *http.Server
 
 	pingEvery time.Duration
@@ -266,19 +266,19 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 
 	i.limits = ratelimit.New(cfg.RateLimit, i.metrics)
 	i.auth = portauth.New(portauth.Config{
-		Codec:     portauth.NewCodec(cfg.CookieKeys, deps.Now),
-		API:       deps.API,
-		AuthURL:   cfg.AuthURL,
+		Codec:       portauth.NewCodec(cfg.CookieKeys, deps.Now),
+		API:         deps.API,
+		AuthURL:     cfg.AuthURL,
 		UmiakDomain: cfg.UmiakDomain,
-		CrossSite: cfg.CookieCrossSite,
-		Limits:    i.limits,
-		Metrics:   i.metrics,
+		CrossSite:   cfg.CookieCrossSite,
+		Limits:      i.limits,
+		Metrics:     i.metrics,
 	})
 	i.streams = httpproxy.NewStreamTracker()
 	accessLog := obs.NewAccessLog(deps.AccessLog)
 	i.proxy = httpproxy.New(httpproxy.Config{
 		DesktopAPI:          cpapi.Desktop(deps.API),
-		UmiakDomain:           cfg.UmiakDomain,
+		UmiakDomain:         cfg.UmiakDomain,
 		Grammar:             grammar(cfg),
 		Routes:              i.routes,
 		Auth:                i.auth,
@@ -519,9 +519,9 @@ func (i *Instance) startEdge(ln net.Listener) (*edge.Dispatcher, []*edge.CertSou
 		ln = edge.WrapProxyProtocol(ln, i.cfg.ProxyProtocolCIDRs, i.cfg.ProxyHeaderTimeout)
 	}
 	d := edge.NewDispatcher(ln, edge.DispatchConfig{
-		UmiakDomain:        i.cfg.UmiakDomain,
+		UmiakDomain:      i.cfg.UmiakDomain,
 		TunnelHost:       i.cfg.TunnelHost,
-		Umiak:              umiak,
+		Umiak:            umiak,
 		Tunnel:           tun,
 		HandshakeTimeout: i.cfg.Timeouts.TLSHandshake,
 		// Node SNAT (spec 11) has its own handshake budget.

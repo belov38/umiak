@@ -117,7 +117,7 @@ func TestAccessLogFields(t *testing.T) {
 		Method:        "GET",
 		Path:          "/index.html?_token=secret&x=1",
 		Status:        200,
-		UmiakError:      "",
+		UmiakError:    "",
 		BytesIn:       10,
 		BytesOut:      20,
 		DurationMs:    5,

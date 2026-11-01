@@ -83,8 +83,8 @@ func TestDoctorJSONFields(t *testing.T) {
 	want := map[string]any{
 		"versions.current":      "1.2.3",
 		"versions.previous":     "1.2.2",
-		"units.umiak-identity":    "active:umiak-identity.service",
-		"units.umiak-agent":       "active:umiak-agent.service",
+		"units.umiak-identity":  "active:umiak-identity.service",
+		"units.umiak-agent":     "active:umiak-agent.service",
 		"identity.machine_id":   machineA,
 		"tunnel_url.url":        overrideURL,
 		"tunnel_url.source":     "smbios",

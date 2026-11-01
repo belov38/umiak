@@ -140,7 +140,7 @@ func (x *exchange) finish() {
 		Method:     capField(x.r.Method),
 		Path:       capField(x.r.URL.Path),
 		Status:     status,
-		UmiakError:   x.w.umiakError,
+		UmiakError: x.w.umiakError,
 		BytesIn:    x.in.Load(),
 		BytesOut:   x.w.out.Load(),
 		DurationMs: dur.Milliseconds(),

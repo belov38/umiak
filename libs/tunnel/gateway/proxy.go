@@ -53,7 +53,9 @@ func copyHeader(dst, src http.Header) {
 // isUmiakHeader reports whether a header name is in the Umiak- namespace
 // (case-insensitive). Towards callers only the gateway produces those: they
 // are routing signals (Umiak-Error-Code, Umiak-Instance-Url) a caller acts on.
-func isUmiakHeader(k string) bool { return len(k) >= 4 && strings.EqualFold(k[:4], "umiak-") }
+func isUmiakHeader(k string) bool {
+	return len(k) >= len("Umiak-") && strings.EqualFold(k[:len("Umiak-")], "Umiak-")
+}
 
 // isRedirectHeader reports whether a header points the caller at another
 // URL or endpoint (Location, Content-Location, Refresh, Alt-Svc): an agent

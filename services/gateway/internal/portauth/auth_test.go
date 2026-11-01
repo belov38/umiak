@@ -57,15 +57,15 @@ func newHarness(t *testing.T, mut func(*Config)) *harness {
 	h.metrics = obs.NewMetrics(prometheus.NewRegistry())
 	h.limits = ratelimit.New(ratelimit.Config{AuthFailPerMin: 20, AuthBlock: 5 * time.Minute, Now: clock}, h.metrics)
 	cfg := Config{
-		Codec:     h.codec,
-		API:       h.api,
-		AuthURL:   testAuthURL,
+		Codec:       h.codec,
+		API:         h.api,
+		AuthURL:     testAuthURL,
 		UmiakDomain: testDomain,
-		TokenTTL:  7 * 24 * time.Hour,
-		SSOTTL:    12 * time.Hour,
-		StateTTL:  10 * time.Minute,
-		Limits:    h.limits,
-		Metrics:   h.metrics,
+		TokenTTL:    7 * 24 * time.Hour,
+		SSOTTL:      12 * time.Hour,
+		StateTTL:    10 * time.Minute,
+		Limits:      h.limits,
+		Metrics:     h.metrics,
 	}
 	if mut != nil {
 		mut(&cfg)

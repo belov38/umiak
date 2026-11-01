@@ -202,7 +202,7 @@ func TestListenExtraChannels(t *testing.T) {
 	other := make(chan string, 64)
 	h := ev.handlers()
 	h.Channels = map[string]func(string){
-		"umiak_routes":   func(p string) { routes <- p },
+		"umiak_routes": func(p string) { routes <- p },
 		"Mixed Case.x": func(p string) { other <- p },
 	}
 	done := make(chan error, 1)

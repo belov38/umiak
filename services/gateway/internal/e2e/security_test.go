@@ -342,7 +342,7 @@ func TestPlatformCredentialsStripped(t *testing.T) {
 			portauth.AuthCookie + "=x"},
 		"X-Auth-Request-Email": {"admin@example.com"},
 		"X-Forwarded-User":     {"admin"},
-		"Umiak-Port-Token":       {"tok"},
+		"Umiak-Port-Token":     {"tok"},
 	}
 	for _, r := range []cpapi.Route{public, token} {
 		for _, front := range []*testenv.Inst{c.A, c.C} {

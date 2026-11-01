@@ -44,7 +44,7 @@ var errConnLimit = errors.New("edge: too many conns from the client IP")
 // SNI kinds, also the sni_kind label values.
 const (
 	kindUnknown = "unknown"
-	kindUmiak     = "umiak"
+	kindUmiak   = "umiak"
 	kindTunnel  = "tunnel"
 )
 
@@ -106,7 +106,7 @@ type Dispatcher struct {
 	log *slog.Logger
 
 	base      *tls.Config
-	umiakTLS    *tls.Config
+	umiakTLS  *tls.Config
 	tunnelTLS *tls.Config
 	rejectTLS *tls.Config
 
@@ -151,7 +151,7 @@ func NewDispatcher(ln net.Listener, cfg DispatchConfig) *Dispatcher {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &Dispatcher{
 		ln: ln, cfg: cfg, log: log,
-		umiak:              newConnListener(ln.Addr()),
+		umiak:            newConnListener(ln.Addr()),
 		tunnel:           newConnListener(ln.Addr()),
 		handshakes:       make(chan struct{}, cfg.MaxHandshakes),
 		exemptHandshakes: make(chan struct{}, cfg.MaxExemptHandshakes),
