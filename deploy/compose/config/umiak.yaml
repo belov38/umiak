@@ -119,15 +119,16 @@ topology:
           ssd: "1"
     # S9 template build (umiak-tpl build windows): Windows 11 Pro 26H2 from the ISO in
     # local:iso, agent baked in (tunnel CA = the dev CA of the CT 590 gateway). Create is cold:
-    # clone, specialize, OOBE skip, one rename reboot (~2 min to agent ready).
+    # clone, specialize, OOBE skip, one rename reboot (~2 min to agent ready). Rebuilt in
+    # win598-rebuild with the rebootBoot agent fix; verify 101 PASS, 0 FAIL, 5 INFO.
     - templateSlug: windows
-      version: "20261031.9"
+      version: "20261101.1"
       os: windows
       node: pve
       storage: local-lvm
       pveVmid: 598
       bootTimeoutS: 1200
-      agentVersion: 0.1.0+20261031.a595e60
+      agentVersion: 0.1.0+20261101.767aace0
       hw:
         machine: pc-q35-11.0+pve2
         cpu: host
