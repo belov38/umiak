@@ -238,10 +238,10 @@ S8 — человеческое лицо платформы. Операторы 
 
 ```
 /app/t/<team>/                       Sandboxes (list)            [default]
-/app/t/<team>/sandboxes/new          Create sandbox
+/app/t/<team>/sandboxes/new          Create sandbox (dialog over list)
 /app/t/<team>/sandboxes/<slug>       Sandbox detail, tabs: Overview | Terminal | Commands | Files | Ports | SSH | Env | Desktop*
 /app/t/<team>/snapshots              Saved snapshots
-/app/t/<team>/environments           Environments (wave 2)
+/app/t/<team>/environments           Environment: list and selected details
 /app/t/<team>/keys                   API keys
 /app/t/<team>/settings               Team: name, members, roles, invite, quota and usage, leave
 /app/account                         SSH keys, default team, profile (from IdP, read-only), sign out
@@ -250,37 +250,46 @@ S8 — человеческое лицо платформы. Операторы 
 * Desktop — only when the template has the `desktop` capability
 ```
 
-Общая рамка:
+Общая рамка: слева фиксированная панель шириной 17.5rem с собственной маркой,
+переключателем команды, разделителем и пунктами Sandboxes, Snapshots, Environment,
+API keys, Account, Team; выбранный пункт подсвечен. Контент ограничен 72rem и
+центрирован. `[Operator]` и `[Admin]` видны только операторам, Operator показывает
+активное состояние. Переключатель команды меняет `<team>` в пути.
 
-```
-+--------------------------------------------------------------------------------+
-| sbx   [Team: platform-dev v]   Sandboxes  Snapshots  Environments  Keys  Team   |
-|                                              [Operator] [Admin]   ilia@... (v) |
-+--------------------------------------------------------------------------------+
-| <page>                                                                          |
-```
+При ширине <1024px — верхняя панель с переключателем команды и кнопкой меню;
+навигация открывается боковым модальным drawer. Skip-link доступен также на мобильном.
+Light/Dark сохраняется локально и применяется inline bootstrap до первого paint;
+уведомления следуют теме. Payload admin использует собственный layout.
 
-`[Operator]` и `[Admin]` видны только операторам. Переключатель команды меняет `<team>` в пути.
+Environment показывает **все** окружения списком: имя, default/revision/updated и
+доступные действия. Выбор строки или selector раскрывает её env/secrets/files/repos;
+после создания выбирается новое окружение. Иконки New/Edit/Delete имеют доступные
+подписи; permissions и подтверждение удаления сохраняются.
+
+Create открывает доступный, прокручиваемый по вертикали диалог шириной до 32rem
+над списком. Вложенные поля и подсказки сжимаются по ширине, без горизонтального
+обрезания. Только реальные API-поля; billing и отсутствующие функции не показываются.
 
 ### 9.4 Список sandbox
 
 ```
-Sandboxes                                   2 of 3 active · 4096 of 6144 MB   [+ New sandbox]
-[search name/slug] [state: all v] [label: k=v]
-+--------------------+----------+--------+-------+---------+-----------+--------------+
-| name / slug        | template | size   | state | health  | activity  | created      |
-+--------------------+----------+--------+-------+---------+-----------+--------------+
-| ci-run-42          | linux    | 2gb    | ready | ok      | busy      | 5 min ago by |
-| quiet-otter-lamp   | 2026.10.29-1      |       |         |           | ilia         |
-|                    |          |        |       |         |  [Stop] [...] menu: resume, |
-|                    |          |        |       |         |  fork, terminal, delete      |
-+--------------------+----------+--------+-------+---------+-----------+--------------+
+Sandboxes                 2 of 3 active · 4096 of 6144 MB  [+ New sandbox]
+[search name/slug] [State v] [label: k=v]
+| Name / slug | Sandbox ID | State | Created (UTC) | Type | Health | Activity | Actions |
+| ci-run-42   | sb_… [copy]| ready | absolute date | 2gb  | ok     | busy     | ›  …    |
+| slug        |            |       |               | linux|        |          |         |
 ```
+
+На ширине <1400px — карточки с теми же существенными данными: state под именем,
+ID/copy, template/size, **Health и Activity**; degraded с видимой причиной
+`healthReason`. Меню … находится справа вверху. На мобильном поиск занимает всю
+ширину, New sandbox остаётся рядом с заголовком, квота — отдельной строкой.
+
 
 - `GET /v1/sandboxes` с фильтрами (S7 §8.2) и бесконечной прокруткой по `nextCursor`; квота и использование — `GET /v1/limits`.
 - Обновление — опрос каждые 5 s, пока вкладка видима, и сразу после действия. `deleted` не показываются.
 - Переходные состояния (`creating`, `starting`, `stopping`, `deleting`) — со спиннером и шагом активной операции (`activeOperation.kind`). `error` — красным, с `error.message` во всплывающей подсказке. `degraded` — жёлтым, с `healthReason`. Заблокированная оператором — значок замка с причиной.
-- Действия строки: Stop / Resume (по состоянию), Fork, Open terminal, Delete (подтверждение вводом slug).
+- Действия строки/карточки: › открывает detail; меню … содержит Stop / Resume (по состоянию), Fork, Open terminal, Delete (подтверждение вводом slug). Заблокированный Resume объясняет «Blocked by a platform operator».
 
 ### 9.5 Создание sandbox
 
@@ -364,14 +373,19 @@ Fork и Save snapshot работающей Windows-sandbox (S9 §24.8). OS бе�
 ### 9.8 API-ключи
 
 ```
-Team API keys (team platform-dev)                                      [+ New key]
+API keys
+[Team keys: framed intro]
+[Key name                  ] [Expires in: 90 days]
+Access: [read-only / ci / full / custom scopes, inline preset rows]
+[+ Create key]
  name        prefix…last4   scopes  created by               expires     last used
  ci-main     sbx_a1B2…9xYz  ci      ilia@… (left the team)   2027-01-27  2 min ago   [Rotate] [Revoke]
 ```
 
-- Ключи — **командные** [решение Ильи 2026-10-29, изменение S7 C5]: принадлежат команде, создатель записан для аудита. `GET /v1/api-keys` видят все участники; кнопки New, Rotate, Revoke — только у `owner`. Людям ключи для CLI не нужны: страница подсказывает `sbx login` (Keycloak, S7 §7.6).
+- Ключи — **командные** [решение Ильи 2026-10-29, изменение S7 C5]: принадлежат команде, создатель записан для аудита. `GET /v1/api-keys` видят все участники; inline-форма Create key и Rotate — только у `owner`; Revoke — согласно разрешениям (§6.2). Людям ключи для CLI не нужны: страница подсказывает `sbx login` (Keycloak, S7 §7.6).
 - Создатель деактивирован или вышел из команды — у ключа пометка, ключ работает; над таблицей — уведомление синхронизации (§20.1) со списком таких ключей и кнопкой «отозвать выбранные».
-- Создание: имя, пресет (`read-only`, `ci`, `full`) или выбор scopes галочками, срок (по умолчанию 90 дней, максимум 365, S7 §7.2). Секрет — один раз в диалоге с копированием и примерами `export SBX_API_KEY=…` и `sbx login --key-stdin`.
+- Создание — inline-форма внутри карточки команды (не отдельный New key dialog): имя, пресет (`read-only`, `ci`, `full`) или выбор scopes галочками, срок (по умолчанию 90 дней, максимум 365, S7 §7.2). Секрет — один раз в диалоге с копированием и примерами `export SBX_API_KEY=…` и `sbx login --key-stdin`.
+- Поля имени и срока выровнены; Access подписывает непрерывную рамку пресетов. Выбранная строка подсвечена, scope chips используют обычный шрифт и нейтральную подложку.
 - Rotate (новый секрет в том же диалоге), Revoke (подтверждение). Отозванные и просроченные — свёрнуты внизу.
 
 ### 9.9 Аккаунт и команда

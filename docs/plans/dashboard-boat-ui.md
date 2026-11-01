@@ -203,3 +203,31 @@ of inheriting the centered Dialog's translation utilities.
   deliberately different content/branding/features and are not a parity score.
 - Reference account remains read-only, theme unchanged, viewport restored and tab
   left open. No API/schema changes, production mocks, remote deploy or PVE access.
+
+
+## Acceptance fixes (iteration 2)
+
+- Reproduced the create-dialog clipping with a failing Playwright check: inner
+  scrollWidth exceeded clientWidth by 90px at the desktop viewport. Grid tracks,
+  descendants and selects now shrink; key/value rows share available width.
+- All environments remain visible/selectable, and the created ID becomes selected.
+  Sidebar/drawer skip navigation, active Operator and blocked Resume explanations
+  are restored. Copy SSH reports success; health/activity remain in laptop cards.
+- Theme bootstrap runs before paint; Sonner observes the root theme. Warning and
+  success colors use semantic light/dark tokens throughout customer/operator views.
+- Mobile regression checks cover detail, account, keys, environments, team and
+  create, plus internal create-dialog width at 1900px and 390px. Test evidence goes
+  to Playwright outputPath by default, optionally SBX_VISUAL_DIR.
+- Refined brand/divider, list cards/date/actions, detail title/tabs/single frames,
+  inline key fields/presets/intro and environment icon actions. S8 sections 9.3,
+  9.4 and 9.8 now describe the actual UI. No rename, API or DB changes.
+
+Acceptance validation: sequential workspace build/lint/typecheck/test are green
+(4,463 Vitest tests and 81 Python tests); E2E typecheck is green. Fresh local
+compose Playwright: **21/21**, including the new acceptance regression case.
+It verifies create dialog inner width at 1900/390, all six mobile page widths,
+new environment selection and visible list entries, and degraded/activity laptop
+cards. Appearance checks cover pre-hydration theme initialization, toaster theme,
+Copy SSH feedback, drawer bounds and mobile skip-link focus. Containers/volumes
+are removed after the run. A first reused-stack attempt hit the existing fake
+RAM-cap reset on re-bootstrap; the final validation uses a clean local stack.
