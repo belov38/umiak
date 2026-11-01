@@ -107,3 +107,29 @@ topology:
         tablet: "0"
         rng0: source=/dev/urandom
         cloudinit: false
+    - templateSlug: linux-desktop
+      version: "20261101.3"
+      os: linux
+      node: pve
+      storage: local-lvm
+      pveVmid: 596
+      bootTimeoutS: 300
+      agentVersion: 0.1.0+20261101.087b3f3a
+      diskLayout:
+        scsi0:
+          size: 64G
+          discard: on
+          iothread: "1"
+          ssd: "1"
+      hw:
+        machine: q35
+        cpu: host
+        bios: seabios
+        ostype: l26
+        scsihw: virtio-scsi-single
+        agent: enabled=1
+        serial0: socket
+        vga: std
+        tablet: "0"
+        rng0: source=/dev/urandom
+        cloudinit: false
