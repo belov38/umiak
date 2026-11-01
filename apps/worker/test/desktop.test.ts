@@ -1,6 +1,10 @@
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { configureDesktop, issueTurnCredentials } from "../src/desktop.ts";
+import {
+	configureDesktop,
+	issueTurnCredentials,
+	refreshDesktopTurn,
+} from "../src/desktop.ts";
 import { createWorld } from "./fakes/world.ts";
 import { createSandbox, opsEnv, row, run } from "./helpers/ops.ts";
 
@@ -89,4 +93,41 @@ it("does not finish desktop readiness on another boot", async () => {
 		return true;
 	};
 	await expect(run(w, operationId)).rejects.toThrow("desktop boot changed");
+});
+
+it("desktop-turn renews every due desktop in a fixed order even when one guest fails", async () => {
+	const w = await desktopWorld();
+	const env = opsEnv(w);
+	const ids: string[] = [];
+	for (let i = 0; i < 3; i++) {
+		const { sandboxId, operationId } = await createSandbox(w, env);
+		expect(await run(w, operationId)).toBe("succeeded");
+		ids.push(sandboxId);
+	}
+	// Oldest credentials first; the failing guest is the first in the batch.
+	await w.pool.query(
+		"UPDATE runtime.sandbox_desktops SET turn_issued_at=now()-interval '13 hours'-(interval '1 minute'*array_position($1::uuid[],sandbox_id)) WHERE sandbox_id=ANY($1::uuid[])",
+		[[ids[2], ids[0], ids[1]]],
+	);
+	const machines = new Map<string, string>();
+	for (const id of ids)
+		machines.set(
+			(await row(w, "sandboxes", id)).machine_id as string,
+			id,
+		);
+	const before = w.agent.callsOf("configureDesktop").length;
+	w.agent.fail("configureDesktop", "unavailable");
+	expect(await refreshDesktopTurn(w.ctx)).toBe(2);
+	const order = w.agent
+		.callsOf("configureDesktop")
+		.slice(before)
+		.map((c) => machines.get(c.machineId));
+	expect(order).toEqual([ids[1], ids[0], ids[2]]);
+	const fresh = await w.pool.query<{ sandbox_id: string }>(
+		"SELECT sandbox_id FROM runtime.sandbox_desktops WHERE sandbox_id=ANY($1::uuid[]) AND turn_issued_at>now()-interval '1 hour' ORDER BY sandbox_id",
+		[ids],
+	);
+	expect(fresh.rows.map((r) => r.sandbox_id).sort()).toEqual(
+		[ids[0], ids[2]].sort(),
+	);
 });
