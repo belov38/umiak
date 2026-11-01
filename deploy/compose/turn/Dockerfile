@@ -17,8 +17,8 @@ COPY --from=build /src/bin/turnserver /usr/bin/turnserver
 COPY --from=build /src/LICENSE /usr/share/licenses/coturn/LICENSE
 COPY refresh-auth.patch /usr/share/licenses/coturn/refresh-auth.patch
 RUN apt-get update
-RUN apt-get install -y --no-install-recommends libcap2-bin
-RUN setcap CAP_NET_BIND_SERVICE=+ep /usr/bin/turnserver
+RUN apt-get install -y --no-install-recommends libcap2-bin nftables
 LABEL org.opencontainers.image.source="https://github.com/coturn/coturn" \
       org.opencontainers.image.revision="23c6c1d32a3d2b21a56cee65d3203bcc4ea82d2b+s10-refresh-auth"
-USER 1000:1000
+# entrypoint.sh installs the relay egress table as root, then drops to SBX_TURN_UID.
+USER 0:0

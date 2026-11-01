@@ -91,9 +91,28 @@ class Turn:
         self.relay_port = port
         assert 49160 <= port <= 49200, "relay escaped dev port range"
 
-    def peer(self, ip):
-        value = bytes([0, 1]) + struct.pack("!H", 50000 ^ (COOKIE >> 16))
+    def peer(self, ip, port=50000):
+        value = bytes([0, 1]) + struct.pack("!H", port ^ (COOKIE >> 16))
         return value + bytes(a ^ b for a, b in zip(socket.inet_aton(ip), struct.pack("!I", COOKIE)))
+
+    def send_indication(self, ip, port, payload):
+        # Send indications carry no credentials (RFC 8656 section 11).
+        self.sock.sendall(packet(0x16, os.urandom(12), [(0x12, self.peer(ip, port)), (0x13, payload)]))
+
+    def data_indication(self, timeout=3):
+        self.sock.settimeout(timeout)
+        try:
+            if self.transport == "udp":
+                data = self.sock.recv(65536)
+            else:
+                header = self.recv_n(20)
+                data = header + self.recv_n(struct.unpack("!H", header[2:4])[0])
+        except (socket.timeout, TimeoutError):
+            return None
+        finally:
+            self.sock.settimeout(10)
+        kind, attrs, _ = unpack(data)
+        return attrs.get(0x13) if kind == 0x17 else None
 
     def permission(self, ip):
         return self.request(8, [(0x12, self.peer(ip))])[2]
@@ -149,6 +168,52 @@ def main():
             print(f"ok TURN {transport}: allocate, restricted peers, refresh", flush=True)
         finally:
             turn.close()
+    ssh = ["ssh", "-o", "BatchMode=yes", os.environ.get("SBX_DEVCP_SSH", f"sbx@{ip}")]
+    # Relay <-> relay: each client transport reaches a UDP relay of this server.
+    sender = Turn("udp", ip, host, ca, secret)
+    try:
+        sender.allocate()
+        assert sender.permission(ip) == 0, "TURN denied its own relay address"
+        for transport in ("udp", "tcp", "tls"):
+            receiver = Turn(transport, ip, host, ca, secret)
+            try:
+                receiver.allocate()
+                assert receiver.permission(ip) == 0, "TURN denied its own relay address"
+                payload = os.urandom(16)
+                for _ in range(3):
+                    sender.send_indication(ip, receiver.relay_port, payload)
+                    if receiver.data_indication() == payload:
+                        break
+                else:
+                    raise AssertionError(f"relay to relay over {transport} lost the media")
+                print(f"ok TURN relay<->relay media to a {transport} client", flush=True)
+            finally:
+                receiver.close()
+        # Our own address outside the relay range (another service of this host) is unreachable.
+        listen = int(os.environ.get("SBX_TURN_PROBE_LISTEN_PORT", "40123"))
+        listener = subprocess.Popen(ssh + [
+            "python3", "-I", "-c",
+            "import socket,sys; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.bind((sys.argv[1],int(sys.argv[2]))); s.settimeout(6); print('ready',flush=True)\n"
+            "try:\n print('received',len(s.recvfrom(2048)[0]),flush=True)\nexcept socket.timeout:\n print('nothing',flush=True)",
+            ip, str(listen),
+        ], stdout=subprocess.PIPE, text=True)
+        try:
+            assert listener.stdout.readline().strip() == "ready", "probe listener did not start"
+            for port in (listen, 41641):
+                for _ in range(3):
+                    sender.send_indication(ip, port, b"s10-port-probe")
+            result = listener.stdout.readline().strip()
+        finally:
+            listener.wait(timeout=20)
+        assert result == "nothing", f"TURN relayed to {ip}:{listen} ({result})"
+        drops = subprocess.check_output(ssh + [
+            "docker", "exec", "sbx-turn-1", "nft", "list", "chain", "inet", "sbx_turn", "relay_egress",
+        ], text=True)
+        assert "non-relay peer" in drops and "packets 0 " not in drops.split("non-relay peer")[0].splitlines()[-1], \
+            "relay egress filter did not count the denied probe"
+        print(f"ok TURN own-address ports {listen} and 41641 denied, relay range only", flush=True)
+    finally:
+        sender.close()
     if os.environ.get("SBX_TURN_PROBE_RECONNECTS"):
         clients = []
         try:
