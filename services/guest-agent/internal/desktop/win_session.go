@@ -236,3 +236,36 @@ func (s *WinSession) Input(ctx context.Context, a *v1.DesktopAction) error {
 	}
 	return errors.New("unsupported Windows input")
 }
+
+// sendInputRetryWindow bounds how long a blocked SendInput is retried. Windows
+// refuses input (0 inserted, ERROR_ACCESS_DENIED) while the input desktop is
+// briefly not the user's Default desktop, for example during the logon
+// transition of a freshly booted fork. Spec S10 section 12.2: one action
+// never runs longer than this before action_failed.
+const sendInputRetryWindow = 2 * time.Second
+
+// sendInputRetryDelay is the pause between two attempts.
+const sendInputRetryDelay = 50 * time.Millisecond
+
+// sendInputs inserts all inputs with send, which returns how many of them
+// Windows accepted. Only the inputs not yet accepted are sent again, so no
+// key or click is repeated. After window it returns the last refusal,
+// described by blocked.
+func sendInputs(inputs []WinInput, send func([]WinInput) (int, error), blocked func(error) error, sleep func(time.Duration), window time.Duration) error {
+	waited := time.Duration(0)
+	for {
+		n, err := send(inputs)
+		if n < 0 || n > len(inputs) {
+			return errors.New("windows input: invalid inserted count")
+		}
+		inputs = inputs[n:]
+		if len(inputs) == 0 {
+			return nil
+		}
+		if waited >= window {
+			return blocked(err)
+		}
+		sleep(sendInputRetryDelay)
+		waited += sendInputRetryDelay
+	}
+}

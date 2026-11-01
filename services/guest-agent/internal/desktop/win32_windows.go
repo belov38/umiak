@@ -198,15 +198,31 @@ func (s *win32Desktop) Send(inputs []WinInput) error {
 	if len(inputs) == 0 {
 		return nil
 	}
-	wire := encodeWinInputs(inputs)
-	n, e := call(user32, "SendInput", uintptr(len(inputs)), uintptr(unsafe.Pointer(&wire[0])), 40)
+	send := func(batch []WinInput) (int, error) {
+		wire := encodeWinInputs(batch)
+		n, _, e := user32.NewProc("SendInput").Call(uintptr(len(batch)), uintptr(unsafe.Pointer(&wire[0])), 40)
+		return int(n), e
+	}
+	blocked := func(e error) error {
+		return fmt.Errorf("windows input was blocked (input desktop %q): %w", inputDesktopName(), e)
+	}
+	return sendInputs(inputs, send, blocked, time.Sleep, sendInputRetryWindow)
+}
+
+// inputDesktopName names the desktop that receives input now ("Default" for
+// the user's desktop, "Winlogon" for the secure desktop), for diagnostics.
+func inputDesktopName() string {
+	desktop, e := call(user32, "OpenInputDesktop", 0, 0, 1)
 	if e != nil {
-		return e
+		return "unavailable: " + e.Error()
 	}
-	if int(n) != len(inputs) {
-		return errors.New("windows input was blocked")
+	defer func() { _, _, _ = user32.NewProc("CloseDesktop").Call(desktop) }()
+	var name [128]uint16
+	var needed uint32
+	if _, e = call(user32, "GetUserObjectInformationW", desktop, 2, uintptr(unsafe.Pointer(&name[0])), uintptr(len(name)*2), uintptr(unsafe.Pointer(&needed))); e != nil {
+		return "unknown"
 	}
-	return nil
+	return windows.UTF16ToString(name[:])
 }
 func (s *win32Desktop) Key(key string) (uint16, byte, error) {
 	names := map[string]uint16{"ctrl": 0x11, "alt": 0x12, "shift": 0x10, "meta": 0x5b, "enter": 13, "tab": 9, "escape": 27, "backspace": 8, "delete": 46, "insert": 45, "space": 32, "up": 38, "down": 40, "left": 37, "right": 39, "home": 36, "end": 35, "pageup": 33, "pagedown": 34, "capslock": 20, "printscreen": 44, "menu": 0x5d}

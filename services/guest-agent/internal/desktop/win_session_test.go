@@ -5,7 +5,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"image"
+	"slices"
 	"testing"
+	"time"
 
 	v1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
 )
@@ -65,5 +67,36 @@ func TestWindowsModifierFailureReleasesPressedKeys(t *testing.T) {
 	}
 	if len(f.inputs) == 0 || f.inputs[len(f.inputs)-1].Flags != 2 {
 		t.Fatalf("modifier remains held: %v", f.inputs)
+	}
+}
+
+// TestSendInputsRetriesOnlyTheRefusedTail: a briefly blocked input desktop
+// does not fail the action and no input is sent twice; a lasting block fails
+// after the bounded window.
+func TestSendInputsRetriesOnlyTheRefusedTail(t *testing.T) {
+	in := []WinInput{{Key: 1}, {Key: 2}, {Key: 3}}
+	var sent []uint16
+	answers := []int{0, 1, 0, 2}
+	send := func(batch []WinInput) (int, error) {
+		n := answers[0]
+		answers = answers[1:]
+		for _, x := range batch[:n] {
+			sent = append(sent, x.Key)
+		}
+		return n, errors.New("access denied")
+	}
+	var slept time.Duration
+	sleep := func(d time.Duration) { slept += d }
+	if err := sendInputs(in, send, func(e error) error { return e }, sleep, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(sent, []uint16{1, 2, 3}) || slept != 3*sendInputRetryDelay {
+		t.Fatalf("sent %v after %v", sent, slept)
+	}
+	never := func([]WinInput) (int, error) { return 0, errors.New("access denied") }
+	slept = 0
+	err := sendInputs(in, never, func(e error) error { return errors.New("blocked: " + e.Error()) }, sleep, 200*time.Millisecond)
+	if err == nil || err.Error() != "blocked: access denied" || slept != 200*time.Millisecond {
+		t.Fatalf("lasting block: err=%v slept=%v", err, slept)
 	}
 }
