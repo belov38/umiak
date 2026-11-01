@@ -240,6 +240,41 @@ describe.skipIf(skipPg())("SandboxService.fork (S6 §7.7)", () => {
 		await expectCode(env.svc.fork(env.p, src.sandboxId, {}), "quota_exceeded");
 		expect(await count()).toBe(2);
 	});
+	it("a forced Windows fork counts the running source once plus the fork; a real shortfall names both", async () => {
+		const fits = await serviceEnv(t.pool, {
+			os: "windows",
+			quota: { maxRamMb: 8192 },
+		});
+		const src = await seedSandbox(t.pool, fits, {
+			state: "ready",
+			memoryMb: 4096,
+		});
+		const res = await fits.svc.fork(fits.p, src.sandboxId, {
+			forceStop: true,
+		});
+		expect(res.sandbox.memoryMb).toBe(4096);
+
+		const short = await serviceEnv(t.pool, {
+			os: "windows",
+			quota: { maxRamMb: 6144 },
+		});
+		const tight = await seedSandbox(t.pool, short, {
+			state: "ready",
+			memoryMb: 4096,
+		});
+		const err = await expectCode(
+			short.svc.fork(short.p, tight.sandboxId, { forceStop: true }),
+			"quota_exceeded",
+		);
+		expect(err.details).toMatchObject({
+			quota: "maxRamMb",
+			limit: 6144,
+			current: 4096,
+			requested: 4096,
+		});
+		expect(err.message).toContain("4096 MB in use + 4096 MB requested");
+		expect(err.message).toContain("source restarts");
+	});
 	it("checks like create: a disabled template and storage over its thresholds refuse the fork", async () => {
 		const env = await serviceEnv(t.pool);
 		const src = await seedSandbox(t.pool, env, { state: "ready" });

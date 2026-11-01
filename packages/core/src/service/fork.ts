@@ -238,9 +238,16 @@ export async function forkSandbox(
 		}
 
 		const quota = await deps.config.teamQuota(p.teamId);
+		// The running source is already counted once; forceStop only restarts
+		// it, so the fork needs room next to it.
 		await checkQuota(tx, p.teamId, quota, {
 			addSandboxes: 1,
 			addRamMb: size.memoryMb,
+			...(forceStop
+				? {
+						note: "the source restarts after a forceStop fork, so both run; the fork alone needs this room",
+					}
+				: {}),
 		});
 		// As create (§8.4): the fork's new disks go to the source's storage,
 		// which must be below its thresholds on an active node (a draining
