@@ -90,10 +90,7 @@ export async function refreshDesktopTurn(ctx: WorkerCtx): Promise<number> {
 				ctx,
 				s.id,
 				s.machine_id,
-				stepRequestId(
-					s.id,
-					`desktop-turn:${Math.floor(Date.now() / 600000)}`,
-				),
+				stepRequestId(s.id, `desktop-turn:${Math.floor(Date.now() / 600000)}`),
 			);
 			count++;
 		} catch (err) {

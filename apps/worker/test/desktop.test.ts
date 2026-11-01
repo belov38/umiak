@@ -111,10 +111,7 @@ it("desktop-turn renews every due desktop in a fixed order even when one guest f
 	);
 	const machines = new Map<string, string>();
 	for (const id of ids)
-		machines.set(
-			(await row(w, "sandboxes", id)).machine_id as string,
-			id,
-		);
+		machines.set((await row(w, "sandboxes", id)).machine_id as string, id);
 	const before = w.agent.callsOf("configureDesktop").length;
 	w.agent.fail("configureDesktop", "unavailable");
 	expect(await refreshDesktopTurn(w.ctx)).toBe(2);
