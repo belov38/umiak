@@ -1,0 +1,81 @@
+diff --git a/src/stream/proto/video/mod.rs b/src/stream/proto/video/mod.rs
+index 14069c3..8542925 100644
+--- a/src/stream/proto/video/mod.rs
++++ b/src/stream/proto/video/mod.rs
+@@ -245,6 +245,11 @@ impl VideoStream {
+         Ok(())
+     }
+ 
++    /// If the host already sent a video packet, so it knows our video address.
++    pub fn received_first_packet(&self) -> bool {
++        self.first_packet.is_some()
++    }
++
+     pub fn request_idr(&mut self) {
+         info!("requesting idr on behalf of the video decoder");
+ 
+diff --git a/src/stream/tokio/mod.rs b/src/stream/tokio/mod.rs
+index e685059..ee595e6 100644
+--- a/src/stream/tokio/mod.rs
++++ b/src/stream/tokio/mod.rs
+@@ -68,8 +68,16 @@ pub struct MoonlightStream {
+     video_stream: StreamDriver<VideoStream>,
+     control_stream: StreamDriver<ControlStream>,
+     foundation_mic_stream: Option<StreamDriver<FoundationMicStream>>,
++    connected_at: Instant,
+ }
+ 
++/// Sunshine keeps one source endpoint for the receives of its video and audio
++/// sockets (stream.cpp recvThread). When the first video and audio pings complete
++/// together, the video address can become the audio socket's and no video ever
++/// arrives. The audio stream (and its pings) waits until the host sent video, at
++/// most this long; Sunshine's own ping timeout is 10 s.
++const AUDIO_PING_HOLD: Duration = Duration::from_secs(3);
++
+ impl MoonlightStream {
+     #[instrument(level = Level::DEBUG, skip_all, name = "stream")]
+     pub async fn connect(
+@@ -235,6 +243,7 @@ impl MoonlightStream {
+             video_stream,
+             control_stream,
+             foundation_mic_stream,
++            connected_at: Instant::now(),
+         })
+     }
+ 
+@@ -283,17 +292,24 @@ impl MoonlightStream {
+     }
+ 
+     pub async fn drive(&mut self) -> Result<MoonlightStreamEvent, Error> {
+-        select! {
+-            result = self.audio_stream.drive() => result.map(MoonlightStreamEvent::from),
+-            result = self.video_stream.drive() => result.map(MoonlightStreamEvent::from),
+-            result = self.control_stream.drive() => result.map(MoonlightStreamEvent::from),
+-            _ = async {
+-                if let Some(stream) = self.foundation_mic_stream.as_mut() {
+-                    stream.drive().await
+-                } else {
+-                    pending().await
+-                }
+-            } => unreachable!(),
++        loop {
++            let audio_until = self.connected_at + AUDIO_PING_HOLD;
++            let hold_audio = !self.video_stream.stream().received_first_packet()
++                && Instant::now() < audio_until;
++            return select! {
++                result = self.audio_stream.drive(), if !hold_audio => result.map(MoonlightStreamEvent::from),
++                result = self.video_stream.drive() => result.map(MoonlightStreamEvent::from),
++                result = self.control_stream.drive() => result.map(MoonlightStreamEvent::from),
++                _ = async {
++                    if let Some(stream) = self.foundation_mic_stream.as_mut() {
++                        stream.drive().await
++                    } else {
++                        pending().await
++                    }
++                } => unreachable!(),
++                // Recheck the hold: the first video packet may produce no event yet.
++                _ = sleep(Duration::from_millis(20)), if hold_audio => continue,
++            };
+         }
+     }
+ 

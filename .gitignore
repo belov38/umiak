@@ -42,3 +42,6 @@ build-logs/
 /apps/web/test-results/
 /apps/web/playwright-report/
 /apps/web/e2e/.state/
+
+# Built by infra/templates/windows-desktop/moonlight-web/build.sh
+/infra/templates/windows-desktop/files/moonlight-web/

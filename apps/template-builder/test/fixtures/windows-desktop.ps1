@@ -11,7 +11,21 @@ $ops=@{
 }
 $program=Join-Path $Root 'program';$agent=Join-Path $Root 'agent';$work=Join-Path $Root 'work'
 New-Item -ItemType Directory -Force $agent | Out-Null
-Install-SbxDesktop -ProgramRoot $program -AgentRoot $agent -WorkRoot $work -FilesRoot $Files -Ops $ops
+# The recipe files plus a fake patched moonlight-web build (moonlight-web/build.sh output).
+$recipeFiles=Join-Path $Root 'files'
+Copy-Item -LiteralPath $Files -Destination $recipeFiles -Recurse
+$patched=Join-Path $recipeFiles 'moonlight-web'
+New-Item -ItemType Directory -Force $patched | Out-Null
+[IO.File]::WriteAllText((Join-Path $patched 'web-server.exe'),'patched')
+$sha=(Get-FileHash -LiteralPath (Join-Path $patched 'web-server.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+@{patch='ping-order.patch';sha256=$sha} | ConvertTo-Json | Set-Content (Join-Path $patched 'build.json')
+Install-SbxDesktop -ProgramRoot $program -AgentRoot $agent -WorkRoot $work -FilesRoot $recipeFiles -Ops $ops
+$web=Join-Path $program 'sbx-desktop/moonlight-web/current'
+if((Get-Content -Raw (Join-Path $web 'web-server.exe')) -ne 'patched' -or -not (Test-Path (Join-Path $web 'sbx-build.json'))){throw 'upstream moonlight-web server kept'}
+[IO.File]::WriteAllText((Join-Path $patched 'web-server.exe'),'tampered')
+$refusedPatch=$false
+try{Install-SbxPatchedMoonlight $patched (Join-Path $Root 'patch-check')}catch{$refusedPatch=$_.Exception.Message -match 'SHA256 mismatch'}
+if(-not $refusedPatch){throw 'tampered moonlight-web build accepted'}
 $config=Get-Content -Raw (Join-Path $agent 'desktop/moonlight.json') | ConvertFrom-Json
 if($config.web_server.bind_address -ne '127.0.0.1:47800' -or $config.webrtc.ice_servers.Count -ne 0){throw 'public/default STUN config'}
 if(-not ($commands | Where-Object {$_ -match 'config SunshineService start= demand'})){throw 'Sunshine not manual'}
