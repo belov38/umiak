@@ -40,12 +40,14 @@ export function EnvironmentDialog({
 	editing,
 	open,
 	onOpenChange,
+	onCreated,
 }: {
 	teamId: string;
 	/** `env_...` of the environment to edit; null to create one. */
 	editing: string | null;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
+	onCreated?: (id: string) => void;
 }) {
 	const sbx = useSbx(teamId);
 	const detail = useQuery({
@@ -84,6 +86,7 @@ export function EnvironmentDialog({
 						key={editing ?? "new"}
 						teamId={teamId}
 						original={detail.data ?? null}
+						onCreated={onCreated}
 						onDone={() => onOpenChange(false)}
 					/>
 				)}
@@ -96,10 +99,12 @@ function EnvironmentForm({
 	teamId,
 	original,
 	onDone,
+	onCreated,
 }: {
 	teamId: string;
 	original: EnvironmentDetail | null;
 	onDone: () => void;
+	onCreated?: ((id: string) => void) | undefined;
 }) {
 	const sbx = useSbx(teamId);
 	const queryClient = useQueryClient();
@@ -119,7 +124,8 @@ function EnvironmentForm({
 				setErrors(r.errors);
 				return false;
 			}
-			await sbx.raw.POST("/v1/environments", { body: r.body });
+			const { data } = await sbx.raw.POST("/v1/environments", { body: r.body });
+			onCreated?.(data.id);
 			toast.success(`Environment ${r.body.name} created`);
 			return true;
 		}

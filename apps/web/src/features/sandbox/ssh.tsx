@@ -44,13 +44,13 @@ export function SshTab({
 	return (
 		<div className="max-w-3xl space-y-4 text-sm">
 			{sandbox.blocked && (
-				<p className="text-amber-800">
+				<p className="text-warning">
 					The sandbox is blocked: SSH logins are refused.
 				</p>
 			)}
 			{!s.hasKeys && (
 				<p
-					className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-950"
+					className="rounded-lg border border-warning/35 bg-warning-tint p-3 text-warning"
 					data-testid="ssh-no-keys"
 				>
 					You have no SSH keys yet.{" "}

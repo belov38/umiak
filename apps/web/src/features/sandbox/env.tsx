@@ -97,7 +97,7 @@ export function EnvTab({
 				<p
 					role="status"
 					data-testid="env-undelivered"
-					className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-950"
+					className="rounded-lg border border-warning/35 bg-warning-tint p-3 text-warning"
 				>
 					Saved. It applies at the next start: the sandbox is not ready or its
 					agent did not answer.

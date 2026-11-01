@@ -170,7 +170,7 @@ export function CommandsTab({
 							>
 								<TableCell
 									className={cn(
-										isRunning(c.status) && "text-emerald-700",
+										isRunning(c.status) && "text-success",
 										(c.status === "failed_to_start" || c.status === "lost") &&
 											"text-destructive",
 									)}

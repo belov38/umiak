@@ -240,7 +240,7 @@ function OperatorTable({
 									<div className="text-xs text-muted-foreground">{s.slug}</div>
 								)}
 								{s.blocked && (
-									<div className="text-xs text-amber-700">
+									<div className="text-xs text-warning">
 										blocked{s.blockReason ? ` (${s.blockReason})` : ""}
 									</div>
 								)}

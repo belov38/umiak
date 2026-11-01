@@ -68,8 +68,7 @@ test("disabled in Keycloak → deactivated by ctl-idp-sync, notice, keys keep wo
 	// dave signs in and creates a team key.
 	const dave = await as("dave");
 	await dave.page.goto(`/app/t/${team}/keys`);
-	await dave.page.getByRole("button", { name: "New key" }).click();
-	const dialog = dave.page.getByRole("dialog", { name: "New team API key" });
+	const dialog = dave.page.getByRole("form", { name: "New team API key" });
 	const keyName = `dave-ci-${state.run}`;
 	await dialog.getByRole("textbox", { name: "Key name" }).fill(keyName);
 	await dialog.getByRole("button", { name: "Create key" }).click();
@@ -207,7 +206,11 @@ test("disabled in Keycloak → deactivated by ctl-idp-sync, notice, keys keep wo
 		}
 		await alice.page.reload();
 		await expect(
-			alice.page.getByRole("heading", { name: "Keys" }),
+			alice.page.getByRole("heading", {
+				name: "API keys",
+				level: 1,
+				exact: true,
+			}),
 		).toBeVisible();
 	} finally {
 		await control("PUT", "/keycloak", { mode: "real" });

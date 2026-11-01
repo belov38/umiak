@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmButton } from "@/components/app/confirm-button";
+import { EmptyState as DashboardEmpty } from "@/components/app/empty-state";
 import { QueryError } from "@/components/app/query-error";
 import { useTeamPermission } from "@/components/app/session-context";
 import { TeamNotices } from "@/components/app/team-notices";
@@ -37,7 +38,7 @@ import { attempt } from "@/lib/client-call";
 import { formatAgo, formatDate } from "@/lib/format";
 import { can } from "@/lib/permissions";
 import type { TeamNoticeView } from "@/lib/team-actions/team-settings";
-import { NewKeyDialog } from "./new-key-dialog";
+import { NewKeyForm } from "./new-key-form";
 import { SecretDialog, type ShownSecret } from "./secret-dialog";
 
 export function KeysPage({
@@ -102,89 +103,86 @@ export function KeysPage({
 				canRevoke={canRevoke}
 			/>
 			<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-				<h1 className="text-xl font-semibold">
-					Team API keys
-					{team0 && (
-						<span className="ml-2 text-base font-normal text-muted-foreground">
-							(team {team0.name})
-						</span>
-					)}
-				</h1>
-				<div className="ml-auto">
-					{canIssue && (
-						<NewKeyDialog
-							teamId={teamId}
-							onIssued={async (s) => {
-								setShown(s);
-								await refresh();
-							}}
-						/>
-					)}
-				</div>
+				<h1 className="text-xl font-semibold">API keys</h1>
 			</div>
-			<p className="text-sm text-muted-foreground">
-				Keys are for CI and agents and belong to the team. People do not need
-				one: run <code>sbx login</code> to use the CLI with your own account.
-				{!canIssue && " Only an owner of the team can issue and rotate keys."}
-			</p>
-			{keys.isError && (
-				<QueryError
-					error={keys.error}
-					what="API keys"
-					onRetry={() => keys.refetch()}
-				/>
-			)}
-			{keys.isPending && (
-				<p className="text-sm text-muted-foreground">Loading…</p>
-			)}
-			{keys.data && live.length === 0 && (
-				<div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-					No active keys.
+			<div className="dashboard-card keys-card">
+				<div className="key-intro">
+					<h2>{team0?.name ?? "Team"} keys</h2>
+					<p className="text-sm text-muted-foreground">
+						Keys are for CI and agents and belong to the team. People do not
+						need one: run <code>sbx login</code> to use the CLI with your own
+						account.
+						{!canIssue &&
+							" Only an owner of the team can issue and rotate keys."}
+					</p>
 				</div>
-			)}
-			{live.length > 0 && (
-				<KeyTable
-					keys={live}
-					now={now}
-					actions={(k) => (
-						<>
-							{canIssue && (
-								<ConfirmButton
-									title={`Rotate ${k.name}?`}
-									description="A new secret is issued and the old one stops working at once everywhere it is used."
-									confirmLabel="Rotate"
-									size="xs"
-									onConfirm={() => rotate(k)}
-								>
-									Rotate
-								</ConfirmButton>
-							)}
-							{canRevoke && (
-								<ConfirmButton
-									title={`Revoke ${k.name}?`}
-									description="It stops working at once on every server; its open streams and terminals are closed. This cannot be undone."
-									confirmLabel="Revoke"
-									variant="ghost"
-									size="xs"
-									onConfirm={() => revoke(k)}
-								>
-									Revoke
-								</ConfirmButton>
-							)}
-						</>
-					)}
-				/>
-			)}
-			{inactive.length > 0 && (
-				<details className="group" data-testid="inactive-keys">
-					<summary className="cursor-pointer text-sm text-muted-foreground select-none">
-						Revoked and expired ({inactive.length})
-					</summary>
-					<div className="pt-2 opacity-70">
-						<KeyTable keys={inactive} now={now} />
-					</div>
-				</details>
-			)}
+				{canIssue && (
+					<NewKeyForm
+						teamId={teamId}
+						onIssued={async (secret) => {
+							setShown(secret);
+							await refresh();
+						}}
+					/>
+				)}
+
+				{keys.isError && (
+					<QueryError
+						error={keys.error}
+						what="API keys"
+						onRetry={() => keys.refetch()}
+					/>
+				)}
+				{keys.isPending && (
+					<p className="text-sm text-muted-foreground">Loading…</p>
+				)}
+				{keys.data && live.length === 0 && (
+					<DashboardEmpty kind="keys">No active keys.</DashboardEmpty>
+				)}
+				{live.length > 0 && (
+					<KeyTable
+						keys={live}
+						now={now}
+						actions={(k) => (
+							<>
+								{canIssue && (
+									<ConfirmButton
+										title={`Rotate ${k.name}?`}
+										description="A new secret is issued and the old one stops working at once everywhere it is used."
+										confirmLabel="Rotate"
+										size="xs"
+										onConfirm={() => rotate(k)}
+									>
+										Rotate
+									</ConfirmButton>
+								)}
+								{canRevoke && (
+									<ConfirmButton
+										title={`Revoke ${k.name}?`}
+										description="It stops working at once on every server; its open streams and terminals are closed. This cannot be undone."
+										confirmLabel="Revoke"
+										variant="ghost"
+										size="xs"
+										onConfirm={() => revoke(k)}
+									>
+										Revoke
+									</ConfirmButton>
+								)}
+							</>
+						)}
+					/>
+				)}
+				{inactive.length > 0 && (
+					<details className="group" data-testid="inactive-keys">
+						<summary className="cursor-pointer text-sm text-muted-foreground select-none">
+							Revoked and expired ({inactive.length})
+						</summary>
+						<div className="pt-2 opacity-70">
+							<KeyTable keys={inactive} now={now} />
+						</div>
+					</details>
+				)}
+			</div>
 			<SecretDialog shown={shown} onClose={() => setShown(null)} />
 		</section>
 	);
@@ -245,7 +243,7 @@ function KeyTable({
 								{note && (
 									<Badge
 										variant="outline"
-										className="ml-2 border-amber-300 text-amber-800"
+										className="ml-2 border-warning/35 text-warning"
 										data-testid="creator-note"
 									>
 										{note}

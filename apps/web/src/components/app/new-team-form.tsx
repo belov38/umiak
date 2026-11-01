@@ -23,7 +23,7 @@ export function NewTeamForm() {
 		});
 	};
 	return (
-		<section className="max-w-md space-y-4">
+		<section className="dashboard-card max-w-md space-y-4">
 			<div>
 				<h1 className="text-xl font-semibold">New team</h1>
 				<p className="text-sm text-muted-foreground">

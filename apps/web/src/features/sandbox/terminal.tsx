@@ -334,7 +334,7 @@ function TerminalSession({
 							"flex items-center gap-1 rounded px-2 py-0.5",
 							phase === "failed"
 								? "bg-destructive/10 text-destructive"
-								: "bg-amber-50 text-amber-900",
+								: "bg-warning-tint text-warning",
 						)}
 					>
 						{(phase === "connecting" || phase === "reconnecting") && (

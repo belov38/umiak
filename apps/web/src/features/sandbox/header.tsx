@@ -8,12 +8,27 @@
 // restart it (S9 §24.8).
 import type { SandboxData } from "@sbx/sdk";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { LoaderCircleIcon, LockIcon, PencilIcon } from "lucide-react";
+import {
+	ArchiveIcon,
+	ChevronLeftIcon,
+	ClockPlusIcon,
+	GitForkIcon,
+	LoaderCircleIcon,
+	LockIcon,
+	MonitorIcon,
+	PauseIcon,
+	PencilIcon,
+	PlayIcon,
+	RotateCcwIcon,
+	TerminalIcon,
+	TrashIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmButton } from "@/components/app/confirm-button";
+import { CopyButton } from "@/components/app/copy-button";
 import { Field, FormDialog } from "@/components/app/form-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,10 +61,12 @@ import { sandboxQueryKey } from "./use-sandbox";
 export function SandboxHeader({
 	teamId,
 	sandbox: s,
+	desktop = false,
 	track,
 }: {
 	teamId: string;
 	sandbox: SandboxData;
+	desktop?: boolean;
 	track: (operationId: string) => void;
 }) {
 	const sbx = useSbx(teamId);
@@ -79,21 +96,17 @@ export function SandboxHeader({
 	};
 
 	return (
-		<header className="space-y-3">
+		<header className="sandbox-header space-y-2">
 			<Link
 				href={teamPath(teamId)}
-				className="text-sm text-muted-foreground hover:underline"
+				className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline"
 			>
-				← Sandboxes
+				<ChevronLeftIcon className="size-4" /> Sandboxes
 			</Link>
-			<div className="flex flex-wrap items-start gap-3">
-				<div className="min-w-0 space-y-1">
-					<h1 className="flex items-center gap-2 text-xl font-semibold">
+			<div className="space-y-2">
+				<div className="sandbox-title">
+					<h1 className="sandbox-detail-heading flex items-center gap-2 font-semibold">
 						<span className="truncate">{s.name ?? s.slug}</span>
-						<BlockLock sandbox={s} />
-					</h1>
-					<div className="flex items-center gap-1 text-sm text-muted-foreground">
-						<code data-testid="sandbox-slug">{s.slug}</code>
 						<Button
 							size="icon-xs"
 							variant="ghost"
@@ -104,13 +117,45 @@ export function SandboxHeader({
 						>
 							<PencilIcon />
 						</Button>
+						<BlockLock sandbox={s} />
+					</h1>
+					<div className="flex items-center gap-1 text-sm text-muted-foreground">
+						<code data-testid="sandbox-slug">{s.slug}</code>
+
+						<code className="ml-3 text-xs">{s.id}</code>
+						<CopyButton text={s.id} label="Copy sandbox ID" />
 					</div>
 				</div>
-				<div className="ml-auto flex flex-wrap items-center gap-1.5">
+				<div className="sandbox-actions">
+					<Button
+						variant="ghost"
+						disabled={s.state !== "ready" || s.blocked}
+						onClick={() =>
+							void attempt(async () => {
+								await navigator.clipboard.writeText(s.endpoints.ssh);
+								toast.success("SSH command copied");
+							})
+						}
+					>
+						<TerminalIcon />
+						Copy SSH
+					</Button>
+					{desktop && (
+						<Button
+							variant="ghost"
+							disabled={s.state !== "ready" || s.blocked}
+							onClick={() =>
+								router.replace(sandboxHref(teamId, s.slug, "desktop"))
+							}
+						>
+							<MonitorIcon />
+							Desktop
+						</Button>
+					)}
 					{s.state === "stopped" ? (
 						<Button
-							size="sm"
-							variant="outline"
+							size="default"
+							variant="ghost"
 							disabled={busy || !a.resume}
 							onClick={() =>
 								act(`Resuming ${s.slug}`, () =>
@@ -121,12 +166,13 @@ export function SandboxHeader({
 								)
 							}
 						>
+							<PlayIcon />
 							Resume
 						</Button>
 					) : (
 						<Button
-							size="sm"
-							variant="outline"
+							size="default"
+							variant="ghost"
 							disabled={busy || !a.stop}
 							onClick={() =>
 								act(`Stopping ${s.slug}`, () =>
@@ -134,12 +180,13 @@ export function SandboxHeader({
 								)
 							}
 						>
+							<PauseIcon />
 							Stop
 						</Button>
 					)}
 					<Button
-						size="sm"
-						variant="outline"
+						size="default"
+						variant="ghost"
 						disabled={busy || !a.fork}
 						onClick={async () => {
 							setBusy(true);
@@ -150,9 +197,12 @@ export function SandboxHeader({
 							}
 						}}
 					>
+						<GitForkIcon />
 						Fork
 					</Button>
 					<ConfirmButton
+						size="default"
+						variant="ghost"
 						title={`Recover ${s.slug}?`}
 						description="Recover restarts the VM (a power cycle): running commands and terminals end, files on disk stay."
 						confirmLabel="Recover"
@@ -163,11 +213,12 @@ export function SandboxHeader({
 							)
 						}
 					>
+						<RotateCcwIcon />
 						Recover
 					</ConfirmButton>
 					<Button
-						size="sm"
-						variant="outline"
+						size="default"
+						variant="ghost"
 						disabled={busy || !a.extend}
 						title={
 							s.ttlSeconds === null && s.deadlineAt === null
@@ -176,22 +227,26 @@ export function SandboxHeader({
 						}
 						onClick={() => setDialog("extend")}
 					>
+						<ClockPlusIcon />
 						Extend
 					</Button>
 					<Button
-						size="sm"
-						variant="outline"
+						size="default"
+						variant="ghost"
 						disabled={busy || !a.saveSnapshot}
 						onClick={() => setDialog("snapshot")}
 					>
+						<ArchiveIcon />
 						Save snapshot
 					</Button>
 					<Button
-						size="sm"
+						size="default"
 						variant="destructive"
+						className="basis-full justify-start"
 						disabled={busy || !a.delete}
 						onClick={() => setDialog("delete")}
 					>
+						<TrashIcon />
 						Delete
 					</Button>
 				</div>
@@ -200,7 +255,7 @@ export function SandboxHeader({
 			{s.blocked && (
 				<div
 					role="status"
-					className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950"
+					className="flex items-center gap-2 rounded-lg border border-warning/35 bg-warning-tint p-3 text-sm text-warning"
 				>
 					<LockIcon className="size-4 shrink-0" />
 					<p>
@@ -292,55 +347,71 @@ function Facts({
 }) {
 	const labels = Object.entries(s.labels);
 	return (
-		<dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_1fr_auto_1fr]">
-			<dt className="text-muted-foreground">State</dt>
-			<dd>
-				<StateCell sandbox={s} />
-			</dd>
-			<dt className="text-muted-foreground">Health</dt>
-			<dd>
-				<HealthCell sandbox={s} />
-				<span className="ml-2 text-muted-foreground">
-					activity: {s.activity}
-				</span>
-			</dd>
-			<dt className="text-muted-foreground">Template</dt>
-			<dd>
-				{s.template}
-				{s.templateVersion ? ` · ${s.templateVersion}` : ""}
-			</dd>
-			<dt className="text-muted-foreground">Size</dt>
-			<dd>
-				{s.size} · {s.vcpu} vCPU · {s.memoryMb} MB
-			</dd>
-			<dt className="text-muted-foreground">Origin</dt>
-			<dd>{originText(teamId, s)}</dd>
-			<dt className="text-muted-foreground">Labels</dt>
-			<dd className="flex flex-wrap gap-1">
-				{labels.length === 0
-					? "—"
-					: labels.map(([k, v]) => (
-							<code key={k} className="rounded bg-muted px-1 text-xs">
-								{k}={v}
-							</code>
-						))}
-			</dd>
-			<dt className="text-muted-foreground">TTL</dt>
-			<dd>
-				{formatSeconds(s.ttlSeconds)}
-				{s.deadlineAt && (
-					<span className="text-muted-foreground">
-						{" "}
-						· deleted at {formatTime(s.deadlineAt)}
+		<dl className="sandbox-facts">
+			<div className="sandbox-fact">
+				<dt className="text-muted-foreground">State</dt>
+				<dd>
+					<StateCell sandbox={s} />
+				</dd>
+			</div>
+			<div className="sandbox-fact">
+				<dt className="text-muted-foreground">Health</dt>
+				<dd>
+					<HealthCell sandbox={s} />
+					<span className="ml-2 text-muted-foreground">
+						activity: {s.activity}
 					</span>
-				)}
-			</dd>
-			<dt className="text-muted-foreground">Idle stop</dt>
-			<dd>
-				{s.idleTimeoutSeconds === null
-					? "off"
-					: `after ${formatSeconds(s.idleTimeoutSeconds)}`}
-			</dd>
+				</dd>
+			</div>
+			<div className="sandbox-fact">
+				<dt className="text-muted-foreground">Template</dt>
+				<dd>
+					{s.template}
+					{s.templateVersion ? ` · ${s.templateVersion}` : ""}
+				</dd>
+			</div>
+			<div className="sandbox-fact">
+				<dt className="text-muted-foreground">Size</dt>
+				<dd>
+					{s.size} · {s.vcpu} vCPU · {s.memoryMb} MB
+				</dd>
+			</div>
+			<div className="sandbox-fact">
+				<dt className="text-muted-foreground">Origin</dt>
+				<dd>{originText(teamId, s)}</dd>
+			</div>
+			<div className="sandbox-fact">
+				<dt className="text-muted-foreground">Labels</dt>
+				<dd className="flex flex-wrap gap-1">
+					{labels.length === 0
+						? "—"
+						: labels.map(([k, v]) => (
+								<code key={k} className="rounded bg-muted px-1 text-xs">
+									{k}={v}
+								</code>
+							))}
+				</dd>
+			</div>
+			<div className="sandbox-fact">
+				<dt className="text-muted-foreground">TTL</dt>
+				<dd>
+					{formatSeconds(s.ttlSeconds)}
+					{s.deadlineAt && (
+						<span className="text-muted-foreground">
+							{" "}
+							· deleted at {formatTime(s.deadlineAt)}
+						</span>
+					)}
+				</dd>
+			</div>
+			<div className="sandbox-fact">
+				<dt className="text-muted-foreground">Idle stop</dt>
+				<dd>
+					{s.idleTimeoutSeconds === null
+						? "off"
+						: `after ${formatSeconds(s.idleTimeoutSeconds)}`}
+				</dd>
+			</div>
 		</dl>
 	);
 }
@@ -635,12 +706,12 @@ function SnapshotDialog({
 				/>
 			</Field>
 			{replaces && (
-				<p className="text-sm text-amber-800">
+				<p className="text-sm text-warning">
 					A snapshot named {n} exists: it is replaced when the new one is ready.
 				</p>
 			)}
 			{forceStop && (
-				<p role="alert" className="text-sm text-amber-800">
+				<p role="alert" className="text-sm text-warning">
 					{requiresStop
 						? "This Windows sandbox is snapshotted only from a stopped VM. "
 						: ""}
