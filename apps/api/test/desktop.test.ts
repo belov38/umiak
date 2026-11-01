@@ -1,6 +1,7 @@
 import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { recheckDesktopAccess } from "../src/desktop/revocation.ts";
+import { ticketHash } from "../src/desktop/service.ts";
 import { ServiceTokens } from "../src/index.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
 
@@ -208,9 +209,62 @@ it.each(["public", "blocked"])(
 				[seeded.sandboxId],
 			);
 		await recheckDesktopAccess(h.deps);
-		expect((await epoch()).auth_epoch).toBe(3);
+		// Lifting the denial and denying again each advance the epoch.
+		expect((await epoch()).auth_epoch).toBe(4);
 	},
 );
+
+it("a ticket written while a block is applied stays invalid after unblock", async () => {
+	const config = new Proxy(w.env.config, {
+		get(target, key) {
+			if (key === "template")
+				return async (slug: string) => {
+					const t = await target.template(slug);
+					return t
+						? { ...t, capabilities: [...t.capabilities, "desktop"] }
+						: null;
+				};
+			const v = Reflect.get(target, key);
+			return typeof v === "function" ? v.bind(target) : v;
+		},
+	});
+	const key = await w.key(["desktop"]);
+	const h = w.harness({ bearer: key.secret, deps: { config } });
+	const s = await w.seed({ state: "ready" });
+	await db.pool.query(
+		"INSERT INTO runtime.sandbox_desktops(sandbox_id,access) VALUES($1,'token')",
+		[s.sandboxId],
+	);
+	await db.pool.query("UPDATE runtime.sandboxes SET blocked=true WHERE id=$1", [
+		s.sandboxId,
+	]);
+	await recheckDesktopAccess(h.deps);
+	// A link request that passed the block check before the block reads the new epoch.
+	const ticket = `sbxd_${"r".repeat(43)}`;
+	await db.pool.query(
+		`INSERT INTO runtime.desktop_tickets(ticket_hash,sandbox_id,label,api_key_id,auth_epoch,expires_at)
+		 SELECT $1,$2,$3,$4,auth_epoch,now()+interval '10 minutes' FROM runtime.sandbox_desktops WHERE sandbox_id=$2`,
+		[ticketHash(ticket), s.sandboxId, `${s.slug}-desktop`, key.id],
+	);
+	await db.pool.query("UPDATE runtime.sandboxes SET blocked=false WHERE id=$1", [
+		s.sandboxId,
+	]);
+	await recheckDesktopAccess(h.deps);
+	const gateway = w.harness({
+		listener: "internal",
+		bearer: "gateway-desktop-token",
+		deps: {
+			config,
+			serviceTokens: new ServiceTokens({ gateway: ["gateway-desktop-token"] }),
+		},
+	});
+	const exchange = await gateway.request(
+		"POST",
+		"/internal/v1/gateway/desktop/tickets/exchange",
+		{ json: { ticket, label: `${s.slug}-desktop` } },
+	);
+	expect(exchange.status).toBe(401);
+});
 
 it("an operator block refuses desktop input, clipboard writes, links and access like exec", async () => {
 	const config = new Proxy(w.env.config, {

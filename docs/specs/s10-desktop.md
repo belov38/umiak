@@ -614,7 +614,7 @@ S9 ввёл `sbx-session` — helper в интерактивной сессии 
 | 403 | `forbidden` | нет | `public` при выключенном `publicDesktopEnabled` (`details.reason: "public_disabled"`) |
 
 - Состояние sandbox — как для команд (S7 §9.1): не `ready` → `409 sandbox_not_ready`.
-- **Блокировка оператором** (S8 C3, s10-fix): `POST /links`, `PUT /access`, `POST /actions`, `PUT /clipboard` на заблокированной sandbox → `403 forbidden` с `details.reason: "sandbox_blocked"`, как `exec` (оператор проходит). Чтение (`GET /desktop`, `GET /screenshot`, `GET /clipboard`) разрешено, как чтение файлов; `DELETE /streams` разрешён (только отключает). Сама блокировка шлёт `NOTIFY sbx_identity 'sandboxes:<id>'`; монитор доступа `api` по нему (и раз в 5 s) поднимает `authEpoch`, вызывает `EndStreams` и отмечает `policy_revoked`, поэтому выданные билеты и cookie перестают действовать, а маршрут gateway получает `blocked`.
+- **Блокировка оператором** (S8 C3, s10-fix): `POST /links`, `PUT /access`, `POST /actions`, `PUT /clipboard` на заблокированной sandbox → `403 forbidden` с `details.reason: "sandbox_blocked"`, как `exec` (оператор проходит). Чтение (`GET /desktop`, `GET /screenshot`, `GET /clipboard`) разрешено, как чтение файлов; `DELETE /streams` разрешён (только отключает). Сама блокировка шлёт `NOTIFY sbx_identity 'sandboxes:<id>'`; монитор доступа `api` по нему (и раз в 5 s) поднимает `authEpoch`, вызывает `EndStreams` и отмечает `policy_revoked`, поэтому выданные билеты и cookie перестают действовать, а маршрут gateway получает `blocked`. Снятие блокировки снова поднимает `authEpoch` (s10-fix2): билет, выданный в те миллисекунды, пока ставилась блокировка, мог получить эпоху блокировки и иначе ожил бы после разблокировки.
 - Ресурс Sandbox (S7 §8.1): `endpoints.desktop = "https://<slug>-desktop.<sbx-domain>/"` у шаблонов с capability `desktop` (без билета).
 
 ### 13.3 Внутренние ручки (internal listener, service token gateway)
@@ -635,7 +635,7 @@ S9 ввёл `sbx-session` — helper в интерактивной сессии 
 
 ### 13.5 Таблицы
 
-Схема `runtime`, миграции S10 в `db/migrations/`: **0401–0404** внутри блока S8 `0400–0499` по решению master (0400 занята S8 environments); следующий свободный номер блока — 0405 (`docs/roadmap.md`):
+Схема `runtime`, миграции S10 в `db/migrations/`: **0401–0405** внутри блока S8 `0400–0499` по решению master (0400 занята S8 environments); следующий свободный номер блока — 0406 (`docs/roadmap.md`):
 
 ```
 sandbox_desktops(
@@ -643,6 +643,7 @@ sandbox_desktops(
   access text,                    -- token | sso | public
   auth_epoch int,
   turn_issued_at timestamptz null,
+  turn_attempted_at timestamptz null, -- last renewal attempt (0405): failed guests go to the back
   pending_disconnect bool, policy_revoked bool,
   updated_at timestamptz)
 
