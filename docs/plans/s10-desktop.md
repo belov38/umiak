@@ -186,3 +186,8 @@ Windows desktop (2026-11-01): recipe windows-desktop (extends windows, slot 595)
 (desktop config ACL), 3 passed verify but live showed 1280x800 and unreadable streamer config
 (icacls (OI)(CI) /T), 4 = 20261101.1 with the agent ACL fix and OVMF PlatformConfig 1920x1080:
 verify 110/0 on rerun. Full live acceptance on CT 590 PASS (see spec). Linux regression PASS.
+
+Rebase on main 743f112 (Windows fork only from a stopped VM): clean. Windows e2e checks the 409
+without forceStop, fork desktop 1920x1080, computer_* on the fork and the resumed size. Live run
+found 1280x800 scaled desktops after the first boot (stored display configuration from the build);
+build 20261101.2 clears it in 65-streamer. Full Windows e2e PASS on 20261101.2.
