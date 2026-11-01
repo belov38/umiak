@@ -13,11 +13,23 @@ shared secret is preserved; use at least 32 random bytes, encoded as base64/hex.
 reads the same secret from its own read-only mount and sends only expiring HMAC
 credentials to guests. Never put the secret in `.env`, API responses or logs.
 
-Open UDP/TCP 3478 and TCP 443 to clients. Relay ports 49152–65535 stay local:
-peer permissions deny all IPv4/IPv6 addresses except this server's own IPv4.
-Only relay-to-relay candidates can pass. There is no unauthenticated mode.
+Open UDP/TCP 3478 and TCP 443 to clients. coturn runs in its own network
+namespace (the `turn` network): compose publishes only these listeners on
+`SBX_TURN_IP`, and the entrypoint adds `SBX_TURN_IP` to `lo` inside the namespace,
+so relay-to-relay traffic never leaves it and no host socket can be a peer. The
+entrypoint refuses to start on the host network. Relay ports 61000–65535 are
+above the ephemeral range, reserved in the namespace and not published; peer
+permissions deny all IPv4/IPv6 addresses except this server's own IPv4. Only
+relay-to-relay candidates can pass. There is no unauthenticated mode.
 TLS certs and the auth secret are mandatory. coturn's config is generated in
 private tmpfs; the process is unprivileged with only NET_BIND_SERVICE.
+
+The relay egress table `inet sbx_turn` is checked every 2 s by the entrypoint,
+which stays the container's init: if the table is removed or changed, the
+container exits (turnserver with it) and `restart: unless-stopped` starts it with
+a fresh table. The healthcheck runs the same comparison. A host firewall reload
+with `flush ruleset` would drop Docker's published-port rules (TURN unreachable,
+not open); keep the host's nftables.conf to its own tables.
 
 Proxmox egress firewall changes remain a separate operator step with a rollback
 timer and prior master notification. No firewall is changed by compose.

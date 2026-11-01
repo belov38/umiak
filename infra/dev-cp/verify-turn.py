@@ -16,6 +16,7 @@ import subprocess
 import time
 
 COOKIE = 0x2112A442
+RELAY_MIN, RELAY_MAX = (int(p) for p in os.environ.get("SBX_TURN_PROBE_RELAY_RANGE", "61000-61040").split("-"))
 
 
 def attr(kind, value):
@@ -45,14 +46,15 @@ def unpack(data):
 
 
 class Turn:
-    def __init__(self, transport, ip, host, ca, secret, ttl=120):
+    def __init__(self, transport, ip, host, ca, secret, ttl=120, timeout=10):
         self.transport = transport
+        self.timeout = timeout
         self.username = f"{int(time.time()) + ttl}:s10-verification".encode()
         self.password = base64.b64encode(hmac.digest(secret, self.username, "sha1"))
         self.key = None
         self.auth = []
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM if transport == "udp" else socket.SOCK_STREAM)
-        self.sock.settimeout(10)
+        self.sock.settimeout(timeout)
         self.sock.connect((ip, 5349 if transport == "tls" else 3478))
         if transport == "tls":
             self.sock = ssl.create_default_context(cafile=ca).wrap_socket(self.sock, server_hostname=host)
@@ -90,7 +92,7 @@ class Turn:
         address = response[0x16]
         port = struct.unpack("!H", address[2:4])[0] ^ (COOKIE >> 16)
         self.relay_port = port
-        assert 49160 <= port <= 49200, "relay escaped dev port range"
+        assert RELAY_MIN <= port <= RELAY_MAX, "relay escaped dev port range"
 
     def peer(self, ip, port=50000):
         value = bytes([0, 1]) + struct.pack("!H", port ^ (COOKIE >> 16))
@@ -111,7 +113,7 @@ class Turn:
         except (socket.timeout, TimeoutError):
             return None
         finally:
-            self.sock.settimeout(10)
+            self.sock.settimeout(self.timeout)
         kind, attrs, _ = unpack(data)
         return attrs.get(0x13) if kind == 0x17 else None
 
@@ -141,6 +143,81 @@ class Turn:
             self.refresh(0)
         finally:
             self.sock.close()
+
+
+def listen_while(ssh, ip, ports, send):
+    """UDP sockets of the CT host bound to ip:ports; returns 'nothing' or what arrived."""
+    listener = subprocess.Popen(ssh + [shlex.join([
+        "python3", "-I", "-c",
+        "import select,socket,sys,time\n"
+        "socks=[]\n"
+        "for p in sys.argv[2:]:\n s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.bind((sys.argv[1],int(p))); socks.append(s)\n"
+        "print('ready',flush=True)\n"
+        "r,_,_=select.select(socks,[],[],6)\n"
+        "print(' '.join(f'received {len(s.recvfrom(2048)[0])} on {s.getsockname()[1]}' for s in r) or 'nothing',flush=True)",
+        ip, *map(str, ports),
+    ])], stdout=subprocess.PIPE, text=True)
+    try:
+        assert listener.stdout.readline().strip() == "ready", "probe listener did not start"
+        send()
+        return listener.stdout.readline().strip()
+    finally:
+        listener.wait(timeout=20)
+
+
+def relays(ip, host, ca, secret):
+    """True when a UDP allocation reaches another allocation's relay (relay <-> relay)."""
+    try:
+        a, b = (Turn("udp", ip, host, ca, secret, timeout=1) for _ in range(2))
+    except OSError:
+        return False
+    try:
+        a.allocate()
+        b.allocate()
+        if a.permission(ip) or b.permission(ip):
+            return False
+        payload = os.urandom(16)
+        for _ in range(3):
+            a.send_indication(ip, b.relay_port, payload)
+            if b.data_indication(timeout=1) == payload:
+                return True
+        return False
+    except (OSError, AssertionError, RuntimeError, struct.error):
+        return False
+    finally:
+        for t in (a, b):
+            try:
+                t.close()
+            except (OSError, AssertionError, RuntimeError, struct.error):
+                pass
+
+
+def guard_probe(ssh, pve, ip, host, ca, secret):
+    """Fail-closed relay table: removal stops relaying; nftables reload on the CT does not touch it."""
+    table = ["docker", "exec", "sbx-turn-1", "nft", "-s", "list", "table", "inet", "sbx_turn"]
+    assert relays(ip, host, ca, secret), "relay <-> relay broken before the guard probe"
+    subprocess.check_call(ssh + ["docker", "exec", "sbx-turn-1", "nft", "delete", "table", "inet", "sbx_turn"])
+    removed = time.monotonic()
+    while True:
+        attempt = time.monotonic()
+        if not relays(ip, host, ca, secret):
+            break
+        assert attempt - removed < 10, "TURN kept relaying without its egress table"
+    stopped = attempt - removed
+    while not (relays(ip, host, ca, secret) and subprocess.run(ssh + table, capture_output=True).returncode == 0):
+        assert time.monotonic() - removed < 90, "TURN did not recover with its table"
+        time.sleep(1)
+    print(f"ok TURN stopped relaying {stopped:.1f} s after its table was deleted, "
+          f"recovered with the table after {time.monotonic() - removed:.1f} s", flush=True)
+    before = subprocess.check_output(ssh + ["docker", "inspect", "-f", "{{.State.StartedAt}}", "sbx-turn-1"], text=True)
+    subprocess.check_call(pve + ["pct", "exec", os.environ.get("SBX_DEVCP_CTID", "590"), "--",
+                                 "systemctl", "reload", "nftables"])
+    time.sleep(5)
+    after = subprocess.check_output(ssh + ["docker", "inspect", "-f", "{{.State.StartedAt}}", "sbx-turn-1"], text=True)
+    assert before == after, "nftables reload on the CT restarted TURN"
+    assert subprocess.run(ssh + table, capture_output=True).returncode == 0, "nftables reload removed the TURN table"
+    assert relays(ip, host, ca, secret), "TURN stopped relaying after nftables reload on the CT"
+    print("ok nftables reload on the CT leaves the TURN namespace table and published ports", flush=True)
 
 
 def main():
@@ -190,31 +267,25 @@ def main():
                 print(f"ok TURN relay<->relay media to a {transport} client", flush=True)
             finally:
                 receiver.close()
-        # Our own address outside the relay range (another service of this host) is unreachable.
+        # Sockets of the host on the TURN address, outside and inside the relay range
+        # (another service, an ephemeral client socket), are never relay peers.
         listen = int(os.environ.get("SBX_TURN_PROBE_LISTEN_PORT", "40123"))
-        listener = subprocess.Popen(ssh + [shlex.join([
-            "python3", "-I", "-c",
-            "import socket,sys; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.bind((sys.argv[1],int(sys.argv[2]))); s.settimeout(6); print('ready',flush=True)\n"
-            "try:\n print('received',len(s.recvfrom(2048)[0]),flush=True)\nexcept socket.timeout:\n print('nothing',flush=True)",
-            ip, str(listen),
-        ])], stdout=subprocess.PIPE, text=True)
-        try:
-            assert listener.stdout.readline().strip() == "ready", "probe listener did not start"
-            for port in (listen, 41641):
-                for _ in range(3):
-                    sender.send_indication(ip, port, b"s10-port-probe")
-            result = listener.stdout.readline().strip()
-        finally:
-            listener.wait(timeout=20)
-        assert result == "nothing", f"TURN relayed to {ip}:{listen} ({result})"
+        result = listen_while(ssh, ip, [listen, RELAY_MAX - 1], lambda: [
+            sender.send_indication(ip, port, b"s10-port-probe")
+            for port in (listen, 41641, RELAY_MAX - 1) for _ in range(3)
+        ])
+        assert result == "nothing", f"TURN relayed to a host socket on {ip} ({result})"
         drops = subprocess.check_output(ssh + [
             "docker", "exec", "sbx-turn-1", "nft", "list", "chain", "inet", "sbx_turn", "relay_egress",
         ], text=True)
         assert "non-relay peer" in drops and "packets 0 " not in drops.split("non-relay peer")[0].splitlines()[-1], \
             "relay egress filter did not count the denied probe"
-        print(f"ok TURN own-address ports {listen} and 41641 denied, relay range only", flush=True)
+        print(f"ok TURN host sockets on {listen}, 41641 and relay-range {RELAY_MAX - 1} unreachable", flush=True)
     finally:
         sender.close()
+    if os.environ.get("SBX_TURN_PROBE_GUARD"):
+        guard_probe(ssh, ["ssh", "-o", "BatchMode=yes", os.environ.get("SBX_DEVCP_PVE_SSH", "pve")],
+                    ip, host, ca, secret)
     if os.environ.get("SBX_TURN_PROBE_RECONNECTS"):
         clients = []
         try:

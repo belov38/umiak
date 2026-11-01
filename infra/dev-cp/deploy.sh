@@ -155,6 +155,14 @@ COMPOSE_FILE=$FILES:../../infra/dev-cp/compose.dev-cp.yaml
 COMPOSE_PROFILES=desktop
 SBX_DEVCP_TURN_IP=$TURN_IP
 SBX_DEVCP_TURN_HOST=$TURN_HOST
+# Dev TURN on the CT address (README): TLS on 5349 (443 is the gateway), relay ports above
+# the ephemeral range (32768-60999) and never published.
+SBX_TURN_IP=$TURN_IP
+SBX_TURN_REALM=$TURN_HOST
+SBX_TURN_PORT=3478
+SBX_TURN_TLS_PORT=5349
+SBX_TURN_RELAY_MIN=61000
+SBX_TURN_RELAY_MAX=61040
 SBX_DEVCP_TURN_URLS=turn:$TURN_HOST:3478?transport=udp,turn:$TURN_HOST:3478?transport=tcp,turns:$TURN_HOST:5349?transport=tcp
 # The PVE host over the LAN. migrate (bootstrap) loads the API URL from secrets/devcp/sbx.yaml.
 SBX_PVE_URL=https://$PVE_LAN_IP:8006
@@ -201,7 +209,7 @@ docker compose up -d --remove-orphans 2>&1 | tail -30
 # api, worker and web wait for migrate and web-migrate.
 healthy() {
 	local s
-	for s in worker gateway api oauth2-proxy web mcp; do
+	for s in worker gateway api oauth2-proxy web mcp turn; do
 		[ "$(docker compose ps --format '{{.Health}}' "$s")" = healthy ] || return 1
 	done
 }

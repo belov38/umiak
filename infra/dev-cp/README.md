@@ -224,8 +224,20 @@ and firewall rules is a separate network change (notify master and use auto roll
 CT590 was not redeployed for S10 in this pass. Public create/media/TURN and long-idle
 viewer checks have not run; direct pairing and HTML alone do not prove video transport.
 
-Dev TURN runs in the desktop compose profile on CT590's existing address: UDP/TCP3478,
-TLS5349 and UDP relay49160–49200. `turn-cert.sh` issues a leaf below the existing
+Dev TURN runs in the desktop compose profile on CT590's existing address: UDP/TCP3478 and
+TLS5349 are published from its own network namespace (the address is on `lo` inside it);
+the UDP relay range 61000–61040 lies above the CT's ephemeral ports (32768–60999), is
+reserved in that namespace and is not published (s10-fix2; was 49160–49200 on the host
+network). deploy.sh writes `SBX_TURN_*` into `.env`. The PVE firewall of 590 still has the
+old `udp 49160:49200` accept from the first TURN setup; nothing listens there for TURN any
+more, `turn-firewall.py` no longer adds it, and removing it is a host change for master.
+
+CT590's `/etc/nftables.conf` (s10-fix2, also written by `infra/pve/setup.sh cp`) manages
+only `table inet filter`; Debian's `flush ruleset` would also drop Docker's iptables-nft
+rules, so a `systemctl reload nftables` cut every published port. The original file is
+kept as `/etc/nftables.conf.before-s10-fix2` in the CT. The TURN relay table lives in the
+TURN namespace and is untouched by host reloads; the TURN entrypoint watches it every 2 s
+and exits (compose restarts it with a fresh table) when it is removed or changed. `turn-cert.sh` issues a leaf below the existing
 CA's permitted tunnel namespace (`turn.$TUNNEL_HOST`), preserving the CA trusted by
 images. CT memory remains6GiB. Production TLS443/dedicatedIP/SNI is a follow-up.
 
@@ -233,8 +245,12 @@ Firewall changes use `turn-firewall.py apply` **only after telling master and ar
 an automatic rollback timer**. `rollback` removes only tagged S10 rules and preserves
 concurrent edits. Compile/check gateway and SSH before cancelling the timer.
 `mise exec -- python infra/dev-cp/verify-turn.py` tests actual UDP/TCP/TLS allocation,
-peer restrictions, relay-to-relay media, the relay port filter (own address `:40123` and
-tailscaled `:41641` unreachable) and expiry on Refresh without logging the REST secret.
+peer restrictions, relay-to-relay media, the relay port filter (host sockets on the TURN
+address — `:40123`, tailscaled `:41641` and a listener inside the relay range — unreachable)
+and expiry on Refresh without logging the REST secret. `SBX_TURN_PROBE_GUARD=1` adds the
+fail-closed probe: delete the table with `docker exec` (relaying must stop within seconds and
+recover with the table), then `systemctl reload nftables` in the CT via `pct exec` (TURN must
+keep relaying, its table intact).
 `desktop-block-probe.ts` (operator block) and `desktop-cache-probe.ts` (no screenshots in
 the agent `state.db`) are separate live probes; both need the logged-in CLI on PATH. Upstream
 coturn keeps an allocation's password after the REST timestamp expires, so the product

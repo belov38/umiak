@@ -22,7 +22,7 @@ def update(root: Path, enable: bool) -> None:
         rules = f"OUT ACCEPT -dest +sbx-gateway -p udp -dport 3478 {MARKER}\n"
         cleaned[0] = cleaned[0].replace(anchor, rules + anchor, 1)
         rules = (f"IN ACCEPT -source 192.168.68.0/24 -p tcp -dport 3478,5349 {MARKER}\n"
-                 f"IN ACCEPT -source 192.168.68.0/24 -p udp -dport 3478,49160:49200 {MARKER}\n")
+                 f"IN ACCEPT -source 192.168.68.0/24 -p udp -dport 3478 {MARKER}\n")
         cleaned[1] = cleaned[1].replace("[RULES]\n", "[RULES]\n" + rules, 1)
     cluster.write_text(cleaned[0])
     ct.write_text(cleaned[1])

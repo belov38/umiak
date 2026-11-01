@@ -21,14 +21,8 @@
 x-devcp-proxy-cidrs: &devcp-proxy-cidrs 172.16.0.0/12,127.0.0.1/32
 
 services:
-  turn:
-    environment:
-      SBX_TURN_IP: ${SBX_DEVCP_TURN_IP:?set by deploy.sh}
-      SBX_TURN_REALM: ${SBX_DEVCP_TURN_HOST:?set by deploy.sh}
-      SBX_TURN_PORT: "3478"
-      SBX_TURN_TLS_PORT: "5349"
-      SBX_TURN_RELAY_MIN: "49160"
-      SBX_TURN_RELAY_MAX: "49200"
+  # turn (desktop profile) takes SBX_TURN_* from .env (deploy.sh): its published ports and
+  # sysctls are interpolated in deploy/compose/turn.yaml, not only its environment.
 
   # sbx.yaml with the PVE API on the host LAN address (deploy.sh writes it from config/sbx.yaml).
   migrate:
