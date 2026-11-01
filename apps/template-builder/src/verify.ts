@@ -12,6 +12,7 @@ import {
 	type Machines,
 	type NodeOps,
 	type ReadyInfo,
+	retryOnVmLock,
 	type Smbios,
 	type SnapshotRef,
 	s2SerialPayload,
@@ -758,7 +759,12 @@ export async function verifyTemplate(
 		// source evidence before stopping it; the fork never needs both guests live.
 		const sourceFacts = await facts(A);
 		if (manifest.templateSlug === "linux-desktop") {
-			await machines.stop(A.vmid);
+			// The hard restart above leaves qmeventd holding the VM lock for a while.
+			await retryOnVmLock(() => machines.stop(A.vmid), {
+				sleep,
+				onRetry: (err) =>
+					log(`stop VM ${A.vmid}: ${errorText(err)}; retrying`),
+			});
 			deps.ramGuard.release(A.vmid);
 			A.reserved = false;
 		}

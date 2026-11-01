@@ -158,13 +158,13 @@ topology:
 
     # S10: windows-desktop (extends windows, slot 595); verify 110 checks, 0 FAIL.
     - templateSlug: windows-desktop
-      version: "20261101.2"
+      version: "20261101.3"
       os: windows
       node: pve
       storage: local-lvm
       pveVmid: 595
       bootTimeoutS: 1200
-      agentVersion: 0.1.0+20261101.cbddbf59
+      agentVersion: 0.1.0+20261101.fabc0b94
       hw:
         machine: pc-q35-11.0+pve2
         cpu: host
@@ -195,13 +195,13 @@ topology:
 
     # S10: verified Linux desktop build; no warm/hibernated pool.
     - templateSlug: linux-desktop
-      version: "20261031.6"
+      version: "20261101.2"
       os: linux
       node: pve
       storage: local-lvm
       pveVmid: 596
       bootTimeoutS: 300
-      agentVersion: 0.1.0+20261031.4865e13
+      agentVersion: 0.1.0+20261101.fabc0b94
       hw:
         {
           "machine": "q35",
