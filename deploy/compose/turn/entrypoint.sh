@@ -45,8 +45,12 @@ NFT
 
 umask 077
 install -d -m 0700 -o "$uid" -g "$uid" "$run/state"
-install -m 0400 -o "$uid" -g "$uid" "$secrets/tls.crt" "$run/tls.crt"
-install -m 0400 -o "$uid" -g "$uid" "$secrets/tls.key" "$run/tls.key"
+# Mode first: without CAP_FOWNER root cannot chmod a file it no longer owns.
+for f in tls.crt tls.key; do
+ cat "$secrets/$f" >"$run/$f"
+ chmod 0400 "$run/$f"
+ chown "$uid:$uid" "$run/$f"
+done
 config="$run/turnserver.conf"
 cat >"$config" <<CONF
 listening-port=$port
@@ -80,9 +84,10 @@ log-file=stdout
 simple-log
 CONF
 unset secret
-chown "$uid:$uid" "$config"
 chmod 0400 "$config"
+chown "$uid:$uid" "$config"
 # Drop to the relay uid; keep only the bind capability for privileged listener ports.
+# The bounding set is the container's cap_add; no-new-privileges blocks regaining the rest.
 exec setpriv --reuid="$uid" --regid="$uid" --clear-groups \
  --inh-caps=-all,+net_bind_service --ambient-caps=-all,+net_bind_service \
- --bounding-set=-all,+net_bind_service turnserver -c "$config"
+ turnserver -c "$config"

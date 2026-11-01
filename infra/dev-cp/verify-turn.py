@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import os
 from pathlib import Path
+import shlex
 import socket
 import ssl
 import struct
@@ -191,12 +192,12 @@ def main():
                 receiver.close()
         # Our own address outside the relay range (another service of this host) is unreachable.
         listen = int(os.environ.get("SBX_TURN_PROBE_LISTEN_PORT", "40123"))
-        listener = subprocess.Popen(ssh + [
+        listener = subprocess.Popen(ssh + [shlex.join([
             "python3", "-I", "-c",
             "import socket,sys; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.bind((sys.argv[1],int(sys.argv[2]))); s.settimeout(6); print('ready',flush=True)\n"
             "try:\n print('received',len(s.recvfrom(2048)[0]),flush=True)\nexcept socket.timeout:\n print('nothing',flush=True)",
             ip, str(listen),
-        ], stdout=subprocess.PIPE, text=True)
+        ])], stdout=subprocess.PIPE, text=True)
         try:
             assert listener.stdout.readline().strip() == "ready", "probe listener did not start"
             for port in (listen, 41641):

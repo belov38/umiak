@@ -87,7 +87,7 @@ func TestDesktopTURNSecretInitAndRestrictedConfig(t *testing.T) {
 			}
 		}
 		drop, _ := os.ReadFile(filepath.Join(dir, "config.setpriv"))
-		if !strings.Contains(string(drop), "--reuid=3478 --regid=3478 --clear-groups") || !strings.Contains(string(drop), "--bounding-set=-all,+net_bind_service turnserver") {
+		if !strings.Contains(string(drop), "--reuid=3478 --regid=3478 --clear-groups") || !strings.Contains(string(drop), "--ambient-caps=-all,+net_bind_service turnserver") {
 			t.Fatalf("turnserver keeps root: %s", drop)
 		}
 		if bytes.Contains(out, secret) {
