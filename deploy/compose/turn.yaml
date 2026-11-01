@@ -20,6 +20,10 @@ services:
     # turnserver runs as SBX_TURN_UID.
     user: "0:0"
     entrypoint: ["/bin/sh", "/etc/sbx-turn/entrypoint.sh"]
+    # A changed entrypoint changes the label, so `compose up` recreates the container
+    # (the running init keeps the old script otherwise).
+    labels:
+      sbx.turn.entrypoint-sha256: ${SBX_TURN_ENTRYPOINT_SHA256:-}
     environment:
       SBX_TURN_IP: ${SBX_TURN_IP:-}
       SBX_TURN_REALM: ${SBX_TURN_REALM:-}

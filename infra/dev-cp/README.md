@@ -237,7 +237,7 @@ only `table inet filter`; Debian's `flush ruleset` would also drop Docker's ipta
 rules, so a `systemctl reload nftables` cut every published port. The original file is
 kept as `/etc/nftables.conf.before-s10-fix2` in the CT. The TURN relay table lives in the
 TURN namespace and is untouched by host reloads; the TURN entrypoint watches it every 2 s
-and exits (compose restarts it with a fresh table) when it is removed or changed. `turn-cert.sh` issues a leaf below the existing
+and exits (compose restarts it with a fresh table) when it is removed or changed, or when the TURN address leaves `lo` (s10-followups; the healthcheck checks both). The entrypoint is bind-mounted; deploy.sh puts its hash into `.env` and turn.yaml into a label, so a changed entrypoint recreates the container. `turn-cert.sh` issues a leaf below the existing
 CA's permitted tunnel namespace (`turn.$TUNNEL_HOST`), preserving the CA trusted by
 images. CT memory remains6GiB. Production TLS443/dedicatedIP/SNI is a follow-up.
 
