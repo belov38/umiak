@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -264,6 +265,51 @@ func TestApplyRenameRebootsBounded(t *testing.T) {
 	}
 	if f, err := LoadFile(l.IdentityFile); err != nil || f.RenameReboots != 0 {
 		t.Errorf("identity.json = %+v, %v; want the counter reset", f, err)
+	}
+}
+
+// A rename reboot that Windows has not carried out yet in the boot that asked
+// for it is asked for again on every apply of that boot, without counting
+// and without giving up: giving up would let the machine go ready and reboot
+// later under its user. Only boots that did reboot count.
+func TestApplyRenameRebootSameBootNeverGivesUp(t *testing.T) {
+	l := winLayout(t)
+	r := newWinFake(t, l, "SBXTEMPLATE")
+	boot := func(id string) Identity {
+		i := testIdentity(testMachineID)
+		i.BootID = id
+		return i
+	}
+	// First apply of a clone: the identity changes and the name needs a reboot.
+	changed, reboot, err := ApplyWindows(context.Background(), l, boot("boot-1"), r, ModeService)
+	if err != nil || !changed || !reboot {
+		t.Fatalf("first apply: changed, reboot, err = %v, %v, %v", changed, reboot, err)
+	}
+	// The agent restarts several times in the same boot: the reboot is still due.
+	for i := range 2 * MaxRenameReboots {
+		_, reboot, err := ApplyWindows(context.Background(), l, boot("boot-1"), r, ModeService)
+		if err != nil || !reboot {
+			t.Fatalf("same boot, apply %d: reboot, err = %v, %v; want the reboot asked for again", i+2, reboot, err)
+		}
+	}
+	f, err := LoadFile(l.IdentityFile)
+	if err != nil || f.RenameReboots != 0 || f.RebootBoot != "boot-1" {
+		t.Fatalf("identity.json = %+v, %v; want no counted reboots, rebootBoot boot-1", f, err)
+	}
+	// Reboots that happened but left the name out of effect count up to the bound.
+	for i, want := range []bool{true, true, false} {
+		_, reboot, err := ApplyWindows(context.Background(), l, boot(fmt.Sprintf("boot-%d", i+2)), r, ModeService)
+		if err != nil || reboot != want {
+			t.Fatalf("boot %d: reboot, err = %v, %v; want %v", i+2, reboot, err, want)
+		}
+	}
+	// The name takes effect: the counter and the pending boot are cleared.
+	r.Active = testComputerName
+	if _, reboot, err := ApplyWindows(context.Background(), l, boot("boot-5"), r, ModeService); err != nil || reboot {
+		t.Fatalf("name in effect: reboot, err = %v, %v", reboot, err)
+	}
+	if f, err := LoadFile(l.IdentityFile); err != nil || f.RenameReboots != 0 || f.RebootBoot != "" {
+		t.Errorf("identity.json = %+v, %v; want the counter and rebootBoot cleared", f, err)
 	}
 }
 
