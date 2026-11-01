@@ -86,9 +86,9 @@ export function SandboxHeader({
 			>
 				← Sandboxes
 			</Link>
-			<div className="flex flex-wrap items-start gap-3">
+			<div className="flex flex-col items-stretch gap-4">
 				<div className="min-w-0 space-y-1">
-					<h1 className="flex items-center gap-2 text-xl font-semibold">
+					<h1 className="sandbox-detail-heading flex items-center gap-2 font-semibold">
 						<span className="truncate">{s.name ?? s.slug}</span>
 						<BlockLock sandbox={s} />
 					</h1>
@@ -106,7 +106,7 @@ export function SandboxHeader({
 						</Button>
 					</div>
 				</div>
-				<div className="ml-auto flex flex-wrap items-center gap-1.5">
+				<div className="flex flex-wrap items-center gap-1.5">
 					{s.state === "stopped" ? (
 						<Button
 							size="sm"
@@ -293,54 +293,70 @@ function Facts({
 	const labels = Object.entries(s.labels);
 	return (
 		<dl className="sandbox-facts">
-			<dt className="text-muted-foreground">State</dt>
-			<dd>
-				<StateCell sandbox={s} />
-			</dd>
-			<dt className="text-muted-foreground">Health</dt>
-			<dd>
-				<HealthCell sandbox={s} />
-				<span className="ml-2 text-muted-foreground">
-					activity: {s.activity}
-				</span>
-			</dd>
-			<dt className="text-muted-foreground">Template</dt>
-			<dd>
-				{s.template}
-				{s.templateVersion ? ` · ${s.templateVersion}` : ""}
-			</dd>
-			<dt className="text-muted-foreground">Size</dt>
-			<dd>
-				{s.size} · {s.vcpu} vCPU · {s.memoryMb} MB
-			</dd>
-			<dt className="text-muted-foreground">Origin</dt>
-			<dd>{originText(teamId, s)}</dd>
-			<dt className="text-muted-foreground">Labels</dt>
-			<dd className="flex flex-wrap gap-1">
-				{labels.length === 0
-					? "—"
-					: labels.map(([k, v]) => (
-							<code key={k} className="rounded bg-muted px-1 text-xs">
-								{k}={v}
-							</code>
-						))}
-			</dd>
-			<dt className="text-muted-foreground">TTL</dt>
-			<dd>
-				{formatSeconds(s.ttlSeconds)}
-				{s.deadlineAt && (
-					<span className="text-muted-foreground">
-						{" "}
-						· deleted at {formatTime(s.deadlineAt)}
+			<div className="sandbox-fact">
+				<dt className="text-muted-foreground">State</dt>
+				<dd>
+					<StateCell sandbox={s} />
+				</dd>
+			</div>
+			<div className="sandbox-fact">
+				<dt className="text-muted-foreground">Health</dt>
+				<dd>
+					<HealthCell sandbox={s} />
+					<span className="ml-2 text-muted-foreground">
+						activity: {s.activity}
 					</span>
-				)}
-			</dd>
-			<dt className="text-muted-foreground">Idle stop</dt>
-			<dd>
-				{s.idleTimeoutSeconds === null
-					? "off"
-					: `after ${formatSeconds(s.idleTimeoutSeconds)}`}
-			</dd>
+				</dd>
+			</div>
+			<div className="sandbox-fact">
+				<dt className="text-muted-foreground">Template</dt>
+				<dd>
+					{s.template}
+					{s.templateVersion ? ` · ${s.templateVersion}` : ""}
+				</dd>
+			</div>
+			<div className="sandbox-fact">
+				<dt className="text-muted-foreground">Size</dt>
+				<dd>
+					{s.size} · {s.vcpu} vCPU · {s.memoryMb} MB
+				</dd>
+			</div>
+			<div className="sandbox-fact">
+				<dt className="text-muted-foreground">Origin</dt>
+				<dd>{originText(teamId, s)}</dd>
+			</div>
+			<div className="sandbox-fact">
+				<dt className="text-muted-foreground">Labels</dt>
+				<dd className="flex flex-wrap gap-1">
+					{labels.length === 0
+						? "—"
+						: labels.map(([k, v]) => (
+								<code key={k} className="rounded bg-muted px-1 text-xs">
+									{k}={v}
+								</code>
+							))}
+				</dd>
+			</div>
+			<div className="sandbox-fact">
+				<dt className="text-muted-foreground">TTL</dt>
+				<dd>
+					{formatSeconds(s.ttlSeconds)}
+					{s.deadlineAt && (
+						<span className="text-muted-foreground">
+							{" "}
+							· deleted at {formatTime(s.deadlineAt)}
+						</span>
+					)}
+				</dd>
+			</div>
+			<div className="sandbox-fact">
+				<dt className="text-muted-foreground">Idle stop</dt>
+				<dd>
+					{s.idleTimeoutSeconds === null
+						? "off"
+						: `after ${formatSeconds(s.idleTimeoutSeconds)}`}
+				</dd>
+			</div>
 		</dl>
 	);
 }

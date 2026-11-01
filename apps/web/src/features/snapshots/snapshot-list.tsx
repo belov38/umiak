@@ -88,104 +88,106 @@ export function SnapshotList({ teamId }: { teamId: string }) {
 					</p>
 				)}
 			</div>
-			<h2>Saved snapshots</h2>
-			<p className="text-sm text-muted-foreground">
-				Save a snapshot from a sandbox's page. A snapshot belongs to this team
-				only.
-			</p>
-			{snapshots.isError && (
-				<QueryError
-					error={snapshots.error}
-					what="snapshots"
-					onRetry={() => snapshots.refetch()}
-				/>
-			)}
-			{snapshots.isPending && (
-				<p className="text-sm text-muted-foreground">Loading…</p>
-			)}
-			{snapshots.data && snapshots.data.length === 0 && (
-				<div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-					No saved snapshots yet.
-				</div>
-			)}
-			{snapshots.data && snapshots.data.length > 0 && (
-				<Table data-testid="snapshot-table">
-					<TableHeader>
-						<TableRow>
-							<TableHead>Name</TableHead>
-							<TableHead>State</TableHead>
-							<TableHead>Source</TableHead>
-							<TableHead>Template</TableHead>
-							<TableHead>Size</TableHead>
-							<TableHead>Consistency</TableHead>
-							<TableHead>Created</TableHead>
-							<TableHead />
-						</TableRow>
-					</TableHeader>
-					<TableBody>
-						{snapshots.data.map((s) => (
-							<TableRow key={s.id} data-testid="snapshot-row">
-								<TableCell className="font-medium">{s.name}</TableCell>
-								<TableCell>
-									<SnapshotState snapshot={s} />
-								</TableCell>
-								<TableCell>
-									{s.sourceSandboxId ? (
-										<Link
-											href={sandboxHref(teamId, s.sourceSandboxId)}
-											className="font-mono text-xs hover:underline"
-										>
-											{s.sourceSandboxId}
-										</Link>
-									) : (
-										"—"
-									)}
-								</TableCell>
-								<TableCell>
-									{s.template ?? "—"}
-									{s.templateVersion && (
-										<div className="text-xs text-muted-foreground">
-											{s.templateVersion}
-										</div>
-									)}
-								</TableCell>
-								<TableCell>{s.size ?? "—"}</TableCell>
-								<TableCell className="text-muted-foreground">
-									{s.consistency
-										? (CONSISTENCY[s.consistency] ?? s.consistency)
-										: "—"}
-								</TableCell>
-								<TableCell>{formatAgo(s.createdAt, now)}</TableCell>
-								<TableCell>
-									<div className="flex justify-end gap-1">
-										{s.state === "ready" && (
-											<Button asChild size="xs" variant="outline">
-												<Link
-													href={newSandboxHref(teamId, { snapshot: s.name })}
-												>
-													Create sandbox
-												</Link>
-											</Button>
-										)}
-										{s.state !== "deleting" && (
-											<ConfirmButton
-												title={`Delete snapshot ${s.name}?`}
-												description="Sandboxes created from it keep running. This cannot be undone."
-												confirmLabel="Delete"
-												variant="ghost"
-												size="xs"
-												onConfirm={() => remove(s)}
-											>
-												Delete
-											</ConfirmButton>
-										)}
-									</div>
-								</TableCell>
+			<div className="snapshot-panel space-y-3 border p-5">
+				<h2>Saved snapshots</h2>
+				<p className="text-sm text-muted-foreground">
+					Save a snapshot from a sandbox's page. A snapshot belongs to this team
+					only.
+				</p>
+				{snapshots.isError && (
+					<QueryError
+						error={snapshots.error}
+						what="snapshots"
+						onRetry={() => snapshots.refetch()}
+					/>
+				)}
+				{snapshots.isPending && (
+					<p className="text-sm text-muted-foreground">Loading…</p>
+				)}
+				{snapshots.data && snapshots.data.length === 0 && (
+					<div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+						No saved snapshots yet.
+					</div>
+				)}
+				{snapshots.data && snapshots.data.length > 0 && (
+					<Table data-testid="snapshot-table">
+						<TableHeader>
+							<TableRow>
+								<TableHead>Name</TableHead>
+								<TableHead>State</TableHead>
+								<TableHead>Source</TableHead>
+								<TableHead>Template</TableHead>
+								<TableHead>Size</TableHead>
+								<TableHead>Consistency</TableHead>
+								<TableHead>Created</TableHead>
+								<TableHead />
 							</TableRow>
-						))}
-					</TableBody>
-				</Table>
-			)}
+						</TableHeader>
+						<TableBody>
+							{snapshots.data.map((s) => (
+								<TableRow key={s.id} data-testid="snapshot-row">
+									<TableCell className="font-medium">{s.name}</TableCell>
+									<TableCell>
+										<SnapshotState snapshot={s} />
+									</TableCell>
+									<TableCell>
+										{s.sourceSandboxId ? (
+											<Link
+												href={sandboxHref(teamId, s.sourceSandboxId)}
+												className="font-mono text-xs hover:underline"
+											>
+												{s.sourceSandboxId}
+											</Link>
+										) : (
+											"—"
+										)}
+									</TableCell>
+									<TableCell>
+										{s.template ?? "—"}
+										{s.templateVersion && (
+											<div className="text-xs text-muted-foreground">
+												{s.templateVersion}
+											</div>
+										)}
+									</TableCell>
+									<TableCell>{s.size ?? "—"}</TableCell>
+									<TableCell className="text-muted-foreground">
+										{s.consistency
+											? (CONSISTENCY[s.consistency] ?? s.consistency)
+											: "—"}
+									</TableCell>
+									<TableCell>{formatAgo(s.createdAt, now)}</TableCell>
+									<TableCell>
+										<div className="flex justify-end gap-1">
+											{s.state === "ready" && (
+												<Button asChild size="xs" variant="outline">
+													<Link
+														href={newSandboxHref(teamId, { snapshot: s.name })}
+													>
+														Create sandbox
+													</Link>
+												</Button>
+											)}
+											{s.state !== "deleting" && (
+												<ConfirmButton
+													title={`Delete snapshot ${s.name}?`}
+													description="Sandboxes created from it keep running. This cannot be undone."
+													confirmLabel="Delete"
+													variant="ghost"
+													size="xs"
+													onConfirm={() => remove(s)}
+												>
+													Delete
+												</ConfirmButton>
+											)}
+										</div>
+									</TableCell>
+								</TableRow>
+							))}
+						</TableBody>
+					</Table>
+				)}
+			</div>
 		</section>
 	);
 }
