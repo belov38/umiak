@@ -238,28 +238,40 @@ try {
 		process.env.SBX_DESKTOP_MCP_URL ?? "",
 		windows,
 	);
-	const link = await sb.desktop.link();
+	// The first open starts the streamer: like the Desktop tab, a retryable
+	// desktop_starting gets a fresh single-use ticket after 2 s.
 	const jar = new Map<string, string>();
-	let url = link.url;
+	let url = "";
 	let response: Response | undefined;
-	for (let i = 0; i < 5; i++) {
-		response = await fetch(url, {
-			redirect: "manual",
-			headers: { cookie: [...jar.values()].join("; ") },
-		});
-		for (const cookie of response.headers.getSetCookie()) {
-			const pair = cookie.split(";")[0];
-			if (pair) jar.set(pair.split("=")[0] ?? pair, pair);
+	const openStartedAt = Date.now();
+	for (;;) {
+		const link = await sb.desktop.link();
+		jar.clear();
+		url = link.url;
+		for (let i = 0; i < 5; i++) {
+			response = await fetch(url, {
+				redirect: "manual",
+				headers: { cookie: [...jar.values()].join("; ") },
+			});
+			for (const cookie of response.headers.getSetCookie()) {
+				const pair = cookie.split(";")[0];
+				if (pair) jar.set(pair.split("=")[0] ?? pair, pair);
+			}
+			const location = response.headers.get("location");
+			if (!location) break;
+			const next = new URL(location, url);
+			check(
+				next.origin === new URL(link.url).origin,
+				"gateway redirect stays on desktop origin",
+			);
+			url = next.href;
 		}
-		const location = response.headers.get("location");
-		if (!location) break;
-		const next = new URL(location, url);
-		check(
-			next.origin === new URL(link.url).origin,
-			"gateway redirect stays on desktop origin",
-		);
-		url = next.href;
+		if (response?.status !== 503 || Date.now() - openStartedAt > 90_000) break;
+		const body = await response.clone().text();
+		if (!body.includes("desktop_starting")) break;
+		await new Promise((done) => setTimeout(done, 2000));
 	}
+	console.log(`stream_open_ms ${Date.now() - openStartedAt}`);
 	const page = (await response?.text()) ?? "";
 	if (response?.status !== 200)
 		console.log(`stream page HTTP ${response?.status}: ${page.slice(0, 300)}`);
