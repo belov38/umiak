@@ -76,3 +76,58 @@ it("SDK facade and computer tools use the real public desktop API with a fake gu
 	}
 	expect((await sb.desktop.clipboardGet()).text).toBe("MCP текст");
 });
+it("computer tools surface an operator block as a non-retryable error", async () => {
+	const config = new Proxy(w.env.config, {
+		get(t, k) {
+			if (k === "template")
+				return async (slug: string) => {
+					const template = await t.template(slug);
+					return template
+						? {
+								...template,
+								capabilities: [...template.capabilities, "desktop"],
+							}
+						: null;
+				};
+			const value = Reflect.get(t, k);
+			return typeof value === "function" ? value.bind(t) : value;
+		},
+	});
+	const app = createPublicApp(w.harness({ deps: { config } }).deps);
+	const sbx = new Sbx({
+		baseUrl: "http://desktop-api.test",
+		apiKey: w.secret,
+		env: {},
+		fetch: async (request) => app.fetch(request as Request),
+	});
+	const seeded = await w.seed({ state: "ready" });
+	await db.pool.query("UPDATE runtime.sandboxes SET blocked=true WHERE id=$1", [
+		seeded.sandboxId,
+	]);
+	const blocked = await connectInMemory(
+		createServer({
+			tools: DESKTOP_TOOLS,
+			sbx: () => sbx,
+			transport: "stdio",
+			log: createLogger({ level: "silent" }),
+		}),
+	);
+	try {
+		for (const [name, args] of [
+			["computer_type", { text: "id", screenshot_after: false }],
+			["computer_clipboard_write", { text: "x" }],
+			["desktop_url", {}],
+		] as const) {
+			const response = await blocked.client.callTool({
+				name,
+				arguments: { sandbox: seeded.slug, ...args },
+			});
+			expect(response.isError, name).toBe(true);
+			const text = JSON.stringify(response.content);
+			expect(text, name).toContain("forbidden");
+			expect(text, name).toContain("blocked this sandbox");
+		}
+	} finally {
+		await blocked.close();
+	}
+});

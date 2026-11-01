@@ -1,6 +1,11 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { encodeUuid } from "@sbx/auth";
-import { parseLabel, type Sandbox } from "@sbx/core";
+import {
+	hasOperatorRights,
+	parseLabel,
+	type Sandbox,
+	sandboxBlocked,
+} from "@sbx/core";
 import type { Context } from "hono";
 import { agentErrorToHttp } from "../agent/errors.ts";
 import type { DesktopMethod } from "../agent/types.ts";
@@ -10,13 +15,21 @@ import { ApiError } from "../http/errors.ts";
 import { resolveSandboxRef } from "../map/sandbox.ts";
 import { poolOf } from "../routes/internal/common.ts";
 
+/**
+ * `write`: the call drives the guest (input, clipboard, links, access), so an
+ * operator block refuses it like exec (S8 C3, 403 `sandbox_blocked`). Reads
+ * (status, screenshot, clipboard read) stay allowed, like file reads.
+ */
 export async function desktopSandbox(
 	deps: ApiDeps,
 	c: Context<ApiEnv>,
 	ref: string,
-	ready = true,
+	opts: { ready?: boolean; write?: boolean } = {},
 ): Promise<Sandbox> {
-	const s = await deps.svc.get(authOf(c).principal, resolveSandboxRef(ref));
+	const principal = authOf(c).principal;
+	const s = await deps.svc.get(principal, resolveSandboxRef(ref));
+	if (opts.write && s.blocked && !hasOperatorRights(principal))
+		throw sandboxBlocked();
 	if (
 		!(await deps.config.template(s.templateSlug))?.capabilities.includes(
 			"desktop",
@@ -27,7 +40,7 @@ export async function desktopSandbox(
 			"desktop_unsupported",
 			"this template has no desktop capability",
 		);
-	if (ready && (s.state !== "ready" || !s.machineId))
+	if ((opts.ready ?? true) && (s.state !== "ready" || !s.machineId))
 		throw new ApiError(409, "sandbox_not_ready", "sandbox must be ready");
 	await poolOf(deps).query(
 		"INSERT INTO runtime.sandbox_desktops(sandbox_id) VALUES($1) ON CONFLICT DO NOTHING",
@@ -70,10 +83,8 @@ export async function desktopPolicy(deps: ApiDeps, id: string) {
 	const r = await poolOf(deps).query<{
 		access: "token" | "sso" | "public";
 		auth_epoch: number;
-		blocked: boolean;
-		block_reason: string | null;
 	}>(
-		"SELECT access,auth_epoch,blocked,block_reason FROM runtime.sandbox_desktops WHERE sandbox_id=$1",
+		"SELECT access,auth_epoch FROM runtime.sandbox_desktops WHERE sandbox_id=$1",
 		[id],
 	);
 	const p = r.rows[0];
@@ -163,14 +174,12 @@ export async function lookupDesktopRoute(deps: ApiDeps, label: string) {
 		access: p.access,
 		tokenHash: null,
 		authEpoch: p.auth_epoch,
-		blocked: s.blocked || p.blocked || disabled,
+		blocked: s.blocked || disabled,
 		blockReason: s.blocked
 			? s.block_reason
-			: p.blocked
-				? p.block_reason
-				: disabled
-					? "public_disabled"
-					: null,
+			: disabled
+				? "public_disabled"
+				: null,
 		hostRewrite: "localhost",
 		appProtocol: "http1",
 		teamId: encodeUuid("team", s.team_id),

@@ -211,3 +211,48 @@ it.each(["public", "blocked"])(
 		expect((await epoch()).auth_epoch).toBe(3);
 	},
 );
+
+it("an operator block refuses desktop input, clipboard writes, links and access like exec", async () => {
+	const config = new Proxy(w.env.config, {
+		get(target, key) {
+			if (key === "template")
+				return async (slug: string) => {
+					const t = await target.template(slug);
+					return t
+						? { ...t, capabilities: [...t.capabilities, "desktop"] }
+						: null;
+				};
+			const v = Reflect.get(target, key);
+			return typeof v === "function" ? v.bind(target) : v;
+		},
+	});
+	const h = w.harness({ deps: { config } });
+	const s = await w.seed({ state: "ready" });
+	await db.pool.query("UPDATE runtime.sandboxes SET blocked=true WHERE id=$1", [
+		s.sandboxId,
+	]);
+	const root = `/v1/sandboxes/${s.slug}/desktop`;
+	const refused = [
+		await h.request("POST", `${root}/actions`, {
+			json: { actions: [{ type: "type", text: "id\n" }] },
+		}),
+		await h.request("PUT", `${root}/clipboard`, { json: { text: "x" } }),
+		await h.request("POST", `${root}/links`),
+		await h.request("PUT", `${root}/access`, { json: { access: "sso" } }),
+	];
+	for (const r of refused) {
+		expect(r.status).toBe(403);
+		expect(r.body).toMatchObject({
+			error: { code: "forbidden", details: { reason: "sandbox_blocked" } },
+		});
+	}
+	const tickets = await db.pool.query(
+		"SELECT count(*)::int AS n FROM runtime.desktop_tickets WHERE sandbox_id=$1",
+		[s.sandboxId],
+	);
+	expect(tickets.rows[0].n).toBe(0);
+	expect((await h.request("GET", root)).status).toBe(200);
+	expect((await h.request("GET", `${root}/screenshot`)).status).toBe(200);
+	expect((await h.request("GET", `${root}/clipboard`)).status).toBe(200);
+	expect((await h.request("DELETE", `${root}/streams`)).status).toBe(204);
+});

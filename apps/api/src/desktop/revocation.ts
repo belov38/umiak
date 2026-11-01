@@ -77,7 +77,7 @@ export async function recheckDesktopAccess(deps: ApiDeps): Promise<void> {
 		template_slug: string;
 		policy_revoked: boolean;
 	}>(
-		"SELECT d.sandbox_id,s.machine_id,d.auth_epoch,d.access,(d.blocked OR s.blocked) AS blocked,s.template_slug,d.policy_revoked FROM runtime.sandbox_desktops d JOIN runtime.sandboxes s ON s.id=d.sandbox_id WHERE s.state='ready'",
+		"SELECT d.sandbox_id,s.machine_id,d.auth_epoch,d.access,s.blocked,s.template_slug,d.policy_revoked FROM runtime.sandbox_desktops d JOIN runtime.sandboxes s ON s.id=d.sandbox_id WHERE s.state='ready'",
 	);
 	for (const route of routes.rows) {
 		const denied =

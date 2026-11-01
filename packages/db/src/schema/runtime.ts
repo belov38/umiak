@@ -602,8 +602,6 @@ export const sandboxDesktops = runtime.table("sandbox_desktops", {
 		.notNull()
 		.default("token"),
 	authEpoch: integer("auth_epoch").notNull().default(1),
-	blocked: boolean("blocked").notNull().default(false),
-	blockReason: text("block_reason"),
 	turnIssuedAt: tstz("turn_issued_at"),
 	lastStopOperationId: uuid("last_stop_operation_id"),
 	updatedAt: tstz("updated_at").notNull().defaultNow(),

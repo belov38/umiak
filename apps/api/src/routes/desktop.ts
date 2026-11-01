@@ -116,6 +116,9 @@ const Query = z.object({
 	cursor: z.enum(["true", "false"]).optional(),
 });
 
+/** Operations refused on an operator-blocked sandbox; ending streams stays allowed. */
+const GUEST_WRITES = new Set(["link", "access", "setClipboard", "act"]);
+
 export function registerDesktopRoutes(app: ApiApp, deps: ApiDeps): void {
 	const add = (
 		method: "get" | "post" | "put" | "patch" | "delete",
@@ -160,7 +163,9 @@ export function registerDesktopRoutes(app: ApiApp, deps: ApiDeps): void {
 			},
 		});
 		app.openapi(route as RouteConfig, async (c) => {
-			const s = await desktopSandbox(deps, c, c.req.param("sandbox") ?? "");
+			const s = await desktopSandbox(deps, c, c.req.param("sandbox") ?? "", {
+				write: GUEST_WRITES.has(id),
+			});
 			const input =
 				body && (!optionalBody || c.req.header("content-type"))
 					? await readJson(c, body)
