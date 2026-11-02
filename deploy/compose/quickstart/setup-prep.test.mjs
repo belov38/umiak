@@ -38,14 +38,16 @@ test("prep validates generated values before interpolating a shell script", () =
 		}),
 	);
 });
-test("fresh SDN apply and rollback preserve the vmbr0 multicast setting", () => {
-	const script = renderPreparation({
-		origin: "https://stack.example:8443",
-		token: "a".repeat(64),
-		publicKey: "ssh-ed25519 AAAA test",
-		gateway: "192.168.68.90",
-		node: "pve",
-	});
-	assert.match(script, /mcast_hash_max/);
-	assert.match(script, /restore_bridge/);
+test("fresh host real program completes against fake PVE and preserves existing management state", () => {
+	const result = spawnSync(
+		"python3",
+		[
+			"deploy/compose/quickstart/setup-prep-fake.py",
+			"deploy/compose/quickstart/setup-prep.py",
+		],
+		{ encoding: "utf8" },
+	);
+	assert.equal(result.status, 0, result.stderr);
+	assert.match(result.stdout, /FAKE FRESH HOST PASS/);
+	assert.doesNotMatch(result.stdout, /fake-secret/);
 });
