@@ -1,0 +1,97 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { parseWebEnv } from "../src/lib/env.ts";
+import { guard } from "../src/lib/guard.ts";
+
+const options = {
+	appOrigin: "http://192.168.1.10:4180",
+	operatorGroups: [],
+	authMode: "none" as const,
+};
+function request(
+	pathname = "/app",
+	headers: Record<string, string> = {},
+	method = "GET",
+) {
+	return { pathname, method, headers: new Headers(headers) };
+}
+afterEach(() => vi.unstubAllEnvs());
+describe("local web transport boundary", () => {
+	it("opens dashboard and admin without oauth headers for an allowed ingress client", () => {
+		for (const path of ["/app", "/admin", "/cms-api/users/me"]) {
+			expect(
+				guard(request(path, { "x-umiak-client-ip": "192.168.1.20" }), options),
+			).toBeNull();
+		}
+	});
+	it("fails closed without the ingress client stamp or with a disallowed address", () => {
+		for (const address of [
+			undefined,
+			"203.0.113.4",
+			"192.168.1.20, 127.0.0.1",
+		]) {
+			expect(
+				guard(
+					request("/admin", {
+						"x-forwarded-for": "127.0.0.1",
+						"x-auth-request-email": "admin@example.com",
+						...(address ? { "x-umiak-client-ip": address } : {}),
+					}),
+					options,
+				)?.reason,
+			).toBe("client_network_forbidden");
+		}
+	});
+	it("uses the configured narrower allowlist", () => {
+		const restricted = { ...options, localAllowedCidrs: "192.168.2.0/24" };
+		expect(
+			guard(
+				request("/app", { "x-umiak-client-ip": "192.168.1.20" }),
+				restricted,
+			)?.status,
+		).toBe(403);
+	});
+	it("keeps CSRF origin checks on plain LAN HTTP", () => {
+		const h = { "x-umiak-client-ip": "192.168.1.20" };
+		expect(guard(request("/app", h, "POST"), options)?.reason).toBe(
+			"origin_forbidden",
+		);
+		expect(
+			guard(
+				request("/app", { ...h, origin: options.appOrigin }, "POST"),
+				options,
+			),
+		).toBeNull();
+	});
+	it("does not enable password endpoints", () => {
+		expect(
+			guard(
+				request(
+					"/cms-api/users/login",
+					{ "x-umiak-client-ip": "127.0.0.1" },
+					"POST",
+				),
+				options,
+			)?.reason,
+		).toBe("endpoint_disabled");
+	});
+	it("retains oidc as the default", () => {
+		expect(
+			guard(request(), { appOrigin: options.appOrigin, operatorGroups: [] })
+				?.status,
+		).toBe(401);
+	});
+	it("parses none mode without a sign-out destination", () => {
+		const env = parseWebEnv({
+			DATABASE_URL: "postgres://local/db",
+			PAYLOAD_SECRET: "0123456789abcdef",
+			UMIAK_APP_ORIGIN: options.appOrigin,
+			UMIAK_OPERATOR_GROUPS: "operators",
+			UMIAK_PREVIEW_DOMAIN: "umiak.localhost",
+			UMIAK_API_PUBLIC_URL: "http://192.168.1.10:8080",
+			UMIAK_AUTH_MODE: "none",
+			UMIAK_LOGOUT_URL: "https://idp/logout",
+		});
+		expect(env.authMode).toBe("none");
+		expect(env.logoutUrl).toBeNull();
+	});
+});

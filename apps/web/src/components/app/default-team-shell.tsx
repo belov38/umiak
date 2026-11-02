@@ -16,7 +16,12 @@ export async function DefaultTeamShell({
 		return <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>;
 	}
 	return (
-		<AppShell team={team} member logoutUrl={webEnv().logoutUrl}>
+		<AppShell
+			team={team}
+			member
+			logoutUrl={webEnv().logoutUrl}
+			localMode={webEnv().authMode === "none"}
+		>
 			{children}
 		</AppShell>
 	);

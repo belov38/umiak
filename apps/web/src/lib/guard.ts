@@ -1,3 +1,4 @@
+import { isLocalClientAllowed } from "@umiak/auth";
 import { ACCESS_CSS } from "./access-style";
 import { APPEARANCE_BOOTSTRAP } from "./appearance";
 import { LOCKUP_SVG } from "./brand-markup";
@@ -22,6 +23,7 @@ export interface GuardRequest {
 export interface GuardDenial {
 	status: 401 | 403;
 	reason:
+		| "client_network_forbidden"
 		| "not_signed_in"
 		| "origin_forbidden"
 		| "operators_only"
@@ -59,11 +61,34 @@ export function headerGroups(h: Headers): string[] {
 
 export function guard(
 	r: GuardRequest,
-	o: { appOrigin: string; operatorGroups: readonly string[] },
+	o: {
+		appOrigin: string;
+		operatorGroups: readonly string[];
+		authMode?: "oidc" | "none";
+		localAllowedCidrs?: string;
+	},
 ): GuardDenial | null {
 	if (PUBLIC_PATHS.has(r.pathname)) return null;
+	const local = o.authMode === "none";
+	// Only the private local ingress may reach Next; it replaces this header
+	// with its socket peer. X-Forwarded-For never authenticates web requests.
+	if (
+		local &&
+		!isLocalClientAllowed(r.headers.get("x-umiak-client-ip") ?? undefined, {
+			UMIAK_LOCAL_ALLOWED_CIDRS: o.localAllowedCidrs,
+		})
+	) {
+		return {
+			status: 403,
+			reason: "client_network_forbidden",
+			html: page(
+				"Forbidden",
+				"Your client network is not allowed in local mode.",
+			),
+		};
+	}
 	const email = r.headers.get("x-auth-request-email")?.trim() ?? "";
-	if (email === "") {
+	if (!local && email === "") {
 		return {
 			status: 401,
 			reason: "not_signed_in",
@@ -81,6 +106,7 @@ export function guard(
 		};
 	}
 	if (
+		!local &&
 		OPERATOR_PATH.test(r.pathname) &&
 		!headerGroups(r.headers).some((g) => o.operatorGroups.includes(g))
 	) {

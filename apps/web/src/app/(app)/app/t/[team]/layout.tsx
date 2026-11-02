@@ -44,6 +44,7 @@ export default async function TeamLayout({
 			team={current}
 			member={session.teams.some((t) => t.id === team)}
 			logoutUrl={env.logoutUrl}
+			localMode={env.authMode === "none"}
 		>
 			{children}
 		</AppShell>

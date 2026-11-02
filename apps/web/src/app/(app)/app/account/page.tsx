@@ -7,7 +7,11 @@ import { signOutHref } from "@/lib/team-path";
 export default function AccountPage() {
 	return (
 		<DefaultTeamShell>
-			<AccountSettings signOutHref={signOutHref(webEnv().logoutUrl)} />
+			<AccountSettings
+				signOutHref={
+					webEnv().authMode === "none" ? null : signOutHref(webEnv().logoutUrl)
+				}
+			/>
 		</DefaultTeamShell>
 	);
 }

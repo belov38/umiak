@@ -14,6 +14,7 @@ const OK = {
 describe("parseWebEnv (S8 §14.1)", () => {
 	it("parses and normalizes", () => {
 		expect(parseWebEnv(OK)).toEqual({
+			authMode: "oidc",
 			databaseUrl: OK.DATABASE_URL,
 			payloadSecret: OK.PAYLOAD_SECRET,
 			appOrigin: "https://app.umiak.example.com",
