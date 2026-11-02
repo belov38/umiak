@@ -1,0 +1,15 @@
+/* Keep the stock Keycloak 26 / PatternFly 5 login layout. */
+:root {
+	--pf-v5-global--primary-color--100: #263fa9;
+}
+#kc-header-wrapper {
+	height: 40px;
+	background: url("../img/keycloak-logo.svg") center / auto 40px no-repeat;
+	font-size: 0;
+	/* The stock header stays on a dark image even in light mode. */
+	filter: invert(1);
+}
+.pf-v5-theme-dark #kc-header-wrapper {
+	filter: none;
+	background-image: url("../img/lockup-inter-dark.svg");
+}
