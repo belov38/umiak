@@ -61,6 +61,8 @@ class Reply:
 def urlopen(request, **_kwargs):
     if isinstance(request, urllib.request.Request):
         report.update(json.loads(request.data))
+    else:
+        assert request == config["origin"] + "/pve-setup.sh?token=" + config["token"] + "&asset=node-agent"
     return Reply()
 
 

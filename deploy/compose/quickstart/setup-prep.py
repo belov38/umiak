@@ -162,7 +162,7 @@ ca = Path(config.get("caPath", "/root/.config/umiak/quickstart-ca.pem"))
 if not ca.exists():
     raise SystemExit("Copy the verified quickstart CA to " + str(ca) + "; rollback timer remains armed")
 context = ssl.create_default_context(cafile=str(ca))
-binary = urllib.request.urlopen(config["origin"] + "/downloads/umiak-node-linux-amd64", context=context, timeout=30).read()
+binary = urllib.request.urlopen(config["origin"] + "/pve-setup.sh?token=" + config["token"] + "&asset=node-agent", context=context, timeout=30).read()
 expected = config.get("nodeSha256")
 if not expected or hashlib.sha256(binary).hexdigest() != expected:
     raise SystemExit("Node-agent checksum mismatch or unavailable manifest")

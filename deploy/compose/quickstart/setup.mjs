@@ -248,6 +248,7 @@ export function createSetupHandler({
 	pool,
 	store = new PgSetupStore(pool),
 	secretsDir = process.env.UMIAK_PVE_SECRETS_DIR || "/pve-secrets",
+	assetsDir = process.env.UMIAK_QUICKSTART_ASSETS || "/app/quickstart-assets",
 	apiUrl = "http://api:8080",
 	makePve = pinnedPve,
 	nodeCheck = checkNode,
@@ -629,8 +630,6 @@ export function createSetupHandler({
 		},
 	};
 	const wizard = new SetupWizard({ store, steps });
-	const assetsDir =
-		process.env.UMIAK_QUICKSTART_ASSETS || "/app/quickstart-assets";
 	const jobs = new TemplateBuildJobs({
 		store,
 		validate: async (slug, state, input) => {
@@ -711,6 +710,9 @@ export function createSetupHandler({
 								token: new URL(req.url, context.origin).searchParams.get(
 									"token",
 								),
+								asset: new URL(req.url, context.origin).searchParams.get(
+									"asset",
+								),
 							}
 						: await body(req);
 				const action = async () => {
@@ -733,21 +735,37 @@ export function createSetupHandler({
 							req.method === "GET",
 							"Use GET for the preparation script",
 						);
+						if (input.asset !== null) {
+							requireValue(
+								input.asset === "node-agent" && prep.mode === "fresh",
+								"Unknown or unavailable preparation asset",
+							);
+							const binary = await readFile(
+								join(assetsDir, "umiak-node-linux-amd64"),
+							);
+							res.writeHead(200, {
+								"Content-Type": "application/octet-stream",
+								"Content-Length": binary.length,
+								"Cache-Control": "no-store",
+								"Referrer-Policy": "no-referrer",
+							});
+							res.end(binary);
+							return;
+						}
 						const publicKey = (
 							await readOptional(secretsDir, "umiak-node_ed25519.pub")
 						).trim();
 						let nodeSha256;
 						try {
 							nodeSha256 = digest(
-								await readFile(
-									join(
-										process.env.UMIAK_QUICKSTART_ASSETS ||
-											"/app/quickstart-assets",
-										"umiak-node-linux-amd64",
-									),
-								),
+								await readFile(join(assetsDir, "umiak-node-linux-amd64")),
 							);
 						} catch {}
+						if (prep.mode === "fresh")
+							requireValue(
+								nodeSha256,
+								"Node-agent build asset is missing; rebuild the quickstart image before preparing a host",
+							);
 						const config = {
 							origin: prep.origin,
 							token: input.token,
