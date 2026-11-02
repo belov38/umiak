@@ -42,6 +42,7 @@ export interface OidcSettings {
 export interface Settings {
 	authMode: "oidc" | "none";
 	localAllowedCidrs: string[];
+	localAllowedHosts: string[];
 	publicPort: number;
 	proxiedPort: number;
 	internalPort: number;
@@ -194,6 +195,25 @@ const version = z.preprocess(
 );
 
 const schema = z.object({
+	UMIAK_LOCAL_ALLOWED_HOSTS: csv("").refine(
+		(hosts) =>
+			hosts.every((host) => {
+				try {
+					const url = new URL(`http://${host}`);
+					return (
+						!url.username &&
+						!url.password &&
+						url.pathname === "/" &&
+						!url.search &&
+						!url.hash &&
+						url.host === host.toLowerCase()
+					);
+				} catch {
+					return false;
+				}
+			}),
+		{ message: "must be comma-separated host[:port] authorities" },
+	),
 	UMIAK_API_PUBLIC_PORT: port(8080),
 	UMIAK_API_PROXIED_PORT: port(8081),
 	UMIAK_API_INTERNAL_PORT: port(8082),
@@ -272,6 +292,13 @@ export function loadSettings(
 	return {
 		authMode: mode,
 		localAllowedCidrs: allowed,
+		localAllowedHosts: [
+			...new Set([
+				new URL(e.UMIAK_API_URL).host,
+				new URL(e.UMIAK_APP_ORIGIN ?? e.UMIAK_APP_URL).host,
+				...e.UMIAK_LOCAL_ALLOWED_HOSTS.map((host) => host.toLowerCase()),
+			]),
+		],
 		publicPort: e.UMIAK_API_PUBLIC_PORT,
 		proxiedPort: e.UMIAK_API_PROXIED_PORT,
 		internalPort: e.UMIAK_API_INTERNAL_PORT,

@@ -23,6 +23,18 @@ export function localNetworkGuard(deps: ApiDeps): MiddlewareHandler<ApiEnv> {
 				"local_network_forbidden",
 				"client address is outside UMIAK_LOCAL_ALLOWED_CIDRS",
 			);
+
+		if (
+			deps.settings.authMode === "none" &&
+			!deps.settings.localAllowedHosts.includes(
+				c.req.header("host")?.toLowerCase() ?? "",
+			)
+		)
+			throw new ApiError(
+				403,
+				"local_host_forbidden",
+				"Host must match the configured API or app authority (UMIAK_LOCAL_ALLOWED_HOSTS for additional hosts)",
+			);
 		await next();
 	};
 }

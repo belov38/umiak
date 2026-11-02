@@ -14,20 +14,20 @@ function setup(
 	listener: "public" | "proxied" = "public",
 	cidrs?: string,
 	trusted = "",
+	hosts = "",
 ) {
 	const settings = testSettings({
 		UMIAK_AUTH_MODE: "none",
 		...(cidrs === undefined ? {} : { UMIAK_LOCAL_ALLOWED_CIDRS: cidrs }),
 		UMIAK_API_TRUSTED_PROXY_CIDRS: trusted,
+		UMIAK_LOCAL_ALLOWED_HOSTS: hosts,
 	});
 	const identity = testIdentityStore({
 		sessions: [
 			{
 				sub: LOCAL_USER_SUB,
 				isOperator: true,
-				teams: [
-					{ teamId: TEST_TEAM_ID, TEST_API_KEY, name: "Local", role: "owner" },
-				],
+				teams: [{ teamId: TEST_TEAM_ID, name: "Local", role: "owner" }],
 			},
 		],
 	});
@@ -42,7 +42,7 @@ function setup(
 	) {
 		return app.request(
 			path,
-			{ method, headers },
+			{ method, headers: { host: new URL(settings.apiUrl).host, ...headers } },
 			{ incoming: { socket: { remoteAddress: peer } } as IncomingMessage },
 		);
 	}
@@ -90,6 +90,31 @@ describe("local API", () => {
 			).status,
 		).toBe(403);
 	});
+	it("rejects arbitrary Host even on a same-origin GET without Origin", async () => {
+		const { request } = setup();
+		expect(
+			(await request("/v1/me", undefined, { host: "evil.example" })).status,
+		).toBe(403);
+		expect((await request("/v1/meta", undefined, { host: "" })).status).toBe(
+			403,
+		);
+	});
+	it("accepts configured API, app and explicitly allowed internal authorities", async () => {
+		const { request, settings } = setup("public", undefined, "", "api:8080");
+		for (const host of [
+			new URL(settings.apiUrl).host,
+			new URL(settings.appOrigin).host,
+			"api:8080",
+		])
+			expect((await request("/v1/meta", undefined, { host })).status).toBe(200);
+		expect(
+			(await request("/v1/meta", undefined, { host: "api:8081" })).status,
+		).toBe(403);
+		expect(() =>
+			testSettings({ UMIAK_LOCAL_ALLOWED_HOSTS: "trusted@evil.example" }),
+		).toThrow();
+	});
+
 	it("advertises none and suppresses OIDC", async () => {
 		const { request, settings } = setup();
 		expect(settings.oidc).toBeNull();
@@ -121,7 +146,12 @@ describe("local API", () => {
 		});
 		const r = await createPublicApp(deps).request(
 			"/v1/me",
-			{ headers: { authorization: `Bearer ${TEST_API_KEY}` } },
+			{
+				headers: {
+					authorization: `Bearer ${TEST_API_KEY}`,
+					host: new URL(deps.settings.apiUrl).host,
+				},
+			},
 			{
 				incoming: { socket: { remoteAddress: "127.0.0.1" } } as IncomingMessage,
 			},
