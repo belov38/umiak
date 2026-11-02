@@ -1,4 +1,4 @@
-// `sbx shell` through the real CLI (S7 §10, §14.2): a PTY over WebSocket,
+// `umiak shell` through the real CLI (S7 §10, §14.2): a PTY over WebSocket,
 // the terminal's input from stdin, its output on stdout, the exit code of
 // the terminal's command, SIGWINCH → resize, and --cacert reaching the
 // WebSocket behind a self-signed TLS front. The FakeAgent's PTY is a process
@@ -17,7 +17,7 @@ import { type CliWorld, startWorld, until } from "./helpers/api.ts";
 import { type CliHome, cliHome, runCli } from "./helpers/run-cli.ts";
 import { startTlsFront, type TlsFront } from "./helpers/tls.ts";
 
-describe("sbx shell", () => {
+describe("umiak shell", () => {
 	let w: CliWorld;
 	let tls: TlsFront;
 	let home: CliHome;
@@ -35,7 +35,7 @@ describe("sbx shell", () => {
 	});
 	beforeEach(() => {
 		home = cliHome();
-		env = { ...home.env, SBX_API_URL: w.url, SBX_API_KEY: w.secret };
+		env = { ...home.env, UMIAK_API_URL: w.url, UMIAK_API_KEY: w.secret };
 	});
 	afterEach(() => home.rm());
 
@@ -130,9 +130,9 @@ describe("sbx shell", () => {
 	});
 
 	it("--cacert reaches the PTY WebSocket behind a self-signed TLS front", async () => {
-		const tenv = { ...env, SBX_API_URL: tls.url };
+		const tenv = { ...env, UMIAK_API_URL: tls.url };
 		const bad = await runCli(["shell", sb.id, "--", "echo no"], {
-			env: { ...tenv, SBX_RETRY_BUDGET_MS: "500" },
+			env: { ...tenv, UMIAK_RETRY_BUDGET_MS: "500" },
 			stdin: "",
 		});
 		expect(bad.code).toBe(75);
@@ -144,7 +144,7 @@ describe("sbx shell", () => {
 		expect(r.code, r.stderr).toBe(0);
 		expect(r.stdout).toBe("over tls\n");
 		const e = await runCli(["shell", sb.id, "--", "echo via env"], {
-			env: { ...tenv, SBX_CA_FILE: tls.caFile },
+			env: { ...tenv, UMIAK_CA_FILE: tls.caFile },
 			stdin: "",
 		});
 		expect(e.code, e.stderr).toBe(0);

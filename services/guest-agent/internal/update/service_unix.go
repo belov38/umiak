@@ -9,15 +9,15 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // AgentService is the agent unit that Rollback starts.
-const AgentService = "sbx-agent.service"
+const AgentService = "umiak-agent.service"
 
 // enabledUnits are enabled by an install with units.
-var enabledUnits = []string{"sbx-identity.service", "sbx-agent.service"}
+var enabledUnits = []string{"umiak-identity.service", "umiak-agent.service"}
 
 // DefaultServiceManager returns the ServiceManager of this OS.
 func DefaultServiceManager() ServiceManager { return SystemctlManager{} }

@@ -1,6 +1,6 @@
-"""Generates the committed code of sbx-sdk:
+"""Generates the committed code of umiak-sdk:
 
-1. ``sbx_sdk/_gen``: openapi-python-client over ``apps/api/openapi/v1.json``
+1. ``umiak_sdk/_gen``: openapi-python-client over ``apps/api/openapi/v1.json``
    (config ``openapi-python-client.yaml``, ``literal_enums: false``).
    The generator makes every enum a strict ``StrEnum``: an unknown value
    raises ``ValueError`` in ``from_dict``. The API marks the response enums
@@ -10,7 +10,7 @@
    member (``value`` is the string, ``name`` is ``UNKNOWN``) instead of an
    error. Closed enums (frame ``type`` discriminators, request-only enums)
    stay strict.
-2. ``sbx_sdk/_sync``: the blocking facade, rewritten from ``sbx_sdk/_async``
+2. ``umiak_sdk/_sync``: the blocking facade, rewritten from ``umiak_sdk/_async``
    by token replacement (async def -> def, await dropped, AsyncX -> X, ...),
    except the hand-written ``_io.py`` of each side.
 
@@ -37,7 +37,7 @@ REPO = ROOT.parent.parent
 SPEC = REPO / "apps" / "api" / "openapi" / "v1.json"
 CONFIG = ROOT / "openapi-python-client.yaml"
 PYPROJECT = ROOT / "pyproject.toml"
-PKG = ROOT / "sbx_sdk"
+PKG = ROOT / "umiak_sdk"
 # Hand-written on both sides: the I/O primitives that differ (sleep, locks, subprocess).
 SYNC_KEEP = {"_io.py"}
 
@@ -169,7 +169,7 @@ SYNC_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\baiter\("), "iter("),
     (re.compile(r"\b_async\b"), "_sync"),
     *[(re.compile(rf"\b{re.escape(a)}\b"), b) for a, b in SYNC_NAMES],
-    # AsyncSbx -> Sbx, AsyncClient -> Client, AsyncIterator -> Iterator, ...
+    # AsyncUmiak -> Umiak, AsyncClient -> Client, AsyncIterator -> Iterator, ...
     (re.compile(r"\bAsync([A-Z]\w*)"), r"\1"),
 ]
 
@@ -177,7 +177,7 @@ SYNC_RULES: list[tuple[re.Pattern[str], str]] = [
 def to_sync(source: str, name: str) -> str:
     for pattern, repl in SYNC_RULES:
         source = pattern.sub(repl, source)
-    header = f"# Generated from sbx_sdk/_async/{name} by scripts/gen.py; do not edit.\n"
+    header = f"# Generated from umiak_sdk/_async/{name} by scripts/gen.py; do not edit.\n"
     return header + source
 
 

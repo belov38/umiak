@@ -1,10 +1,10 @@
 "use client";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 // Commands tab (S8 §9.6): GET /commands (status, command, exit code,
 // duration, who, tags) with a status filter; "Run command" → `sb.start()`
 // (detached, Idempotency-Key), then its output; the output of a chosen
 // command below the table.
-import type { CommandData, Sandbox, SandboxData } from "@sbx/sdk";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import type { CommandData, Sandbox, SandboxData } from "@umiak/sdk";
 import { PlayIcon } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";

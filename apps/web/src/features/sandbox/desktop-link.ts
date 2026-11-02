@@ -1,4 +1,4 @@
-import type { Sandbox } from "@sbx/sdk";
+import type { Sandbox } from "@umiak/sdk";
 
 /** A link is single-use: keep it outside the shared query cache. */
 export async function fetchDesktopLink(

@@ -1,6 +1,6 @@
 // Remote MCP server process: `node src/main.ts`. Reads the environment
-// (settings.ts), serves /mcp on SBX_MCP_PORT (8080) and /metrics on
-// SBX_MCP_OPS_PORT (9090), and stops on SIGTERM/SIGINT within 25 s:
+// (settings.ts), serves /mcp on UMIAK_MCP_PORT (8080) and /metrics on
+// UMIAK_MCP_OPS_PORT (9090), and stops on SIGTERM/SIGINT within 25 s:
 // readiness goes false and new requests get 503, new connections stop, calls
 // in flight get the rest of the grace period, then whatever still hangs is
 // cut (clients retry, S11 6.2).
@@ -143,7 +143,7 @@ async function main(): Promise<void> {
 		settings = loadSettings(process.env);
 	} catch (err) {
 		process.stderr.write(
-			`sbx-mcp: ${err instanceof Error ? err.message : String(err)}\n`,
+			`umiak-mcp: ${err instanceof Error ? err.message : String(err)}\n`,
 		);
 		process.exit(1);
 	}

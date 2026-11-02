@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shim"
+	"github.com/belov38/umiak/services/guest-agent/internal/shim"
 )
 
 // readReady reads the first line a Windows shim prints on its stdout:

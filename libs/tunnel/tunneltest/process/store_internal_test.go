@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	testingv1 "github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1"
+	testingv1 "github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1"
 )
 
 // Starts counts generator launches, not Start calls: a second generator for

@@ -15,7 +15,7 @@ import {
 	type PveClient,
 	Qga,
 	sendKey,
-} from "@sbx/pve";
+} from "@umiak/pve";
 import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
 import { verifyAgentPackage } from "../agent-package.ts";
@@ -90,7 +90,8 @@ import {
 // the installed Windows, which is not sealed yet.
 
 const MIN = 60_000;
-const SBX_AGENT_EXE = "C:\\Program Files\\sbx-agent\\current\\sbx-agent.exe";
+const UMIAK_AGENT_EXE =
+	"C:\\Program Files\\umiak-agent\\current\\umiak-agent.exe";
 const SYSPREP_DIR = "C:\\Windows\\System32\\Sysprep";
 export const SYSPREP_COMMAND = [
 	`${SYSPREP_DIR}\\sysprep.exe`,
@@ -98,15 +99,15 @@ export const SYSPREP_COMMAND = [
 	"/oobe",
 	"/shutdown",
 	"/quiet",
-	`/unattend:${SYSPREP_DIR}\\sbx-unattend.xml`,
+	`/unattend:${SYSPREP_DIR}\\umiak-unattend.xml`,
 ];
 const SETUPERR_LOG = `${SYSPREP_DIR}\\Panther\\setuperr.log`;
 const SETUPERR_TAIL = 50;
 /** Enough for any setuperr.log; the read stops there. */
 const SETUPERR_MAX_BYTES = 16 * 1024 * 1024;
-const GUEST_MANIFEST_DIR = "C:\\ProgramData\\sbx-template";
+const GUEST_MANIFEST_DIR = "C:\\ProgramData\\umiak-template";
 const GUEST_MANIFEST = `${GUEST_MANIFEST_DIR}\\build.json`;
-const BUILD_DIR = "C:\\sbx-build";
+const BUILD_DIR = "C:\\umiak-build";
 const BUILD_DIR_TRIES = 5;
 const BUILD_DIR_RETRY_MS = 10_000;
 /** build.json is written right before this step; the step keeps it. */
@@ -128,16 +129,16 @@ const OFFLINE_ATTEMPTS = 2;
 /** The setup script copies boot.wim (about 500 MB) from the ISO. */
 const PE_SETUP_TIMEOUT_MS = 10 * MIN;
 /** boot.wim and boot.sdi of the user's ISO for the ramdisk boot, relative to C:. */
-const PE_DIR_REL = "\\sbx-pe";
+const PE_DIR_REL = "\\umiak-pe";
 const PE_DIR = `C:${PE_DIR_REL}`;
 /** Description of the BCD entries of the WinPE boot; the cleanup finds them by it. */
-const PE_ENTRY = "sbx offline";
+const PE_ENTRY = "umiak offline";
 const GUID_RE =
 	/^\{[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}$/i;
 /** The boot of Windows from the disk up to the guest agent (verify-offline, CD swap fallback). */
 const OFFLINE_BOOT_TIMEOUT_MS = 15 * MIN;
 const OFFLINE_CHECK_TIMEOUT_MS = 2 * MIN;
-const OFFLINE_LOG = "C:\\Windows\\Setup\\Scripts\\sbx-offline.log";
+const OFFLINE_LOG = "C:\\Windows\\Setup\\Scripts\\umiak-offline.log";
 const OFFLINE_LOG_TAIL = 30;
 const SEAL_TIMEOUT_MS = 5 * MIN;
 const FACTS_TIMEOUT_MS = 5 * MIN;
@@ -145,12 +146,12 @@ const ISO_FILE_RE = /^[A-Za-z0-9._()+-]+\.iso$/;
 const HEX64_RE = /^[0-9a-f]{64}$/;
 const MACHINE_RE = /^pc-q35-(\d+)\.(\d+)\+pve(\d+)$/;
 /** --fail-step: the step's script in the build ISO is replaced by this one. */
-const FAIL_STEP_PS1 = 'Write-Output "sbx-tpl: --fail-step"\r\nexit 1\r\n';
+const FAIL_STEP_PS1 = 'Write-Output "umiak-tpl: --fail-step"\r\nexit 1\r\n';
 
-export const buildIsoName = (m: Manifest) => `sbx-build-${m.buildId}.iso`;
-export const offlineIsoName = (m: Manifest) => `sbx-offline-${m.buildId}.iso`;
+export const buildIsoName = (m: Manifest) => `umiak-build-${m.buildId}.iso`;
+export const offlineIsoName = (m: Manifest) => `umiak-offline-${m.buildId}.iso`;
 export const virtioIsoName = (version: string) =>
-	`sbx-virtio-win-${version}.iso`;
+	`umiak-virtio-win-${version}.iso`;
 
 export interface WindowsPrepared {
 	recipe: WindowsRecipe;
@@ -169,7 +170,7 @@ export function prepareWindows(
 	recipe: WindowsRecipe,
 ): WindowsPrepared {
 	for (const [flag, v] of [
-		["--sbx-cli", o.sbxCli],
+		["--umiak-cli", o.umiakCli],
 		["--api-url", o.apiUrl],
 	] as const)
 		if (v !== undefined)
@@ -192,9 +193,9 @@ export function prepareWindows(
 			throw new Error(`recipe "${o.slug}": hw.${disk} is required for windows`);
 
 	const isoFile = o.iso ?? pinned.iso.file;
-	if (!ISO_FILE_RE.test(isoFile) || isoFile.startsWith("sbx-"))
+	if (!ISO_FILE_RE.test(isoFile) || isoFile.startsWith("umiak-"))
 		throw new Error(
-			`--iso ${isoFile}: expected the file name of an ISO in ${MEDIA_STORAGE}:iso (not an sbx-* name)`,
+			`--iso ${isoFile}: expected the file name of an ISO in ${MEDIA_STORAGE}:iso (not an umiak-* name)`,
 		);
 	const isoSha256 = o.isoSha256?.toLowerCase();
 	if (isoSha256 !== undefined && !HEX64_RE.test(isoSha256))
@@ -258,7 +259,7 @@ export function prepareWindows(
 		node: o.node,
 		storage: o.storage,
 		pveVmid: null,
-		vmName: `sbx-tpl-${o.slug}-${version.replace(".", "-")}`,
+		vmName: `umiak-tpl-${o.slug}-${version.replace(".", "-")}`,
 		gitCommit: o.gitCommit,
 		recipeDigest: recipeDigest(recipe),
 		windows,
@@ -397,7 +398,7 @@ async function checkUserIso(
 		r = await deps.node.call("media.sha256", { name: file });
 	} catch (err) {
 		const hint = /not.?found/i.test(errorText(err))
-			? "; put it there with sbx-tpl iso upload <file> or the Proxmox web UI"
+			? "; put it there with umiak-tpl iso upload <file> or the Proxmox web UI"
 			: "";
 		throw new Error(
 			`user ISO ${MEDIA_STORAGE}:iso/${file}: ${errorText(err)}${hint}`,
@@ -467,7 +468,7 @@ export async function stageMedia(
 		);
 	await ensureMedia(deps, o.node, "iso", virtioIsoName(vw.version), got);
 
-	const dir = mkdtempSync(join(tmpdir(), "sbx-tpl-iso-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-tpl-iso-"));
 	try {
 		// The ISO must carry the bytes prepare verified, not a later version of the file.
 		const agentTar = readFileSync(o.agentPackage);
@@ -589,7 +590,7 @@ export async function stageWindowsVm(
 		sata1: cd(virtioIsoName(versions.virtioWin.version)),
 		sata2: cd(buildIsoName(st.m)),
 		boot: `order=${recipe.disk.slot};ide2`,
-		description: `sbx-tpl build ${st.m.buildId}\ngit ${o.gitCommit}`,
+		description: `umiak-tpl build ${st.m.buildId}\ngit ${o.gitCommit}`,
 	});
 	await api.waitTask(o.node, upid, { timeoutMs: TASK_TIMEOUT_MS });
 	// Tags after the create, as in stageVm (pool-scoped token).
@@ -856,7 +857,7 @@ export function removedAppx(list: string[], provisioned: string[]): string[] {
 	return list.filter((p) => !provisioned.some((n) => re(p).test(n)));
 }
 
-/** Facts into the manifest, then the manifest into C:\ProgramData\sbx-template\build.json. */
+/** Facts into the manifest, then the manifest into C:\ProgramData\umiak-template\build.json. */
 async function recordFacts(
 	deps: BuildDeps,
 	o: BuildOptions,
@@ -989,7 +990,7 @@ async function setupErrTail(io: GuestIo): Promise<string[]> {
 }
 
 /**
- * C:\sbx-build holds logs and downloads only (90-cleanup emptied the work dir): a file some
+ * C:\umiak-build holds logs and downloads only (90-cleanup emptied the work dir): a file some
  * process still holds open is not worth a failed build, so removal is retried, then warned about.
  */
 async function removeBuildDir(deps: BuildDeps, io: GuestIo): Promise<void> {
@@ -1012,8 +1013,8 @@ async function removeBuildDir(deps: BuildDeps, io: GuestIo): Promise<void> {
 }
 
 /**
- * On the running VM (verify-offline booted it): C:\sbx-build goes (90-cleanup's log was read
- * already), `sbx-agent seal`, then sysprep starts through QGA without waiting for it; sysprep
+ * On the running VM (verify-offline booted it): C:\umiak-build goes (90-cleanup's log was read
+ * already), `umiak-agent seal`, then sysprep starts through QGA without waiting for it; sysprep
  * powers the VM off. A failed sysprep leaves the VM running, so setuperr.log is read through QGA.
  */
 export async function stageSysprep(
@@ -1025,7 +1026,12 @@ export async function stageSysprep(
 	const vmid = st.vmid as number;
 	const vmPath = `/nodes/${o.node}/qemu/${vmid}`;
 	await removeBuildDir(deps, io);
-	await mustRun(io, "sbx-agent seal", [SBX_AGENT_EXE, "seal"], SEAL_TIMEOUT_MS);
+	await mustRun(
+		io,
+		"umiak-agent seal",
+		[UMIAK_AGENT_EXE, "seal"],
+		SEAL_TIMEOUT_MS,
+	);
 	const { pid } = await deps.api.post<{ pid: number }>(`${vmPath}/agent/exec`, {
 		command: SYSPREP_COMMAND,
 	});
@@ -1071,7 +1077,7 @@ export async function stageSysprep(
 
 /**
  * PowerShell helpers of the WinPE boot entry. `Bcd` runs bcdedit and throws on a non-zero exit
- * code. `Remove-SbxEntries` deletes every BCD object described as "sbx offline": the labels of
+ * code. `Remove-UmiakEntries` deletes every BCD object described as "umiak offline": the labels of
  * `bcdedit /enum` are localized, ids and values are not, so blocks are matched by the value.
  */
 const PE_BCD_PS1 = `function Bcd([string[]]$A) {
@@ -1080,7 +1086,7 @@ const PE_BCD_PS1 = `function Bcd([string[]]$A) {
   if ($LASTEXITCODE -ne 0) { throw "bcdedit $($A -join ' ') failed (exit $LASTEXITCODE): $($out.Trim())" }
   $out
 }
-function Remove-SbxEntries {
+function Remove-UmiakEntries {
   $ids = foreach ($b in ((Bcd @('/enum', 'all', '/v')) -split '\\r?\\n\\s*\\r?\\n')) {
     if ($b.Contains('${PE_ENTRY}') -and $b -match '\\{[0-9a-fA-F-]{36}\\}') { $Matches[0] }
   }
@@ -1088,7 +1094,7 @@ function Remove-SbxEntries {
 }`;
 
 /**
- * Copies boot.wim and boot.sdi of the user's ISO to C:\sbx-pe and makes a ramdisk entry for that
+ * Copies boot.wim and boot.sdi of the user's ISO to C:\umiak-pe and makes a ramdisk entry for that
  * WinPE the next boot, once (`bcdedit /bootsequence`). What an earlier run left goes first.
  */
 const PE_SETUP_PS1 = `$ErrorActionPreference = 'Stop'
@@ -1098,7 +1104,7 @@ foreach ($d in [IO.DriveInfo]::GetDrives()) {
   if ($d.DriveType -eq 'CDRom' -and $d.IsReady -and (Test-Path -LiteralPath ($d.Name + 'sources\\boot.wim'))) { $iso = $d.Name; break }
 }
 if ($null -eq $iso) { throw 'no CD with \\sources\\boot.wim (the Windows ISO on ide2)' }
-Remove-SbxEntries
+Remove-UmiakEntries
 try { $null = Bcd @('/delete', '{ramdiskoptions}', '/f') } catch {}
 if (Test-Path -LiteralPath '${PE_DIR}') { Remove-Item -LiteralPath '${PE_DIR}' -Recurse -Force }
 $null = New-Item -ItemType Directory -Path '${PE_DIR}'
@@ -1118,19 +1124,19 @@ $null = Bcd @('/set', $id, 'systemroot', '\\windows')
 $null = Bcd @('/set', $id, 'winpe', 'yes')
 $null = Bcd @('/set', $id, 'detecthal', 'yes')
 $null = Bcd @('/bootsequence', $id)
-Write-Output "SBXPE $id"
+Write-Output "UMIAKPE $id"
 `;
 
-/** Removes the WinPE entries and C:\sbx-pe and checks that `bcdedit /enum all` has no "sbx offline". */
+/** Removes the WinPE entries and C:\umiak-pe and checks that `bcdedit /enum all` has no "umiak offline". */
 const PE_CLEANUP_PS1 = `$ErrorActionPreference = 'Stop'
 ${PE_BCD_PS1}
-Remove-SbxEntries
+Remove-UmiakEntries
 try { $null = Bcd @('/delete', '{ramdiskoptions}', '/f') } catch {}
 try { $null = Bcd @('/deletevalue', '{bootmgr}', 'bootsequence') } catch {}
 if ((Bcd @('/enum', 'all', '/v')).Contains('${PE_ENTRY}')) { throw "BCD entries '${PE_ENTRY}' are still there after the cleanup" }
 if (Test-Path -LiteralPath '${PE_DIR}') { Remove-Item -LiteralPath '${PE_DIR}' -Recurse -Force }
 if (Test-Path -LiteralPath '${PE_DIR}') { throw '${PE_DIR} is still there' }
-Write-Output 'SBXPE removed'
+Write-Output 'UMIAKPE removed'
 `;
 
 /** The reboot into WinPE started Windows from the disk again. */
@@ -1210,7 +1216,7 @@ async function armWinPe(deps: BuildDeps, io: GuestIo): Promise<string> {
 		deps.pollMs ?? DEFAULT_POLL_MS,
 		(err) => deps.log(`${what}: ${errorText(err)}; retrying`),
 	);
-	const id = /^SBXPE (\S+)/m.exec(out)?.[1];
+	const id = /^UMIAKPE (\S+)/m.exec(out)?.[1];
 	if (id === undefined || !GUID_RE.test(id))
 		throw new Error(`${what}: no entry id in ${out.slice(0, 200)}`);
 	return id;
@@ -1263,7 +1269,7 @@ async function rebootIntoWinPe(
  * Boots WinPE of the user's ISO once, from a ramdisk entry of the installed (not yet sealed)
  * Windows, with the offline ISO on sata2: Setup finds its autounattend.xml there, offline.cmd edits
  * the SYSTEM hive and powers off. Windows Boot Manager on the disk starts WinPE, so there is no
- * "Press any key" prompt to hit (R17). verify-offline removes the entry and C:\sbx-pe.
+ * "Press any key" prompt to hit (R17). verify-offline removes the entry and C:\umiak-pe.
  */
 export async function stageOffline(
 	deps: BuildDeps,
@@ -1310,7 +1316,7 @@ export async function stageOffline(
 
 // verify-offline
 
-/** sbx-offline.log, the Start value of each service and whether MsMpEng runs, as one line. */
+/** umiak-offline.log, the Start value of each service and whether MsMpEng runs, as one line. */
 function offlineCheckScript(services: string[]): string {
 	return `$ErrorActionPreference = 'Stop'
 $names = @(${services.map((n) => `'${n}'`).join(", ")})
@@ -1333,11 +1339,11 @@ const offlineCheckSchema = z.object({
 });
 
 /**
- * Boots the disk after the offline stage and checks its effect before sysprep: sbx-offline.log
+ * Boots the disk after the offline stage and checks its effect before sysprep: umiak-offline.log
  * ends with `DONE errors 0`, every service of the offline set has Start=4 (or no key at all, as
- * offline.cmd allows), MsMpEng does not run. Then the WinPE boot entries and C:\sbx-pe go. The
- * agent service runs on this boot; there is no sbx SMBIOS serial on the build VM, so identity
- * apply skips, and `sbx-agent seal` comes next.
+ * offline.cmd allows), MsMpEng does not run. Then the WinPE boot entries and C:\umiak-pe go. The
+ * agent service runs on this boot; there is no umiak SMBIOS serial on the build VM, so identity
+ * apply skips, and `umiak-agent seal` comes next.
  */
 export async function stageVerifyOffline(
 	deps: BuildDeps,
@@ -1474,7 +1480,7 @@ export async function stageWindowsTemplate(
 		} catch (err) {
 			// st.isos stays: a later rollback (red verify) tries again.
 			deps.log(
-				`warning: removing ${st.isos.join(", ")}: ${errorText(err)}; left for sbx-tpl cleanup`,
+				`warning: removing ${st.isos.join(", ")}: ${errorText(err)}; left for umiak-tpl cleanup`,
 			);
 		}
 	}
@@ -1498,7 +1504,7 @@ export async function stageWindowsTemplate(
 		layout[slot] = { index: m[3], ...layout[slot] };
 	}
 	save({ diskLayout: layout });
-	// The sbx-tpl tag on the disks makes them clone origins for sbx-node (lv.usage needs it too).
+	// The umiak-tpl tag on the disks makes them clone origins for umiak-node (lv.usage needs it too).
 	await deps.node.call("lv.tagTemplate", { vmid });
 	await checkTemplateDisk(deps, lvs[p.recipe.disk.slot] as string, st);
 	if (st.m.diskUsedGiB !== undefined) save({ diskUsedGiB: st.m.diskUsedGiB });

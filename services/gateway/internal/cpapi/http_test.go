@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi/cpapitest"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi/cpapitest"
 )
 
 const token = "svc-token"
@@ -28,7 +28,7 @@ func newPair(t *testing.T) (*cpapitest.Fake, cpapi.Client) {
 func TestHTTPClientLookupRoute(t *testing.T) {
 	f, c := newPair(t)
 	want := cpapi.Route{
-		Label: "quiet-otter-lamp-5173", SandboxID: "sbx_1", Slug: "quiet-otter-lamp", Port: 5173,
+		Label: "quiet-otter-lamp-5173", SandboxID: "umiak_1", Slug: "quiet-otter-lamp", Port: 5173,
 		MachineID: "0192abc", SandboxState: "running", Access: "token", TokenHash: "abcd",
 		AuthEpoch: 7, Blocked: true, BlockReason: "abuse", HostRewrite: "localhost",
 		AppProtocol: "h2c", TeamID: "team_1", Kind: "port",
@@ -49,7 +49,7 @@ func TestHTTPClientRouteWireFormat(t *testing.T) {
 		gotPath, gotAuth = r.URL.EscapedPath(), r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
 		// Null fields, no kind, and a field the client does not know.
-		_, _ = w.Write([]byte(`{"label":"foo-80","sandboxId":"sbx_1","slug":"foo","port":80,
+		_, _ = w.Write([]byte(`{"label":"foo-80","sandboxId":"umiak_1","slug":"foo","port":80,
 			"machineId":null,"sandboxState":"stopped","access":"public","tokenHash":null,
 			"authEpoch":3,"blocked":false,"blockReason":null,"hostRewrite":"preserve",
 			"appProtocol":"http1","teamId":"team_1","somethingNew":{"a":1}}`))
@@ -291,23 +291,23 @@ func TestHTTPClientExchange400WithoutCodeIsUnavailable(t *testing.T) {
 func TestHTTPClientAuthorizeSSH(t *testing.T) {
 	f, c := newPair(t)
 	f.SetSSH(func(r cpapi.SSHAuthorizeRequest) bool {
-		return r.Certificate != nil && r.Certificate.KeyID == "sbx:key:key_1"
+		return r.Certificate != nil && r.Certificate.KeyID == "umiak:key:key_1"
 	},
 		cpapi.SSHAuthorization{
 			Allowed: true, Actor: cpapi.SSHActor{Kind: "team_key", APIKeyID: "key_1"},
-			SandboxID: "sbx_1", MachineID: "m1", SandboxState: "ready", LoginUser: "ubuntu", TeamID: "team_1",
+			SandboxID: "umiak_1", MachineID: "m1", SandboxState: "ready", LoginUser: "ubuntu", TeamID: "team_1",
 		})
 	f.SetSSH(func(r cpapi.SSHAuthorizeRequest) bool { return r.Fingerprint == "SHA256:abc" },
 		cpapi.SSHAuthorization{
 			Allowed: true, Actor: cpapi.SSHActor{Kind: "user", UserID: "usr_1", Email: "a@example.com"},
-			UserID: "usr_1", Email: "a@example.com", SandboxID: "sbx_1", LoginUser: "dev", TeamID: "team_1",
+			UserID: "usr_1", Email: "a@example.com", SandboxID: "umiak_1", LoginUser: "dev", TeamID: "team_1",
 		})
 
 	validBefore := time.Date(2026, 10, 29, 12, 10, 0, 0, time.UTC)
 	got, err := c.AuthorizeSSH(context.Background(), cpapi.SSHAuthorizeRequest{
 		Sandbox: "quiet-otter-lamp",
 		Certificate: &cpapi.SSHCertInfo{
-			KeyID: "sbx:key:key_1", Serial: "42", Principal: "sb_1", ValidBefore: validBefore,
+			KeyID: "umiak:key:key_1", Serial: "42", Principal: "sb_1", ValidBefore: validBefore,
 		},
 	})
 	if err != nil {
@@ -323,7 +323,7 @@ func TestHTTPClientAuthorizeSSH(t *testing.T) {
 		t.Fatalf("last body: %v", err)
 	}
 	cert, _ := body["certificate"].(map[string]any)
-	if body["sandbox"] != "quiet-otter-lamp" || cert["keyId"] != "sbx:key:key_1" || cert["serial"] != "42" ||
+	if body["sandbox"] != "quiet-otter-lamp" || cert["keyId"] != "umiak:key:key_1" || cert["serial"] != "42" ||
 		cert["principal"] != "sb_1" || cert["validBefore"] != "2026-10-29T12:10:00Z" {
 		t.Fatalf("request body = %s", f.LastSSHBody())
 	}

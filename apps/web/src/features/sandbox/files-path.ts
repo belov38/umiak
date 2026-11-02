@@ -50,7 +50,7 @@ export function isHidden(name: string): boolean {
 
 /**
  * Link that downloads a file (S7 answers with `Content-Disposition:
- * attachment`). A link carries no `Sbx-Team` header, so the team goes in
+ * attachment`). A link carries no `Umiak-Team` header, so the team goes in
  * the query (S8 §9.2, C4).
  */
 export function fileDownloadUrl(o: {

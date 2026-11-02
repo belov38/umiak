@@ -1,15 +1,15 @@
 "use client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 // Terminal tab (S8 §9.6): terminals of the sandbox as tabs. "New terminal"
 // → POST /ptys (Idempotency-Key), then the PTY WebSocket through the SDK
-// (`/api/v1/sandboxes/{sb}/ptys/{cmd}/connect?team=…`, sbx.pty.v1). The
+// (`/api/v1/sandboxes/{sb}/ptys/{cmd}/connect?team=…`, umiak.pty.v1). The
 // running terminals (GET /commands?mode=pty&status=running) come back as
 // tabs after a reload and attach with 64 KiB of scrollback. Only the open
 // tab holds a WebSocket; leaving the tab or the page closes it (the shell
 // keeps running). The SDK reconnects by offset; meanwhile a
 // "reconnecting…" bar. Detach leaves the shell running (the agent ends it
 // after 10 min without a client); Close ends it (kill).
-import type { CommandData, Pty, Sandbox, SandboxData } from "@sbx/sdk";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { CommandData, Pty, Sandbox, SandboxData } from "@umiak/sdk";
 import { LoaderCircleIcon, PlusIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";

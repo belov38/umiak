@@ -6,9 +6,9 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
+	"github.com/belov38/umiak/libs/tunnel/rpcconv"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
 )
 
 func TestWindowsPathRules(t *testing.T) {

@@ -7,10 +7,10 @@ import {
 	markOutputTruncated,
 	normalizeAgentEvent,
 	operationDeadline,
-	SbxError,
 	type SyntheticEventType,
-} from "@sbx/core";
-import type { Tx } from "@sbx/db";
+	UmiakError,
+} from "@umiak/core";
+import type { Tx } from "@umiak/db";
 import type { WorkerCtx } from "../context.ts";
 import { type MachineRow, withMachineLocked } from "../db.ts";
 
@@ -406,7 +406,7 @@ async function onQuiesceWatchdogThawed(
 		 RETURNING id`,
 		[s.machine.id],
 	);
-	s.ctx.metrics.inc("sbx_quiesce_watchdog_thawed_total");
+	s.ctx.metrics.inc("umiak_quiesce_watchdog_thawed_total");
 	s.ctx.log.warn(
 		{
 			machineId: s.machine.id,
@@ -477,7 +477,7 @@ async function onIdentityChanged(
 		s.ctx.log.info({ machineId: m.id }, "identity changed (expected)");
 		return;
 	}
-	s.ctx.metrics.inc("sbx_unexpected_identity_change_total");
+	s.ctx.metrics.inc("umiak_unexpected_identity_change_total");
 	s.ctx.log.warn(
 		{ machineId: m.id, epoch: e.epoch, origin: m.origin },
 		"unexpected identity change",
@@ -548,7 +548,7 @@ async function maybeReprovision(
 
 /**
  * Applies `write` to a command of this machine; a command of another or no
- * machine, or a malformed value (an SbxError), is logged and skipped.
+ * machine, or a malformed value (an UmiakError), is logged and skipped.
  */
 async function writeCommand(
 	s: EventScope,
@@ -571,7 +571,7 @@ async function writeCommand(
 		await write();
 	} catch (err) {
 		// A malformed result must not block the machine's event queue.
-		if (!(err instanceof SbxError)) throw err;
+		if (!(err instanceof UmiakError)) throw err;
 		s.ctx.log.warn(
 			{ machineId: s.machine.id, commandId, code: err.code },
 			"command event rejected",

@@ -1,7 +1,7 @@
 // Route guards: requireScope, requireHuman, requireOwner (S7 §7.3, §7.5).
 import { randomUUID } from "node:crypto";
 import { createRoute, z } from "@hono/zod-openapi";
-import { generateApiKeySecret, type Scope } from "@sbx/auth";
+import { generateApiKeySecret, type Scope } from "@umiak/auth";
 import { describe, expect, it } from "vitest";
 import {
 	ERROR_RESPONSES,

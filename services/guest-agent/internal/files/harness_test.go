@@ -24,14 +24,14 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/agent/v1/agentv1connect"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/reqcache"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/process"
+	"github.com/belov38/umiak/services/guest-agent/internal/reqcache"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
 )
 
 // clock is a settable test clock.
@@ -129,7 +129,7 @@ func newHarness(t *testing.T, mods ...func(*Options)) *harness {
 	return h
 }
 
-// requestIDs adds a fresh Sbx-Request-Id to every call.
+// requestIDs adds a fresh Umiak-Request-Id to every call.
 type requestIDs struct{}
 
 func (requestIDs) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {

@@ -13,8 +13,8 @@ import {
 	encodeUuid,
 	IdentityError,
 	type NewEnvironment,
-} from "@sbx/auth";
-import { isUuid, type Principal } from "@sbx/core";
+} from "@umiak/auth";
+import { isUuid, type Principal } from "@umiak/core";
 import { authOf } from "../auth/principal.ts";
 import { requireOwnerUnlessKey, requireScope } from "../auth/scopes.ts";
 import type { ApiApp, ApiDeps } from "../deps.ts";

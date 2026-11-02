@@ -22,13 +22,13 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
 )
 
 // HeaderUploadOffset carries the current size of an upload. It is the only
-// Sbx-* response header of /files.
+// Umiak-* response header of /files.
 const HeaderUploadOffset = wire.HeaderUploadOffset
 
 // uploadIDRE is the syntax of an upload id. It is matched against the
@@ -187,12 +187,12 @@ func randomSuffix() string {
 	return hex.EncodeToString(b[:])
 }
 
-// writeTemp copies r into a new temporary file ".sbx-tmp-*" in dir, fsyncs
+// writeTemp copies r into a new temporary file ".umiak-tmp-*" in dir, fsyncs
 // it and gives it owner o and mode (after the chown, which may clear
 // setuid bits). It returns the path of the closed file; on error nothing is
 // left behind.
 func writeTemp(dir string, r io.Reader, mode fs.FileMode, o owner) (path string, err error) {
-	f, err := os.CreateTemp(dir, ".sbx-tmp-*")
+	f, err := os.CreateTemp(dir, ".umiak-tmp-*")
 	if err != nil {
 		return "", fsError(err)
 	}

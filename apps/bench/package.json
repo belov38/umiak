@@ -1,19 +1,19 @@
 {
-	"name": "@sbx/bench",
+	"name": "@umiak/bench",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
-	"description": "sbx-bench: S1 Proxmox foundation checks and measurements",
+	"description": "umiak-bench: S1 Proxmox foundation checks and measurements",
 	"bin": {
-		"sbx-bench": "./src/main.ts"
+		"umiak-bench": "./src/main.ts"
 	},
 	"scripts": {
-		"sbx-bench": "node src/main.ts",
+		"umiak-bench": "node src/main.ts",
 		"test": "vitest run",
 		"build": "tsc --noEmit -p .",
 		"typecheck": "tsc --noEmit -p ."
 	},
 	"dependencies": {
-		"@sbx/pve": "workspace:*"
+		"@umiak/pve": "workspace:*"
 	}
 }

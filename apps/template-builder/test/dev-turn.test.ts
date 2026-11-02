@@ -16,7 +16,7 @@ it("dev TURN rollback removes only its rules and preserves concurrent changes", 
 		const dir = join(root, "etc/pve/firewall");
 		mkdirSync(dir, { recursive: true });
 		const cluster =
-			"[group sbx-egress]\nOUT ACCEPT -dest +sbx-gateway -p tcp -dport 443\nOUT DROP -dest +sbx-deny\n";
+			"[group umiak-egress]\nOUT ACCEPT -dest +umiak-gateway -p tcp -dport 443\nOUT DROP -dest +umiak-deny\n";
 		writeFileSync(join(dir, "cluster.fw"), cluster);
 		writeFileSync(join(dir, "590.fw"), "[RULES]\nIN ACCEPT -p tcp -dport 22\n");
 		const run = (arg: string) =>
@@ -37,7 +37,7 @@ it("dev TURN rollback removes only its rules and preserves concurrent changes", 
 		const applied = readFileSync(join(dir, "cluster.fw"), "utf8");
 		expect(applied.match(/s10-dev-turn/g)).toHaveLength(1);
 		expect(applied).toContain(
-			"OUT ACCEPT -dest +sbx-gateway -p udp -dport 3478 # s10-dev-turn",
+			"OUT ACCEPT -dest +umiak-gateway -p udp -dport 3478 # s10-dev-turn",
 		);
 		writeFileSync(
 			join(dir, "cluster.fw"),
@@ -87,8 +87,8 @@ it("TURN leaf issuance is idempotent and repairs a mismatched private key", () =
 					encoding: "utf8",
 					env: {
 						...process.env,
-						SBX_DEVCP_CA_DIR: root,
-						SBX_DEVCP_TURN_HOST: "turn.fixture.test",
+						UMIAK_DEVCP_CA_DIR: root,
+						UMIAK_DEVCP_TURN_HOST: "turn.fixture.test",
 					},
 				},
 			);

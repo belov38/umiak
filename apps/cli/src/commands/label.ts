@@ -1,4 +1,4 @@
-// `sbx label [<sb>] [k=v...] [--unset k]...` (S7 §8.2): merges labels into
+// `umiak label [<sb>] [k=v...] [--unset k]...` (S7 §8.2): merges labels into
 // the sandbox's (PATCH replaces them all, so they are read first). Without
 // changes prints the labels. A first argument with `=` is a label: the
 // sandbox is then the current one.
@@ -34,10 +34,12 @@ export function register(program: Command, run: Runner): void {
 				}
 				const labels: Record<string, string> = { ...sb.data.labels, ...set };
 				for (const k of unset) delete labels[k];
-				const { data } = await ctx.sbx().raw.PATCH("/v1/sandboxes/{sandbox}", {
-					params: { path: { sandbox: sb.id } },
-					body: { labels },
-				});
+				const { data } = await ctx
+					.umiak()
+					.raw.PATCH("/v1/sandboxes/{sandbox}", {
+						params: { path: { sandbox: sb.id } },
+						body: { labels },
+					});
 				ctx.out.result(data, (v) =>
 					[
 						`${v.slug} (${v.id})`,

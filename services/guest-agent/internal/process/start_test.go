@@ -15,14 +15,14 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shim"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/supervisor"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/shim"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/supervisor"
 )
 
 func TestStartIdempotent(t *testing.T) {
@@ -192,7 +192,7 @@ func TestStartTooMany(t *testing.T) {
 func TestStartUnknownUser(t *testing.T) {
 	h := newHarness(t)
 	spec := argvSpec("/bin/true")
-	spec.User = "no-such-user-sbx-test"
+	spec.User = "no-such-user-umiak-test"
 	_, err := h.client.Start(h.ctx(), connect.NewRequest(&agentv1.StartRequest{CommandId: "c1", Spec: spec}))
 	wantCode(t, err, connect.CodeInvalidArgument, errs.UserNotFound)
 	if n := len(h.fake.Launches()); n != 0 {

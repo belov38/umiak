@@ -1,6 +1,6 @@
-// Read-only status queries shared by `sbx-admin pool status` and the
+// Read-only status queries shared by `umiak-admin pool status` and the
 // scrape-time gauges of /metrics.
-import { POWERED_SQL, RESERVED_SQL } from "@sbx/core";
+import { POWERED_SQL, RESERVED_SQL } from "@umiak/core";
 import type pg from "pg";
 
 type Queryable = Pick<pg.Pool, "query">;

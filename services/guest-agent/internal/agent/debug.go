@@ -1,9 +1,9 @@
 package agent
 
 // The debug socket is a test and QGA aid, not a production interface:
-// `sbx-agent run --debug-listen unix:<path>` serves the agent mux (the same
-// handler the tunnel serves), sbx.tunnel.v1.Control/Info and a read-only
-// sbx.tunnel.v1.Events/Subscribe on a local unix socket, over HTTP/1.1 or
+// `umiak-agent run --debug-listen unix:<path>` serves the agent mux (the same
+// handler the tunnel serves), umiak.tunnel.v1.Control/Info and a read-only
+// umiak.tunnel.v1.Events/Subscribe on a local unix socket, over HTTP/1.1 or
 // h2c, without the tunnel library. It lets tests drive the agent and read
 // its journal without a gateway. Events/Ack is not served, so a debug
 // client never drops events the gateway has not seen.
@@ -26,13 +26,13 @@ import (
 
 	"connectrpc.com/connect"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1/tunnelv1connect"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/tunnel/v1/tunnelv1connect"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
 )
 
 // tunnelPackage is the proto package of the tunnel control API.
-const tunnelPackage = "sbx.tunnel.v1"
+const tunnelPackage = "umiak.tunnel.v1"
 
 // debugShutdown bounds the wait for in-flight debug requests at shutdown.
 // Streaming calls (Attach) do not end on their own and hold it to the bound.
@@ -98,7 +98,7 @@ func (a *agent) serveLocal(ctx context.Context, ln net.Listener, path string, h 
 // Administrators DACL), made 0600 (on Windows given the DACL of the admin
 // socket) and only then renamed into place.
 func listenPrivate(ctx context.Context, path string) (net.Listener, error) {
-	dir, err := os.MkdirTemp(filepath.Dir(path), ".sbx-debug-")
+	dir, err := os.MkdirTemp(filepath.Dir(path), ".umiak-debug-")
 	if err != nil {
 		return nil, fmt.Errorf("agent: debug socket dir: %w", err)
 	}

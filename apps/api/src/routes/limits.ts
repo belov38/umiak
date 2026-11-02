@@ -1,7 +1,7 @@
 // GET /v1/limits (S7 §13): quota, usage and remaining of the request's team,
 // which sizes it can create now, and the rate limits. Any valid credential.
 import { createRoute } from "@hono/zod-openapi";
-import { teamUsage } from "@sbx/core";
+import { teamUsage } from "@umiak/core";
 import { authOf } from "../auth/principal.ts";
 import type { ApiApp, ApiDeps } from "../deps.ts";
 import { ERROR_RESPONSES, jsonResponse } from "../openapi/registry.ts";

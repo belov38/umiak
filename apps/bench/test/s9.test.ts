@@ -66,7 +66,7 @@ describe("agentReadiness", () => {
 	const id = "0a1b2c3d-1111-2222-3333-444455556666";
 	const info = (o: Record<string, unknown>) => ({
 		machine_id: id,
-		hostname: "SBX444455556666",
+		hostname: "UMI444455556666",
 		readiness: [
 			{ name: "identity", state: "ready" },
 			{ name: "claim", state: "pending" },
@@ -99,10 +99,11 @@ describe("agentReadiness", () => {
 
 	it("waits for the new computer name of a fork", () => {
 		const want = { machineId: id, hostname: computerNameFor(id) };
-		expect(want.hostname).toBe("SBX444455556666");
+		expect(want.hostname).toBe("UMI444455556666");
+		expect(want.hostname).toHaveLength(15);
 		expect(agentReadiness(info({}), want).ready).toBe(true);
 		expect(
-			agentReadiness(info({ hostname: "SBXAAAAAAAAAAAA" }), want).ready,
+			agentReadiness(info({ hostname: "UMIAAAAAAAAAAAA" }), want).ready,
 		).toBe(false);
 	});
 });
@@ -180,7 +181,7 @@ function fakeDeps(opts: { failFork?: boolean } = {}) {
 				// A fork reports the old name on its first answer, the new one after the rename.
 				const forkVm = vmid === 501;
 				const hostname =
-					forkVm && !renamed ? "SBXOLD" : `SBX${id.slice(-12).toUpperCase()}`;
+					forkVm && !renamed ? "UMIAKOLD" : `UMI${id.slice(-12).toUpperCase()}`;
 				if (forkVm) renamed = true;
 				return {
 					exitCode: 0,
@@ -333,7 +334,7 @@ describe("runS9Once", () => {
 const INFO_OK = (id: string) =>
 	JSON.stringify({
 		machine_id: id,
-		hostname: "SBXTEST",
+		hostname: "UMIAKTEST",
 		readiness: [{ name: "identity", state: "ready" }],
 	});
 
@@ -377,7 +378,9 @@ function fakeTestsRun(
 						stderr: "",
 					};
 				}
-				if (cmd[0] === "C:\\Program Files\\sbx-agent\\current\\sbx-agent.exe")
+				if (
+					cmd[0] === "C:\\Program Files\\umiak-agent\\current\\umiak-agent.exe"
+				)
 					return { exitCode: 0, stdout: INFO_OK(uuid), stderr: "" };
 				const code = opts.exitCodes?.[cmd[0] ?? ""] ?? 0;
 				return {
@@ -392,7 +395,7 @@ function fakeTestsRun(
 		made: [] as { names: string[]; label: string; sizes: number[] }[],
 		make(files: Map<string, Buffer>, path: string, label: string) {
 			calls.push("make");
-			expect(path).toMatch(/sbx-build-agenttests-\d{14}\.iso$/);
+			expect(path).toMatch(/umiak-build-agenttests-\d{14}\.iso$/);
 			this.made.push({
 				names: [...files.keys()],
 				label,
@@ -402,7 +405,7 @@ function fakeTestsRun(
 		async upload(name: string) {
 			calls.push(`upload:${name}`);
 			if (opts.uploadFails) throw new Error("upload boom");
-			expect(name).toMatch(/^sbx-build-[a-z0-9-]{1,64}\.iso$/);
+			expect(name).toMatch(/^umiak-build-[a-z0-9-]{1,64}\.iso$/);
 		},
 		async remove(name: string) {
 			calls.push(`remove:${name.replace(/\d{14}/, "<ts>")}`);
@@ -441,8 +444,8 @@ function fakeTestsRun(
 	return { deps, calls, execs, iso, printed: () => printed };
 }
 
-const A = "C:\\sbx-tests\\internal_a.test.exe";
-const B = "C:\\sbx-tests\\internal_b.test.exe";
+const A = "C:\\umiak-tests\\internal_a.test.exe";
+const B = "C:\\umiak-tests\\internal_b.test.exe";
 const opts = { template: 598, dir: "/tmp/x", keep: false, ramCapMb: 8192 };
 
 describe("agent-tests", () => {
@@ -450,23 +453,23 @@ describe("agent-tests", () => {
 		const t = fakeTestsRun({ exitCodes: { [B]: 1 } });
 		const code = await runAgentTests(t.deps, { ...opts, run: "TestFoo" });
 		expect(code).toBe(1);
-		// The ISO holds only the test binaries, whole (no chunking), under the SBXTESTS label.
+		// The ISO holds only the test binaries, whole (no chunking), under the UMIAKTESTS label.
 		expect(t.iso.made).toEqual([
 			{
 				names: ["internal_a.test.exe", "internal_b.test.exe"],
-				label: "SBXTESTS",
+				label: "UMIAKTESTS",
 				sizes: [70_000, 2],
 			},
 		]);
 		expect(t.calls).toEqual([
 			"make",
-			expect.stringMatching(/^upload:sbx-build-agenttests-\d{14}\.iso$/),
+			expect.stringMatching(/^upload:umiak-build-agenttests-\d{14}\.iso$/),
 			"create:500",
-			"attach:500:sbx-build-agenttests-<ts>.iso",
+			"attach:500:umiak-build-agenttests-<ts>.iso",
 			"reserve:500",
 			"start:500",
 			"delete:500",
-			"remove:sbx-build-agenttests-<ts>.iso",
+			"remove:umiak-build-agenttests-<ts>.iso",
 			"release:500",
 		]);
 		const runs = t.execs.filter((c) => c[0]?.endsWith(".test.exe"));
@@ -499,7 +502,7 @@ describe("agent-tests", () => {
 				},
 				opts,
 			),
-		).rejects.toThrow(/copy from the SBXTESTS CD failed/);
+		).rejects.toThrow(/copy from the UMIAKTESTS CD failed/);
 		expect(t.calls).toContain("delete:500");
 		expect(t.calls.some((c) => c.startsWith("remove:"))).toBe(true);
 	});
@@ -531,7 +534,7 @@ describe("agent-tests", () => {
 		expect(t.calls).toEqual([
 			"make",
 			expect.stringMatching(/^upload:/),
-			"remove:sbx-build-agenttests-<ts>.iso",
+			"remove:umiak-build-agenttests-<ts>.iso",
 		]);
 	});
 
@@ -548,7 +551,7 @@ describe("agent-tests", () => {
 		).rejects.toThrow(/SIGTERM/);
 		expect(t.calls.slice(-3)).toEqual([
 			"delete:500",
-			"remove:sbx-build-agenttests-<ts>.iso",
+			"remove:umiak-build-agenttests-<ts>.iso",
 			"release:500",
 		]);
 		expect(t.execs.some((c) => c[0]?.endsWith(".test.exe"))).toBe(false);
@@ -574,11 +577,11 @@ describe("agent-tests", () => {
 		}
 	});
 
-	it("names the ISO like the sbx-node media pattern", () => {
-		const name = `sbx-build-agenttests-${stamp(Date.UTC(2026, 9, 31, 5, 4, 3))}.iso`;
-		expect(name).toBe("sbx-build-agenttests-20261031050403.iso");
+	it("names the ISO like the umiak-node media pattern", () => {
+		const name = `umiak-build-agenttests-${stamp(Date.UTC(2026, 9, 31, 5, 4, 3))}.iso`;
+		expect(name).toBe("umiak-build-agenttests-20261031050403.iso");
 		expect(ISO_NAME_RE.test(name)).toBe(true);
-		expect(ISO_NAME_RE.test("sbx-build-Agent.iso")).toBe(false);
+		expect(ISO_NAME_RE.test("umiak-build-Agent.iso")).toBe(false);
 		expect(ISO_NAME_RE.test("agenttests.iso")).toBe(false);
 	});
 });

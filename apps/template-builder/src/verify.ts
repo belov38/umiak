@@ -16,7 +16,7 @@ import {
 	type Smbios,
 	type SnapshotRef,
 	s2SerialPayload,
-} from "@sbx/pve";
+} from "@umiak/pve";
 import type {
 	BootTimes,
 	CheckResult,
@@ -26,7 +26,7 @@ import type {
 import type { GuestIo } from "./runner.ts";
 import { verifyWindows } from "./windows/verify.ts";
 
-// `sbx-tpl verify` (spec S5 section 10): a clone of the template, its hard restart, a fork with
+// `umiak-tpl verify` (spec S5 section 10): a clone of the template, its hard restart, a fork with
 // a new identity and a raw-disk scan for build secrets. The clones are removed at the end.
 
 /** Tunnel URL of the test smbios family when no gateway is used: never resolves. */
@@ -73,11 +73,11 @@ export function defaultSecretFiles(
 ): SecretFiles {
 	return {
 		updateSigningKey:
-			env.SBX_UPDATE_SIGNING_KEY ??
-			join(home, ".config/sbx/update-signing/ed25519.key"),
+			env.UMIAK_UPDATE_SIGNING_KEY ??
+			join(home, ".config/umiak/update-signing/ed25519.key"),
 		pveToken: cfg.tokenSecretFile,
 		nodeSshKey: cfg.nodeSshKeyFile,
-		devCaKey: join(home, ".config/sbx/dev-ca/ca.key"),
+		devCaKey: join(home, ".config/umiak/dev-ca/ca.key"),
 	};
 }
 
@@ -96,7 +96,7 @@ export interface VerifyDeps {
 		| "deleteSnapshot"
 	>;
 	io: (vmid: number) => GuestIo;
-	/** sbx-node: lv.scan of the template and clone disks. */
+	/** umiak-node: lv.scan of the template and clone disks. */
 	node: Pick<NodeOps, "call">;
 	ramGuard: {
 		reserve(vmid: number, memoryMb: number): Promise<void>;
@@ -104,7 +104,7 @@ export interface VerifyDeps {
 	};
 	/** infra/templates/<recipe.verify>/verify.sh (windows: verify.ps1) */
 	verifyScript: string;
-	/** Windows: QGA calls beyond exec (Qga of @sbx/pve). */
+	/** Windows: QGA calls beyond exec (Qga of @umiak/pve). */
 	windows?: WindowsGuestOps;
 	secretFiles: SecretFiles;
 	/** One message per call; secrets are already redacted. */
@@ -176,7 +176,7 @@ const pass = (id: string, ok: boolean, evidence: string): CheckResult => ({
 /** Lower-case hex of a UUID without dashes. */
 const uuidHex = (s: string) => s.replaceAll("-", "").toLowerCase();
 
-/** `sbx-agent doctor --json` against the template and the test smbios (spec section 10 item 9). */
+/** `umiak-agent doctor --json` against the template and the test smbios (spec section 10 item 9). */
 export function checkDoctor(
 	doctorJson: unknown,
 	expect: { agentVersion: string; machineId: string; tunnelUrl: string },
@@ -194,7 +194,7 @@ export function checkDoctor(
 	const version = d.versions?.current;
 	const units = d.units ?? {};
 	const unitsOk =
-		units["sbx-identity"] === "active" && units["sbx-agent"] === "active";
+		units["umiak-identity"] === "active" && units["umiak-agent"] === "active";
 	const mid = d.identity?.machine_id;
 	const idState = d.status?.identity?.state;
 	const url = d.tunnel_url;
@@ -208,7 +208,7 @@ export function checkDoctor(
 		pass(
 			"agent_units",
 			unitsOk,
-			`sbx-identity ${units["sbx-identity"] ?? "unknown"}, sbx-agent ${units["sbx-agent"] ?? "unknown"}`,
+			`umiak-identity ${units["umiak-identity"] ?? "unknown"}, umiak-agent ${units["umiak-agent"] ?? "unknown"}`,
 		),
 		pass(
 			"agent_identity",
@@ -231,8 +231,8 @@ export function checkDoctor(
 	];
 }
 
-/** Tools that may be absent from an image (no `--sbx-cli` at build). */
-const OPTIONAL_TOOLS = new Set(["sbx"]);
+/** Tools that may be absent from an image (no `--umiak-cli` at build). */
+const OPTIONAL_TOOLS = new Set(["umiak"]);
 
 /**
  * verify.sh TOOLS against the manifest (spec section 10 item 11): direct exec and login shell
@@ -290,7 +290,7 @@ export interface Facts {
 	randomSeed: string;
 	/** sha256 of /var/lib/systemd/credential.secret, or "absent". */
 	credentialSecret: string;
-	/** machineId in the agent's /var/lib/sbx-agent/identity.json. */
+	/** machineId in the agent's /var/lib/umiak-agent/identity.json. */
 	agentMachineId: string;
 	/** "1" when journalctl (this machine-id's journal) has the kernel's first line of this boot. */
 	journalBoot: string;
@@ -376,7 +376,7 @@ function keyBodyLines(text: string): string[] {
 
 /**
  * Fixed strings the raw-disk scan looks for: the update signing key (PEM body, base64 and hex
- * of its seed), the PVE token secret, the sbx-node and dev CA key bodies, and the BS of the
+ * of its seed), the PVE token secret, the umiak-node and dev CA key bodies, and the BS of the
  * verify clone. Missing files are skipped with a note.
  */
 export function scanPatterns(
@@ -433,7 +433,7 @@ function redactor(patterns: string[]): (text: string) => string {
 	};
 }
 
-/** Result of `sbx-node lv.scan`: the patterns stay on the host (never sent to a guest). */
+/** Result of `umiak-node lv.scan`: the patterns stay on the host (never sent to a guest). */
 export interface ScanResult {
 	matches: number;
 	scannedBytes: number;
@@ -476,7 +476,7 @@ const FACTS_SCRIPT = [
 	"for f in random-seed credential.secret; do",
 	'  if [ -e "/var/lib/systemd/$f" ]; then echo "$f=$(sha256sum "/var/lib/systemd/$f" | cut -d" " -f1)"; else echo "$f=absent"; fi',
 	"done",
-	'echo "agent_machine_id=$(grep -o \'"machineId": *"[^"]*"\' /var/lib/sbx-agent/identity.json | cut -d\'"\' -f4)"',
+	'echo "agent_machine_id=$(grep -o \'"machineId": *"[^"]*"\' /var/lib/umiak-agent/identity.json | cut -d\'"\' -f4)"',
 	"echo \"journal_boot=$(journalctl -b -q --no-pager -o cat -t kernel 2>/dev/null | head -1 | grep -c '^Linux version')\"",
 ].join("\n");
 
@@ -558,7 +558,7 @@ export async function verifyTemplate(
 		c.reserved = true;
 	};
 
-	/** Starts a clone and waits for QGA, the IPv4 and an active sbx-agent. */
+	/** Starts a clone and waits for QGA, the IPv4 and an active umiak-agent. */
 	const startClone = async (c: Clone, label: string): Promise<BootTimes> => {
 		const startedAt = now();
 		await machines.start(c.vmid);
@@ -578,7 +578,7 @@ export async function verifyTemplate(
 			pass(
 				`${label}agent_active`,
 				active.at !== undefined,
-				`sbx-agent ${active.state}${active.at !== undefined ? ` ${active.at - startedAt} ms after start` : ` after ${AGENT_ACTIVE_TIMEOUT_MS} ms`}`,
+				`umiak-agent ${active.state}${active.at !== undefined ? ` ${active.at - startedAt} ms after start` : ` after ${AGENT_ACTIVE_TIMEOUT_MS} ms`}`,
 			),
 		);
 		log(
@@ -595,7 +595,7 @@ export async function verifyTemplate(
 		for (;;) {
 			signal?.throwIfAborted();
 			try {
-				const r = await io.exec(["systemctl", "is-active", "sbx-agent"]);
+				const r = await io.exec(["systemctl", "is-active", "umiak-agent"]);
 				state = r.stdout.trim() || `exit ${r.exitCode}`;
 			} catch (err) {
 				state = `unknown: ${errorText(err)}`;
@@ -671,13 +671,13 @@ export async function verifyTemplate(
 			kvm = { available: false, reason: k.slice("unavailable: ".length) };
 		add(...checkTools(parsed.tools, manifest.tools));
 
-		step("agent (sbx-agent doctor)");
-		const dr = await io.exec(["sbx-agent", "doctor", "--json"]);
+		step("agent (umiak-agent doctor)");
+		const dr = await io.exec(["umiak-agent", "doctor", "--json"]);
 		let doc: unknown = null;
 		try {
 			doc = JSON.parse(dr.stdout);
 		} catch {
-			log(`sbx-agent doctor: exit ${dr.exitCode}: ${dr.stderr.trim()}`);
+			log(`umiak-agent doctor: exit ${dr.exitCode}: ${dr.stderr.trim()}`);
 		}
 		add(
 			...checkDoctor(doc, {
@@ -717,7 +717,7 @@ export async function verifyTemplate(
 			status: "INFO",
 			evidence: [`${scan.patterns.length} patterns`, ...scan.notes].join("; "),
 		});
-		// On the host through sbx-node: the template disk (build secrets) and A's disk after a boot
+		// On the host through umiak-node: the template disk (build secrets) and A's disk after a boot
 		// (the BS must not reach it). The guest never sees the patterns.
 		const scans: { disk: string; r?: ScanResult; error?: string }[] = [];
 		for (const disk of [`base-${tplVmid}-disk-0`, `vm-${A.vmid}-disk-0`]) {

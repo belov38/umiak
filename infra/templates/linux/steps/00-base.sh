@@ -14,8 +14,8 @@ systemctl stop apt-daily.timer apt-daily-upgrade.timer apt-daily.service \
 
 # cloud-init (bootcmd) set the snapshot already; set it again in case the
 # apt module rewrote the file.
-log "apt snapshot $SBX_APT_SNAPSHOT"
-apt_snapshot "$SBX_APT_SNAPSHOT"
+log "apt snapshot $UMIAK_APT_SNAPSHOT"
+apt_snapshot "$UMIAK_APT_SNAPSHOT"
 apt_update
 
 # grub-pc upgrades must not ask for the boot disk. The by-id name of the
@@ -86,7 +86,7 @@ log "next boot: $kernel"
 # The initrd-less PARTUUID boot of the image (spec 8.5) is not tried with the
 # generic kernel either.
 rm -f /etc/default/grub.d/40-force-partuuid.cfg
-printf 'GRUB_DEFAULT=0\nGRUB_TOP_LEVEL="/boot/vmlinuz-%s"\n' "$kernel" >/etc/default/grub.d/99-sbx-build-kernel.cfg
+printf 'GRUB_DEFAULT=0\nGRUB_TOP_LEVEL="/boot/vmlinuz-%s"\n' "$kernel" >/etc/default/grub.d/99-umiak-build-kernel.cfg
 update-grub
 first=$(awk '/^menuentry /{ m = 1 } m && $1 == "linux" { print $2; exit }' /boot/grub/grub.cfg)
 [[ $first == *"/vmlinuz-$kernel" ]] || die "first GRUB entry boots '$first', not $kernel"

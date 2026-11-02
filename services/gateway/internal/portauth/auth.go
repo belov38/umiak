@@ -14,15 +14,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/ratelimit"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/routes"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/sbxerr"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
+	"github.com/belov38/umiak/services/gateway/internal/ratelimit"
+	"github.com/belov38/umiak/services/gateway/internal/routes"
+	"github.com/belov38/umiak/services/gateway/internal/umiakerr"
 )
 
 // TokenHeader carries a port token for API clients and scripts (spec 8.3).
-const TokenHeader = "Sbx-Port-Token"
+const TokenHeader = "Umiak-Port-Token"
 
 // tokenParam is the query parameter that carries a port token.
 const tokenParam = "_token"
@@ -61,16 +61,16 @@ const maxStateCookies = 8
 
 // Config configures Auth.
 type Config struct {
-	Codec     *Codec
-	API       cpapi.Client
-	AuthURL   string // SBX_GATEWAY_AUTH_URL; may carry its own query
-	SbxDomain string
-	CrossSite bool // SameSite=None; Partitioned instead of SameSite=Lax
-	TokenTTL  time.Duration
-	SSOTTL    time.Duration
-	StateTTL  time.Duration
-	Limits    *ratelimit.Limits // nil disables the auth-failure limit
-	Metrics   *obs.Metrics      // nil disables metrics
+	Codec       *Codec
+	API         cpapi.Client
+	AuthURL     string // UMIAK_GATEWAY_AUTH_URL; may carry its own query
+	UmiakDomain string
+	CrossSite   bool // SameSite=None; Partitioned instead of SameSite=Lax
+	TokenTTL    time.Duration
+	SSOTTL      time.Duration
+	StateTTL    time.Duration
+	Limits      *ratelimit.Limits // nil disables the auth-failure limit
+	Metrics     *obs.Metrics      // nil disables metrics
 }
 
 // Auth runs the token and sso checks. It is safe for concurrent use.
@@ -117,14 +117,14 @@ func (a *Auth) Check(w http.ResponseWriter, r *http.Request, l routes.Label, rt 
 	case AccessSSO:
 		res = a.checkSSO(w, r, l, rt, requestID)
 	default:
-		sbxerr.Write(w, r, sbxerr.Error{Status: http.StatusUnauthorized, Code: sbxerr.CodeAuthRequired, RequestID: requestID})
+		umiakerr.Write(w, r, umiakerr.Error{Status: http.StatusUnauthorized, Code: umiakerr.CodeAuthRequired, RequestID: requestID})
 		res = Result{AuthResult: ResultInvalid}
 	}
 	a.count(rt.Access, res.AuthResult)
 	return res
 }
 
-// checkToken follows spec 8.3: _token query, then Sbx-Port-Token, then the
+// checkToken follows spec 8.3: _token query, then Umiak-Port-Token, then the
 // cookie. A token that is present is evaluated even when a valid cookie is
 // also present, so an invalid _token always gives 401 token_invalid.
 func (a *Auth) checkToken(w http.ResponseWriter, r *http.Request, l routes.Label, rt cpapi.Route, ip netip.Addr, requestID string) Result {
@@ -140,7 +140,7 @@ func (a *Auth) checkToken(w http.ResponseWriter, r *http.Request, l routes.Label
 		}
 		if !tokenMatches(tok, rt.TokenHash) {
 			a.authFailure(ip)
-			sbxerr.Write(w, r, sbxerr.Error{Status: http.StatusUnauthorized, Code: sbxerr.CodeTokenInvalid, RequestID: requestID})
+			umiakerr.Write(w, r, umiakerr.Error{Status: http.StatusUnauthorized, Code: umiakerr.CodeTokenInvalid, RequestID: requestID})
 			return Result{AuthResult: ResultInvalid}
 		}
 		if !inQuery {
@@ -163,7 +163,7 @@ func (a *Auth) checkToken(w http.ResponseWriter, r *http.Request, l routes.Label
 	if ok {
 		return Result{Proceed: true, AuthResult: ResultOK}
 	}
-	sbxerr.Write(w, r, sbxerr.Error{Status: http.StatusUnauthorized, Code: sbxerr.CodeAuthRequired, RequestID: requestID})
+	umiakerr.Write(w, r, umiakerr.Error{Status: http.StatusUnauthorized, Code: umiakerr.CodeAuthRequired, RequestID: requestID})
 	return Result{AuthResult: missingOrInvalid(present)}
 }
 
@@ -182,7 +182,7 @@ func (a *Auth) checkSSO(w http.ResponseWriter, r *http.Request, l routes.Label, 
 		return Result{Proceed: true, AuthResult: ResultOK, Email: s.Email, UserID: s.UserID}
 	}
 	if !isNavigation(r) {
-		sbxerr.Write(w, r, sbxerr.Error{Status: http.StatusUnauthorized, Code: sbxerr.CodeAuthRequired, RequestID: requestID})
+		umiakerr.Write(w, r, umiakerr.Error{Status: http.StatusUnauthorized, Code: umiakerr.CodeAuthRequired, RequestID: requestID})
 		return Result{AuthResult: missingOrInvalid(present)}
 	}
 
@@ -296,7 +296,7 @@ func (a *Auth) sameURL(l routes.Label, path, rawQuery string) string {
 	if safePath(target) {
 		return target
 	}
-	return "https://" + l.Raw + "." + a.cfg.SbxDomain + target
+	return "https://" + l.Raw + "." + a.cfg.UmiakDomain + target
 }
 
 // blocked writes 429 when the IP is blocked for auth failures. It must be
@@ -313,9 +313,9 @@ func (a *Auth) blocked(w http.ResponseWriter, r *http.Request, ip netip.Addr, re
 	if retry < 1 {
 		retry = 1
 	}
-	sbxerr.Write(w, r, sbxerr.Error{
+	umiakerr.Write(w, r, umiakerr.Error{
 		Status:     http.StatusTooManyRequests,
-		Code:       sbxerr.CodeRateLimited,
+		Code:       umiakerr.CodeRateLimited,
 		Retryable:  true,
 		RetryAfter: retry,
 		RequestID:  requestID,

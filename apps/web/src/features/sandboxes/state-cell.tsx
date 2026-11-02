@@ -2,7 +2,7 @@
 // State, health and block of a sandbox (S8 §9.4): transitional states with
 // a spinner and the step of the active operation, `error` red with its
 // message, `degraded` yellow with the reason, a lock when blocked.
-import type { SandboxData } from "@sbx/sdk";
+import type { SandboxData } from "@umiak/sdk";
 import { LoaderCircleIcon, LockIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {

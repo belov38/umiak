@@ -1,5 +1,5 @@
 // Package rpcconv holds the Connect conventions of the tunnel protocol:
-// structured error details and the Sbx-Request-Id requirement.
+// structured error details and the Umiak-Request-Id requirement.
 package rpcconv
 
 import (
@@ -7,7 +7,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
 )
 
 // Retryable reports whether a client may retry a call that failed with code.

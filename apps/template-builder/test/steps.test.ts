@@ -70,7 +70,7 @@ describe("recipe scripts: shellcheck", () => {
 				"steps/20-docker.sh",
 				"steps/30-toolchains.sh",
 				"steps/40-coding-agents.sh",
-				"steps/50-sbx-agent.sh",
+				"steps/50-umiak-agent.sh",
 				"steps/90-cleanup.sh",
 			]),
 		);
@@ -174,10 +174,10 @@ describe("recipe scripts: spec items", () => {
 	it("10-system adds the S3 PAM lines", () => {
 		const s = code("steps/10-system.sh");
 		expect(s).toContain(
-			"session required pam_env.so readenv=1 envfile=/etc/sbx/env",
+			"session required pam_env.so readenv=1 envfile=/etc/umiak/env",
 		);
 		expect(s).toContain(
-			"session required pam_env.so readenv=1 envfile=/run/sbx/secrets/env",
+			"session required pam_env.so readenv=1 envfile=/run/umiak/secrets/env",
 		);
 	});
 
@@ -187,7 +187,7 @@ describe("recipe scripts: spec items", () => {
 		expect(s).toContain("cloud-init clean --logs --seed");
 		expect(s).toContain("/etc/netplan/50-cloud-init.yaml");
 		expect(s).toContain("/etc/ssh/sshd_config.d/50-cloud-init.conf");
-		expect(s).toContain("/etc/sbx-template/build.json");
+		expect(s).toContain("/etc/umiak-template/build.json");
 	});
 
 	it("no tailscale outside the purge list and the verify check", () => {
@@ -227,21 +227,21 @@ describe("recipe scripts: spec items", () => {
 
 describe("files/", () => {
 	it("sshd drop-in is spec 8.3 exactly", () => {
-		expect(read("files/etc/ssh/sshd_config.d/10-sbx.conf")).toBe(
+		expect(read("files/etc/ssh/sshd_config.d/10-umiak.conf")).toBe(
 			[
 				"ListenAddress 127.0.0.1",
 				"ListenAddress ::1",
 				"PasswordAuthentication no",
 				"KbdInteractiveAuthentication no",
 				"PermitRootLogin prohibit-password",
-				"TrustedUserCAKeys /etc/ssh/sbx_user_ca.pub",
+				"TrustedUserCAKeys /etc/ssh/umiak_user_ca.pub",
 				"",
 			].join("\n"),
 		);
 	});
 
 	it("grub drop-in is spec 8.5 exactly", () => {
-		expect(read("files/etc/default/grub.d/90-sbx.cfg")).toBe(
+		expect(read("files/etc/default/grub.d/90-umiak.cfg")).toBe(
 			[
 				"GRUB_TIMEOUT=0",
 				"GRUB_TIMEOUT_STYLE=hidden",
@@ -254,7 +254,7 @@ describe("files/", () => {
 	});
 
 	it("netplan matches by name, never by MAC", () => {
-		const n = read("files/etc/netplan/10-sbx.yaml");
+		const n = read("files/etc/netplan/10-umiak.yaml");
 		expect(n).toContain('name: "en*"');
 		expect(n).toContain("dhcp4: true");
 		expect(n).toContain("dhcp6: false");
@@ -265,25 +265,25 @@ describe("files/", () => {
 	it("the other drop-ins carry the spec values", () => {
 		expect(
 			read(
-				"files/etc/systemd/system/systemd-networkd-wait-online.service.d/10-sbx.conf",
+				"files/etc/systemd/system/systemd-networkd-wait-online.service.d/10-umiak.conf",
 			),
 		).toMatch(
 			/^ExecStart=\nExecStart=\S+systemd-networkd-wait-online --any --timeout=15$/m,
 		);
-		expect(read("files/etc/systemd/resolved.conf.d/10-sbx.conf")).toContain(
+		expect(read("files/etc/systemd/resolved.conf.d/10-umiak.conf")).toContain(
 			"FallbackDNS=1.1.1.1 9.9.9.9",
 		);
-		const sysctl = read("files/etc/sysctl.d/90-sbx.conf");
+		const sysctl = read("files/etc/sysctl.d/90-umiak.conf");
 		for (const kv of [
 			"kernel.apparmor_restrict_unprivileged_userns = 0",
 			"fs.inotify.max_user_watches = 524288",
 			"fs.inotify.max_user_instances = 1024",
 		])
 			expect(sysctl).toContain(kv);
-		expect(read("files/etc/systemd/system.conf.d/90-sbx.conf")).toContain(
+		expect(read("files/etc/systemd/system.conf.d/90-umiak.conf")).toContain(
 			"DefaultLimitNOFILE=65536:524288",
 		);
-		const journald = read("files/etc/systemd/journald.conf.d/90-sbx.conf");
+		const journald = read("files/etc/systemd/journald.conf.d/90-umiak.conf");
 		for (const kv of [
 			"Storage=persistent",
 			"SystemMaxUse=256M",
@@ -293,7 +293,7 @@ describe("files/", () => {
 		expect(JSON.parse(read("files/etc/docker/daemon.json"))).toEqual({
 			"log-driver": "local",
 		});
-		expect(read("files/etc/sudoers.d/90-sbx-user")).toBe(
+		expect(read("files/etc/sudoers.d/90-umiak-user")).toBe(
 			"user ALL=(ALL) NOPASSWD:ALL\n",
 		);
 	});
@@ -398,7 +398,7 @@ describe("verify.sh", () => {
 			"opencode",
 			"gemini",
 			"pnpm",
-			"sbx",
+			"umiak",
 			"git",
 			"git-lfs",
 			"rg",
@@ -419,7 +419,7 @@ describe("verify.sh", () => {
 describe("renderSeed on the real linux recipe", () => {
 	it("renders every step, lib.sh and files/", () => {
 		const recipe = loadRecipe(templates, "linux", "linux");
-		const dir = mkdtempSync(join(tmpdir(), "sbx-steps-test-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-steps-test-"));
 		const agentPackage = join(dir, "agent.tar");
 		writeFileSync(agentPackage, "x");
 		let files: Map<string, string | Buffer>;
@@ -441,10 +441,10 @@ describe("renderSeed on the real linux recipe", () => {
 				read(`steps/${step}.sh`),
 			);
 		expect(files.get("build/lib.sh")?.toString()).toBe(read("lib.sh"));
-		expect(files.has("build/files/etc/ssh/sshd_config.d/10-sbx.conf")).toBe(
+		expect(files.has("build/files/etc/ssh/sshd_config.d/10-umiak.conf")).toBe(
 			true,
 		);
-		expect(files.has("build/files/etc/sudoers.d/90-sbx-user")).toBe(true);
+		expect(files.has("build/files/etc/sudoers.d/90-umiak-user")).toBe(true);
 	});
 });
 
@@ -454,7 +454,7 @@ describe("lib.sh gpg_primary_fprs", () => {
 	// A throwaway build dir: lib.sh needs build/env next to it.
 	function run(keyFile: string, dir: string): string[] {
 		copyFileSync(join(linux, "lib.sh"), join(dir, "lib.sh"));
-		writeFileSync(join(dir, "env"), "SBX_BUILD_ID='x'\n");
+		writeFileSync(join(dir, "env"), "UMIAK_BUILD_ID='x'\n");
 		// lib.sh sets the Ubuntu PATH; keep the host's to find gpg.
 		const r = spawnSync(
 			"bash",
@@ -474,7 +474,7 @@ describe("lib.sh gpg_primary_fprs", () => {
 	it.skipIf(!gpg)(
 		"lists every primary key and no subkey",
 		() => {
-			const dir = mkdtempSync(join(tmpdir(), "sbx-gpg-"));
+			const dir = mkdtempSync(join(tmpdir(), "umiak-gpg-"));
 			try {
 				const home = join(dir, "gnupg");
 				mkdirSync(home, { mode: 0o700 });
@@ -494,7 +494,7 @@ describe("lib.sh gpg_primary_fprs", () => {
 						{ encoding: "utf8" },
 					);
 				const fprs: string[] = [];
-				for (const uid of ["a@sbx.test", "b@sbx.test"]) {
+				for (const uid of ["a@umiak.test", "b@umiak.test"]) {
 					// default algo: primary key + encryption subkey
 					expect(
 						g("--quick-gen-key", uid, "default", "default", "never").status,
@@ -506,10 +506,10 @@ describe("lib.sh gpg_primary_fprs", () => {
 				}
 				const one = join(dir, "one.asc");
 				const both = join(dir, "both.asc");
-				writeFileSync(one, g("--armor", "--export", "a@sbx.test").stdout);
+				writeFileSync(one, g("--armor", "--export", "a@umiak.test").stdout);
 				writeFileSync(
 					both,
-					g("--armor", "--export", "a@sbx.test", "b@sbx.test").stdout,
+					g("--armor", "--export", "a@umiak.test", "b@umiak.test").stdout,
 				);
 				expect(run(one, dir)).toEqual([fprs[0]]);
 				expect(run(both, dir).sort()).toEqual([...fprs].sort());

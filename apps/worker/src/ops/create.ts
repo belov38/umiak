@@ -1,5 +1,5 @@
-import { stepRequestId } from "@sbx/core";
-import type { Tx } from "@sbx/db";
+import { stepRequestId } from "@umiak/core";
+import type { Tx } from "@umiak/db";
 import type { WorkerCtx } from "../context.ts";
 import { loadMachine, type MachineRow } from "../db.ts";
 import { configureDesktop, waitForDesktopReady } from "../desktop.ts";
@@ -131,7 +131,7 @@ export function createSteps(ctx: WorkerCtx, fenced: Fenced): Step[] {
 				const req: ClaimRequest = {
 					reason: "claim",
 					sandboxId: s.id,
-					hostname: `sbx-${s.slug}`,
+					hostname: `umiak-${s.slug}`,
 					env: sets.env,
 					secretEnv: sets.secrets,
 					secretFiles: deliverableFiles(sets.secretFiles),

@@ -43,11 +43,11 @@ export interface JsonObject {
 	[key: string]: Json;
 }
 
-export const SERVER_NAME = "sbx";
+export const SERVER_NAME = "umiak";
 
 export interface ClientRules {
 	client: string;
-	/** The name the model sees for tool `name` of server `sbx`. */
+	/** The name the model sees for tool `name` of server `umiak`. */
 	qualifiedName(name: string): string;
 	/** The qualified name must match every pattern. */
 	namePatterns: readonly RegExp[];

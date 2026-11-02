@@ -79,7 +79,7 @@ func (f closerFunc) Close() error {
 }
 
 // recorder wraps the client's ResponseWriter: it records the status, the
-// time to the response header, the Sbx-Error of gateway answers and the body
+// time to the response header, the Umiak-Error of gateway answers and the body
 // bytes, and it wraps hijacked conns so upgrades are counted and tracked.
 type recorder struct {
 	rw    http.ResponseWriter
@@ -88,11 +88,11 @@ type recorder struct {
 	onHijack func(net.Conn)
 	in       *atomic.Int64 // request bytes, shared with the body counter
 
-	status   int // final status; 0 until the header is written
-	sbxError string
-	ttfb     time.Duration
-	hijacked bool
-	out      atomic.Int64
+	status     int // final status; 0 until the header is written
+	umiakError string
+	ttfb       time.Duration
+	hijacked   bool
+	out        atomic.Int64
 }
 
 func (w *recorder) Header() http.Header { return w.rw.Header() }
@@ -125,7 +125,7 @@ func (w *recorder) headerWritten(code int) {
 		return
 	}
 	w.status = code
-	w.sbxError = w.rw.Header().Get("Sbx-Error")
+	w.umiakError = w.rw.Header().Get("Umiak-Error")
 	w.ttfb = time.Since(w.start)
 }
 

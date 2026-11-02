@@ -1,8 +1,8 @@
 // IdentityStore over the Payload collections (S7 §17.3, S8 §5.3), the
 // semantics of the stand-in PgIdentityStore (packages/auth/src/pg-store.ts).
 // Reads are SQL over the payload schema (joins, no hooks); writes go
-// through the Local API, so the collection hooks send NOTIFY sbx_identity
-// and sbx_ssh_revoke in the transaction of the write. touchApiKey and
+// through the Local API, so the collection hooks send NOTIFY umiak_identity
+// and umiak_ssh_revoke in the transaction of the write. touchApiKey and
 // touchSshKey are plain UPDATEs without hooks: last use does not notify.
 import {
 	type ApiKeyRecord,
@@ -15,7 +15,7 @@ import {
 	type SessionIdentity,
 	type SshKeyRecord,
 	type UserRecord,
-} from "@sbx/auth";
+} from "@umiak/auth";
 import { type Payload, ValidationError } from "payload";
 import {
 	FK_VIOLATION,
@@ -32,7 +32,7 @@ import { resolveSession, userRecordOf } from "./resolve-session.ts";
 
 export interface PayloadIdentityStoreOptions {
 	payload: Payload;
-	/** IdP groups that make a user an operator (SBX_OPERATOR_GROUPS). */
+	/** IdP groups that make a user an operator (UMIAK_OPERATOR_GROUPS). */
 	operatorGroups: string[];
 }
 

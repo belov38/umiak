@@ -17,9 +17,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
 )
 
 func TestProxyPublicEcho(t *testing.T) {
@@ -55,8 +55,8 @@ func TestProxyPublicEcho(t *testing.T) {
 			t.Errorf("app header %s = %q, want %q", k, got, v)
 		}
 	}
-	if v := e.Header.Get("X-Sbx-User-Email"); v != "" {
-		t.Errorf("X-Sbx-User-Email = %q on a public route", v)
+	if v := e.Header.Get("X-Umiak-User-Email"); v != "" {
+		t.Errorf("X-Umiak-User-Email = %q on a public route", v)
 	}
 	rid := e.Header.Get("X-Request-Id")
 	if len(rid) != 26 {
@@ -68,8 +68,8 @@ func TestProxyPublicEcho(t *testing.T) {
 	if got := hdr.Values("X-Robots-Tag"); len(got) != 1 || got[0] != "noindex, nofollow" {
 		t.Errorf("X-Robots-Tag = %q", got)
 	}
-	if hdr.Get("Sbx-Error") != "" {
-		t.Errorf("Sbx-Error = %q on an app answer", hdr.Get("Sbx-Error"))
+	if hdr.Get("Umiak-Error") != "" {
+		t.Errorf("Umiak-Error = %q on an app answer", hdr.Get("Umiak-Error"))
 	}
 
 	l := logLine(t, f.inst, rid)
@@ -77,7 +77,7 @@ func TestProxyPublicEcho(t *testing.T) {
 		"status": 200.0, "via": "local", "label": rt.Label, "sandboxId": rt.SandboxID,
 		"machineId": f.m.ID, "port": 3000.0, "path": "/a/b", "method": "GET", "access": "public",
 		"userAgent": "probe/1", "clientIp": "127.0.0.1", "ownerInstance": f.inst.Name, "host": host,
-		"sbxError": "", "upgrade": "",
+		"umiakError": "", "upgrade": "",
 	}
 	for k, v := range wantLog {
 		if l[k] != v {
@@ -131,7 +131,7 @@ func TestStripAll(t *testing.T) {
 	req := newReq(t, http.MethodGet, testenv.Host(rt.Label), "/p?x=1&_token=secret-token&y=%2F", nil)
 	req.Header.Set("Accept", "application/json")
 	stripped := []string{
-		"Sbx-Port-Token", "Sbx-Foo", "X-Sbx-User-Email", "X-Sbx-Thing",
+		"Umiak-Port-Token", "Umiak-Foo", "X-Umiak-User-Email", "X-Umiak-Thing",
 		"X-Auth-Request-Email", "X-Auth-Request-User", "X-Auth-Request-Preferred-Username",
 		"X-Forwarded-Email", "X-Forwarded-User", "X-Forwarded-Groups",
 		"X-Forwarded-Preferred-Username", "X-Forwarded-Access-Token", "X-Real-Ip",
@@ -144,13 +144,13 @@ func TestStripAll(t *testing.T) {
 	// Underscore spellings (CGI/WSGI/Rack map them to the same variable),
 	// including the headers the gateway sets itself.
 	for _, k := range []string{
-		"X_Sbx_User_Email", "Sbx_Foo", "X_Forwarded_For", "X_Forwarded_Email", "X_Real_Ip",
+		"X_Umiak_User_Email", "Umiak_Foo", "X_Forwarded_For", "X_Forwarded_Email", "X_Real_Ip",
 		"X_Auth_Request_Email", "X_Forwarded_Host", "X_Forwarded_Proto", "X_Forwarded_Port",
 		"True_Client_Ip", "Cf_Connecting_Ip", "X_Request_Id",
 	} {
 		req.Header[k] = []string{"forged"}
 	}
-	cookies := `a=1; __Host-sbx_auth=forged; b="q w"; __host-SBX_STATE_abcdefgh=s; _oauth2_proxy=z; __Host-oauth2_proxy_1=z; __Secure-oauth2_proxy=z; c=3`
+	cookies := `a=1; __Host-umiak_auth=forged; b="q w"; __host-UMIAK_STATE_abcdefgh=s; _oauth2_proxy=z; __Host-oauth2_proxy_1=z; __Secure-oauth2_proxy=z; c=3`
 	req.Header.Set("Cookie", cookies)
 	e, hdr := getEcho(t, f.c, req)
 
@@ -172,12 +172,12 @@ func TestStripAll(t *testing.T) {
 	}
 	var auth int
 	for _, c := range hdr.Values("Set-Cookie") {
-		if strings.HasPrefix(c, "__Host-sbx_auth=") {
+		if strings.HasPrefix(c, "__Host-umiak_auth=") {
 			auth++
 		}
 	}
 	if auth != 1 {
-		t.Errorf("Set-Cookie = %q, want one __Host-sbx_auth", hdr.Values("Set-Cookie"))
+		t.Errorf("Set-Cookie = %q, want one __Host-umiak_auth", hdr.Values("Set-Cookie"))
 	}
 	if l := logLine(t, f.inst, e.Header.Get("X-Request-Id")); l["access"] != "token" || l["authResult"] != "ok" {
 		t.Errorf("access log access=%v authResult=%v", l["access"], l["authResult"])
@@ -188,12 +188,12 @@ func TestResponseStrip(t *testing.T) {
 	f := newFixture(t, nil)
 	f.m.ServeHTTP(3000, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hd := w.Header()
-		hd.Add("Set-Cookie", "__Host-sbx_auth=x; Path=/; Secure")
-		hd.Add("Set-Cookie", "__host-SBX_auth=y")
-		hd.Add("Set-Cookie", "__Host-sbx_state_abcdefgh=z")
+		hd.Add("Set-Cookie", "__Host-umiak_auth=x; Path=/; Secure")
+		hd.Add("Set-Cookie", "__host-UMIAK_auth=y")
+		hd.Add("Set-Cookie", "__Host-umiak_state_abcdefgh=z")
 		hd.Add("Set-Cookie", "keep=1")
-		hd.Set("Sbx-Error", "fake")
-		hd.Set("Sbx-Instance-Url", "http://evil")
+		hd.Set("Umiak-Error", "fake")
+		hd.Set("Umiak-Instance-Url", "http://evil")
 		hd.Set("Alt-Svc", `h3=":443"`)
 		hd.Set("X-Robots-Tag", "all")
 		switch r.URL.Path {
@@ -212,9 +212,9 @@ func TestResponseStrip(t *testing.T) {
 				hd.Set(http.TrailerPrefix+"X-Big-"+strconv.Itoa(i), strings.Repeat("a", 30<<10))
 			}
 		default:
-			hd.Set("Trailer", "Sbx-X, X-Ok")
+			hd.Set("Trailer", "Umiak-X, X-Ok")
 			_, _ = io.WriteString(w, "body")
-			hd.Set("Sbx-X", "1")
+			hd.Set("Umiak-X", "1")
 			hd.Set("X-Ok", "2")
 		}
 	}))
@@ -226,7 +226,7 @@ func TestResponseStrip(t *testing.T) {
 	if got := resp.Header.Values("Set-Cookie"); len(got) != 1 || got[0] != "keep=1" {
 		t.Errorf("Set-Cookie = %q", got)
 	}
-	for _, k := range []string{"Sbx-Error", "Sbx-Instance-Url", "Alt-Svc"} {
+	for _, k := range []string{"Umiak-Error", "Umiak-Instance-Url", "Alt-Svc"} {
 		if v := resp.Header.Values(k); len(v) != 0 {
 			t.Errorf("%s = %q reached the client", k, v)
 		}
@@ -234,8 +234,8 @@ func TestResponseStrip(t *testing.T) {
 	if got := resp.Header.Values("X-Robots-Tag"); len(got) != 1 || got[0] != "noindex, nofollow" {
 		t.Errorf("X-Robots-Tag = %q", got)
 	}
-	if _, ok := resp.Trailer["Sbx-X"]; ok {
-		t.Error("Sbx-X declared to the client")
+	if _, ok := resp.Trailer["Umiak-X"]; ok {
+		t.Error("Umiak-X declared to the client")
 	}
 	if b := readBody(t, resp); b != "body" {
 		t.Fatalf("body = %q", b)
@@ -243,8 +243,8 @@ func TestResponseStrip(t *testing.T) {
 	if resp.Trailer.Get("X-Ok") != "2" {
 		t.Errorf("trailer X-Ok = %q (trailers %v)", resp.Trailer.Get("X-Ok"), resp.Trailer)
 	}
-	if _, ok := resp.Trailer["Sbx-X"]; ok {
-		t.Errorf("trailer Sbx-X reached the client: %v", resp.Trailer)
+	if _, ok := resp.Trailer["Umiak-X"]; ok {
+		t.Errorf("trailer Umiak-X reached the client: %v", resp.Trailer)
 	}
 
 	t.Run("1xx", func(t *testing.T) {
@@ -272,7 +272,7 @@ func TestResponseStrip(t *testing.T) {
 		if hh.Get("Link") == "" {
 			t.Errorf("Link missing from the 103: %v", hh)
 		}
-		for _, k := range []string{"Sbx-Error", "Sbx-Instance-Url", "Alt-Svc", "Set-Cookie"} {
+		for _, k := range []string{"Umiak-Error", "Umiak-Instance-Url", "Alt-Svc", "Set-Cookie"} {
 			if k == "Set-Cookie" {
 				if got := hh.Values(k); len(got) != 1 || got[0] != "keep=1" {
 					t.Errorf("103 Set-Cookie = %q", got)
@@ -310,7 +310,7 @@ func TestSetCookieTrailerStripped(t *testing.T) {
 		_, _ = io.WriteString(w, "body")
 		_ = http.NewResponseController(w).Flush()
 		if r.URL.Path == "/declared" {
-			hd.Add("Set-Cookie", "__Host-sbx_auth=forged; Path=/")
+			hd.Add("Set-Cookie", "__Host-umiak_auth=forged; Path=/")
 			hd.Add("Set-Cookie", "app=1")
 			hd.Set("X-Ok", "2")
 			return
@@ -412,8 +412,8 @@ func TestRequestID(t *testing.T) {
 			t.Errorf("response X-Request-Id = %q", resp.Header.Get("X-Request-Id"))
 		}
 		l := logLine(t, f.inst, "err-req-1")
-		if l["status"] != 404.0 || l["sbxError"] != "route_not_found" {
-			t.Errorf("access log status=%v sbxError=%v", l["status"], l["sbxError"])
+		if l["status"] != 404.0 || l["umiakError"] != "route_not_found" {
+			t.Errorf("access log status=%v umiakError=%v", l["status"], l["umiakError"])
 		}
 	})
 }
@@ -491,7 +491,7 @@ func TestWebSocket(t *testing.T) {
 			return
 		}
 		defer func() { _ = c.Close() }()
-		_, _ = brw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSbx-Evil: 1\r\n\r\n")
+		_, _ = brw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nUmiak-Evil: 1\r\n\r\n")
 		_ = brw.Flush()
 		_, _ = io.Copy(c, brw)
 	}))
@@ -500,10 +500,10 @@ func TestWebSocket(t *testing.T) {
 	resp, br := upgradeRequest(t, c, testenv.Host(rt.Label), "/ws1")
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusSwitchingProtocols {
-		t.Fatalf("status = %d (%s)", resp.StatusCode, resp.Header.Get("Sbx-Error"))
+		t.Fatalf("status = %d (%s)", resp.StatusCode, resp.Header.Get("Umiak-Error"))
 	}
-	if resp.Header.Get("Sbx-Evil") != "" {
-		t.Error("Sbx-Evil reached the client")
+	if resp.Header.Get("Umiak-Evil") != "" {
+		t.Error("Umiak-Evil reached the client")
 	}
 	if resp.Header.Get("X-Robots-Tag") != "noindex, nofollow" {
 		t.Errorf("X-Robots-Tag = %q", resp.Header.Get("X-Robots-Tag"))
@@ -551,7 +551,7 @@ func TestPreflightBypass(t *testing.T) {
 	host := testenv.Host(rt.Label)
 
 	req := newReq(t, http.MethodOptions, host, "/api", nil)
-	req.Header.Set("Origin", "https://other-5173.sbx.test")
+	req.Header.Set("Origin", "https://other-5173.umiak.test")
 	req.Header.Set("Access-Control-Request-Method", "POST")
 	e, _ := getEcho(t, f.c, req)
 	if e.Method != http.MethodOptions {
@@ -562,11 +562,11 @@ func TestPreflightBypass(t *testing.T) {
 	}
 
 	plain := newReq(t, http.MethodOptions, host, "/api", nil)
-	plain.Header.Set("Origin", "https://other-5173.sbx.test")
+	plain.Header.Set("Origin", "https://other-5173.umiak.test")
 	resp := do(t, f.c, plain)
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusUnauthorized || resp.Header.Get("Sbx-Error") != "auth_required" {
-		t.Fatalf("OPTIONS without Access-Control-Request-Method = %d %s", resp.StatusCode, resp.Header.Get("Sbx-Error"))
+	if resp.StatusCode != http.StatusUnauthorized || resp.Header.Get("Umiak-Error") != "auth_required" {
+		t.Fatalf("OPTIONS without Access-Control-Request-Method = %d %s", resp.StatusCode, resp.Header.Get("Umiak-Error"))
 	}
 }
 
@@ -587,7 +587,7 @@ func TestSSOUserEmail(t *testing.T) {
 	}
 	var stateCookie *http.Cookie
 	for _, c := range resp.Cookies() {
-		if strings.HasPrefix(c.Name, "__Host-sbx_state") {
+		if strings.HasPrefix(c.Name, "__Host-umiak_state") {
 			stateCookie = c
 		}
 	}
@@ -597,16 +597,16 @@ func TestSSOUserEmail(t *testing.T) {
 	loc := resp.Header.Get("Location")
 	state := loc[strings.Index(loc, "state=")+len("state="):]
 
-	cb := newReq(t, http.MethodGet, host, "/__sbx/auth/callback?code="+code+"&state="+state, nil)
+	cb := newReq(t, http.MethodGet, host, "/__umiak/auth/callback?code="+code+"&state="+state, nil)
 	cb.AddCookie(stateCookie)
 	resp = do(t, f.c, cb)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusFound {
-		t.Fatalf("callback = %d %s", resp.StatusCode, resp.Header.Get("Sbx-Error"))
+		t.Fatalf("callback = %d %s", resp.StatusCode, resp.Header.Get("Umiak-Error"))
 	}
 	var session *http.Cookie
 	for _, c := range resp.Cookies() {
-		if c.Name == "__Host-sbx_auth" {
+		if c.Name == "__Host-umiak_auth" {
 			session = c
 		}
 	}
@@ -616,10 +616,10 @@ func TestSSOUserEmail(t *testing.T) {
 
 	req := newReq(t, http.MethodGet, host, "/page", nil)
 	req.AddCookie(session)
-	req.Header.Set("X-Sbx-User-Email", "forged@example.com")
+	req.Header.Set("X-Umiak-User-Email", "forged@example.com")
 	e, _ := getEcho(t, f.c, req)
-	if got := e.Header.Values("X-Sbx-User-Email"); len(got) != 1 || got[0] != "u@example.com" {
-		t.Errorf("X-Sbx-User-Email = %q", got)
+	if got := e.Header.Values("X-Umiak-User-Email"); len(got) != 1 || got[0] != "u@example.com" {
+		t.Errorf("X-Umiak-User-Email = %q", got)
 	}
 	if e.Header.Get("Cookie") != "" {
 		t.Errorf("Cookie = %q reached the app", e.Header.Get("Cookie"))
@@ -679,7 +679,7 @@ func TestUpgradeFiltering(t *testing.T) {
 
 	t.Run("preflight with upgrade is not exempt", func(t *testing.T) {
 		req := newReq(t, http.MethodOptions, token, "/ws", nil)
-		req.Header.Set("Origin", "https://other-5173.sbx.test")
+		req.Header.Set("Origin", "https://other-5173.umiak.test")
 		req.Header.Set("Access-Control-Request-Method", "GET")
 		req.Header.Set("Connection", "Upgrade")
 		req.Header.Set("Upgrade", "websocket")
@@ -708,7 +708,7 @@ func TestUpgradeFiltering(t *testing.T) {
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
 			req := newReq(t, row.method, public, "/up", nil)
-			req.Header.Set("Origin", "https://other-5173.sbx.test")
+			req.Header.Set("Origin", "https://other-5173.umiak.test")
 			req.Header.Set("Access-Control-Request-Method", "GET")
 			req.Header.Set("Connection", "Upgrade, X-Hop")
 			req.Header.Set("Upgrade", row.upgrade)

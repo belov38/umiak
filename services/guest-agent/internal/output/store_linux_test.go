@@ -6,7 +6,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/output"
+	"github.com/belov38/umiak/services/guest-agent/internal/output"
 )
 
 // TestPunchFrontFreesBlocks checks that the real sparse store releases disk

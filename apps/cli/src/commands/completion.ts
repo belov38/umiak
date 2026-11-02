@@ -1,6 +1,6 @@
-// `sbx completion bash|zsh|fish|powershell`: a completion script made from
+// `umiak completion bash|zsh|fish|powershell`: a completion script made from
 // the command tree at run time, so every registered command and its long
-// options are included. Two levels: `sbx <cmd>` and `sbx <cmd> <sub>`.
+// options are included. Two levels: `umiak <cmd>` and `umiak <cmd> <sub>`.
 
 import type { Command } from "commander";
 import { usageError } from "../exit-codes.ts";
@@ -58,8 +58,8 @@ ${subCases}
 			return `    ${c.name})\n${inner}\n      ;;`;
 		})
 		.join("\n");
-	return `# sbx completion for bash: source <(sbx completion bash)
-_sbx() {
+	return `# umiak completion for bash: source <(umiak completion bash)
+_umiak() {
   local cur words
   cur="\${COMP_WORDS[COMP_CWORD]}"
   if [ "$COMP_CWORD" -eq 1 ]; then
@@ -72,7 +72,7 @@ ${cases}
   fi
   COMPREPLY=( $(compgen -W "$words" -- "$cur") )
 }
-complete -o default -F _sbx sbx
+complete -o default -F _umiak umiak
 `;
 }
 
@@ -101,9 +101,9 @@ ${subCases}
 			return `      ${c.name})\n${body}\n        ;;`;
 		})
 		.join("\n");
-	return `#compdef sbx
-# sbx completion for zsh: source <(sbx completion zsh)
-_sbx() {
+	return `#compdef umiak
+# umiak completion for zsh: source <(umiak completion zsh)
+_umiak() {
   if (( CURRENT == 2 )); then
     local -a cmds; cmds=(${described(t.subs)})
     _describe 'command' cmds
@@ -115,32 +115,32 @@ ${cases}
     esac
   fi
 }
-compdef _sbx sbx
+compdef _umiak umiak
 `;
 }
 
 function fish(t: Node): string {
 	const lines = [
-		"# sbx completion for fish: sbx completion fish | source",
-		"complete -c sbx -f",
+		"# umiak completion for fish: umiak completion fish | source",
+		"complete -c umiak -f",
 	];
 	const top = t.subs.map((c) => c.name).join(" ");
 	for (const c of t.subs) {
 		lines.push(
-			`complete -c sbx -n "not __fish_seen_subcommand_from ${top}" -a ${c.name} -d '${q(c.description)}'`,
+			`complete -c umiak -n "not __fish_seen_subcommand_from ${top}" -a ${c.name} -d '${q(c.description)}'`,
 		);
 		for (const s of c.subs) {
 			lines.push(
-				`complete -c sbx -n "__fish_seen_subcommand_from ${c.name}" -a ${s.name} -d '${q(s.description)}'`,
+				`complete -c umiak -n "__fish_seen_subcommand_from ${c.name}" -a ${s.name} -d '${q(s.description)}'`,
 			);
 		}
 		for (const o of c.options) {
 			lines.push(
-				`complete -c sbx -n "__fish_seen_subcommand_from ${c.name}" -l ${o.slice(2)}`,
+				`complete -c umiak -n "__fish_seen_subcommand_from ${c.name}" -l ${o.slice(2)}`,
 			);
 		}
 	}
-	for (const o of t.options) lines.push(`complete -c sbx -l ${o.slice(2)}`);
+	for (const o of t.options) lines.push(`complete -c umiak -l ${o.slice(2)}`);
 	return `${lines.join("\n")}\n`;
 }
 
@@ -151,8 +151,8 @@ function powershell(t: Node): string {
 			return `    '${c.name}' = @(${words.map((w) => `'${w}'`).join(", ")})`;
 		})
 		.join("\n");
-	return `# sbx completion for PowerShell: sbx completion powershell | Out-String | Invoke-Expression
-Register-ArgumentCompleter -Native -CommandName sbx -ScriptBlock {
+	return `# umiak completion for PowerShell: umiak completion powershell | Out-String | Invoke-Expression
+Register-ArgumentCompleter -Native -CommandName umiak -ScriptBlock {
   param($wordToComplete, $commandAst, $cursorPosition)
   $top = @(${[...t.subs.map((c) => c.name), ...t.options].map((w) => `'${w}'`).join(", ")})
   $sub = @{

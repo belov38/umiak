@@ -8,7 +8,7 @@ import type * as ChildProcess from "node:child_process";
 import type * as Crypto from "node:crypto";
 import type * as Fs from "node:fs/promises";
 import type * as Stream from "node:stream";
-import { SbxError, UNSUPPORTED_RUNTIME } from "./errors.ts";
+import { UmiakError, UNSUPPORTED_RUNTIME } from "./errors.ts";
 
 interface NodeProcess {
 	getBuiltinModule?: (id: string) => unknown;
@@ -25,7 +25,7 @@ export function builtinModule<T>(id: string): T | undefined {
 function need<T>(id: string, what: string): T {
 	const m = builtinModule<T>(id);
 	if (m === undefined) {
-		throw new SbxError({
+		throw new UmiakError({
 			status: 0,
 			code: UNSUPPORTED_RUNTIME,
 			message: `${what} needs Node or Bun (${id})`,
@@ -84,7 +84,7 @@ function runTar(args: string[], what: string): TarProcess {
 	const done = new Promise<void>((resolve, reject) => {
 		child.once("error", (err) =>
 			reject(
-				new SbxError({
+				new UmiakError({
 					status: 0,
 					code: UNSUPPORTED_RUNTIME,
 					message: `cannot run tar: ${err.message}`,
@@ -99,7 +99,7 @@ function runTar(args: string[], what: string): TarProcess {
 				return;
 			}
 			reject(
-				new SbxError({
+				new UmiakError({
 					status: 0,
 					code: LOCAL_TAR_FAILED,
 					message: `tar ${args[0]} failed (${signal ?? `exit ${code}`}): ${stderr.trim()}`,

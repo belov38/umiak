@@ -15,12 +15,12 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/system"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/system"
 )
 
 var _ system.Updater = (*Manager)(nil)
@@ -541,7 +541,7 @@ func TestApplyRemovesStagedPackage(t *testing.T) {
 	}
 	t.Run("success", func(t *testing.T) {
 		e := newApplyEnv(t, "v1")
-		pkg := stagePkg(t, e, "v2", "sbx-agent-v2.tar")
+		pkg := stagePkg(t, e, "v2", "umiak-agent-v2.tar")
 		e.uploads["up"] = pkg
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -554,7 +554,7 @@ func TestApplyRemovesStagedPackage(t *testing.T) {
 	})
 	t.Run("failure", func(t *testing.T) {
 		e := newApplyEnv(t, "v1")
-		pkg := stagePkg(t, e, "v2", "sbx-agent-v2.tar")
+		pkg := stagePkg(t, e, "v2", "umiak-agent-v2.tar")
 		e.uploads["up"] = pkg
 		e.m.opts.SelfTest = func(context.Context, string) error { return errors.New("schema 9 unsupported") }
 		if _, err := e.m.Apply(context.Background(), "up", false); err == nil {

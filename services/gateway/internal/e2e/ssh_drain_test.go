@@ -16,17 +16,17 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv/sshdtest"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/services/gateway/internal/testenv/sshdtest"
 )
 
 // sshDrain is the SSH drain deadline of the drain tests.
 const sshDrain = 3 * time.Second
 
 // drainWarning1 is the drain warning when less than a minute is left.
-const drainWarning1 = "sbx: gateway restarting, this SSH session will close in 1 min; reconnect to continue\r\n"
+const drainWarning1 = "umiak: gateway restarting, this SSH session will close in 1 min; reconnect to continue\r\n"
 
 // sshCluster is a cluster with the sshd double on a machine on C and a
 // user key that api allows for its sandbox.
@@ -43,7 +43,7 @@ func newSSHCluster(t *testing.T, mod func(*config.Config)) *sshCluster {
 	t.Helper()
 	c := newCluster(t, testenv.Options{}, mod)
 	m := c.newMachine(t)
-	const loginUser = "sbx"
+	const loginUser = "umiak"
 	sshd := sshdtest.New(t, c.env.Keys.UserCA.PublicKey(), loginUser)
 	m.ServeSSHD(sshd)
 	_, priv, err := ed25519.GenerateKey(rand.Reader)

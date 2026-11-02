@@ -17,18 +17,18 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi/cpapitest"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/ratelimit"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/routes"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi/cpapitest"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
+	"github.com/belov38/umiak/services/gateway/internal/ratelimit"
+	"github.com/belov38/umiak/services/gateway/internal/routes"
 )
 
 const (
-	testToken   = "sbxp_secret-token"
-	testDomain  = "sbx.example.com"
-	testAuthURL = "https://app.example.com/sbx-auth/authorize"
+	testToken   = "umiakp_secret-token"
+	testDomain  = "umiak.example.com"
+	testAuthURL = "https://app.example.com/umiak-auth/authorize"
 )
 
 var clientIP = netip.MustParseAddr("203.0.113.7")
@@ -57,15 +57,15 @@ func newHarness(t *testing.T, mut func(*Config)) *harness {
 	h.metrics = obs.NewMetrics(prometheus.NewRegistry())
 	h.limits = ratelimit.New(ratelimit.Config{AuthFailPerMin: 20, AuthBlock: 5 * time.Minute, Now: clock}, h.metrics)
 	cfg := Config{
-		Codec:     h.codec,
-		API:       h.api,
-		AuthURL:   testAuthURL,
-		SbxDomain: testDomain,
-		TokenTTL:  7 * 24 * time.Hour,
-		SSOTTL:    12 * time.Hour,
-		StateTTL:  10 * time.Minute,
-		Limits:    h.limits,
-		Metrics:   h.metrics,
+		Codec:       h.codec,
+		API:         h.api,
+		AuthURL:     testAuthURL,
+		UmiakDomain: testDomain,
+		TokenTTL:    7 * 24 * time.Hour,
+		SSOTTL:      12 * time.Hour,
+		StateTTL:    10 * time.Minute,
+		Limits:      h.limits,
+		Metrics:     h.metrics,
 	}
 	if mut != nil {
 		mut(&cfg)
@@ -145,8 +145,8 @@ func assertAttrs(t *testing.T, line string, maxAge int, crossSite bool) {
 
 func assertDenied(t *testing.T, w *httptest.ResponseRecorder, status int, code string) {
 	t.Helper()
-	if w.Code != status || w.Header().Get("Sbx-Error") != code {
-		t.Fatalf("got %d %q, want %d %q (body %s)", w.Code, w.Header().Get("Sbx-Error"), status, code, w.Body.String())
+	if w.Code != status || w.Header().Get("Umiak-Error") != code {
+		t.Fatalf("got %d %q, want %d %q (body %s)", w.Code, w.Header().Get("Umiak-Error"), status, code, w.Body.String())
 	}
 }
 
@@ -161,7 +161,7 @@ func TestTokenQueryNavigationRedirect(t *testing.T) {
 	for _, crossSite := range []bool{false, true} {
 		h := newHarness(t, func(c *Config) { c.CrossSite = crossSite })
 		l := label("quiet-otter-3000")
-		r := navRequest(http.MethodGet, "https://quiet-otter-3000.sbx.example.com/p/a%2Fb?a=1&_token="+testToken+"&b=%20x")
+		r := navRequest(http.MethodGet, "https://quiet-otter-3000.umiak.example.com/p/a%2Fb?a=1&_token="+testToken+"&b=%20x")
 		w, res := h.check(r, l, tokenRoute(l.Raw))
 		if res.Proceed {
 			t.Fatal("navigation with _token proceeded")
@@ -195,7 +195,7 @@ func TestTokenQueryNavigationRedirect(t *testing.T) {
 func TestTokenQueryRedirectDropsQuestionMark(t *testing.T) {
 	h := newHarness(t, nil)
 	l := label("quiet-otter-3000")
-	w, _ := h.check(navRequest(http.MethodHead, "https://quiet-otter-3000.sbx.example.com/?_token="+testToken), l, tokenRoute(l.Raw))
+	w, _ := h.check(navRequest(http.MethodHead, "https://quiet-otter-3000.umiak.example.com/?_token="+testToken), l, tokenRoute(l.Raw))
 	if w.Code != http.StatusFound || w.Header().Get("Location") != "/" {
 		t.Errorf("got %d Location %q", w.Code, w.Header().Get("Location"))
 	}
@@ -204,10 +204,10 @@ func TestTokenQueryRedirectDropsQuestionMark(t *testing.T) {
 func TestTokenQueryRedirectUnsafePath(t *testing.T) {
 	h := newHarness(t, nil)
 	l := label("quiet-otter-3000")
-	r := navRequest(http.MethodGet, "https://quiet-otter-3000.sbx.example.com/?_token="+testToken)
+	r := navRequest(http.MethodGet, "https://quiet-otter-3000.umiak.example.com/?_token="+testToken)
 	r.URL.Path = "//evil.com/x"
 	w, _ := h.check(r, l, tokenRoute(l.Raw))
-	if loc := w.Header().Get("Location"); loc != "https://quiet-otter-3000.sbx.example.com//evil.com/x" {
+	if loc := w.Header().Get("Location"); loc != "https://quiet-otter-3000.umiak.example.com//evil.com/x" {
 		t.Errorf("Location = %q", loc)
 	}
 }
@@ -216,10 +216,10 @@ func TestTokenQueryFetchProceeds(t *testing.T) {
 	h := newHarness(t, nil)
 	l := label("quiet-otter-3000")
 	for _, r := range []*http.Request{
-		fetchRequest(http.MethodGet, "https://quiet-otter-3000.sbx.example.com/api?_token="+url.QueryEscape(testToken)),
-		navRequest(http.MethodPost, "https://quiet-otter-3000.sbx.example.com/api?_token="+testToken),
+		fetchRequest(http.MethodGet, "https://quiet-otter-3000.umiak.example.com/api?_token="+url.QueryEscape(testToken)),
+		navRequest(http.MethodPost, "https://quiet-otter-3000.umiak.example.com/api?_token="+testToken),
 		func() *http.Request {
-			r := navRequest(http.MethodGet, "https://quiet-otter-3000.sbx.example.com/ws?_token="+testToken)
+			r := navRequest(http.MethodGet, "https://quiet-otter-3000.umiak.example.com/ws?_token="+testToken)
 			r.Header.Set("Upgrade", "websocket")
 			return r
 		}(),
@@ -243,7 +243,7 @@ func TestTokenQueryFetchProceeds(t *testing.T) {
 func TestTokenHeader(t *testing.T) {
 	h := newHarness(t, nil)
 	l := label("quiet-otter-3000")
-	r := navRequest(http.MethodGet, "https://quiet-otter-3000.sbx.example.com/")
+	r := navRequest(http.MethodGet, "https://quiet-otter-3000.umiak.example.com/")
 	r.Header.Set(TokenHeader, testToken)
 	w, res := h.check(r, l, tokenRoute(l.Raw))
 	if !res.Proceed || res.SetCookie != nil || res.AuthResult != ResultOK {
@@ -256,8 +256,8 @@ func TestTokenInvalid(t *testing.T) {
 	l := label("quiet-otter-3000")
 	rt := tokenRoute(l.Raw)
 
-	header := fetchRequest(http.MethodGet, "https://quiet-otter-3000.sbx.example.com/")
-	header.Header.Set(TokenHeader, "sbxp_wrong")
+	header := fetchRequest(http.MethodGet, "https://quiet-otter-3000.umiak.example.com/")
+	header.Header.Set(TokenHeader, "umiakp_wrong")
 	w, res := h.check(header, l, rt)
 	assertDenied(t, w, http.StatusUnauthorized, "token_invalid")
 	if res.Proceed || res.AuthResult != ResultInvalid {
@@ -265,7 +265,7 @@ func TestTokenInvalid(t *testing.T) {
 	}
 
 	for i := 2; i <= 20; i++ {
-		w, _ := h.check(fetchRequest(http.MethodGet, "https://quiet-otter-3000.sbx.example.com/?_token=nope"), l, rt)
+		w, _ := h.check(fetchRequest(http.MethodGet, "https://quiet-otter-3000.umiak.example.com/?_token=nope"), l, rt)
 		assertDenied(t, w, http.StatusUnauthorized, "token_invalid")
 	}
 	if got := h.authCount("token", ResultInvalid); got != 20 {
@@ -273,7 +273,7 @@ func TestTokenInvalid(t *testing.T) {
 	}
 
 	// The 21st attempt is blocked, even with the right token.
-	w, res = h.check(fetchRequest(http.MethodGet, "https://quiet-otter-3000.sbx.example.com/?_token="+testToken), l, rt)
+	w, res = h.check(fetchRequest(http.MethodGet, "https://quiet-otter-3000.umiak.example.com/?_token="+testToken), l, rt)
 	assertDenied(t, w, http.StatusTooManyRequests, "rate_limited")
 	if w.Header().Get("Retry-After") != "300" || res.Proceed {
 		t.Errorf("Retry-After = %q, result %+v", w.Header().Get("Retry-After"), res)
@@ -283,14 +283,14 @@ func TestTokenInvalid(t *testing.T) {
 	}
 
 	// A request without a token is not affected by the block.
-	w, _ = h.check(fetchRequest(http.MethodGet, "https://quiet-otter-3000.sbx.example.com/"), l, rt)
+	w, _ = h.check(fetchRequest(http.MethodGet, "https://quiet-otter-3000.umiak.example.com/"), l, rt)
 	assertDenied(t, w, http.StatusUnauthorized, "auth_required")
 }
 
 func TestTokenInvalidQueryBeatsValidCookie(t *testing.T) {
 	h := newHarness(t, nil)
 	l := label("quiet-otter-3000")
-	r := fetchRequest(http.MethodGet, "https://quiet-otter-3000.sbx.example.com/?_token=nope")
+	r := fetchRequest(http.MethodGet, "https://quiet-otter-3000.umiak.example.com/?_token=nope")
 	r.AddCookie(&http.Cookie{Name: AuthCookie, Value: h.codec.SealSession(Session{Label: l.Raw, Mode: ModeToken, Epoch: 3, Expiry: h.now.Add(time.Hour)})})
 	w, _ := h.check(r, l, tokenRoute(l.Raw))
 	assertDenied(t, w, http.StatusUnauthorized, "token_invalid")
@@ -299,7 +299,7 @@ func TestTokenInvalidQueryBeatsValidCookie(t *testing.T) {
 func TestTokenMissing(t *testing.T) {
 	h := newHarness(t, nil)
 	l := label("quiet-otter-3000")
-	w, res := h.check(navRequest(http.MethodGet, "https://quiet-otter-3000.sbx.example.com/"), l, tokenRoute(l.Raw))
+	w, res := h.check(navRequest(http.MethodGet, "https://quiet-otter-3000.umiak.example.com/"), l, tokenRoute(l.Raw))
 	assertDenied(t, w, http.StatusUnauthorized, "auth_required")
 	if res.AuthResult != ResultMissing || h.authCount("token", ResultMissing) != 1 {
 		t.Errorf("result = %+v", res)
@@ -367,7 +367,7 @@ func TestSSORedirect(t *testing.T) {
 	l := label("quiet-otter-3000")
 	rt := ssoRoute(l.Raw)
 
-	w, res := h.check(navRequest(http.MethodGet, "https://quiet-otter-3000.sbx.example.com/page?x=1&y=%2F"), l, rt)
+	w, res := h.check(navRequest(http.MethodGet, "https://quiet-otter-3000.umiak.example.com/page?x=1&y=%2F"), l, rt)
 	if res.Proceed || w.Code != http.StatusFound || res.AuthResult != ResultRedirect {
 		t.Fatalf("result = %+v, status %d", res, w.Code)
 	}
@@ -397,7 +397,7 @@ func TestSSORedirect(t *testing.T) {
 		t.Error("redirect not counted")
 	}
 
-	w, res = h.check(fetchRequest(http.MethodGet, "https://quiet-otter-3000.sbx.example.com/api"), l, rt)
+	w, res = h.check(fetchRequest(http.MethodGet, "https://quiet-otter-3000.umiak.example.com/api"), l, rt)
 	assertDenied(t, w, http.StatusUnauthorized, "auth_required")
 	if res.AuthResult != ResultMissing {
 		t.Errorf("xhr result = %q", res.AuthResult)
@@ -410,7 +410,7 @@ func TestSSORedirect(t *testing.T) {
 func TestSSORedirectAuthURLWithQuery(t *testing.T) {
 	h := newHarness(t, func(c *Config) { c.AuthURL = "https://app.example.com/authorize?tenant=x" })
 	l := label("quiet-otter-3000")
-	w, _ := h.check(navRequest(http.MethodGet, "https://quiet-otter-3000.sbx.example.com/"), l, ssoRoute(l.Raw))
+	w, _ := h.check(navRequest(http.MethodGet, "https://quiet-otter-3000.umiak.example.com/"), l, ssoRoute(l.Raw))
 	loc := w.Header().Get("Location")
 	if !strings.HasPrefix(loc, "https://app.example.com/authorize?tenant=x&label=quiet-otter-3000&state=") {
 		t.Errorf("Location = %q", loc)

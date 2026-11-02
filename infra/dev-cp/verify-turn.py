@@ -16,7 +16,7 @@ import subprocess
 import time
 
 COOKIE = 0x2112A442
-RELAY_MIN, RELAY_MAX = (int(p) for p in os.environ.get("SBX_TURN_PROBE_RELAY_RANGE", "61000-61040").split("-"))
+RELAY_MIN, RELAY_MAX = (int(p) for p in os.environ.get("UMIAK_TURN_PROBE_RELAY_RANGE", "61000-61040").split("-"))
 
 
 def attr(kind, value):
@@ -194,9 +194,9 @@ def relays(ip, host, ca, secret):
 
 def guard_probe(ssh, pve, ip, host, ca, secret):
     """Fail-closed relay table: removal stops relaying; nftables reload on the CT does not touch it."""
-    table = ["docker", "exec", "sbx-turn-1", "nft", "-s", "list", "table", "inet", "sbx_turn"]
+    table = ["docker", "exec", "umiak-turn-1", "nft", "-s", "list", "table", "inet", "umiak_turn"]
     assert relays(ip, host, ca, secret), "relay <-> relay broken before the guard probe"
-    subprocess.check_call(ssh + ["docker", "exec", "sbx-turn-1", "nft", "delete", "table", "inet", "sbx_turn"])
+    subprocess.check_call(ssh + ["docker", "exec", "umiak-turn-1", "nft", "delete", "table", "inet", "umiak_turn"])
     removed = time.monotonic()
     while True:
         attempt = time.monotonic()
@@ -209,11 +209,11 @@ def guard_probe(ssh, pve, ip, host, ca, secret):
         time.sleep(1)
     print(f"ok TURN stopped relaying {stopped:.1f} s after its table was deleted, "
           f"recovered with the table after {time.monotonic() - removed:.1f} s", flush=True)
-    before = subprocess.check_output(ssh + ["docker", "inspect", "-f", "{{.State.StartedAt}}", "sbx-turn-1"], text=True)
-    subprocess.check_call(pve + ["pct", "exec", os.environ.get("SBX_DEVCP_CTID", "590"), "--",
+    before = subprocess.check_output(ssh + ["docker", "inspect", "-f", "{{.State.StartedAt}}", "umiak-turn-1"], text=True)
+    subprocess.check_call(pve + ["pct", "exec", os.environ.get("UMIAK_DEVCP_CTID", "590"), "--",
                                  "systemctl", "reload", "nftables"])
     time.sleep(5)
-    after = subprocess.check_output(ssh + ["docker", "inspect", "-f", "{{.State.StartedAt}}", "sbx-turn-1"], text=True)
+    after = subprocess.check_output(ssh + ["docker", "inspect", "-f", "{{.State.StartedAt}}", "umiak-turn-1"], text=True)
     assert before == after, "nftables reload on the CT restarted TURN"
     assert subprocess.run(ssh + table, capture_output=True).returncode == 0, "nftables reload removed the TURN table"
     assert relays(ip, host, ca, secret), "TURN stopped relaying after nftables reload on the CT"
@@ -221,16 +221,16 @@ def guard_probe(ssh, pve, ip, host, ca, secret):
 
 
 def main():
-    ip = os.environ.get("SBX_CP_IP", "192.168.68.90")
-    host = os.environ.get("SBX_DEVCP_TURN_HOST", f"turn.tunnel.{ip.replace('.', '-')}.sslip.io")
-    ca = os.environ.get("SBX_DEVCP_CA_DIR", str(Path.home() / ".config/sbx/dev-ca")) + "/ca.pem"
-    local_secret = os.environ.get("SBX_TURN_PROBE_SECRET_FILE")
+    ip = os.environ.get("UMIAK_CP_IP", "192.168.68.90")
+    host = os.environ.get("UMIAK_DEVCP_TURN_HOST", f"turn.tunnel.{ip.replace('.', '-')}.sslip.io")
+    ca = os.environ.get("UMIAK_DEVCP_CA_DIR", str(Path.home() / ".config/umiak/dev-ca")) + "/ca.pem"
+    local_secret = os.environ.get("UMIAK_TURN_PROBE_SECRET_FILE")
     if local_secret:
         secret = Path(local_secret).read_bytes().strip()
     else:
         secret = subprocess.check_output([
-            "ssh", "-o", "BatchMode=yes", os.environ.get("SBX_DEVCP_SSH", f"sbx@{ip}"),
-            "cat", "boat-dev-clone/deploy/compose/secrets/turn/auth-secret",
+            "ssh", "-o", "BatchMode=yes", os.environ.get("UMIAK_DEVCP_SSH", f"umiak@{ip}"),
+            "cat", "umiak/deploy/compose/secrets/turn/auth-secret",
         ]).strip()
     for transport in ("udp", "tcp", "tls"):
         turn = Turn(transport, ip, host, ca, secret)
@@ -240,13 +240,13 @@ def main():
                 assert turn.permission(denied) == 403, "TURN allowed a forbidden peer"
             assert turn.permission(ip) == 0, "TURN denied its own relay address"
             assert turn.refresh(60) == 0, "valid credential refresh failed"
-            if transport == "udp" and os.environ.get("SBX_TURN_PROBE_CHANNEL_RENEWAL"):
+            if transport == "udp" and os.environ.get("UMIAK_TURN_PROBE_CHANNEL_RENEWAL"):
                 turn.renew_channel_like_moonlight(ip)
                 print("ok moonlight-compatible ChannelBind renewal", flush=True)
             print(f"ok TURN {transport}: allocate, restricted peers, refresh", flush=True)
         finally:
             turn.close()
-    ssh = ["ssh", "-o", "BatchMode=yes", os.environ.get("SBX_DEVCP_SSH", f"sbx@{ip}")]
+    ssh = ["ssh", "-o", "BatchMode=yes", os.environ.get("UMIAK_DEVCP_SSH", f"umiak@{ip}")]
     # Relay <-> relay: each client transport reaches a UDP relay of this server.
     sender = Turn("udp", ip, host, ca, secret)
     try:
@@ -269,24 +269,24 @@ def main():
                 receiver.close()
         # Sockets of the host on the TURN address, outside and inside the relay range
         # (another service, an ephemeral client socket), are never relay peers.
-        listen = int(os.environ.get("SBX_TURN_PROBE_LISTEN_PORT", "40123"))
+        listen = int(os.environ.get("UMIAK_TURN_PROBE_LISTEN_PORT", "40123"))
         result = listen_while(ssh, ip, [listen, RELAY_MAX - 1], lambda: [
             sender.send_indication(ip, port, b"s10-port-probe")
             for port in (listen, 41641, RELAY_MAX - 1) for _ in range(3)
         ])
         assert result == "nothing", f"TURN relayed to a host socket on {ip} ({result})"
         drops = subprocess.check_output(ssh + [
-            "docker", "exec", "sbx-turn-1", "nft", "list", "chain", "inet", "sbx_turn", "relay_egress",
+            "docker", "exec", "umiak-turn-1", "nft", "list", "chain", "inet", "umiak_turn", "relay_egress",
         ], text=True)
         assert "non-relay peer" in drops and "packets 0 " not in drops.split("non-relay peer")[0].splitlines()[-1], \
             "relay egress filter did not count the denied probe"
         print(f"ok TURN host sockets on {listen}, 41641 and relay-range {RELAY_MAX - 1} unreachable", flush=True)
     finally:
         sender.close()
-    if os.environ.get("SBX_TURN_PROBE_GUARD"):
-        guard_probe(ssh, ["ssh", "-o", "BatchMode=yes", os.environ.get("SBX_DEVCP_PVE_SSH", "pve")],
+    if os.environ.get("UMIAK_TURN_PROBE_GUARD"):
+        guard_probe(ssh, ["ssh", "-o", "BatchMode=yes", os.environ.get("UMIAK_DEVCP_PVE_SSH", "pve")],
                     ip, host, ca, secret)
-    if os.environ.get("SBX_TURN_PROBE_RECONNECTS"):
+    if os.environ.get("UMIAK_TURN_PROBE_RECONNECTS"):
         clients = []
         try:
             for _ in range(6):

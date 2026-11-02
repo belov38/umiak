@@ -14,7 +14,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	v1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	v1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 )
 
 type fakeStreamHost struct {
@@ -78,8 +78,8 @@ func TestPinnedPairingAndReuse(t *testing.T) {
 			} else {
 				var b map[string]any
 				_ = json.NewDecoder(r.Body).Decode(&b)
-				if b["name"] != "sbx" || b["password"] != "viewer-secret" {
-					t.Error("proxy user sbx must use its own secret")
+				if b["name"] != "umiak" || b["password"] != "viewer-secret" {
+					t.Error("proxy user umiak must use its own secret")
 				}
 				_, _ = fmt.Fprint(w, `{"user_id":11}`)
 			}

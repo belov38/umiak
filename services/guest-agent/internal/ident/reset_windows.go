@@ -12,8 +12,8 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/winapi"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/winapi"
 )
 
 const (
@@ -105,7 +105,7 @@ func (WindowsResetter) NewUserPassword(user string) error {
 	if err := winapi.SetUserPassword(user, pw); err != nil {
 		return err
 	}
-	// The agent reads L$sbx_user as UTF-8 bytes (winapi.LogonUserToken).
+	// The agent reads L$umiak_user as UTF-8 bytes (winapi.LogonUserToken).
 	if err := winapi.LsaStore(winapi.SecretUserPassword, pw); err != nil {
 		return err
 	}

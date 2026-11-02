@@ -1,13 +1,13 @@
 "use client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 // The sandbox of the page, live (S8 §9.6): a plain GET every 10 s (health
 // and activity do not wake a long-poll) and the long-poll loop of live.ts.
 // The page references the sandbox by slug or `sb_…` id (snapshot sources
 // link by id); after the first answer everything uses the id, so a rename
 // does not break the page.
-import type { Sandbox, SandboxData } from "@sbx/sdk";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Sandbox, SandboxData } from "@umiak/sdk";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import { POLL_RETRY_BUDGET_MS } from "@/lib/sandboxes";
 import {
 	LIVE_POLL_MS,
@@ -37,12 +37,12 @@ export interface LiveSandbox {
 }
 
 export function useLiveSandbox(teamId: string, ref: string): LiveSandbox {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const queryClient = useQueryClient();
 	const key = sandboxQueryKey(teamId, ref);
 	// The handle and the client it was made with (a new client: a new handle).
-	const handleRef = useRef<{ sbx: unknown; h: Sandbox | undefined }>({
-		sbx: null,
+	const handleRef = useRef<{ umiak: unknown; h: Sandbox | undefined }>({
+		umiak: null,
 		h: undefined,
 	});
 	const idRef = useRef<string | undefined>(undefined);
@@ -50,7 +50,7 @@ export function useLiveSandbox(teamId: string, ref: string): LiveSandbox {
 	const q = useQuery({
 		queryKey: key,
 		queryFn: async ({ signal }) => {
-			const { data } = await sbx.raw.GET("/v1/sandboxes/{sandbox}", {
+			const { data } = await umiak.raw.GET("/v1/sandboxes/{sandbox}", {
 				params: { path: { sandbox: pollRef(ref, idRef.current) } },
 				signal,
 				retryBudgetMs: POLL_RETRY_BUDGET_MS,
@@ -65,11 +65,11 @@ export function useLiveSandbox(teamId: string, ref: string): LiveSandbox {
 	idRef.current = id;
 	const handle = useMemo(() => {
 		const prev =
-			handleRef.current.sbx === sbx ? handleRef.current.h : undefined;
-		const h = sandboxHandle((d) => sbx.sandboxes.handle(d), q.data, prev);
-		handleRef.current = { sbx, h };
+			handleRef.current.umiak === umiak ? handleRef.current.h : undefined;
+		const h = sandboxHandle((d) => umiak.sandboxes.handle(d), q.data, prev);
+		handleRef.current = { umiak, h };
 		return h;
-	}, [q.data, sbx]);
+	}, [q.data, umiak]);
 	const stateRef = useRef<string | undefined>(undefined);
 	stateRef.current = q.data?.state;
 	const loopRef = useRef<LiveLoop | null>(null);
@@ -83,7 +83,7 @@ export function useLiveSandbox(teamId: string, ref: string): LiveSandbox {
 			{
 				state: () => stateRef.current,
 				longPoll: async (waitFor, signal) => {
-					const { data } = await sbx.raw.GET("/v1/sandboxes/{sandbox}", {
+					const { data } = await umiak.raw.GET("/v1/sandboxes/{sandbox}", {
 						params: {
 							path: { sandbox: id },
 							query: { waitFor, waitSeconds: LONG_POLL_SECONDS },
@@ -95,7 +95,7 @@ export function useLiveSandbox(teamId: string, ref: string): LiveSandbox {
 					queryClient.setQueryData(queryKey, data);
 				},
 				waitOperation: async (opId, signal) => {
-					await sbx.waitForOperation(opId, { signal });
+					await umiak.waitForOperation(opId, { signal });
 					await queryClient.invalidateQueries({ queryKey });
 				},
 			},
@@ -107,7 +107,7 @@ export function useLiveSandbox(teamId: string, ref: string): LiveSandbox {
 			ac.abort();
 			loopRef.current = null;
 		};
-	}, [id, sbx, queryClient, teamId, ref]);
+	}, [id, umiak, queryClient, teamId, ref]);
 
 	const track = useCallback((operationId: string) => {
 		if (loopRef.current === null) pending.current.push(operationId);

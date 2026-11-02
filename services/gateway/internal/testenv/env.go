@@ -27,23 +27,23 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/memnet"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi/cpapitest"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/ratelimit"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/server"
+	"github.com/belov38/umiak/libs/tunnel/gateway"
+	"github.com/belov38/umiak/libs/tunnel/registry"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/memnet"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/pgtest"
+	"github.com/belov38/umiak/libs/tunnel/wire"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi/cpapitest"
+	"github.com/belov38/umiak/services/gateway/internal/ratelimit"
+	"github.com/belov38/umiak/services/gateway/internal/server"
 )
 
 // Names and tokens of the test platform.
 const (
-	SbxDomain  = "sbx.test"
-	TunnelHost = "tunnel.test"
-	SSHHost    = "ssh.test"
+	UmiakDomain = "umiak.test"
+	TunnelHost  = "tunnel.test"
+	SSHHost     = "ssh.test"
 
 	APIToken    = "test-api-token"
 	WorkerToken = "test-worker-token"
@@ -138,9 +138,9 @@ func New(t testing.TB, opts Options) *Env {
 const refusedAddr = "127.0.0.1:1"
 
 // Logger returns a discarding logger, or a debug logger on stderr when
-// SBX_TEST_LOG is set.
+// UMIAK_TEST_LOG is set.
 func Logger(args ...any) *slog.Logger {
-	if os.Getenv("SBX_TEST_LOG") != "" {
+	if os.Getenv("UMIAK_TEST_LOG") != "" {
 		return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})).With(args...)
 	}
 	return slog.New(slog.DiscardHandler)
@@ -165,12 +165,12 @@ func (e *Env) InstanceConfig(instanceID, internalURL string) config.Config {
 		MetricsListen: "127.0.0.1:0",
 		SSHListen:     "127.0.0.1:0",
 
-		SbxDomain:  SbxDomain,
-		TunnelHost: TunnelHost,
-		SSHHost:    SSHHost,
+		UmiakDomain: UmiakDomain,
+		TunnelHost:  TunnelHost,
+		SSHHost:     SSHHost,
 
-		SbxCertFile:    e.PKI.SbxCertFile,
-		SbxKeyFile:     e.PKI.SbxKeyFile,
+		UmiakCertFile:  e.PKI.UmiakCertFile,
+		UmiakKeyFile:   e.PKI.UmiakKeyFile,
 		TunnelCertFile: e.PKI.TunnelCertFile,
 		TunnelKeyFile:  e.PKI.TunnelKeyFile,
 
@@ -186,7 +186,7 @@ func (e *Env) InstanceConfig(instanceID, internalURL string) config.Config {
 
 		ReservedPorts:    []int{22, 47800, 47984, 47989, 47990, 48010},
 		ReservedSuffixes: []string{"desktop"},
-		ReservedSlugs:    []string{"api", "app", "www", "ssh", "tunnel", "admin", "static", "sbx"},
+		ReservedSlugs:    []string{"api", "app", "www", "ssh", "tunnel", "admin", "static", "umiak"},
 
 		RateLimit: ratelimit.Config{
 			IPRate: 300, IPBurst: 2000, LabelRate: 1000, LabelBurst: 3000,
@@ -449,7 +449,7 @@ func (e *Env) Route(m *Machine, port uint16, mod func(*cpapi.Route)) cpapi.Route
 	slug := "s" + randHex(6)
 	r := cpapi.Route{
 		Label:        fmt.Sprintf("%s-%d", slug, port),
-		SandboxID:    "sbx_" + randHex(8),
+		SandboxID:    "umiak_" + randHex(8),
 		Slug:         slug,
 		Port:         port,
 		SandboxState: "ready",
@@ -474,10 +474,10 @@ func (e *Env) Route(m *Machine, port uint16, mod func(*cpapi.Route)) cpapi.Route
 	return r
 }
 
-// Host returns the sbx host name of a route label.
-func Host(label string) string { return label + "." + SbxDomain }
+// Host returns the umiak host name of a route label.
+func Host(label string) string { return label + "." + UmiakDomain }
 
-// NotifyRoutes sends pg_notify('sbx_routes', payload).
+// NotifyRoutes sends pg_notify('umiak_routes', payload).
 func (e *Env) NotifyRoutes(payload string) {
 	e.T.Helper()
 	e.notify(server.ChannelRoutes, payload)

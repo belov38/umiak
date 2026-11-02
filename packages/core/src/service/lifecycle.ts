@@ -1,4 +1,4 @@
-import { type Tx, withTx } from "@sbx/db";
+import { type Tx, withTx } from "@umiak/db";
 import { type RequestHash, requestHash } from "../canonical.ts";
 import { admit, checkQuota, QUOTA_ACTIVE_SANDBOX_STATES } from "../capacity.ts";
 import { operationDeadline } from "../deadlines.ts";

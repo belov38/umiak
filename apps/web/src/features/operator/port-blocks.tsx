@@ -1,14 +1,14 @@
 "use client";
-// Hosted ports of one sandbox in the operator list (S8 §9.10, C3): Block /
-// Unblock per port. Read with Sbx-Team of the sandbox's team.
-import type { SandboxData } from "@sbx/sdk";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+// Hosted ports of one sandbox in the operator list (S8 §9.10, C3): Block /
+// Unblock per port. Read with Umiak-Team of the sandbox's team.
+import type { SandboxData } from "@umiak/sdk";
 import { LockIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { QueryError } from "@/components/app/query-error";
 import { Button } from "@/components/ui/button";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import { attempt } from "@/lib/client-call";
 import { BlockDialog, UnblockDialog } from "./block-dialog";
 
@@ -16,13 +16,13 @@ import { BlockDialog, UnblockDialog } from "./block-dialog";
 type Dialog = { kind: "block" | "unblock"; port: number; open: boolean } | null;
 
 export function PortBlocks({ sandbox }: { sandbox: SandboxData }) {
-	const sbx = useSbx(sandbox.teamId);
+	const umiak = useUmiak(sandbox.teamId);
 	const queryClient = useQueryClient();
 	const key = ["ports", sandbox.teamId, sandbox.id] as const;
 	const ports = useQuery({
 		queryKey: key,
 		queryFn: async ({ signal }) => {
-			const { data } = await sbx.raw.GET("/v1/sandboxes/{sandbox}/ports", {
+			const { data } = await umiak.raw.GET("/v1/sandboxes/{sandbox}/ports", {
 				params: { path: { sandbox: sandbox.id } },
 				signal,
 			});
@@ -109,7 +109,7 @@ export function PortBlocks({ sandbox }: { sandbox: SandboxData }) {
 					if (dialog === null) return false;
 					const port = dialog.port;
 					const r = await attempt(() =>
-						sbx.raw.POST("/v1/sandboxes/{sandbox}/ports/{port}/block", {
+						umiak.raw.POST("/v1/sandboxes/{sandbox}/ports/{port}/block", {
 							...path(port),
 							body,
 						}),
@@ -125,7 +125,7 @@ export function PortBlocks({ sandbox }: { sandbox: SandboxData }) {
 					if (dialog === null) return false;
 					const port = dialog.port;
 					const r = await attempt(() =>
-						sbx.raw.POST("/v1/sandboxes/{sandbox}/ports/{port}/unblock", {
+						umiak.raw.POST("/v1/sandboxes/{sandbox}/ports/{port}/unblock", {
 							...path(port),
 							body,
 						}),

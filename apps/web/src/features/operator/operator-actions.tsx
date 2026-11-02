@@ -1,15 +1,15 @@
 "use client";
+import { useQueryClient } from "@tanstack/react-query";
 // Actions of a sandbox in the operator list (S8 §9.10): Block / Unblock
 // (reason and note), Stop, Delete, open its page. Every request carries
-// Sbx-Team of the sandbox's team (S7 §7.4); block/unblock need no team but
+// Umiak-Team of the sandbox's team (S7 §7.4); block/unblock need no team but
 // get it too.
-import type { SandboxData } from "@sbx/sdk";
-import { useQueryClient } from "@tanstack/react-query";
+import type { SandboxData } from "@umiak/sdk";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DeleteSandboxDialog } from "@/features/sandboxes/delete-dialog";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import { attempt } from "@/lib/client-call";
 import { canDelete, canStop } from "@/lib/sandboxes";
 import { BlockDialog, UnblockDialog } from "./block-dialog";
@@ -25,7 +25,7 @@ export function OperatorActions({
 	portsOpen: boolean;
 	onTogglePorts: () => void;
 }) {
-	const sbx = useSbx(sandbox.teamId);
+	const umiak = useUmiak(sandbox.teamId);
 	const queryClient = useQueryClient();
 	const [busy, setBusy] = useState(false);
 	const [dialog, setDialog] = useState<"block" | "unblock" | "delete" | null>(
@@ -45,7 +45,7 @@ export function OperatorActions({
 	const stop = async () => {
 		setBusy(true);
 		const r = await attempt(() =>
-			sbx.raw.POST("/v1/sandboxes/{sandbox}/stop", path),
+			umiak.raw.POST("/v1/sandboxes/{sandbox}/stop", path),
 		);
 		setBusy(false);
 		await refresh();
@@ -105,7 +105,7 @@ export function OperatorActions({
 				description="Its ports and SSH are refused at once, open terminals and streams end; the team can only read, stop and delete it until an operator unblocks it."
 				onBlock={async (body) => {
 					const r = await attempt(() =>
-						sbx.raw.POST("/v1/sandboxes/{sandbox}/block", { ...path, body }),
+						umiak.raw.POST("/v1/sandboxes/{sandbox}/block", { ...path, body }),
 					);
 					await refresh();
 					if (r === undefined) return false;
@@ -119,7 +119,7 @@ export function OperatorActions({
 				title={`Unblock ${sandbox.slug}?`}
 				onUnblock={async (body) => {
 					const r = await attempt(() =>
-						sbx.raw.POST("/v1/sandboxes/{sandbox}/unblock", {
+						umiak.raw.POST("/v1/sandboxes/{sandbox}/unblock", {
 							...path,
 							body,
 						}),

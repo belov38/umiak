@@ -219,7 +219,7 @@ func TestPwshArgvEncoded(t *testing.T) {
 	}
 	got := decodeEncoded(t, argv[len(argv)-1])
 	want := "$global:LASTEXITCODE = 0\n" + script + "\n\n" +
-		"$__sbx_ok = $?; if ($__sbx_ok) { exit 0 } elseif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } else { exit 1 }"
+		"$__umiak_ok = $?; if ($__umiak_ok) { exit 0 } elseif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } else { exit 1 }"
 	if got != want {
 		t.Fatalf("wrapped script =\n%s\nwant\n%s", got, want)
 	}
@@ -227,7 +227,7 @@ func TestPwshArgvEncoded(t *testing.T) {
 		t.Fatal("WrapScript differs from the encoded script")
 	}
 	lines := strings.Split(got, "\n")
-	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "$__sbx_ok = $?;") || lines[len(lines)-2] != "" {
+	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "$__umiak_ok = $?;") || lines[len(lines)-2] != "" {
 		t.Fatalf("epilogue is not on its own line after an empty one: %q", lines[len(lines)-2:])
 	}
 
@@ -235,7 +235,7 @@ func TestPwshArgvEncoded(t *testing.T) {
 	// continuation before the epilogue.
 	tick := "cmd /c exit 3 `"
 	argv, _ = PwshArgv(testPwsh, tick, false, `C:\d`)
-	if got := decodeEncoded(t, argv[len(argv)-1]); !strings.Contains(got, tick+"\n\n$__sbx_ok = $?;") {
+	if got := decodeEncoded(t, argv[len(argv)-1]); !strings.Contains(got, tick+"\n\n$__umiak_ok = $?;") {
 		t.Fatalf("backtick script = %q", got)
 	}
 
@@ -285,14 +285,14 @@ func TestPwshArgvTooLong(t *testing.T) {
 
 func TestMergeEnvCaseInsensitive(t *testing.T) {
 	base := []string{"Path=C:\\Windows", "USERPROFILE=C:\\Users\\user", "=C:=C:\\", "bogus", "TEMP=a"}
-	platform := []string{"PATH=C:\\sbx", "SBX=1"}
+	platform := []string{"PATH=C:\\umiak", "UMIAK=1"}
 	spec := []string{"temp=b", "Empty="}
 	got := MergeEnv(base, platform, spec)
-	want := []string{"=C:=C:\\", "Empty=", "Path=C:\\sbx", "SBX=1", "TEMP=b", "USERPROFILE=C:\\Users\\user"}
+	want := []string{"=C:=C:\\", "Empty=", "Path=C:\\umiak", "TEMP=b", "UMIAK=1", "USERPROFILE=C:\\Users\\user"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("MergeEnv = %q, want %q", got, want)
 	}
-	if v, ok := Lookup(got, "path"); !ok || v != `C:\sbx` {
+	if v, ok := Lookup(got, "path"); !ok || v != `C:\umiak` {
 		t.Fatalf("Lookup(path) = %q, %v", v, ok)
 	}
 	if _, ok := Lookup(got, "nope"); ok {

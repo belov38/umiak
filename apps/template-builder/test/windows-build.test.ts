@@ -10,8 +10,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Allocator, PveApiError, SqliteStateStore } from "@sbx/pve";
-import { FakeNode } from "@sbx/pve/testing";
+import { Allocator, PveApiError, SqliteStateStore } from "@umiak/pve";
+import { FakeNode } from "@umiak/pve/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	type BuildDeps,
@@ -36,23 +36,23 @@ const repoRoot = resolve(import.meta.dirname, "../../..");
 const fixtures = resolve(import.meta.dirname, "fixtures/templates");
 const USER_ISO = "Windows11_Client_x64_en-gb_26300_9457.iso";
 const ISO_SHA = "ab".repeat(32);
-const VIRTIO_ISO = "sbx-virtio-win-0.1.271.iso";
+const VIRTIO_ISO = "umiak-virtio-win-0.1.271.iso";
 const VIRTIO_SHA =
 	"bbe6166ad86a490caefad438fef8aa494926cb0a1b37fa1212925cfd81656429";
 const vm = "/nodes/pve/qemu/598";
-const BUILD_JSON = "C:\\ProgramData\\sbx-template\\build.json";
+const BUILD_JSON = "C:\\ProgramData\\umiak-template\\build.json";
 const SYSPREP = [
 	"C:\\Windows\\System32\\Sysprep\\sysprep.exe",
 	"/generalize",
 	"/oobe",
 	"/shutdown",
 	"/quiet",
-	"/unattend:C:\\Windows\\System32\\Sysprep\\sbx-unattend.xml",
+	"/unattend:C:\\Windows\\System32\\Sysprep\\umiak-unattend.xml",
 ];
 
 const dirs: string[] = [];
 function tmp(): string {
-	const d = mkdtempSync(join(tmpdir(), "sbx-winbuild-test-"));
+	const d = mkdtempSync(join(tmpdir(), "umiak-winbuild-test-"));
 	dirs.push(d);
 	return d;
 }
@@ -292,8 +292,8 @@ function setup(
 		slug: "winbuild",
 		node: "pve",
 		storage: "local-lvm",
-		pool: "sandbox",
-		vnet: "sbx0",
+		pool: "umiak",
+		vnet: "umiak0",
 		agentPackage: pkg.tar,
 		keepOnFailure: false,
 		noVerify: false,
@@ -338,8 +338,8 @@ function expectInOrder(log: string[], seq: string[]) {
 	}
 }
 
-const buildIso = (m: Manifest) => `sbx-build-${m.buildId}.iso`;
-const offlineIso = (m: Manifest) => `sbx-offline-${m.buildId}.iso`;
+const buildIso = (m: Manifest) => `umiak-build-${m.buildId}.iso`;
+const offlineIso = (m: Manifest) => `umiak-offline-${m.buildId}.iso`;
 
 function failed(err: unknown): Manifest {
 	expect(err).toBeInstanceOf(BuildFailedError);
@@ -369,16 +369,16 @@ describe("iso-install build: happy path", () => {
 		expect(m.status).toBe("ready");
 		expect(m.os).toBe("windows");
 		expect(m.pveVmid).toBe(598);
-		expect(m.vmName).toBe("sbx-tpl-winbuild-20261030-1");
+		expect(m.vmName).toBe("umiak-tpl-winbuild-20261030-1");
 
 		expectInOrder(s.log, [
 			"node:media.sha256",
 			"virtio:fetch 0.1.271",
 			"api:GET /nodes/pve/storage/local/content",
 			"api:UPLOAD /nodes/pve/storage/local/upload",
-			"iso:make SBXBUILD",
+			"iso:make UMIAKBUILD",
 			"api:UPLOAD /nodes/pve/storage/local/upload",
-			"iso:make SBXOFFL",
+			"iso:make UMIAKOFFL",
 			"api:UPLOAD /nodes/pve/storage/local/upload",
 			"api:GET /nodes/pve/capabilities/qemu/machines",
 			"api:POST /nodes/pve/qemu",
@@ -394,7 +394,7 @@ describe("iso-install build: happy path", () => {
 			`api:GET ${vm}/agent/network-get-interfaces`,
 			"guest:step 10-system",
 			"guest:facts",
-			"guest:mkdir-sbx-template",
+			"guest:mkdir-umiak-template",
 			`qga:write ${BUILD_JSON}`,
 			"guest:step 90-cleanup",
 			// offline: the CD swapped on the running Windows (not sealed yet), a one-time boot
@@ -409,7 +409,7 @@ describe("iso-install build: happy path", () => {
 			"guest:pe-cleanup",
 			`qga:write ${BUILD_JSON}`,
 			// seal
-			"guest:rm-sbx-build",
+			"guest:rm-umiak-build",
 			"guest:seal",
 			"guest:sysprep",
 			"ram:release 598",
@@ -452,8 +452,8 @@ describe("iso-install build: happy path", () => {
 		);
 		expect(create?.params).toMatchObject({
 			vmid: 598,
-			name: "sbx-tpl-winbuild-20261030-1",
-			pool: "sandbox",
+			name: "umiak-tpl-winbuild-20261030-1",
+			pool: "umiak",
 			machine: "pc-q35-11.0+pve2",
 			cpu: "host",
 			bios: "ovmf",
@@ -468,7 +468,7 @@ describe("iso-install build: happy path", () => {
 			efidisk0: "local-lvm:1,efitype=4m,pre-enrolled-keys=1,ms-cert=2023k",
 			tpmstate0: "local-lvm:1,version=v2.0",
 			scsi0: "local-lvm:96,discard=on,iothread=1,ssd=1",
-			net0: "virtio=02:01:00:00:02:56,bridge=sbx0,firewall=1,link_down=1",
+			net0: "virtio=02:01:00:00:02:56,bridge=umiak0,firewall=1,link_down=1",
 			ide2: `local:iso/${USER_ISO},media=cdrom`,
 			sata1: `local:iso/${VIRTIO_ISO},media=cdrom`,
 			sata2: `local:iso/${buildIso(m)},media=cdrom`,
@@ -487,7 +487,7 @@ describe("iso-install build: happy path", () => {
 		expect(s.sysprepCalls).toEqual([SYSPREP]);
 		const sealCmd = s.guest.calls.find((c) => c.cmd[1] === "seal")?.cmd;
 		expect(sealCmd).toEqual([
-			"C:\\Program Files\\sbx-agent\\current\\sbx-agent.exe",
+			"C:\\Program Files\\umiak-agent\\current\\umiak-agent.exe",
 			"seal",
 		]);
 
@@ -495,16 +495,16 @@ describe("iso-install build: happy path", () => {
 			(c) => c.method === "PUT" && c.path === `${vm}/config`,
 		);
 		expect(puts.map((c) => c.params)).toEqual([
-			{ tags: "sbx-tpl" },
+			{ tags: "umiak-tpl" },
 			{
-				net0: "virtio=02:01:00:00:02:56,bridge=sbx0,firewall=1,link_down=0",
+				net0: "virtio=02:01:00:00:02:56,bridge=umiak0,firewall=1,link_down=0",
 			},
 			{ sata2: `local:iso/${offlineIso(m)},media=cdrom` },
 			{ sata2: "none,media=cdrom", boot: "order=scsi0" },
 			{
 				delete: "ide2,sata1,sata2",
 				boot: "order=scsi0",
-				net0: "virtio=02:01:00:00:02:56,bridge=sbx0,firewall=1",
+				net0: "virtio=02:01:00:00:02:56,bridge=umiak0,firewall=1",
 			},
 		]);
 		const cfg = s.pve.vms.get(598)?.config ?? {};
@@ -645,7 +645,7 @@ describe("iso-install build: happy path", () => {
 		const check = s.guest.calls.find((c) =>
 			Buffer.from(String(c.cmd.at(-1)), "base64")
 				.toString("utf16le")
-				.includes("sbx-offline.log"),
+				.includes("umiak-offline.log"),
 		);
 		expect(
 			Buffer.from(String(check?.cmd.at(-1)), "base64").toString("utf16le"),
@@ -655,7 +655,7 @@ describe("iso-install build: happy path", () => {
 	it("keeps the build password in the build ISO only", async () => {
 		const s = setup();
 		const m = await buildTemplate(s.deps, s.opts);
-		const iso = s.isos.find((i) => i.label === "SBXBUILD");
+		const iso = s.isos.find((i) => i.label === "UMIAKBUILD");
 		expect(iso).toBeDefined();
 		const password = buildPassword(iso?.files ?? new Map());
 		expect(password.length).toBeGreaterThanOrEqual(16);
@@ -676,17 +676,17 @@ describe("iso-install build: happy path", () => {
 		// A new password per build.
 		const other = setup();
 		await buildTemplate(other.deps, other.opts);
-		const second = other.isos.find((i) => i.label === "SBXBUILD");
+		const second = other.isos.find((i) => i.label === "UMIAKBUILD");
 		expect(buildPassword(second?.files ?? new Map())).not.toBe(password);
 	});
 
 	it("puts the agent package and the generic key into the build ISO, a key file overrides it", async () => {
 		const s = setup();
 		await buildTemplate(s.deps, s.opts);
-		const files = s.isos.find((i) => i.label === "SBXBUILD")?.files;
-		expect(files?.get("build/sbx-agent-0.4.0-test-windows-amd64.tar")).toEqual(
-			readFileSync(s.opts.agentPackage),
-		);
+		const files = s.isos.find((i) => i.label === "UMIAKBUILD")?.files;
+		expect(
+			files?.get("build/umiak-agent-0.4.0-test-windows-amd64.tar"),
+		).toEqual(readFileSync(s.opts.agentPackage));
 		expect(String(files?.get("autounattend.xml"))).toContain(
 			"<Key>VK7JG-NPHTM-C97JM-9MPGT-3V66T</Key>",
 		);
@@ -702,14 +702,16 @@ describe("iso-install build: happy path", () => {
 			productKeyFile: keyFile,
 		});
 		const xml = String(
-			k.isos.find((i) => i.label === "SBXBUILD")?.files.get("autounattend.xml"),
+			k.isos
+				.find((i) => i.label === "UMIAKBUILD")
+				?.files.get("autounattend.xml"),
 		);
 		expect(xml).toContain("<Key>ABCDE-FGHIJ-KLMNO-PQRST-UVWXY</Key>");
 		// The offline boot installs nothing: it gets the generic key, never the real one.
 		for (const b of [s, k]) {
 			const off = String(
 				b.isos
-					.find((i) => i.label === "SBXOFFL")
+					.find((i) => i.label === "UMIAKOFFL")
 					?.files.get("autounattend.xml"),
 			);
 			expect(off).toContain("<Key>VK7JG-NPHTM-C97JM-9MPGT-3V66T</Key>");
@@ -738,7 +740,9 @@ describe("iso-install build: happy path", () => {
 			"local:iso/Win11_25H2_EnglishInternational_x64.iso,media=cdrom",
 		);
 		const xml = String(
-			s.isos.find((i) => i.label === "SBXBUILD")?.files.get("autounattend.xml"),
+			s.isos
+				.find((i) => i.label === "UMIAKBUILD")
+				?.files.get("autounattend.xml"),
 		);
 		expect(xml).toContain("Windows 11 Enterprise");
 	});
@@ -866,7 +870,7 @@ describe("iso-install build: failures", () => {
 	it("--fail-step replaces the step script in the build ISO", async () => {
 		const s = setup({ failStep: "10-system" });
 		await buildTemplate(s.deps, s.opts).catch(() => {});
-		const files = s.isos.find((i) => i.label === "SBXBUILD")?.files;
+		const files = s.isos.find((i) => i.label === "UMIAKBUILD")?.files;
 		expect(String(files?.get("build/steps/10-system.ps1"))).toContain("exit 1");
 		expect(String(files?.get("build/steps/00-base.ps1"))).not.toContain(
 			"--fail-step",
@@ -879,7 +883,7 @@ describe("iso-install build: failures", () => {
 			if (
 				method === "UPLOAD" &&
 				String(params?.content) === "iso" &&
-				s.log.includes("iso:make SBXBUILD")
+				s.log.includes("iso:make UMIAKBUILD")
 			)
 				throw new PveApiError(500, "upload failed");
 		};
@@ -940,12 +944,12 @@ describe("iso-install build: failures", () => {
 		for (const want of [
 			"sources\\boot.wim",
 			"boot\\boot.sdi",
-			"'C:\\sbx-pe'",
-			"'/create', '{ramdiskoptions}', '/d', 'sbx offline'",
+			"'C:\\umiak-pe'",
+			"'/create', '{ramdiskoptions}', '/d', 'umiak offline'",
 			"'ramdisksdidevice', 'partition=C:'",
-			"'ramdisksdipath', '\\sbx-pe\\boot.sdi'",
-			"'/create', '/d', 'sbx offline', '/application', 'osloader'",
-			"'ramdisk=[C:]\\sbx-pe\\boot.wim,{ramdiskoptions}'",
+			"'ramdisksdipath', '\\umiak-pe\\boot.sdi'",
+			"'/create', '/d', 'umiak offline', '/application', 'osloader'",
+			"'ramdisk=[C:]\\umiak-pe\\boot.wim,{ramdiskoptions}'",
 			"'device', $dev",
 			"'osdevice', $dev",
 			"'path', '\\windows\\system32\\boot\\winload.efi'",
@@ -958,12 +962,12 @@ describe("iso-install build: failures", () => {
 			expect(pe).toContain(want);
 		const cleanup =
 			scripts.find(
-				(t) => t.includes("C:\\sbx-pe") && !t.includes("/bootsequence"),
+				(t) => t.includes("C:\\umiak-pe") && !t.includes("/bootsequence"),
 			) ?? "";
 		expect(cleanup).toContain("'/delete'");
 		expect(cleanup).toContain("'/enum', 'all', '/v'");
-		expect(cleanup).toContain("sbx offline");
-		expect(cleanup).toContain("Remove-Item -LiteralPath 'C:\\sbx-pe'");
+		expect(cleanup).toContain("umiak offline");
+		expect(cleanup).toContain("Remove-Item -LiteralPath 'C:\\umiak-pe'");
 		// The reboot goes through the guest (the reboot step is the other one).
 		expect(s.log.filter((e) => e === "guest:reboot")).toHaveLength(2);
 		expect(s.messages.join("\n")).toContain(
@@ -1019,7 +1023,7 @@ describe("iso-install build: failures", () => {
 
 	it("a CD change the running VM refuses or leaves pending falls back to a shutdown and a boot into Windows", async () => {
 		const offlineCd = (params: Record<string, unknown> | undefined) =>
-			String(params?.sata2 ?? "").includes("sbx-offline");
+			String(params?.sata2 ?? "").includes("umiak-offline");
 		const refused = (s: ReturnType<typeof setup>) => {
 			const base = s.pve.before;
 			s.pve.before = (method, path, params) => {
@@ -1094,7 +1098,7 @@ describe("iso-install build: failures", () => {
 		s.guest.peCleanupExit = 1;
 		const m = failed(await buildTemplate(s.deps, s.opts).catch((e) => e));
 		expect(m.error?.stage).toBe("verify-offline");
-		expect(m.error?.message).toMatch(/sbx offline/);
+		expect(m.error?.message).toMatch(/umiak offline/);
 		expect(s.log).not.toContain("guest:seal");
 		expect(s.log).not.toContain("guest:sysprep");
 	});
@@ -1102,12 +1106,12 @@ describe("iso-install build: failures", () => {
 	it("an offline log with errors fails verify-offline with its tail, before sysprep", async () => {
 		const s = setup();
 		s.guest.offlineLog =
-			"sbx offline stage: drivers w11\r\nWindows volume C:\r\nERROR reg load of the offline SYSTEM hive failed\r\nDONE errors 1\r\n";
+			"umiak offline stage: drivers w11\r\nWindows volume C:\r\nERROR reg load of the offline SYSTEM hive failed\r\nDONE errors 1\r\n";
 		const m = failed(await buildTemplate(s.deps, s.opts).catch((e) => e));
 		expect(m.error?.stage).toBe("verify-offline");
 		expect(m.error?.message).toMatch(/DONE errors 1/);
 		expect(m.error?.tail).toEqual([
-			"sbx offline stage: drivers w11",
+			"umiak offline stage: drivers w11",
 			"Windows volume C:",
 			"ERROR reg load of the offline SYSTEM hive failed",
 			"DONE errors 1",
@@ -1123,11 +1127,11 @@ describe("iso-install build: failures", () => {
 				(s) => {
 					s.guest.offlineLog = null;
 				},
-				/sbx-offline\.log is missing/,
+				/umiak-offline\.log is missing/,
 			],
 			[
 				(s) => {
-					s.guest.offlineLog = "sbx offline stage\r\nOK x\r\n";
+					s.guest.offlineLog = "umiak offline stage\r\nOK x\r\n";
 				},
 				/no "DONE errors 0"/,
 			],
@@ -1189,28 +1193,32 @@ describe("iso-install build: failures", () => {
 		expect(m.status).toBe("ready");
 		expect(s.pve.vms.get(598)?.config.template).toBe("1");
 		expect((await s.allocator.get(598))?.state).toBe("active");
-		expect(s.messages.join("\n")).toMatch(/sbx-tpl cleanup/);
+		expect(s.messages.join("\n")).toMatch(/umiak-tpl cleanup/);
 	});
 
-	it("a C:\\sbx-build that resists removal is retried, then only warned about", async () => {
+	it("a C:\\umiak-build that resists removal is retried, then only warned about", async () => {
 		const s = setup();
 		s.guest.rmBuildDirExits = [1, 1];
 		const m = await buildTemplate(s.deps, s.opts);
 		expect(m.status).toBe("ready");
-		expect(s.log.filter((e) => e === "guest:rm-sbx-build")).toHaveLength(3);
+		expect(s.log.filter((e) => e === "guest:rm-umiak-build")).toHaveLength(3);
 		expect(s.messages.join("\n")).not.toMatch(
-			/WARNING: removing C:\\sbx-build/,
+			/WARNING: removing C:\\umiak-build/,
 		);
 
 		const w = setup();
 		w.guest.rmBuildDirExits = Array.from({ length: 10 }, () => 1);
 		const m2 = await buildTemplate(w.deps, w.opts);
 		expect(m2.status).toBe("ready");
-		expect(w.log.filter((e) => e === "guest:rm-sbx-build")).toHaveLength(5);
+		expect(w.log.filter((e) => e === "guest:rm-umiak-build")).toHaveLength(5);
 		expect(w.messages.join("\n")).toMatch(
-			/WARNING: removing C:\\sbx-build failed .*file in use/,
+			/WARNING: removing C:\\umiak-build failed .*file in use/,
 		);
-		expectInOrder(w.log, ["guest:rm-sbx-build", "guest:seal", "guest:sysprep"]);
+		expectInOrder(w.log, [
+			"guest:rm-umiak-build",
+			"guest:seal",
+			"guest:sysprep",
+		]);
 	});
 
 	it("sysprep failure surfaces setuperr tail", async () => {
@@ -1296,7 +1304,7 @@ describe("iso-install build: failures", () => {
 
 	it("rejects linux-only and bad options before recording", async () => {
 		for (const over of [
-			{ sbxCli: "/bin/sh" },
+			{ umiakCli: "/bin/sh" },
 			{ failStep: "reboot" },
 			{ failStep: "network-up" },
 			{ iso: "../evil.iso" },

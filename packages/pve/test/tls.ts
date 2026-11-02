@@ -11,7 +11,7 @@ export interface TestPki {
 
 /** Creates a throwaway CA and a server certificate for the given DNS name with the openssl CLI. */
 export function makePki(dnsName: string): TestPki {
-	const d = mkdtempSync(join(tmpdir(), "sbx-pki-"));
+	const d = mkdtempSync(join(tmpdir(), "umiak-pki-"));
 	const run = (...args: string[]) =>
 		execFileSync("openssl", args, { cwd: d, stdio: "pipe" });
 	run(

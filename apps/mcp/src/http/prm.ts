@@ -4,7 +4,7 @@
 /** Scopes a client asks the authorization server for; never offline_access. */
 export const PRM_SCOPES = ["openid", "email", "profile"] as const;
 
-export const RESOURCE_NAME = "sbx sandboxes";
+export const RESOURCE_NAME = "umiak sandboxes";
 
 /**
  * Path of the metadata document: the well-known prefix in front of the

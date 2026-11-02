@@ -6,7 +6,7 @@
 # --- PowerShell 7 (all users, in Path, no telemetry, no Microsoft Update opt-in) ---
 Set-MachineEnv POWERSHELL_TELEMETRY_OPTOUT 1
 $pwshVersion = Get-ToolVersion 'pwsh'
-$installed = if (Test-Path -LiteralPath $SbxPwshExe) { (Get-Item -LiteralPath $SbxPwshExe).VersionInfo.ProductVersion } else { '' }
+$installed = if (Test-Path -LiteralPath $UmiakPwshExe) { (Get-Item -LiteralPath $UmiakPwshExe).VersionInfo.ProductVersion } else { '' }
 if ("$installed" -like "$pwshVersion*") {
     Write-BuildLog "PowerShell $installed is installed"
 } else {
@@ -17,8 +17,8 @@ if ("$installed" -like "$pwshVersion*") {
         'ADD_EXPLORER_CONTEXT_MENU_OPENPOWERSHELL=0', 'ADD_FILE_CONTEXT_MENU_RUNPOWERSHELL=0'
     )
 }
-if (-not (Test-Path -LiteralPath $SbxPwshExe)) { throw "$SbxPwshExe is missing after the install" }
-Invoke-Native -FilePath $SbxPwshExe -ArgumentList @('-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()')
+if (-not (Test-Path -LiteralPath $UmiakPwshExe)) { throw "$UmiakPwshExe is missing after the install" }
+Invoke-Native -FilePath $UmiakPwshExe -ArgumentList @('-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()')
 
 # --- OpenSSH Server ---
 $source = [string](Get-BuildVersionInfo).openssh.source
@@ -42,7 +42,7 @@ Write-BuildLog "sshd $($sshd.FileVersionInfo.ProductVersion)"
 
 # The agent starts sshd once the identity (host keys) is ready (spec 12.3).
 if ((Get-Service -Name sshd).Status -ne 'Stopped') { Stop-Service -Name sshd -Force }
-Set-SbxServiceStartup -Name sshd -StartupType Manual
+Set-UmiakServiceStartup -Name sshd -StartupType Manual
 $rule = Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue
 if ($rule) { Remove-NetFirewallRule -Name 'OpenSSH-Server-In-TCP'; Write-BuildLog 'firewall rule OpenSSH-Server-In-TCP removed' }
 
@@ -54,7 +54,7 @@ Invoke-Native -FilePath icacls.exe -ArgumentList @($sshDir, '/inheritance:r', '/
 Copy-BuildFile -Name 'sshd_config' -Destination (Join-Path $sshDir 'sshd_config')
 # Host keys of the build are never used: identity apply creates new ones on every clone.
 Get-ChildItem -LiteralPath $sshDir -Filter 'ssh_host_*' -Force | Remove-Item -Force
-Set-RegValue 'HKLM:\SOFTWARE\OpenSSH' DefaultShell $SbxPwshExe String
+Set-RegValue 'HKLM:\SOFTWARE\OpenSSH' DefaultShell $UmiakPwshExe String
 
 # --- Accounts (spec 8.2) ---
 $user = Get-LocalUser -Name 'user'

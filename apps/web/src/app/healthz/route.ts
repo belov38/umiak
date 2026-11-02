@@ -1,7 +1,7 @@
 // Exec probe target (S8 §5.1, §12): no identity headers needed; 200 "ok"
 // once Postgres answers, Payload is initialized and every migration known
 // to this code is applied. Nothing else is said.
-import { assertPayloadMigrated } from "@sbx/payload";
+import { assertPayloadMigrated } from "@umiak/payload";
 import { getWebPayload } from "@/lib/payload";
 
 export const dynamic = "force-dynamic";

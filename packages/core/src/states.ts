@@ -1,7 +1,7 @@
 import { invalidState } from "./errors.ts";
 
 // State machines of S6 §6. Each `*Next` returns the target state or throws
-// SbxError `invalid_state` with `details {state, event}`. Callers persist the
+// UmiakError `invalid_state` with `details {state, event}`. Callers persist the
 // result with a conditional UPDATE (`WHERE state = <from>`).
 
 export const SANDBOX_STATES = [

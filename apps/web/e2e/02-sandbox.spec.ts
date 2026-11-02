@@ -56,7 +56,7 @@ test("files: chunked upload, download, preview, rename, delete", async ({
 	const { page } = alice;
 	const team = await personalTeam(alice);
 	await ensureSandbox(alice, team, `term-${state.run}`);
-	const dir = mkdtempSync(join(tmpdir(), "sbx-e2e-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-e2e-"));
 	// Over 64 MiB: the dashboard uploads it in resumable chunks.
 	const big = join(dir, `big-${UPLOAD_MIB}.bin`);
 	const f = await open(big, "w");
@@ -150,10 +150,10 @@ test("ports: token shown once, rotate, public while public ports are off", async
 		const token = (
 			await tokenDialog
 				.locator("code")
-				.filter({ hasText: /^sbxp_/ })
+				.filter({ hasText: /^umiakp_/ })
 				.textContent()
 		)?.trim();
-		expect(token).toMatch(/^sbxp_/);
+		expect(token).toMatch(/^umiakp_/);
 		await tokenDialog.getByRole("button", { name: "I have copied it" }).click();
 		await expect(tokenDialog).toHaveCount(0);
 		audit.forbid(token as string, label, Date.now());

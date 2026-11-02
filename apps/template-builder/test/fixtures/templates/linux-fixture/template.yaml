@@ -14,7 +14,7 @@ hw:
   cloudinit: false
 build_vm: { cores: 2, memory_mb: 2048 }
 steps: [00-base, reboot, 10-system, 90-cleanup]
-seal: sbx-agent
+seal: umiak-agent
 boot_timeout_s: 300
 verify: linux
 vmids: [597, 599]

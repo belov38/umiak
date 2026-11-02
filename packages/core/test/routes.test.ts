@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRoutes, lookupRoute, sshTarget } from "../src/index.ts";
 import { seedSandbox, serviceEnv } from "./helpers/service.ts";

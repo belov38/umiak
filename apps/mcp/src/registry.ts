@@ -20,7 +20,7 @@ export const TOOLSETS: readonly Toolset[] = [
 ];
 
 /**
- * Toolsets of a comma list (`--toolsets`, `SBX_MCP_TOOLSETS`, `?toolsets=`):
+ * Toolsets of a comma list (`--toolsets`, `UMIAK_MCP_TOOLSETS`, `?toolsets=`):
  * spaces trimmed, repeats dropped; an unknown name is an Error listing the
  * valid ones.
  */
@@ -164,7 +164,7 @@ export function publishedSchemaOf(
 	return {
 		"~standard": {
 			version: 1,
-			vendor: "sbx",
+			vendor: "umiak",
 			validate: (value) => std.validate(value),
 			jsonSchema: {
 				input: (opts) =>

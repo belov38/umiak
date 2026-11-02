@@ -1,7 +1,7 @@
 // GET /v1/operations/{operation} with long-poll (S7 §5.10, §8.4). Internal
 // `reprovision` operations are 404 like unknown ones.
 import { createRoute } from "@hono/zod-openapi";
-import { decodeUuid } from "@sbx/auth";
+import { decodeUuid } from "@umiak/auth";
 import { authOf } from "../auth/principal.ts";
 import { requireScope } from "../auth/scopes.ts";
 import type { ApiApp, ApiDeps } from "../deps.ts";

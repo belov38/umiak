@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// sbx-admin entry point: `node apps/worker/src/admin/main.ts <command>`.
+// umiak-admin entry point: `node apps/worker/src/admin/main.ts <command>`.
 // Results are JSON lines on stdout, errors a JSON line on stderr, logs go to
 // stderr. Exit code 0 on success, 1 on error.
-import { StaticConfigReader } from "@sbx/config";
-import { ensureQueues, KeyRing, PgBossJobSender } from "@sbx/core";
-import { createPool } from "@sbx/db";
+import { StaticConfigReader } from "@umiak/config";
+import { ensureQueues, KeyRing, PgBossJobSender } from "@umiak/core";
+import { createPool } from "@umiak/db";
 import type { PgBoss } from "pg-boss";
 import { pino } from "pino";
 import { PveInfraRegistry } from "../adapters/pve-infra.ts";
@@ -26,7 +26,7 @@ async function main(): Promise<number> {
 		return 1;
 	}
 	const log = createLogger(
-		{ level: env.logLevel, name: "sbx-admin" },
+		{ level: env.logLevel, name: "umiak-admin" },
 		pino.destination(2),
 	);
 	const pool = createPool(env.databaseUrl, 4, {

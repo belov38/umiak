@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
 )
 
 // inputPollSlice bounds one wait for POLLOUT, so a blocked input notices

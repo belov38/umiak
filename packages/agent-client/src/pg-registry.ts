@@ -51,7 +51,7 @@ const cacheSweepSize = 10_000;
 const maxNegativeInstanceTtlMs = 250;
 
 /** Application name of the LISTEN connection (visible in pg_stat_activity). */
-export const LISTEN_APPLICATION_NAME = "sbx-agent-client-listen";
+export const LISTEN_APPLICATION_NAME = "umiak-agent-client-listen";
 
 /**
  * Registry backed by the tunnel schema in Postgres (spec section 8.4).
@@ -91,7 +91,7 @@ export class PgRegistry implements Registry {
 		this.pool = new pg.Pool({
 			connectionString: opts.connectionString,
 			max: opts.maxConnections ?? 10,
-			application_name: "sbx-agent-client",
+			application_name: "umiak-agent-client",
 		});
 		// Idle clients that lose their connection emit here; the pool drops them.
 		this.pool.on("error", () => {});

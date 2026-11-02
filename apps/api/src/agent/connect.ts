@@ -1,4 +1,4 @@
-// AgentApi over the guest agent's Connect API (sbx.agent.v1 Process,
+// AgentApi over the guest agent's Connect API (umiak.agent.v1 Process,
 // Filesystem and System, S3 §9–§13). Every RPC goes through
 // `AgentClient.transport(machineId)`: the client finds the gateway instance
 // that owns the machine's tunnel (S2 §8.4), waits for the agent up to its
@@ -8,7 +8,7 @@
 // The proto ↔ AgentApi rules are in apps/api/README.md ("Wiring S3"):
 // `*_UNSPECIFIED` is not a value, proto zeros are null, uint64 is a number
 // only up to Number.MAX_SAFE_INTEGER, the streams of CommandInfo become an
-// object by name, mutations carry Sbx-Request-Id. A reply that breaks them
+// object by name, mutations carry Umiak-Request-Id. A reply that breaks them
 // is AgentCallError("bad_response") (502 agent_error).
 //
 // `attach` is one Process/Attach stream; the caller resumes it with
@@ -37,8 +37,8 @@ import {
 	AgentUnavailableError,
 	HEADER_REQUEST_ID,
 	isConnectionError,
-} from "@sbx/agent-client";
-import { ErrorDetailSchema } from "@sbx/proto";
+} from "@umiak/agent-client";
+import { ErrorDetailSchema } from "@umiak/proto";
 import {
 	type AttachResponse,
 	type CommandInfo,
@@ -56,7 +56,7 @@ import {
 	Process,
 	Stream,
 	System,
-} from "@sbx/proto/agent/v1";
+} from "@umiak/proto/agent/v1";
 import type pg from "pg";
 import { AgentCallError } from "./errors.ts";
 import type {
@@ -408,7 +408,7 @@ export class ConnectAgentApi implements AgentApi {
 		};
 	}
 
-	/** Call options: the deadline, Sbx-Request-Id of a mutation, the caller's signal. */
+	/** Call options: the deadline, Umiak-Request-Id of a mutation, the caller's signal. */
 	#opts(requestId?: string, signal?: AbortSignal): CallOptions {
 		return {
 			timeoutMs: this.#timeoutMs,

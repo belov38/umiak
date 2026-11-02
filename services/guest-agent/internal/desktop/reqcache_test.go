@@ -10,11 +10,11 @@ import (
 
 	"connectrpc.com/connect"
 
-	v1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/reqcache"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
+	v1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/agent/v1/agentv1connect"
+	"github.com/belov38/umiak/libs/tunnel/wire"
+	"github.com/belov38/umiak/services/guest-agent/internal/reqcache"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
 )
 
 // TestActReplayKeepsScreenshotsOutOfTheStore: a repeated Act does not repeat

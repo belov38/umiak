@@ -7,12 +7,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // BinaryName is the agent binary in a package and a version directory of
 // this OS.
-const BinaryName = "sbx-agent"
+const BinaryName = "umiak-agent"
 
 // pointLink points link (current or previous) at version v. The target is
 // relative, so the tree stays valid under any root.
@@ -42,7 +42,7 @@ func switchLink(link, target string) error {
 	return syncDir(dir)
 }
 
-// linkCLI makes /usr/local/bin/sbx-agent a symlink to current/sbx-agent.
+// linkCLI makes /usr/local/bin/umiak-agent a symlink to current/umiak-agent.
 func linkCLI(l paths.Layout) error {
 	target, err := filepath.Rel(filepath.Dir(l.BinLink), filepath.Join(l.CurrentLink, BinaryName))
 	if err == nil {

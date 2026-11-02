@@ -1,7 +1,7 @@
 // SSH keys for tests, built with node:crypto (no ssh-keygen): user public
 // keys in the `authorized_keys` line format and an ed25519 login CA.
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
-import { loadSshCa, type SshCa } from "@sbx/auth";
+import { loadSshCa, type SshCa } from "@umiak/auth";
 
 function str(b: Buffer | string): Buffer {
 	const v = typeof b === "string" ? Buffer.from(b) : b;

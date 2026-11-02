@@ -3,7 +3,7 @@
 // packages after a failure.
 //
 // Every container started by global-setup (and by the Postgres setup of
-// @sbx/agent-client's tests) carries owner labels: the host,
+// @umiak/agent-client's tests) carries owner labels: the host,
 // the pid of the process that started it and that process's start time
 // (`ps -o lstart=` with TZ=UTC and the C locale, so every session reads the
 // same text; with the pid it names one process even when the pid is reused
@@ -36,10 +36,10 @@ import { promisify } from "node:util";
 const run = promisify(execFile);
 
 /** Marks every test Postgres container of global-setup. */
-export const TEST_PG_LABEL = "sbx-test=pg";
-const HOST = "sbx-test.host";
-const PID = "sbx-test.pid";
-const STARTED = "sbx-test.started";
+export const TEST_PG_LABEL = "umiak-test=pg";
+const HOST = "umiak-test.host";
+const PID = "umiak-test.pid";
+const STARTED = "umiak-test.started";
 
 export interface Owner {
 	host: string;
@@ -119,7 +119,7 @@ export function currentOwner(): Promise<Owner | null> {
 
 /** A unique name for a new test container of this process. */
 export function containerName(): string {
-	return `sbx-test-pg-${process.pid}-${randomUUID().slice(0, 8)}`;
+	return `umiak-test-pg-${process.pid}-${randomUUID().slice(0, 8)}`;
 }
 
 /** `docker run` arguments that label a container with its owner. */

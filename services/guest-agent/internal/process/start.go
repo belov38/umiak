@@ -18,14 +18,14 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shim"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/supervisor"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/shim"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/supervisor"
 )
 
 // startFailedCode is the exit code of a command that never started.
@@ -330,7 +330,7 @@ func (m *Manager) recordStartFailedLocked(ctx context.Context, c *command, msg s
 				continue
 			}
 			if s == streams[len(streams)-1] {
-				_, _ = f.WriteString("sbx-agent: cannot start command: " + msg + "\n")
+				_, _ = f.WriteString("umiak-agent: cannot start command: " + msg + "\n")
 			}
 			_ = f.Close()
 		}

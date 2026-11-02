@@ -8,7 +8,7 @@ import { SandboxFs } from "./vfs.ts";
 
 export const FAKE_TEAM = "team_fake";
 export const OTHER_TEAM = "team_other";
-export const SBX_DOMAIN = "sbx.example.com";
+export const UMIAK_DOMAIN = "umiak.example.com";
 
 export const FULL_SCOPES = [
 	"sandboxes:read",
@@ -42,10 +42,10 @@ export interface FakePrincipal {
 	scopes: string[];
 	/**
 	 * The default team; in a request, the team it acts in (the fake replaces
-	 * it with the team Sbx-Team selected).
+	 * it with the team Umiak-Team selected).
 	 */
 	teamId: string;
-	/** oidc: the person's other teams, selectable with Sbx-Team. */
+	/** oidc: the person's other teams, selectable with Umiak-Team. */
 	teams?: string[];
 	/** oidc: the person; team_key: the creator shown in /v1/me. */
 	userEmail?: string;

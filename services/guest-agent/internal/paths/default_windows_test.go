@@ -10,7 +10,7 @@ import (
 var emptyFields = map[string]bool{
 	"BinLink":        true,
 	"CmdSpecDir":     true,
-	"SbxEnvFile":     true,
+	"UmiakEnvFile":   true,
 	"MachineIDFile":  true,
 	"DbusMachineID":  true,
 	"HostnameFile":   true,
@@ -20,11 +20,11 @@ var emptyFields = map[string]bool{
 
 func TestWindowsDefaultLayout(t *testing.T) {
 	const (
-		lib   = `C:\Program Files\sbx-agent`
-		etc   = `C:\ProgramData\sbx-agent`
-		state = `C:\ProgramData\sbx-agent\state`
-		run   = `C:\ProgramData\sbx-agent\run`
-		sbx   = `C:\ProgramData\sbx`
+		lib   = `C:\Program Files\umiak-agent`
+		etc   = `C:\ProgramData\umiak-agent`
+		state = `C:\ProgramData\umiak-agent\state`
+		run   = `C:\ProgramData\umiak-agent\run`
+		umiak = `C:\ProgramData\umiak`
 		ssh   = `C:\ProgramData\ssh`
 	)
 	want := map[string]string{
@@ -50,24 +50,24 @@ func TestWindowsDefaultLayout(t *testing.T) {
 		"EarlyFile":        run + `\early.json`,
 		"AdminSocket":      run + `\admin.sock`,
 		"EnvSocket":        run + `\env.sock`,
-		"LogDir":           `C:\ProgramData\sbx-agent\logs`,
+		"LogDir":           `C:\ProgramData\umiak-agent\logs`,
 
-		"SecretsMount":     sbx,
-		"SecretsDir":       sbx + `\secrets`,
-		"SecretsEnvFile":   sbx + `\secrets\env`,
-		"SecretFilesDir":   sbx + `\secrets\files`,
-		"SecretsStateFile": sbx + `\secrets.json`,
+		"SecretsMount":     umiak,
+		"SecretsDir":       umiak + `\secrets`,
+		"SecretsEnvFile":   umiak + `\secrets\env`,
+		"SecretFilesDir":   umiak + `\secrets\files`,
+		"SecretsStateFile": umiak + `\secrets.json`,
 
 		"EtcDir":          etc,
 		"ConfigFile":      etc + `\agent.toml`,
 		"TemplateSSHCA":   etc + `\ssh-user-ca.pub`,
 		"QuiesceHooksDir": etc + `\quiesce.d`,
 		"SSHDir":          ssh,
-		"SSHUserCA":       ssh + `\sbx_user_ca.pub`,
-		"SysprepUnattend": `C:\Windows\System32\Sysprep\sbx-unattend.xml`,
+		"SSHUserCA":       ssh + `\umiak_user_ca.pub`,
+		"SysprepUnattend": `C:\Windows\System32\Sysprep\umiak-unattend.xml`,
 
 		"SetupCompleteScript": `C:\Windows\Setup\Scripts\SetupComplete.cmd`,
-		"FirstBootDone":       `C:\ProgramData\sbx-template\firstboot.done`,
+		"FirstBootDone":       `C:\ProgramData\umiak-template\firstboot.done`,
 	}
 	v := reflect.ValueOf(Default())
 	for i := range v.NumField() {
@@ -89,10 +89,10 @@ func TestWindowsDefaultLayout(t *testing.T) {
 
 func TestWindowsPerIDPaths(t *testing.T) {
 	l := Default()
-	if got, want := l.CommandDir("c1"), `C:\ProgramData\sbx-agent\state\commands\c1`; got != want {
+	if got, want := l.CommandDir("c1"), `C:\ProgramData\umiak-agent\state\commands\c1`; got != want {
 		t.Errorf("CommandDir = %q, want %q", got, want)
 	}
-	if got, want := l.ShimSocket("c1"), `C:\ProgramData\sbx-agent\run\cmd\c1.sock`; got != want {
+	if got, want := l.ShimSocket("c1"), `C:\ProgramData\umiak-agent\run\cmd\c1.sock`; got != want {
 		t.Errorf("ShimSocket = %q, want %q", got, want)
 	}
 }
@@ -100,10 +100,10 @@ func TestWindowsPerIDPaths(t *testing.T) {
 func TestWindowsForRoot(t *testing.T) {
 	root := t.TempDir()
 	l := ForRoot(root)
-	if want := filepath.Join(root, "ProgramData", "sbx-agent", "state", "state.db"); l.StateDB != want {
+	if want := filepath.Join(root, "ProgramData", "umiak-agent", "state", "state.db"); l.StateDB != want {
 		t.Errorf("StateDB = %q, want %q", l.StateDB, want)
 	}
-	if want := filepath.Join(root, "Program Files", "sbx-agent", "current"); l.CurrentLink != want {
+	if want := filepath.Join(root, "Program Files", "umiak-agent", "current"); l.CurrentLink != want {
 		t.Errorf("CurrentLink = %q, want %q", l.CurrentLink, want)
 	}
 }

@@ -13,7 +13,7 @@ S7 — внешний интерфейс платформы. Им пользую
 Что считается успехом:
 1. Агент создаёт sandbox, запускает 40-минутную сборку и получает её вывод **байт в байт** с правильным кодом выхода, даже если за это время обрывался туннель, передеплоился gateway и перезапустился под `api`. Повтор запроса с тем же `Idempotency-Key` не запускает команду второй раз.
 2. Типичный сценарий (create → ждать готовности → exec → файлы → delete) занимает 5–10 строк на TS и на Python, без ручного разбора NDJSON и без ручных повторов.
-3. `sbx login` (device grant Keycloak) входит за одно подтверждение в браузере, в том числе с машины без браузера; личных долгоживущих ключей у людей нет, а выключенный в Keycloak человек теряет доступ за минуты (§7.6, §7.10).
+3. `umiak login` (device grant Keycloak) входит за одно подтверждение в браузере, в том числе с машины без браузера; личных долгоживущих ключей у людей нет, а выключенный в Keycloak человек теряет доступ за минуты (§7.6, §7.10).
 4. Из ответа на любую ошибку клиент (и LLM) понимает, что случилось и можно ли безопасно повторить запрос.
 5. OpenAPI — единственный источник правды: SDK, CLI, MCP и документация строятся из него, а ломающее изменение `v1` ловит CI.
 
@@ -22,10 +22,10 @@ S7 — внешний интерфейс платформы. Им пользую
 **Цели**
 - `apps/api` на Hono + `@hono/zod-openapi`: публичные ресурсы v1, NDJSON-стримы, PTY по WebSocket, внутренние ручки для gateway и приёма событий агента.
 - Единые конвенции: ID, ошибки, пагинация, идемпотентность, лимиты, версии.
-- Аутентификация: Keycloak JWT для людей в CLI, SDK и MCP; командные API-ключи со scopes для автоматизации; браузерные вызовы через oauth2-proxy; `sbx login`; контракт с S8.
+- Аутентификация: Keycloak JWT для людей в CLI, SDK и MCP; командные API-ключи со scopes для автоматизации; браузерные вызовы через oauth2-proxy; `umiak login`; контракт с S8.
 - Возобновляемый стрим от агента до клиента.
 - OpenAPI 3.1, SDK TS и Python (генерация и рукописные фасады с хелперами).
-- `apps/cli` (`sbx`) на Bun compile.
+- `apps/cli` (`umiak`) на Bun compile.
 - Требования S11 (MCP) к API.
 
 **Не-цели (другие области)**
@@ -39,7 +39,7 @@ S7 — внешний интерфейс платформы. Им пользую
 - Вывод, который получил клиент после переподключения, отличается от реального хотя бы на байт, а клиент об этом не узнал (событие `truncated` не пришло).
 - Значение env, секрета, секрета API-ключа, токена порта или кода входа попало в лог, метрику, ответ `GET` или URL.
 - Запрос на публичный хост прошёл аутентификацию по заголовку `X-Auth-Request-*`.
-- Командный ключ выпущен не `owner`-ом команды или получил права шире выбранных им scopes; принят JWT не от Keycloak realm `sbx` или не для `sbx-api`.
+- Командный ключ выпущен не `owner`-ом команды или получил права шире выбранных им scopes; принят JWT не от Keycloak realm `umiak` или не для `umiak-api`.
 - `retryable: true` в ответе, после которого повтор того же запроса создаёт второй ресурс или запускает вторую команду.
 
 ## 3. Ограничения
@@ -54,8 +54,8 @@ S7 — внешний интерфейс платформы. Им пользую
 
 ```
  agents / CI / CLI / SDK                     browser (dashboard S8, terminal)
-   |  https://api.<domain>/v1/*                 |  https://app.<domain>/api/v1/*, /sbx-auth/*
-   |  Bearer <Keycloak JWT> | sbx_... (team)    v
+   |  https://api.<domain>/v1/*                 |  https://app.<domain>/api/v1/*, /umiak-auth/*
+   |  Bearer <Keycloak JWT> | umiak_... (team)    v
    |                                     +--------------+
    |                                     | oauth2-proxy |  OIDC, X-Auth-Request-Email/-User/-Groups
    |                                     +------+-------+
@@ -67,7 +67,7 @@ S7 — внешний интерфейс платформы. Им пользую
  | :9090 metrics, /healthz, /readyz                                                               |
  |                                                                                                |
  |  routes (zod-openapi) -> auth/scopes -> packages/core SandboxService (S6) -> Postgres, pg-boss |
- |                                      -> @sbx/agent-client (S2) -> gateway internal -> agent    |
+ |                                      -> @umiak/agent-client (S2) -> gateway internal -> agent    |
  +------------------------------------------------------------------------------------------------+
         ^ gateway (S4): routes, ssh/authorize, port-auth/exchange, agent-events
 ```
@@ -78,11 +78,11 @@ S7 — внешний интерфейс платформы. Им пользую
 
 | Путь | Имя | Что |
 |---|---|---|
-| `apps/api` | `@sbx/api` | Hono-приложение, три listener-а, маршруты, zod-схемы, генерация OpenAPI в `apps/api/openapi/v1.json` (коммитится) |
-| `packages/auth` | `@sbx/auth` | Формат и hash API-ключей, scopes и пресеты, интерфейс `IdentityStore` и его статическая реализация (в реализации — `PgIdentityStore`, §23.10). Используют `api` и S8 (чтобы формат ключа был один) |
-| `packages/sdk-ts` | `@sbx/sdk` | Сгенерированные типы + `openapi-fetch` + фасад `Sbx` и хелперы |
-| `packages/sdk-py` | `sbx-sdk` (импорт `sbx_sdk`) | Python-проект (uv); сгенерированный клиент + фасады `Sbx`/`AsyncSbx` |
-| `apps/cli` | `sbx` | CLI на `@sbx/sdk`, сборка `bun build --compile` |
+| `apps/api` | `@umiak/api` | Hono-приложение, три listener-а, маршруты, zod-схемы, генерация OpenAPI в `apps/api/openapi/v1.json` (коммитится) |
+| `packages/auth` | `@umiak/auth` | Формат и hash API-ключей, scopes и пресеты, интерфейс `IdentityStore` и его статическая реализация (в реализации — `PgIdentityStore`, §23.10). Используют `api` и S8 (чтобы формат ключа был один) |
+| `packages/sdk-ts` | `@umiak/sdk` | Сгенерированные типы + `openapi-fetch` + фасад `Umiak` и хелперы |
+| `packages/sdk-py` | `umiak-sdk` (импорт `umiak_sdk`) | Python-проект (uv); сгенерированный клиент + фасады `Umiak`/`AsyncUmiak` |
+| `apps/cli` | `umiak` | CLI на `@umiak/sdk`, сборка `bun build --compile` |
 | `packages/core`, `packages/db`, `packages/config` | S6 | Сервисный слой, миграции, конфигурация |
 | `packages/agent-client` | S2 | Connect-клиент агента с маршрутизацией и возобновлением |
 
@@ -94,7 +94,7 @@ S7 — внешний интерфейс платформы. Им пользую
 |---|---|---|
 | `https://api.<domain>/v1/*` | public `:8080` | SDK, CLI, MCP, CI, агенты |
 | `https://app.<domain>/api/v1/*` (префикс `/api` снимает ingress) | proxied `:8081` | браузер (дашборд S8, терминал) |
-| `https://app.<domain>/sbx-auth/*` | proxied `:8081` | SSO для портов (S4 §8.4) |
+| `https://app.<domain>/umiak-auth/*` | proxied `:8081` | SSO для портов (S4 §8.4) |
 | `http://api.<ns>.svc:8082/internal/v1/*` | internal `:8082` | gateway |
 | `GET /v1/openapi.json`, `GET /v1/docs` | public и proxied (`/v1/docs` — только public, §23.3) | без аутентификации |
 
@@ -125,15 +125,15 @@ S7 — внешний интерфейс платформы. Им пользую
 | Upload | `upl_` | ULID, генерирует `api` |
 | Request | `req_` | ULID на каждый запрос |
 
-- Секрет API-ключа — единственное значение с префиксом `sbx_` (§7.2). Префикс `sbxs_` зарезервирован за секретом ключа типа `sandbox` (§7.2, в MVP не выпускается). Токен порта — `sbxp_` (S4 §8.3).
+- Секрет API-ключа — единственное значение с префиксом `umiak_` (§7.2). Префикс `umiaks_` зарезервирован за секретом ключа типа `sandbox` (§7.2, в MVP не выпускается). Токен порта — `umiakp_` (S4 §8.3).
 - Декодер принимает ID в любом регистре. Ошибка формата — `404 not_found` (не `400`): клиенту всё равно, «плохой» ID или несуществующий.
 - В пути `{sandbox}` можно передать ID (`sb_...`) или slug. Строка с префиксом `sb_` — всегда ID, иначе — slug.
 
 ### 5.4 Slug [переопределяет S6 §5.6]
 
-Slug — человекочитаемое имя sandbox в URL портов (`<slug>-<port>.sbx.<domain>`), в SSH (`ssh <slug>@ssh.<domain>`) и в hostname гостя (`sbx-<slug>`).
+Slug — человекочитаемое имя sandbox в URL портов (`<slug>-<port>.umiak.<domain>`), в SSH (`ssh <slug>@ssh.<domain>`) и в hostname гостя (`umiak-<slug>`).
 
-- Грамматика — S4 §4.2: `[a-z0-9]+(-[a-z0-9]+)*`, 3–40 символов, без `--`, не заканчивается на `-<цифры>` (иначе неоднозначен разбор метки), не заканчивается на зарезервированный суффикс (`-desktop`, константа общая с gateway). Зарезервированы целиком: `api`, `app`, `www`, `ssh`, `tunnel`, `admin`, `static`, `sbx`.
+- Грамматика — S4 §4.2: `[a-z0-9]+(-[a-z0-9]+)*`, 3–40 символов, без `--`, не заканчивается на `-<цифры>` (иначе неоднозначен разбор метки), не заканчивается на зарезервированный суффикс (`-desktop`, константа общая с gateway). Зарезервированы целиком: `api`, `app`, `www`, `ssh`, `tunnel`, `admin`, `static`, `umiak`.
 - По умолчанию `api` генерирует **три слова** (`quiet-otter-lamp`) из встроенного словаря примерно в 1 500 коротких (3–7 букв) нейтральных английских слов, это около 3,4 · 10⁹ сочетаний. При коллизии — до 5 новых попыток, затем добавляется четвёртое слово. (В MVP — словарь core, около 300 слов, §23.3.)
 - Пользователь может задать slug при create/fork и сменить его через `PATCH` (`slug_taken` при занятом). Смена slug меняет метки всех опубликованных портов: старые URL и cookie сразу перестают работать (S4 §8.2).
 - Slug занят, пока жива строка sandbox, включая надгробие `deleted` (30 дней, S6 §5.6).
@@ -168,7 +168,7 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 | 401 | `token_expired` | нет | access token Keycloak истёк: обновить токен и повторить (§7.6) |
 | 401 | `api_key_expired` | нет | |
 | 403 | `forbidden` | нет | не хватает scope (`details.requiredScope`) или роли; `details.reason`: `role`, `user_required` (ручка только для человека), `user_disabled` (пользователь деактивирован, S8 §20.1) |
-| 403 | `team_forbidden` | нет | `Sbx-Team` не из команд пользователя или не совпадает с командой ключа |
+| 403 | `team_forbidden` | нет | `Umiak-Team` не из команд пользователя или не совпадает с командой ключа |
 | 403 | `origin_forbidden` | нет | проверка Origin на proxied listener-е (§7.4) |
 | 403 | `quota_exceeded` | нет | квота команды (S6 §8.5); `details {quota, limit, current}` |
 | 403 | `path_forbidden` | нет | `EACCES` в файловой операции |
@@ -184,13 +184,13 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 | 409 | `slug_taken`, `snapshot_name_taken`, `ssh_key_in_use`, `already_exists` | нет | |
 | 409 | `agent_outdated` | нет | у агента нет capability; `details.capability` |
 | 409 | `command_exited` | нет | input/resize для завершённой команды |
-| 409 | `upload_offset_mismatch` | нет | `details.offset`, заголовок `Sbx-Upload-Offset` |
+| 409 | `upload_offset_mismatch` | нет | `details.offset`, заголовок `Umiak-Upload-Offset` |
 | 409 | `not_directory`, `is_directory`, `cross_device` | нет | файлы (S3 §11.1) |
 | 413 | `payload_too_large` | нет | |
 | 416 | `range_not_satisfiable` | нет | |
 | 422 | `template_unavailable` | нет | шаблон выключен или размер не разрешён |
 | 422 | `checksum_mismatch` | нет | commit загрузки |
-| 428 | `confirmation_required` | нет | нет `Sbx-Confirm-Delete` или он не совпадает с удаляемым ресурсом (§5.12); `details.reason: missing \| mismatch` |
+| 428 | `confirmation_required` | нет | нет `Umiak-Confirm-Delete` или он не совпадает с удаляемым ресурсом (§5.12); `details.reason: missing \| mismatch` |
 | 429 | `rate_limited` | да | §5.8 |
 | 429 | `recover_rate_limited` | да | S6 §7.8 |
 | 500 | `internal` | нет | |
@@ -205,12 +205,12 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 | 503 | `idp_unavailable` | да | добавлено в реализации (§23.2): discovery или JWKS Keycloak недоступны, а ключей в кэше нет |
 | 503 | `not_ready` | да | добавлено в реализации (§23.2): `/readyz`, `details.reasons` |
 
-Доменные ошибки S6 (`SbxError{code, retryable, details}`) отображаются по этой таблице; `validation` из S6 — `400`, `not_found` — `404`, и т. д. Ошибки Connect от агента — по S3 §11.1 и S2 §10.1.
+Доменные ошибки S6 (`UmiakError{code, retryable, details}`) отображаются по этой таблице; `validation` из S6 — `400`, `not_found` — `404`, и т. д. Ошибки Connect от агента — по S3 §11.1 и S2 §10.1.
 
 ### 5.6 Пагинация
 
 - `GET` списков: `limit` (1–200, по умолчанию 50), `cursor` (непрозрачный, из `nextCursor`). Порядок фиксирован для каждого списка (по умолчанию — новые первыми).
-- Курсор — base64url от JSON `{k: <ключ сортировки>, id}` с HMAC (ключ `SBX_API_CURSOR_KEY`), чтобы клиент не строил его сам (в реализации — обёртка над курсором core, §23.3). Подделанный — `400 invalid_cursor`. Курсор живёт, пока жив ключ.
+- Курсор — base64url от JSON `{k: <ключ сортировки>, id}` с HMAC (ключ `UMIAK_API_CURSOR_KEY`), чтобы клиент не строил его сам (в реализации — обёртка над курсором core, §23.3). Подделанный — `400 invalid_cursor`. Курсор живёт, пока жив ключ.
 - Для списков, которые отдаёт агент (`files/list`), курсор оборачивает `page_token` агента.
 
 ### 5.7 Идемпотентность
@@ -218,7 +218,7 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 - Заголовок `Idempotency-Key` (1–255 печатных ASCII) принимают: `POST /sandboxes`, `POST /sandboxes/{sandbox}/fork`, `POST /sandboxes/{sandbox}/commands`, `POST /sandboxes/{sandbox}/ptys`, `POST /snapshots`.
 - Хранение — таблица S6 `idempotency_keys`: `(principal, scope, key)`, hash канонического тела, 24 h. Тот же ключ и тело → сохранённый результат (тот же ресурс), заголовок `Idempotency-Replayed: true`. Другое тело → `409 idempotency_key_reused`. Параллельный дубль ждёт первого (S6 §14.1). Principal для ключа — командный API-ключ или пользователь (сессия или Keycloak JWT — один и тот же `userId`).
 - Для команд ключ превращается в `commandId`; `Process/Start` агента идемпотентен по нему (S2 §9.1). Поэтому повтор `POST /commands` с тем же ключом **никогда** не запускает команду второй раз, а подключается к уже запущенной (§9.3).
-- Мутирующие вызовы агента без публичного ключа получают `Sbx-Request-Id` = новый UUID на каждый HTTP-запрос (повторы внутри `agent-client` его сохраняют). С публичным ключом — UUIDv5 от `(principal, scope, key)`.
+- Мутирующие вызовы агента без публичного ключа получают `Umiak-Request-Id` = новый UUID на каждый HTTP-запрос (повторы внутри `agent-client` его сохраняют). С публичным ключом — UUIDv5 от `(principal, scope, key)`.
 - Остальные действия естественно идемпотентны: `stop`, `recover`, `delete` при активной операции того же вида возвращают её, `resume` — если совпадает и тело (§8.2); `PUT /ports/{port}` с теми же настройками ничего не меняет; `DELETE` повторяем.
 - **SDK сам генерирует `Idempotency-Key`** (UUIDv4) для всех ручек из списка, если вызывающий не передал свой, и держит его на все свои повторы.
 
@@ -240,8 +240,8 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 
 - Действия, которые запускают операцию S6 (`create`, `fork`, `stop`, `resume`, `recover`, `delete`, `snapshots`), отвечают `202` с операцией и текущим состоянием sandbox.
 - **Long-poll**:
-  - `GET /v1/sandboxes/{sandbox}?waitFor=ready,stopped&waitSeconds=30` (до 60 s): ответ, как только состояние входит в `waitFor` или становится `error`/`deleting`/`deleted`, иначе по таймауту — текущее состояние, `200` в обоих случаях. Реализация — `SandboxService.waitForState` (`LISTEN sbx_sandboxes`, S6 §14.1).
-  - `GET /v1/operations/{operation}?waitSeconds=30` — до терминального состояния операции (`LISTEN sbx_operations`, §20.2).
+  - `GET /v1/sandboxes/{sandbox}?waitFor=ready,stopped&waitSeconds=30` (до 60 s): ответ, как только состояние входит в `waitFor` или становится `error`/`deleting`/`deleted`, иначе по таймауту — текущее состояние, `200` в обоих случаях. Реализация — `SandboxService.waitForState` (`LISTEN umiak_sandboxes`, S6 §14.1).
+  - `GET /v1/operations/{operation}?waitSeconds=30` — до терминального состояния операции (`LISTEN umiak_operations`, §20.2).
 - SDK-хелперы ждут через long-poll, а не частым опросом.
 
 ### 5.11 Размеры тел
@@ -258,9 +258,9 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 
 ### 5.12 Подтверждение удаления
 
-- `DELETE /v1/sandboxes/{sandbox}` и `DELETE /v1/snapshots/{name}` требуют заголовок `Sbx-Confirm-Delete: <id>`. Значение — ID удаляемого ресурса (`sb_...`, `snap_...`) или его slug / имя; оно должно указывать на тот же ресурс, что и путь. Нет заголовка или он указывает на другой ресурс → `428 confirmation_required`, ничего не удаляется.
+- `DELETE /v1/sandboxes/{sandbox}` и `DELETE /v1/snapshots/{name}` требуют заголовок `Umiak-Confirm-Delete: <id>`. Значение — ID удаляемого ресурса (`sb_...`, `snap_...`) или его slug / имя; оно должно указывать на тот же ресурс, что и путь. Нет заголовка или он указывает на другой ресурс → `428 confirmation_required`, ничего не удаляется.
 - Заголовок защищает от ошибок агентов и скриптов (не тот slug, подстановка пустой переменной), а не от злоумышленника: у него и так есть `sandboxes:delete`.
-- SDK (`sb.delete()`, `stopAndDelete()`, `snapshots.delete()`) ставит заголовок сам из ID уже полученного ресурса. CLI `sbx rm` ставит его после подтверждения в TTY или с `--yes`. Повтор удаления (`deleted`, §8.2) тоже требует заголовок.
+- SDK (`sb.delete()`, `stopAndDelete()`, `snapshots.delete()`) ставит заголовок сам из ID уже полученного ресурса. CLI `umiak rm` ставит его после подтверждения в TTY или с `--yes`. Повтор удаления (`deleted`, §8.2) тоже требует заголовок.
 
 ## 6. Ресурсы и ручки: сводка
 
@@ -272,7 +272,7 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 | `GET /v1/sandboxes` | list | `sandboxes:read` | `list` | P |
 | `GET /v1/sandboxes/{sandbox}` | get, long-poll | `sandboxes:read` | `get`, `waitForState` | P |
 | `PATCH /v1/sandboxes/{sandbox}` | name, slug, labels, ttl, idle | `sandboxes:write` | `update`, `rename` | P (slug — M) |
-| `DELETE /v1/sandboxes/{sandbox}` | delete (заголовок `Sbx-Confirm-Delete`, §5.12) | `sandboxes:delete` | `delete` | P |
+| `DELETE /v1/sandboxes/{sandbox}` | delete (заголовок `Umiak-Confirm-Delete`, §5.12) | `sandboxes:delete` | `delete` | P |
 | `POST /v1/sandboxes/{sandbox}/stop` | stop | `sandboxes:write` | `stop` | M |
 | `POST /v1/sandboxes/{sandbox}/resume` | resume | `sandboxes:write` | `resume` | M |
 | `POST /v1/sandboxes/{sandbox}/fork` | fork | `sandboxes:write` | `fork` | M |
@@ -314,12 +314,12 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 | `GET/POST /v1/ssh-keys`, `DELETE /v1/ssh-keys/{key}` | SSH-ключи пользователя (только человек, §7.10) | `ssh:connect` | `IdentityStore` (S8) | M |
 | `GET /v1/snapshots`, `GET /v1/snapshots/{name}` | saved snapshots | `snapshots:read` | `listSavedSnapshots`, `getSavedSnapshot` | M |
 | `POST /v1/snapshots` | сохранить | `snapshots:write` | `saveSnapshot` | M |
-| `DELETE /v1/snapshots/{name}` | удалить (`Sbx-Confirm-Delete`, §5.12) | `snapshots:write` | `deleteSavedSnapshot` | M |
+| `DELETE /v1/snapshots/{name}` | удалить (`Umiak-Confirm-Delete`, §5.12) | `snapshots:write` | `deleteSavedSnapshot` | M |
 | `GET /v1/templates`, `GET /v1/sizes` | каталог | любой ключ | `ConfigReader`, `template_builds` | P |
 | `GET /v1/api-keys` | командные ключи (§7.2) | любой участник; ключ — `keys:admin` | `IdentityStore` | M |
 | `POST /v1/api-keys`, `POST /v1/api-keys/{key}/rotate` | выпуск, ротация | `owner` команды, только человек (§7.2) | `IdentityStore` | M |
 | `DELETE /v1/api-keys/{key}` | отзыв | `owner`, оператор; ключ — `keys:admin` | `IdentityStore` | M |
-| `DELETE /v1/api-keys/self` | ключ отзывает сам себя (`sbx logout --revoke`) | любой ключ | `IdentityStore` | M |
+| `DELETE /v1/api-keys/self` | ключ отзывает сам себя (`umiak logout --revoke`) | любой ключ | `IdentityStore` | M |
 | `GET /v1/me` | кто я | любой | — | P |
 | `GET /v1/limits` | квоты, остаток, допустимые шаблоны и размеры | любой | `usage` | M |
 | `/v1/environments` (S8 §10.2) | environments команды | `environments:read` / `environments:write` | `EnvironmentService` (S8) | M |
@@ -327,29 +327,29 @@ Slug — человекочитаемое имя sandbox в URL портов (`<
 
 ## 7. Аутентификация и права [решение Q2; модель входа — решение Ильи 2026-10-29: Keycloak, offboarding вариант A]
 
-Два вида bearer на public listener-е: **Keycloak JWT** — люди в CLI, SDK и локальном MCP (§7.6, §7.10), личных долгоживущих ключей у людей нет; **командный ключ `sbx_`** — автоматизация и CI (§7.2). Браузер — через oauth2-proxy (§7.4). IdP — Keycloak, realm `sbx` (architecture §10).
+Два вида bearer на public listener-е: **Keycloak JWT** — люди в CLI, SDK и локальном MCP (§7.6, §7.10), личных долгоживущих ключей у людей нет; **командный ключ `umiak_`** — автоматизация и CI (§7.2). Браузер — через oauth2-proxy (§7.4). IdP — Keycloak, realm `umiak` (architecture §10).
 
 ### 7.1 Три listener-а
 
 | Listener | Принимает | Не принимает |
 |---|---|---|
-| public `:8080` (`api.<domain>`) | `Authorization: Bearer <access token Keycloak>` (§7.10) или `Authorization: Bearer sbx_...` (§7.2); без auth — только `/v1/meta`, `/v1/openapi.json`, `/v1/docs` | Заголовки `X-Auth-Request-*`, `X-Forwarded-User`, `X-Forwarded-Email` вырезаются до любой обработки. Cookie игнорируются |
+| public `:8080` (`api.<domain>`) | `Authorization: Bearer <access token Keycloak>` (§7.10) или `Authorization: Bearer umiak_...` (§7.2); без auth — только `/v1/meta`, `/v1/openapi.json`, `/v1/docs` | Заголовки `X-Auth-Request-*`, `X-Forwarded-User`, `X-Forwarded-Email` вырезаются до любой обработки. Cookie игнорируются |
 | proxied `:8081` (`app.<domain>` через oauth2-proxy) | Заголовки oauth2-proxy `X-Auth-Request-Email` (обязателен), `-User`, `-Groups`, `-Preferred-Username` | `Authorization: Bearer` (на этом хосте не нужен, `400`). Запрос без `X-Auth-Request-Email` — `401` |
 | internal `:8082` (ClusterIP) | `Authorization: Bearer <service-token>` gateway | Всё остальное |
 
 - Заголовкам oauth2-proxy можно доверять только потому, что к `:8081` пускает лишь oauth2-proxy (NetworkPolicy S12), а на `:8080` они вырезаются. Это анти-цель №4, у неё отдельный тест (§16).
-- IP клиента для логов и лимитов — из `X-Forwarded-For` только от адресов из `SBX_API_TRUSTED_PROXY_CIDRS` (ingress), иначе адрес соединения. (В реализации — только для лога, лимиты считаются по principal, §23.3.)
+- IP клиента для логов и лимитов — из `X-Forwarded-For` только от адресов из `UMIAK_API_TRUSTED_PROXY_CIDRS` (ingress), иначе адрес соединения. (В реализации — только для лога, лимиты считаются по principal, §23.3.)
 
-### 7.2 Командные API-ключи (`sbx_`)
+### 7.2 Командные API-ключи (`umiak_`)
 
-- **Формат секрета:** `sbx_` + 43 символа base62 (32 случайных байта) + 6 символов base62 CRC32 от предыдущей части. CRC позволяет сканерам секретов (GitHub secret scanning с собственным паттерном, gitleaks) отличать ключ от случайной строки без обращения к серверу. Регулярное выражение для сканеров: `\bsbx_[0-9A-Za-z]{49}\b`.
-- **Хранение:** только `sha256(secret)` в hex (уникальный индекс); высокая энтропия, медленный hash не нужен. Для отображения — `prefix` (первые 8 символов после `sbx_`) и `last4`. Коллекция `api-keys` в Payload (S8, поля — §17.3).
-- **Проверка:** `sha256` → кэш в памяти пода (положительный 30 s, отрицательный 5 s) → `IdentityStore.findApiKeyByHash`. Сброс кэша по `LISTEN sbx_identity` (S8 шлёт `NOTIFY` при изменении ключа; `api` шлёт сам при отзыве). Отозванный ключ перестаёт работать на всех подах не позже чем через 30 s, обычно сразу.
+- **Формат секрета:** `umiak_` + 43 символа base62 (32 случайных байта) + 6 символов base62 CRC32 от предыдущей части. CRC позволяет сканерам секретов (GitHub secret scanning с собственным паттерном, gitleaks) отличать ключ от случайной строки без обращения к серверу. Регулярное выражение для сканеров: `\bumiak_[0-9A-Za-z]{49}\b`.
+- **Хранение:** только `sha256(secret)` в hex (уникальный индекс); высокая энтропия, медленный hash не нужен. Для отображения — `prefix` (первые 8 символов после `umiak_`) и `last4`. Коллекция `api-keys` в Payload (S8, поля — §17.3).
+- **Проверка:** `sha256` → кэш в памяти пода (положительный 30 s, отрицательный 5 s) → `IdentityStore.findApiKeyByHash`. Сброс кэша по `LISTEN umiak_identity` (S8 шлёт `NOTIFY` при изменении ключа; `api` шлёт сам при отзыве). Отозванный ключ перестаёт работать на всех подах не позже чем через 30 s, обычно сразу.
 - **Срок:** по умолчанию 90 дней, максимум 365 [решение S7]; бессрочных ключей нет. `expiresAt` прошёл — `401 api_key_expired`.
 - `lastUsedAt` обновляется не чаще раза в 60 s на ключ.
-- **Ключ принадлежит команде, а не человеку.** Выпускает и ротирует его `owner` команды — человек в браузерной сессии (дашборд) или с Keycloak JWT (`sbx keys create`, тот же API) (иначе `403 forbidden`, `details.reason: "role"` или `"user_required"`); ключ ключей не выпускает. Создатель записывается в `createdBy` только для аудита. Уход создателя из команды и его деактивация (S8 §20.1) ключ **не выключают**: отзывают его `owner`-ы команды, оператор (только отзыв), ключ с `keys:admin` или сам ключ (`DELETE /v1/api-keys/self`). Удаление команды отзывает все её ключи (S8 §6.4).
+- **Ключ принадлежит команде, а не человеку.** Выпускает и ротирует его `owner` команды — человек в браузерной сессии (дашборд) или с Keycloak JWT (`umiak keys create`, тот же API) (иначе `403 forbidden`, `details.reason: "role"` или `"user_required"`); ключ ключей не выпускает. Создатель записывается в `createdBy` только для аудита. Уход создателя из команды и его деактивация (S8 §20.1) ключ **не выключают**: отзывают его `owner`-ы команды, оператор (только отзыв), ключ с `keys:admin` или сам ключ (`DELETE /v1/api-keys/self`). Удаление команды отзывает все её ключи (S8 §6.4).
 - Секрет показывается один раз: в ответе `POST /api-keys` и `rotate`.
-- **Тип ключа** (`kind`): `team` — командный ключ, всё выше; `sandbox` — **зарезервирован, в MVP не реализуется**. Ключ `sandbox` будет привязан к одной sandbox (`sandboxId`), с секретом `sbxs_` + тот же формат (регулярное выражение для сканеров — `\bsbxs?_[0-9A-Za-z]{49}\b`), и предназначен для CLI внутри VM: видит только свою sandbox, scopes не шире пресета `sandbox-self` (§7.3) и не шире прав создателя. В MVP в схеме есть поля `kind` (всегда `team`) и `sandboxId` (всегда `null`); `POST /api-keys` с `kind: "sandbox"` → `400 validation`. Выпуск, доставка в VM и отзыв при delete sandbox — фаза 2 (S24).
+- **Тип ключа** (`kind`): `team` — командный ключ, всё выше; `sandbox` — **зарезервирован, в MVP не реализуется**. Ключ `sandbox` будет привязан к одной sandbox (`sandboxId`), с секретом `umiaks_` + тот же формат (регулярное выражение для сканеров — `\bumiaks?_[0-9A-Za-z]{49}\b`), и предназначен для CLI внутри VM: видит только свою sandbox, scopes не шире пресета `sandbox-self` (§7.3) и не шире прав создателя. В MVP в схеме есть поля `kind` (всегда `team`) и `sandboxId` (всегда `null`); `POST /api-keys` с `kind: "sandbox"` → `400 validation`. Выпуск, доставка в VM и отзыв при delete sandbox — фаза 2 (S24).
 
 ### 7.3 Scopes и пресеты
 
@@ -385,10 +385,10 @@ Scope — пара «ресурс × действие» в форме `<resource
 
 ### 7.4 Браузер: proxied listener
 
-- `IdentityStore.resolveSession(headers)` (реализует S8): по заголовкам oauth2-proxy находит или создаёт JIT-пользователя, отдаёт пользователя, его команды с ролями и признак оператора (из групп IdP). Результат кэшируется в поде на 30 s по email; сброс по `LISTEN sbx_identity`.
-- Команда запроса — заголовок `Sbx-Team: team_...`; без него — команда пользователя по умолчанию (S8). Команда не из списка пользователя — `403 team_forbidden`. Оператор может указать любую команду.
+- `IdentityStore.resolveSession(headers)` (реализует S8): по заголовкам oauth2-proxy находит или создаёт JIT-пользователя, отдаёт пользователя, его команды с ролями и признак оператора (из групп IdP). Результат кэшируется в поде на 30 s по email; сброс по `LISTEN umiak_identity`.
+- Команда запроса — заголовок `Umiak-Team: team_...`; без него — команда пользователя по умолчанию (S8). Команда не из списка пользователя — `403 team_forbidden`. Оператор может указать любую команду.
 - Сессия имеет все scopes. Ограничения по ролям внутри команды — S8 (S7 передаёт роль в `Principal`).
-- **CSRF.** Для небезопасных методов и для WebSocket upgrade заголовок `Origin` обязателен и равен `SBX_APP_ORIGIN` (`https://app.<domain>`), иначе `403 origin_forbidden`. Тела с JSON принимаются только с `Content-Type: application/json` (простая HTML-форма его не пошлёт).
+- **CSRF.** Для небезопасных методов и для WebSocket upgrade заголовок `Origin` обязателен и равен `UMIAK_APP_ORIGIN` (`https://app.<domain>`), иначе `403 origin_forbidden`. Тела с JSON принимаются только с `Content-Type: application/json` (простая HTML-форма его не пошлёт).
 - Cookie oauth2-proxy — `__Host-` на `app.<domain>` (architecture §10, S4 §14.1); `api` своих cookie не ставит.
 
 ### 7.5 Principal
@@ -409,51 +409,51 @@ interface Principal {
 
 Доступ к sandbox: sandbox принадлежит команде; любой участник команды и любой ключ команды имеют к ней доступ в пределах scopes [решение S7, как рекомендует S4 §9.2]. Sandbox чужой команды — `404 not_found`. Проверки роли `owner` в S8 (например, `environments:write`) для командного ключа заменяются наличием scope: ключ выпускает `owner`, и scopes выбирает он. Ручки, которым нужен человек (SSH-ключи пользователя, выпуск ключей), командному ключу отвечают `403 forbidden` с `details.reason: "user_required"`.
 
-### 7.6 `sbx login`
+### 7.6 `umiak login`
 
 **Люди: OAuth 2.0 Device Authorization Grant (RFC 8628) в Keycloak** [решение Ильи 2026-10-29]. Своих страниц входа у `api` нет.
-1. CLI берёт из `GET /v1/meta` блок `oidc {issuer, clientId: "sbx-cli", audience: "sbx-api"}` и вызывает `POST {issuer}/protocol/openid-connect/auth/device` (`client_id=sbx-cli`, `scope=openid`; публичный клиент, без секрета). Ответ: `device_code`, `user_code`, `verification_uri` (`{issuer}/device`), `verification_uri_complete`, `expires_in` (600), `interval` (5).
+1. CLI берёт из `GET /v1/meta` блок `oidc {issuer, clientId: "umiak-cli", audience: "umiak-api"}` и вызывает `POST {issuer}/protocol/openid-connect/auth/device` (`client_id=umiak-cli`, `scope=openid`; публичный клиент, без секрета). Ответ: `device_code`, `user_code`, `verification_uri` (`{issuer}/device`), `verification_uri_complete`, `expires_in` (600), `interval` (5).
 2. CLI печатает код и ссылку и, если есть браузер, открывает `verification_uri_complete` (`--no-browser` — только напечатать). Человек входит в Keycloak (или уже вошёл) и подтверждает.
 3. CLI опрашивает token endpoint (`grant_type=urn:ietf:params:oauth:grant-type:device_code`), обрабатывает `authorization_pending`, `slow_down`, `expired_token`, `access_denied`. Итог — access token (5 min), refresh token, ID token (CLI его не хранит).
-4. CLI вызывает `GET /v1/me` (JIT пользователя по JWT, §7.10), показывает пользователя и команду по умолчанию; `--team` или `SBX_TEAM` выбирают другую.
+4. CLI вызывает `GET /v1/me` (JIT пользователя по JWT, §7.10), показывает пользователя и команду по умолчанию; `--team` или `UMIAK_TEAM` выбирают другую.
 
-**Хранение.** Refresh token и текущий access token — в хранилище ОС через `Bun.secrets` (macOS Keychain, libsecret, Windows Credential Manager с `persist: "local"`), запись `service: "sbx"`, `name: "<profile>@<issuer>"`. Если хранилище недоступно (Linux без secret service, контейнер), — файл `$XDG_CONFIG_HOME/sbx/credentials.json` с правами `0600` и предупреждением; `--credential-store keychain|file` выбирает явно. В `config.json` секретов нет.
+**Хранение.** Refresh token и текущий access token — в хранилище ОС через `Bun.secrets` (macOS Keychain, libsecret, Windows Credential Manager с `persist: "local"`), запись `service: "umiak"`, `name: "<profile>@<issuer>"`. Если хранилище недоступно (Linux без secret service, контейнер), — файл `$XDG_CONFIG_HOME/umiak/credentials.json` с правами `0600` и предупреждением; `--credential-store keychain|file` выбирает явно. В `config.json` секретов нет.
 
-**Обновление.** Access token используется до `exp − 30 s` (в реализации `exp − 90 s`, §23.7), затем `grant_type=refresh_token`. Параллельные процессы обновляют под файловой блокировкой (`$XDG_CONFIG_HOME/sbx/.lock`), второй читает уже обновлённый токен. Refresh привязан к SSO-сессии Keycloak (сроки — architecture §10): закончилась сессия, пользователь выключен или удалён — Keycloak отвечает `invalid_grant`, CLI пишет «войдите снова: `sbx login`» и выходит с кодом `4`. Значит, выключенный в Keycloak человек теряет CLI, SDK и MCP не позже чем через срок жизни access token (5 min), а после синхронизации S8 §20.1 `api` отклоняет и ещё не истёкшие токены.
+**Обновление.** Access token используется до `exp − 30 s` (в реализации `exp − 90 s`, §23.7), затем `grant_type=refresh_token`. Параллельные процессы обновляют под файловой блокировкой (`$XDG_CONFIG_HOME/umiak/.lock`), второй читает уже обновлённый токен. Refresh привязан к SSO-сессии Keycloak (сроки — architecture §10): закончилась сессия, пользователь выключен или удалён — Keycloak отвечает `invalid_grant`, CLI пишет «войдите снова: `umiak login`» и выходит с кодом `4`. Значит, выключенный в Keycloak человек теряет CLI, SDK и MCP не позже чем через срок жизни access token (5 min), а после синхронизации S8 §20.1 `api` отклоняет и ещё не истёкшие токены.
 
-**SDK и локальный MCP используют учётные данные CLI.** `sbx auth token [--json]` печатает действующий bearer текущего профиля — access token (обновляя его при необходимости) или ключ, сохранённый `--key-stdin`, — или выходит с кодом `4`. `--json` → `{kind: "oidc" | "key", token, expiresAt, apiUrl, team}`: SDK берёт `apiUrl` и `team` профиля, если они не заданы явно, и не отправит токен на другой API. Цепочка в SDK TS и Python (§15.2): явные `apiKey` / `accessToken` / `tokenProvider` → `SBX_API_KEY` → `SBX_ACCESS_TOKEN` → `sbx auth token --json` (если `sbx` есть в `PATH`); токен кэшируется в процессе до `exp − 60 s`, на `401 token_expired` SDK один раз берёт новый и повторяет запрос. Локальный MCP по stdio (S11) работает через SDK и получает то же самое. Свой refresh SDK не делает: хранилищем и обновлением владеет CLI.
+**SDK и локальный MCP используют учётные данные CLI.** `umiak auth token [--json]` печатает действующий bearer текущего профиля — access token (обновляя его при необходимости) или ключ, сохранённый `--key-stdin`, — или выходит с кодом `4`. `--json` → `{kind: "oidc" | "key", token, expiresAt, apiUrl, team}`: SDK берёт `apiUrl` и `team` профиля, если они не заданы явно, и не отправит токен на другой API. Цепочка в SDK TS и Python (§15.2): явные `apiKey` / `accessToken` / `tokenProvider` → `UMIAK_API_KEY` → `UMIAK_ACCESS_TOKEN` → `umiak auth token --json` (если `umiak` есть в `PATH`); токен кэшируется в процессе до `exp − 60 s`, на `401 token_expired` SDK один раз берёт новый и повторяет запрос. Локальный MCP по stdio (S11) работает через SDK и получает то же самое. Свой refresh SDK не делает: хранилищем и обновлением владеет CLI.
 
-**Автоматизация: `--key-stdin`.** `echo "$SBX_API_KEY" | sbx login --key-stdin` проверяет командный ключ через `/v1/me` и кладёт его в то же хранилище. `SBX_API_KEY` в env имеет приоритет над сохранённым входом. Это вход для агентов, CI и CLI внутри VM.
+**Автоматизация: `--key-stdin`.** `echo "$UMIAK_API_KEY" | umiak login --key-stdin` проверяет командный ключ через `/v1/me` и кладёт его в то же хранилище. `UMIAK_API_KEY` в env имеет приоритет над сохранённым входом. Это вход для агентов, CI и CLI внутри VM.
 
-`sbx logout` для входа Keycloak отзывает refresh token (`POST {issuer}/protocol/openid-connect/revoke`, `token_type_hint=refresh_token`) и стирает запись; для ключа — только стирает запись, а `--revoke` ещё и вызывает `DELETE /v1/api-keys/self` (ключ общий для команды, по умолчанию его не отзываем).
+`umiak logout` для входа Keycloak отзывает refresh token (`POST {issuer}/protocol/openid-connect/revoke`, `token_type_hint=refresh_token`) и стирает запись; для ключа — только стирает запись, а `--revoke` ещё и вызывает `DELETE /v1/api-keys/self` (ключ общий для команды, по умолчанию его не отзываем).
 
 ### 7.7 SSO для портов (S4 §8.4)
 
-`GET https://app.<domain>/sbx-auth/authorize?label=&state=` на proxied listener-е:
+`GET https://app.<domain>/umiak-auth/authorize?label=&state=` на proxied listener-е:
 1. `label` проходит грамматику S4 §4.2; маршрут существует, `access = sso`, не `blocked` (иначе — HTML-страница ошибки, без редиректа).
 2. Политика: пустить любого вошедшего пользователя платформы (как согласовано в S4). Переключатель `PlatformDefaults.ssoPortPolicy = any | team` (S8) [решение S7]; `team` пускает только участников команды sandbox и операторов.
 3. Код: 32 случайных байта, в `port_auth_codes` (§12.2) — `sha256`, `label`, `userId`, `email`, `authEpoch`, срок 60 s.
-4. `302` на `https://<label>.<sbx-domain>/__sbx/auth/callback?code=…&state=…`; хост строится из label, а не берётся из запроса.
+4. `302` на `https://<label>.<umiak-domain>/__umiak/auth/callback?code=…&state=…`; хост строится из label, а не берётся из запроса.
 
 Обмен кода — §12.1.
 
 ### 7.8 Внутренние вызовы
 
-Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gateway": ["<t1>", "<t2>"] }` (принимаемые) и токен, с которым `api` сам ходит во внутренний listener gateway (`agent-client`). Сравнение constant-time.
+Service tokens по S2 §5.5: файл `UMIAK_API_SERVICE_TOKENS_FILE` — `{ "gateway": ["<t1>", "<t2>"] }` (принимаемые) и токен, с которым `api` сам ходит во внутренний listener gateway (`agent-client`). Сравнение constant-time.
 
 ### 7.9 PoC до S8
 
-`IdentityStore` имеет статическую реализацию `StaticIdentityStore` (`packages/auth`) из YAML (`SBX_IDENTITY_FILE`): пользователи, команды, API-ключи (только `sha256`), SSH-ключи. Proxied listener в PoC выключен. (В реализации вместо неё — `PgIdentityStore` с загрузкой того же YAML, proxied listener включён, §23.10.) Без `SBX_OIDC_ISSUER` JWT не принимаются: Keycloak в PoC необязателен. `sbx-admin` (S6 §15.3) получает команду `api-key hash` для генерации ключа и строки YAML.
+`IdentityStore` имеет статическую реализацию `StaticIdentityStore` (`packages/auth`) из YAML (`UMIAK_IDENTITY_FILE`): пользователи, команды, API-ключи (только `sha256`), SSH-ключи. Proxied listener в PoC выключен. (В реализации вместо неё — `PgIdentityStore` с загрузкой того же YAML, proxied listener включён, §23.10.) Без `UMIAK_OIDC_ISSUER` JWT не принимаются: Keycloak в PoC необязателен. `umiak-admin` (S6 §15.3) получает команду `api-key hash` для генерации ключа и строки YAML.
 
 ### 7.10 Keycloak JWT
 
-- **Какой bearer.** Начинается с `sbx_` — командный ключ (§7.2); `sbxs_` зарезервирован; иначе это должен быть JWS compact (три части base64url), иначе `401 unauthorized`.
-- **Проверка в `api`, без introspection на запрос:** подпись ключом из JWKS (`jwks_uri` из `{issuer}/.well-known/openid-configuration`), алгоритм из списка `RS256`, `ES256` (`none` и `HS*` — отказ); `iss` равен `SBX_OIDC_ISSUER` (`https://<keycloak>/realms/sbx`); `aud` содержит `sbx-api` (`SBX_OIDC_AUDIENCE`); `exp`, `nbf`, `iat` с допуском 60 s; claim `typ` = `Bearer` (так ID token и refresh token не пройдут); `azp` из `SBX_OIDC_ALLOWED_CLIENTS` (по умолчанию `sbx-cli`, `sbx-mcp` — вход в удалённый MCP через браузер, S11 §6.4); `email_verified = true`. Библиотека — `jose` (`createRemoteJWKSet`, `jwtVerify`).
-- **Адреса.** `iss` сверяется с публичным `SBX_OIDC_ISSUER`; discovery и JWKS `api` может брать по внутреннему адресу (`SBX_OIDC_DISCOVERY_URL`, по умолчанию от issuer), если публичное имя Keycloak из кластера недоступно.
+- **Какой bearer.** Начинается с `umiak_` — командный ключ (§7.2); `umiaks_` зарезервирован; иначе это должен быть JWS compact (три части base64url), иначе `401 unauthorized`.
+- **Проверка в `api`, без introspection на запрос:** подпись ключом из JWKS (`jwks_uri` из `{issuer}/.well-known/openid-configuration`), алгоритм из списка `RS256`, `ES256` (`none` и `HS*` — отказ); `iss` равен `UMIAK_OIDC_ISSUER` (`https://<keycloak>/realms/umiak`); `aud` содержит `umiak-api` (`UMIAK_OIDC_AUDIENCE`); `exp`, `nbf`, `iat` с допуском 60 s; claim `typ` = `Bearer` (так ID token и refresh token не пройдут); `azp` из `UMIAK_OIDC_ALLOWED_CLIENTS` (по умолчанию `umiak-cli`, `umiak-mcp` — вход в удалённый MCP через браузер, S11 §6.4); `email_verified = true`. Библиотека — `jose` (`createRemoteJWKSet`, `jwtVerify`).
+- **Адреса.** `iss` сверяется с публичным `UMIAK_OIDC_ISSUER`; discovery и JWKS `api` может брать по внутреннему адресу (`UMIAK_OIDC_DISCOVERY_URL`, по умолчанию от issuer), если публичное имя Keycloak из кластера недоступно.
 - **JWKS** кэшируется в поде: обновление раз в 10 min и при неизвестном `kid` (не чаще раза в 30 s). Если Keycloak недоступен, кэш ключей продолжает работать, токены проверяются офлайн.
 - **Та же личность, что в браузере.** `sub` токена — тот же claim, который oauth2-proxy шлёт в `X-Auth-Request-User` (S8 §5.1). `api` вызывает `IdentityStore.resolveSession({email, user: sub, groups, preferredUsername})` из claims `email`, `sub`, `groups`, `preferred_username`: JIT, привязка к `idpSubject`, кэш 30 s — как для браузера (S8 §5.3). Деактивированный пользователь (`active: false`, в том числе по синхронизации S8 §20.1) — `403 forbidden` с `details.reason: "user_disabled"`, даже если токен не истёк.
-- **Principal:** `kind: "oidc"`, все scopes в пределах роли, команда — `Sbx-Team` или команда по умолчанию (`403 team_forbidden`, как в §7.4), `isOperator: false` (права оператора только в браузере, S8 §5.5).
-- **Ошибки:** токен истёк — `401 token_expired` (клиент обновляет токен и повторяет); подпись, `iss`, `aud`, `typ`, `azp`, алгоритм или формат не прошли — `401 unauthorized` с `details.reason: "invalid_token"`. Всегда заголовок `WWW-Authenticate: Bearer realm="sbx", error="invalid_token"` (RFC 6750).
+- **Principal:** `kind: "oidc"`, все scopes в пределах роли, команда — `Umiak-Team` или команда по умолчанию (`403 team_forbidden`, как в §7.4), `isOperator: false` (права оператора только в браузере, S8 §5.5).
+- **Ошибки:** токен истёк — `401 token_expired` (клиент обновляет токен и повторяет); подпись, `iss`, `aud`, `typ`, `azp`, алгоритм или формат не прошли — `401 unauthorized` с `details.reason: "invalid_token"`. Всегда заголовок `WWW-Authenticate: Bearer realm="umiak", error="invalid_token"` (RFC 6750).
 - **Долгие соединения.** Стрим NDJSON и PTY WebSocket проверяют bearer при открытии и живут дольше `exp` токена или ключа; их закрывает реестр открытых соединений при деактивации пользователя, удалении из команды и отзыве ключа (S8 C9). Это принятое допущение: стримы всё равно переподключаются каждые 60 min (§9.7), а переподключение требует действующего bearer; PTY без клиента закрывается через 10 min. Выход из Keycloak (logout) без деактивации открытые соединения не закрывает.
 
 ## 8. Sandboxes и операции
@@ -488,7 +488,7 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
   "idleTimeoutSeconds": 900,
   "activeOperation": null,
   "endpoints": {
-    "portUrlTemplate": "https://quiet-otter-lamp-{port}.sbx.example.com",
+    "portUrlTemplate": "https://quiet-otter-lamp-{port}.umiak.example.com",
     "ssh": "ssh quiet-otter-lamp@ssh.example.com"
   },
   "createdAt": "...", "readyAt": "...", "stoppedAt": null, "deletedAt": null, "updatedAt": "..."
@@ -554,14 +554,14 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 
 | Поле API | В S3 | Где живёт в госте | Fork | Create из saved snapshot |
 |---|---|---|---|---|
-| `env` | `ClaimRequest.env` | `/etc/sbx/env` и `state.db` (диск) | да (S6 копирует набор источника) | нет |
+| `env` | `ClaimRequest.env` | `/etc/umiak/env` и `state.db` (диск) | да (S6 копирует набор источника) | нет |
 | `secrets` | `secret_env` | tmpfs, заново после каждой загрузки | да (S6 перешифровывает) | нет |
 | `secretFiles` | `secret_files` | tmpfs, `linkPath` — symlink на диске | да | нет |
 
-- **Create из saved snapshot** переносит только диск источника (файлы, пакеты, история shell). Env, секреты и secret-файлы источника не переносятся: при первой загрузке агент видит новую идентичность и стирает `state.db` с claim и `/etc/sbx/env` (S3 §7.2), а наборы новой sandbox — из запроса create и environment (S8 §10), как у create из шаблона. Снапшот — образ диска, а не копия sandbox; секреты на диске не хранятся, и снапшот, которым поделились в команде, не должен раздавать чужие секреты. Решение 2026-10-31 (ветка `fix-resume-sshca`): так и задумано. Нужны наборы источника — fork или явные `env`/`secrets` в create.
+- **Create из saved snapshot** переносит только диск источника (файлы, пакеты, история shell). Env, секреты и secret-файлы источника не переносятся: при первой загрузке агент видит новую идентичность и стирает `state.db` с claim и `/etc/umiak/env` (S3 §7.2), а наборы новой sandbox — из запроса create и environment (S8 §10), как у create из шаблона. Снапшот — образ диска, а не копия sandbox; секреты на диске не хранятся, и снапшот, которым поделились в команде, не должен раздавать чужие секреты. Решение 2026-10-31 (ветка `fix-resume-sshca`): так и задумано. Нужны наборы источника — fork или явные `env`/`secrets` в create.
 
 - Наборы принимают create, fork и resume (§8.2), `PUT /env` и environments (S8 §10).
-- Лимиты: до 100 переменных в каждом наборе; ключ `[A-Za-z_][A-Za-z0-9_]{0,127}`; значение до 32 KiB без NUL; всего до 256 KiB на набор. Префикс `SBX_` зарезервирован (`400 validation`), кроме переменных CLI `sbx` (§14.1): `SBX_API_KEY`, `SBX_API_URL`, `SBX_TEAM`, `SBX_PROFILE` — так CLI внутри VM получает ключ секретом sandbox (S5 §8.9). Значения с переводом строки в SSH-сессиях не видны (S3 §8.2) — это пишется в описании поля.
+- Лимиты: до 100 переменных в каждом наборе; ключ `[A-Za-z_][A-Za-z0-9_]{0,127}`; значение до 32 KiB без NUL; всего до 256 KiB на набор. Префикс `UMIAK_` зарезервирован (`400 validation`), кроме переменных CLI `umiak` (§14.1): `UMIAK_API_KEY`, `UMIAK_API_URL`, `UMIAK_TEAM`, `UMIAK_PROFILE` — так CLI внутри VM получает ключ секретом sandbox (S5 §8.9). Значения с переводом строки в SSH-сессиях не видны (S3 §8.2) — это пишется в описании поля.
 - `secretFiles`: до 32 файлов, каждый до 1 MiB, всего до 8 MiB (S3), имя `[A-Za-z0-9._-]{1,128}`, `mode` по умолчанию `0440`, `linkPath` — абсолютный путь.
 - **`GET /env`** → `{env: {k: v}, secretKeys: [...], secretFiles: [{name, mode, linkPath, sizeBytes}]}`. Значения секретов не отдаются никогда.
 - **`PATCH /env`** (S8 C2, merge: `{K: v | null}`, `null` удаляет) — есть в реализации рядом с `PUT` (§23.6).
@@ -641,7 +641,7 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 - S12 ставит таймауты чтения ingress и `--upstream-timeout` oauth2-proxy не меньше 660 s (§17.6);
 - SDK, CLI и MCP **не используют** долгий raw sync: хелпер `exec()` шлёт `mode: stream` и сам собирает результат в ту же форму, что у sync (`run` без итерации). Raw `mode: sync` остаётся для curl и простых клиентов, его описание в OpenAPI предупреждает о прокси.
 
-**`stream`** → `200`, `Content-Type: application/x-ndjson`, заголовки `Sbx-Command-Id`, `Cache-Control: no-store`, `X-Accel-Buffering: no`. Кадры — §9.5. Статус `200` фиксируется только после успешного `Start`; всё, что случилось позже, приходит кадрами.
+**`stream`** → `200`, `Content-Type: application/x-ndjson`, заголовки `Umiak-Command-Id`, `Cache-Control: no-store`, `X-Accel-Buffering: no`. Кадры — §9.5. Статус `200` фиксируется только после успешного `Start`; всё, что случилось позже, приходит кадрами.
 
 **`detached`** → `201 Command` сразу после `Start`. Вывод — через `/stream` или `/output`.
 
@@ -657,7 +657,7 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 ### 9.4 Attach, вывод, управление
 
 - **`GET .../commands/{command}/stream?stdoutOffset=&stderrOffset=&ptyOffset=&tailBytes=&follow=true&encoding=utf8`** — NDJSON, первый кадр `attached`. `tailBytes` начинает каждый поток с `max(availableFrom, size − tailBytes)`. `follow=false` отдаёт имеющееся и закрывает стрим (`exit`, если команда завершена).
-- **`GET .../commands/{command}/output?stream=stdout&offset=0&limit=1048576`** — сырые байты одного потока (`application/octet-stream`, `limit` до 4 MiB), заголовки `Sbx-Offset`, `Sbx-Next-Offset`, `Sbx-Available-From`, `Sbx-Stream-End` (только если поток закончен). Если `offset < availableFrom`, чтение начинается с `availableFrom` и заголовок `Sbx-Truncated: true`. Это ручка для опроса без стримов (MCP, простые скрипты).
+- **`GET .../commands/{command}/output?stream=stdout&offset=0&limit=1048576`** — сырые байты одного потока (`application/octet-stream`, `limit` до 4 MiB), заголовки `Umiak-Offset`, `Umiak-Next-Offset`, `Umiak-Available-From`, `Umiak-Stream-End` (только если поток закончен). Если `offset < availableFrom`, чтение начинается с `availableFrom` и заголовок `Umiak-Truncated: true`. Это ручка для опроса без стримов (MCP, простые скрипты).
 - **`POST .../input {data, encoding: "utf8"|"base64", closeStdin?, sessionId?, seq?}`** → `204`. С `sessionId` + `seq` повтор дедуплицируется агентом (S2 §9.3); без них `api` использует новый `sessionId` на запрос. Для PTY `closeStdin` не применяется (EOF — байт `^D`).
 - **`POST .../kill {graceMs?}`** (по умолчанию 10 000) → `200 Command`. **`POST .../signal {signal}`** (`SIGINT`, `SIGTERM`, `SIGKILL`, `SIGHUP`, `SIGUSR1`, `SIGUSR2`, `SIGQUIT`) → `200 Command`. Оба идемпотентны.
 - **`GET .../commands/{command}`** → `Command`; если sandbox `ready`, живые поля (`pid`, размеры потоков) из `Process/Get`, иначе из БД.
@@ -710,7 +710,7 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 
 Три участка, у каждого своя защита:
 
-1. **Агент → `api`.** `api` читает `Process/Attach` через `resumableAttach` из `@sbx/agent-client` (S2 §9.1): обрыв туннеля, `421` при drain gateway, перезапуск агента — повторный attach с ожидаемого offset; вызывающий видит паузу. Если агента нет дольше 30 s, `api` отдаёт клиенту кадр `error` с `code: agent_unavailable`, `retryable: true` и offset-ами.
+1. **Агент → `api`.** `api` читает `Process/Attach` через `resumableAttach` из `@umiak/agent-client` (S2 §9.1): обрыв туннеля, `421` при drain gateway, перезапуск агента — повторный attach с ожидаемого offset; вызывающий видит паузу. Если агента нет дольше 30 s, `api` отдаёт клиенту кадр `error` с `code: agent_unavailable`, `retryable: true` и offset-ами.
 2. **`api` → клиент.** Offset-ы в каждом кадре данных, `heartbeat` каждые 15 s тишины. SDK считает соединение мёртвым после 45 s без строк и заново открывает `/stream` с последними offset-ами. Стрим живёт не дольше 60 min, затем `reconnect` [решение S7] — это ограничивает долгоживущие соединения через ingress и даёт балансировку между подами.
 3. **Под `api` останавливается.** По SIGTERM под перестаёт принимать новые запросы (readiness → false), всем открытым стримам шлёт `reconnect` (`reason: server_shutdown`), PTY-сокетам — управляющий кадр `reconnect` и close `1012`, ждёт до 10 s и выходит. Sync-запросы в полёте получают `503 server_shutting_down`: `retryable: true` только с `Idempotency-Key` (повтор подключится к той же команде), без ключа — `retryable: false`, `details {commandId, outcome: "running"}`. `terminationGracePeriodSeconds: 30`.
 
@@ -730,7 +730,7 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 
 ### 10.2 WebSocket
 
-`GET /v1/sandboxes/{sandbox}/ptys/{command}/connect?offset=&tailBytes=` с upgrade, subprotocol `sbx.pty.v1`.
+`GET /v1/sandboxes/{sandbox}/ptys/{command}/connect?offset=&tailBytes=` с upgrade, subprotocol `umiak.pty.v1`.
 
 - Аутентификация: `Authorization: Bearer` (CLI, SDK на Node/Bun/Python) или сессия oauth2-proxy (браузер, с проверкой Origin, §7.4). Браузерный `WebSocket` не умеет ставить заголовки, поэтому из браузера PTY доступен только через `app.<domain>`.
 - **Сервер → клиент:**
@@ -754,8 +754,8 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 - **`PUT /files/content?path=&mode=&makeParents=true&overwrite=true`** — тело потоком любого размера, атомарная запись (S3 §11.2). Ответ `200 FileInfo`. Не возобновляется; для файлов больше 64 MiB SDK и CLI используют загрузку чанками.
 - **Возобновляемая загрузка:**
   1. `POST /files/uploads {path}` → `{uploadId: "upl_...", chunkSizeBytes: 4194304, maxChunkSizeBytes: 8388608, expiresAt}`. `api` ничего не сохраняет: `uploadId` — новый ULID, временный файл живёт у агента 24 h.
-  2. `PUT /files/uploads/{upload}?offset=N` — чанк до 8 MiB; `offset` должен равняться текущему размеру, иначе `409 upload_offset_mismatch` с `Sbx-Upload-Offset`. Ответ `{offset}`. В первом чанке `api` передаёт агенту `path` из `POST` как подсказку (S3 §11.3), поэтому клиент шлёт его и в `PUT` (`?path=`).
-  3. `HEAD /files/uploads/{upload}` → `Sbx-Upload-Offset`; `404 upload_not_found`. (Неизвестный или чужой `uploadId` в `PUT` с `offset > 0` — `409 upload_offset_mismatch` с offset `0`, §23.5.)
+  2. `PUT /files/uploads/{upload}?offset=N` — чанк до 8 MiB; `offset` должен равняться текущему размеру, иначе `409 upload_offset_mismatch` с `Umiak-Upload-Offset`. Ответ `{offset}`. В первом чанке `api` передаёт агенту `path` из `POST` как подсказку (S3 §11.3), поэтому клиент шлёт его и в `PUT` (`?path=`).
+  3. `HEAD /files/uploads/{upload}` → `Umiak-Upload-Offset`; `404 upload_not_found`. (Неизвестный или чужой `uploadId` в `PUT` с `offset > 0` — `409 upload_offset_mismatch` с offset `0`, §23.5.)
   4. `POST /files/uploads/{upload}/commit {path, sha256?, mode?, owner?, overwrite?, makeParents?}` → `FileInfo`; идемпотентен по `uploadId` (S3). Несовпадение `sha256` — `422 checksum_mismatch`.
   5. `DELETE /files/uploads/{upload}` — отмена.
   `api` буферизует чанк в памяти (до 8 MiB), чтобы `agent-client` мог повторить его при обрыве туннеля.
@@ -777,15 +777,15 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 {
   "port": 3000,
   "label": "quiet-otter-lamp-3000",
-  "url": "https://quiet-otter-lamp-3000.sbx.example.com",
+  "url": "https://quiet-otter-lamp-3000.umiak.example.com",
   "access": "token",
   "hostRewrite": "preserve",
   "appProtocol": "http1",
   "blocked": false,
   "blockReason": null,
   "createdAt": "...",
-  "token": "sbxp_...",
-  "urlWithToken": "https://quiet-otter-lamp-3000.sbx.example.com/?_token=sbxp_..."
+  "token": "umiakp_...",
+  "urlWithToken": "https://quiet-otter-lamp-3000.umiak.example.com/?_token=umiakp_..."
 }
 ```
 
@@ -798,8 +798,8 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 ### 11.3 SSH
 
 - **SSH-ключи пользователя** (уровень пользователя, не команды): `GET /v1/ssh-keys`, `POST /v1/ssh-keys {name, publicKey}` → `201 {id: "sshk_...", name, fingerprint: "SHA256:...", type, createdAt, lastUsedAt}`, `DELETE /v1/ssh-keys/{key}`. Типы: `ssh-ed25519`, `ecdsa-sha2-nistp256/384/521`, `ssh-rsa` не короче 3072 бит; сертификаты не принимаются. Отпечаток уникален во всей платформе (`409 ssh_key_in_use`): по нему gateway однозначно находит пользователя. Хранение — коллекция S8 (§17.3).
-- **`GET /v1/sandboxes/{sandbox}/ssh`** → `{host: "ssh.example.com", port: 22, username: "quiet-otter-lamp", loginUser: "user", command: "ssh quiet-otter-lamp@ssh.example.com", knownHosts: ["ssh.example.com ssh-ed25519 AAAA...", "ssh.example.com ecdsa-sha2-nistp256 AAAA..."], hasKeys: true}`; `hasKeys` — есть ли у человека зарегистрированные SSH-ключи (у командного ключа всегда `false`). `knownHosts` — host keys gateway из конфига (`SBX_SSH_HOST_KEYS_FILE`, только публичные), одинаковые для всех sandbox (S4 §9.2).
-- **`POST /v1/sandboxes/{sandbox}/ssh/certificate {publicKey}`** (`ssh:connect`; человек с JWT или сессией и командный ключ) → `{certificate, principal, validAfter, validBefore, host, port, username, knownHosts}` [решение Ильи 2026-10-29: короткие сертификаты на ту же личность]. `api` подписывает **SSH login CA** (ed25519, закрытый ключ только у `api`: `SBX_SSH_LOGIN_CA_KEY_FILE`; публичный — у gateway, S4 §9.2) сертификат пользователя: `ValidPrincipals: [<sb_… id sandbox>]`, `KeyId: sbx:user:<usr_…>` или `sbx:key:<key_…>`, `ValidAfter` = сейчас − 60 s, `ValidBefore` = сейчас + 10 min (проверяется только при входе, сессия живёт дольше), случайный serial, расширения `permit-pty`, `permit-port-forwarding`, `permit-agent-forwarding`, `permit-X11-forwarding`, `permit-user-rc`. Типы ключа — как у SSH-ключей выше. Состояние sandbox не проверяется (остановленную sandbox gateway объясняет сам, S4 §9.3). Это основной путь для CLI и единственный для командных ключей; зарегистрированные SSH-ключи остаются для людей с обычным `ssh`.
+- **`GET /v1/sandboxes/{sandbox}/ssh`** → `{host: "ssh.example.com", port: 22, username: "quiet-otter-lamp", loginUser: "user", command: "ssh quiet-otter-lamp@ssh.example.com", knownHosts: ["ssh.example.com ssh-ed25519 AAAA...", "ssh.example.com ecdsa-sha2-nistp256 AAAA..."], hasKeys: true}`; `hasKeys` — есть ли у человека зарегистрированные SSH-ключи (у командного ключа всегда `false`). `knownHosts` — host keys gateway из конфига (`UMIAK_SSH_HOST_KEYS_FILE`, только публичные), одинаковые для всех sandbox (S4 §9.2).
+- **`POST /v1/sandboxes/{sandbox}/ssh/certificate {publicKey}`** (`ssh:connect`; человек с JWT или сессией и командный ключ) → `{certificate, principal, validAfter, validBefore, host, port, username, knownHosts}` [решение Ильи 2026-10-29: короткие сертификаты на ту же личность]. `api` подписывает **SSH login CA** (ed25519, закрытый ключ только у `api`: `UMIAK_SSH_LOGIN_CA_KEY_FILE`; публичный — у gateway, S4 §9.2) сертификат пользователя: `ValidPrincipals: [<sb_… id sandbox>]`, `KeyId: umiak:user:<usr_…>` или `umiak:key:<key_…>`, `ValidAfter` = сейчас − 60 s, `ValidBefore` = сейчас + 10 min (проверяется только при входе, сессия живёт дольше), случайный serial, расширения `permit-pty`, `permit-port-forwarding`, `permit-agent-forwarding`, `permit-X11-forwarding`, `permit-user-rc`. Типы ключа — как у SSH-ключей выше. Состояние sandbox не проверяется (остановленную sandbox gateway объясняет сам, S4 §9.3). Это основной путь для CLI и единственный для командных ключей; зарегистрированные SSH-ключи остаются для людей с обычным `ssh`.
 - Право входа проверяет `ssh/authorize` (§12.1) на каждом подключении, поэтому деактивация пользователя, удаление из команды и отзыв ключа действуют сразу, а не по истечении сертификата.
 
 ## 12. Внутренние ручки и свои таблицы
@@ -828,8 +828,8 @@ Service tokens по S2 §5.5: файл `SBX_API_SERVICE_TOKENS_FILE` — `{ "gat
 - ID в этом ответе — публичного формата (`sb_`, `team_`), `machineId` — UUID (S2).
 
 **`POST /internal/v1/gateway/ssh/authorize`** [переопределяет S6 §14.2: путь и форма из S4 §9.2] — `{sandbox, publicKey, fingerprint}` (зарегистрированный ключ) или `{sandbox, certificate: {keyId, serial, principal, validBefore}}` (сертификат, подпись и срок которого gateway уже проверил, S4 §9.2):
-1. Ключ: найти SSH-ключ по `fingerprint`, проверить, что `publicKey` совпадает с сохранённым. Сертификат: разобрать `keyId` (`sbx:user:<id>` или `sbx:key:<id>`); `principal` равен ID sandbox из запроса.
-2. Пользователь (`sbx:user`, зарегистрированный ключ): активен и участник команды sandbox (S8 C6, без исключения для оператора). Командный ключ (`sbx:key`): не отозван, не истёк, его команда — команда sandbox, есть scope `ssh:connect`.
+1. Ключ: найти SSH-ключ по `fingerprint`, проверить, что `publicKey` совпадает с сохранённым. Сертификат: разобрать `keyId` (`umiak:user:<id>` или `umiak:key:<id>`); `principal` равен ID sandbox из запроса.
+2. Пользователь (`umiak:user`, зарегистрированный ключ): активен и участник команды sandbox (S8 C6, без исключения для оператора). Командный ключ (`umiak:key`): не отозван, не истёк, его команда — команда sandbox, есть scope `ssh:connect`.
 3. Sandbox существует и не `deleted`.
 → `200 {allowed: true, actor: {kind: "user", userId, email} | {kind: "team_key", apiKeyId}, userId, email, sandboxId, machineId, sandboxState, loginUser}` (`userId` и `email` — `null` у командного ключа) или `200 {allowed: false}` (без причины: gateway её не показывает). `loginUser` — из шаблона (S8 `Template.loginUser`, по умолчанию `user`). Обновить `lastUsedAt` ключа (не чаще раза в 60 s).
 
@@ -859,7 +859,7 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
   - `sizes` — все размеры из `allowedSizes` шаблона; `allowed: false` с `reason`: `template_disabled`, `quota_active_sandboxes`, `quota_ram`. Выключенные шаблоны видят только операторы (как в `/templates`).
   - `warmAvailable` — **фаза 2, вне публичного контракта MVP (решение Ильи 2026-10-29)**, в ответе MVP поля нет: число `warm` machine пары сейчас (подсказка для `failFast`, §8.2; не резерв). Ёмкость нод (`out_of_capacity`) заранее не обещается.
   - `usage` и счётчики пула — метод S6 (добавление, §20.2; счётчики пула — фаза 2).
-- **`GET /v1/meta`** (без auth) → `{apiVersion: "v1", build, appUrl, apiUrl, sbxDomain, oidc: {issuer, clientId: "sbx-cli", audience: "sbx-api"}, ssh: {host, port, hostKeys}, minCliVersion, latestCliVersion}`.
+- **`GET /v1/meta`** (без auth) → `{apiVersion: "v1", build, appUrl, apiUrl, umiakDomain, oidc: {issuer, clientId: "umiak-cli", audience: "umiak-api"}, ssh: {host, port, hostKeys}, minCliVersion, latestCliVersion}`.
 - **Saved snapshots** (адресуются по имени внутри команды; имя `^[a-z0-9][a-z0-9-]{0,62}$`):
   - `POST /v1/snapshots {sandbox, name, forceStop?}` (`Idempotency-Key`) → `202 {snapshot, operation}`. Существующий снапшот с тем же именем заменяется, когда новый станет `ready` (S6 §7.8). Работающая Windows-sandbox сохраняется только из остановленной VM: без `forceStop: true` — `409 snapshot_requires_stop` (сообщение «Windows snapshots are saved from a stopped VM; …»), с ним — stop → snapshot → start, как у fork (§8.2, S9 §24.8). Linux и остановленный источник флаг игнорируют.
   - `GET /v1/snapshots` → список, включая `creating` (их `name` — ожидаемое имя) и `failed` за последние сутки; `GET /v1/snapshots/{name}` → ready-снапшот или создающийся с этим именем.
@@ -873,50 +873,50 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
   - `DELETE /v1/api-keys/{key}` → `204` (`owner`, оператор или ключ с `keys:admin`); `DELETE /v1/api-keys/self` → `204`.
   - Ресурс: `{id: "key_...", kind: "team", sandboxId: null, teamId, name, prefix, last4, scopes, createdBy: {id, email, active, member}, createdVia: "api"|"cli"|"dashboard", createdAt, expiresAt, lastUsedAt, revokedAt}`; `createdBy.active` и `member` показывают, что создатель деактивирован или вышел из команды (ключ при этом работает, S8 §9.8); `kind: "sandbox"` зарезервирован (§7.2).
 
-## 14. CLI `sbx`
+## 14. CLI `umiak`
 
 ### 14.1 Сборка и конфигурация
 
-- `apps/cli` на `@sbx/sdk`, разбор аргументов — `commander`. Сборка `bun build --compile --target=bun-<os>-<arch>` для `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, `windows-x64`. Бинарники и `SHA256SUMS` — в GitHub Releases (§15.5).
-- Конфиг `$XDG_CONFIG_HOME/sbx/config.json` (по умолчанию `~/.config/sbx/`, Windows — `%APPDATA%\sbx\`), права `0600`: профили `{name: {apiUrl, team, auth: "oidc" | "key"}}`, текущий профиль; секреты (токены Keycloak, командный ключ) — в хранилище ОС или `credentials.json` (§7.6). Порядок: флаги > env (`SBX_API_URL`, `SBX_API_KEY`, `SBX_TEAM`, `SBX_PROFILE`) > профиль > системный `/etc/sbx/config.json` (только `apiUrl`; его кладёт шаблон, S5 §8.9).
-- Кэш `known_hosts` для SSH — `~/.config/sbx/known_hosts`, обновляется из `/v1/meta`.
+- `apps/cli` на `@umiak/sdk`, разбор аргументов — `commander`. Сборка `bun build --compile --target=bun-<os>-<arch>` для `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, `windows-x64`. Бинарники и `SHA256SUMS` — в GitHub Releases (§15.5).
+- Конфиг `$XDG_CONFIG_HOME/umiak/config.json` (по умолчанию `~/.config/umiak/`, Windows — `%APPDATA%\umiak\`), права `0600`: профили `{name: {apiUrl, team, auth: "oidc" | "key"}}`, текущий профиль; секреты (токены Keycloak, командный ключ) — в хранилище ОС или `credentials.json` (§7.6). Порядок: флаги > env (`UMIAK_API_URL`, `UMIAK_API_KEY`, `UMIAK_TEAM`, `UMIAK_PROFILE`) > профиль > системный `/etc/umiak/config.json` (только `apiUrl`; его кладёт шаблон, S5 §8.9).
+- Кэш `known_hosts` для SSH — `~/.config/umiak/known_hosts`, обновляется из `/v1/meta`.
 
 ### 14.2 Команды
 
 | Команда | Что делает |
 |---|---|
-| `sbx login [--no-browser] [--key-stdin] [--api-url] [--credential-store]`, `logout [--revoke]`, `whoami`, `auth token [--json]` | §7.6; `whoami` = `/me`; `auth token` — для SDK и MCP |
-| `sbx create [--template] [--size] [--name] [--slug] [--label k=v] [--env K=V] [--secret K=V] [--env-file f] [--ttl] [--idle] [--from snap] [--fail-fast] [--wait]` | create; `--wait` ждёт `ready` и печатает его; `--fail-fast` — §8.2, **фаза 2, вне публичного контракта MVP (решение Ильи 2026-10-29)**, в CLI MVP флага нет |
-| `sbx list [--state] [--label]`, `sbx info <sb>` | |
-| `sbx stop\|resume\|recover <sb> [--wait]`, `sbx fork <sb> [--name] [--force-stop] [--wait]`, `sbx rm <sb>... [--yes]` | `resume` и `fork` принимают `--env K=V`, `--secret K=V`, `--env-file f` (§8.2); `fork --force-stop` и `snapshot save --force-stop` шлют `forceStop: true` (работающая Windows, S9 §24.8); на `409 snapshot_requires_stop` CLI печатает сообщение API и подсказку `use --force-stop`; `rm` спрашивает подтверждение в TTY без `--yes` и шлёт `Sbx-Confirm-Delete` (§5.12); без TTY и без `--yes` — ошибка аргументов |
-| `sbx current [<sb> \| --clear]` | печатает текущую sandbox этого shell; с `<sb>` — делает её текущей |
-| `sbx rename <sb> <slug>`, `sbx extend <sb> [--ttl]`, `sbx label <sb> k=v...` | |
-| `sbx env <sb> [--set K=V] [--secret K=V] [--unset K]` | `GET`/`PUT /env` (в реализации `GET`/`PATCH /env`: флаги — merge, §23.7) |
-| `sbx exec <sb> [--cwd] [--env] [--user] [--timeout] [--detach] [--stdin] -- <cmd...>` | по умолчанию — стрим вывода живьём (stdout в stdout, stderr в stderr), код выхода `sbx` = код команды. Автоматический reattach. `--detach` печатает `commandId` |
-| `sbx logs <sb> <cmd> [-f] [--tail N]`, `sbx kill <sb> <cmd> [--signal]`, `sbx ps <sb>` | attach, kill, список команд (`--tail` — байты на поток, §23.7); `logs -f` ждёт конца команды и выходит с её кодом, как `exec`; `logs` без `-f` выходит с `0` |
-| `sbx shell <sb> [-- <cmd>]` | PTY по WebSocket в raw-режиме TTY; размер по `SIGWINCH`; переподключение само |
-| `sbx ssh <sb> [-- ssh args]`, `sbx ssh-config <sb>` | `ssh`: эфемерный ed25519 в каталоге `0700`, сертификат `POST /ssh/certificate` (§11.3), системный `ssh` с `-i`, `CertificateFile` и `-o UserKnownHostsFile=<кэш>` к `<slug>@ssh.<domain>`; файлы удаляются после выхода. `ssh-config` печатает блок `Host` с `Match exec "sbx ssh-cert <sb> --ensure"` (в реализации `Match originalhost <alias> exec ...`, §23.7), чтобы обычный `ssh` и VS Code Remote-SSH сами получали свежий сертификат. Работает и с командным ключом |
-| `sbx ssh-cert <sb> [--ensure]` | выпускает или обновляет сертификат для `ssh-config` (новый, если до конца срока меньше 2 min) |
-| `sbx ssh-keys list\|add [file]\|rm` | по умолчанию `~/.ssh/id_ed25519.pub` |
-| `sbx cp [-r] <src> <dst>` | `sb:path` с любой стороны; файлы больше 64 MiB — загрузка чанками с докачкой, скачивание — с `Range`; `-r` — каталог через `/files/archive` (§11.1) |
-| `sbx push [dir] <sb>:<path>` | в git-репозитории — файлы из `git ls-files -co --exclude-standard`, иначе весь каталог; tar.gz потоком в `PUT /files/archive` |
-| `sbx port <sb> <port> [--public\|--sso\|--token]`, `sbx ports <sb>`, `sbx unport <sb> <port>`, `sbx port-token <sb> <port>` | печатает URL (с токеном, если выпущен) |
-| `sbx snapshot save <sb> <name> [--force-stop] [--wait]`, `snapshot list\|rm` | `--force-stop` — как у `fork`; `save --wait` ждёт, пока снапшот станет `ready` (лимит `--wait-timeout`, по умолчанию 5 min), и печатает его; ошибка сохранения — код `1`, таймаут ожидания или временная ошибка (`retryable`) — `75` |
-| `sbx templates`, `sbx sizes`, `sbx limits` | |
-| `sbx keys list\|create [--preset] [--scope]...\|rotate\|rm` | командные ключи; `create`, `rotate` — только `owner` с входом Keycloak |
-| `sbx run [create flags] [--push dir] [--keep] -- <cmd...>` | create → push → exec → delete; код выхода — код команды |
-| `sbx mcp [--toolsets] [--read-only] [--sandbox]` | MCP-сервер по stdio на учётных данных CLI (S11 §6.1); в S7 — заглушка, §23.1 |
-| `sbx completion bash\|zsh\|fish\|powershell`, `sbx version` | |
+| `umiak login [--no-browser] [--key-stdin] [--api-url] [--credential-store]`, `logout [--revoke]`, `whoami`, `auth token [--json]` | §7.6; `whoami` = `/me`; `auth token` — для SDK и MCP |
+| `umiak create [--template] [--size] [--name] [--slug] [--label k=v] [--env K=V] [--secret K=V] [--env-file f] [--ttl] [--idle] [--from snap] [--fail-fast] [--wait]` | create; `--wait` ждёт `ready` и печатает его; `--fail-fast` — §8.2, **фаза 2, вне публичного контракта MVP (решение Ильи 2026-10-29)**, в CLI MVP флага нет |
+| `umiak list [--state] [--label]`, `umiak info <sb>` | |
+| `umiak stop\|resume\|recover <sb> [--wait]`, `umiak fork <sb> [--name] [--force-stop] [--wait]`, `umiak rm <sb>... [--yes]` | `resume` и `fork` принимают `--env K=V`, `--secret K=V`, `--env-file f` (§8.2); `fork --force-stop` и `snapshot save --force-stop` шлют `forceStop: true` (работающая Windows, S9 §24.8); на `409 snapshot_requires_stop` CLI печатает сообщение API и подсказку `use --force-stop`; `rm` спрашивает подтверждение в TTY без `--yes` и шлёт `Umiak-Confirm-Delete` (§5.12); без TTY и без `--yes` — ошибка аргументов |
+| `umiak current [<sb> \| --clear]` | печатает текущую sandbox этого shell; с `<sb>` — делает её текущей |
+| `umiak rename <sb> <slug>`, `umiak extend <sb> [--ttl]`, `umiak label <sb> k=v...` | |
+| `umiak env <sb> [--set K=V] [--secret K=V] [--unset K]` | `GET`/`PUT /env` (в реализации `GET`/`PATCH /env`: флаги — merge, §23.7) |
+| `umiak exec <sb> [--cwd] [--env] [--user] [--timeout] [--detach] [--stdin] -- <cmd...>` | по умолчанию — стрим вывода живьём (stdout в stdout, stderr в stderr), код выхода `umiak` = код команды. Автоматический reattach. `--detach` печатает `commandId` |
+| `umiak logs <sb> <cmd> [-f] [--tail N]`, `umiak kill <sb> <cmd> [--signal]`, `umiak ps <sb>` | attach, kill, список команд (`--tail` — байты на поток, §23.7); `logs -f` ждёт конца команды и выходит с её кодом, как `exec`; `logs` без `-f` выходит с `0` |
+| `umiak shell <sb> [-- <cmd>]` | PTY по WebSocket в raw-режиме TTY; размер по `SIGWINCH`; переподключение само |
+| `umiak ssh <sb> [-- ssh args]`, `umiak ssh-config <sb>` | `ssh`: эфемерный ed25519 в каталоге `0700`, сертификат `POST /ssh/certificate` (§11.3), системный `ssh` с `-i`, `CertificateFile` и `-o UserKnownHostsFile=<кэш>` к `<slug>@ssh.<domain>`; файлы удаляются после выхода. `ssh-config` печатает блок `Host` с `Match exec "umiak ssh-cert <sb> --ensure"` (в реализации `Match originalhost <alias> exec ...`, §23.7), чтобы обычный `ssh` и VS Code Remote-SSH сами получали свежий сертификат. Работает и с командным ключом |
+| `umiak ssh-cert <sb> [--ensure]` | выпускает или обновляет сертификат для `ssh-config` (новый, если до конца срока меньше 2 min) |
+| `umiak ssh-keys list\|add [file]\|rm` | по умолчанию `~/.ssh/id_ed25519.pub` |
+| `umiak cp [-r] <src> <dst>` | `sb:path` с любой стороны; файлы больше 64 MiB — загрузка чанками с докачкой, скачивание — с `Range`; `-r` — каталог через `/files/archive` (§11.1) |
+| `umiak push [dir] <sb>:<path>` | в git-репозитории — файлы из `git ls-files -co --exclude-standard`, иначе весь каталог; tar.gz потоком в `PUT /files/archive` |
+| `umiak port <sb> <port> [--public\|--sso\|--token]`, `umiak ports <sb>`, `umiak unport <sb> <port>`, `umiak port-token <sb> <port>` | печатает URL (с токеном, если выпущен) |
+| `umiak snapshot save <sb> <name> [--force-stop] [--wait]`, `snapshot list\|rm` | `--force-stop` — как у `fork`; `save --wait` ждёт, пока снапшот станет `ready` (лимит `--wait-timeout`, по умолчанию 5 min), и печатает его; ошибка сохранения — код `1`, таймаут ожидания или временная ошибка (`retryable`) — `75` |
+| `umiak templates`, `umiak sizes`, `umiak limits` | |
+| `umiak keys list\|create [--preset] [--scope]...\|rotate\|rm` | командные ключи; `create`, `rotate` — только `owner` с входом Keycloak |
+| `umiak run [create flags] [--push dir] [--keep] -- <cmd...>` | create → push → exec → delete; код выхода — код команды |
+| `umiak mcp [--toolsets] [--read-only] [--sandbox]` | MCP-сервер по stdio на учётных данных CLI (S11 §6.1); в S7 — заглушка, §23.1 |
+| `umiak completion bash\|zsh\|fish\|powershell`, `umiak version` | |
 
 Флаги и команды сверх таблицы, закрытый stdout (код `141`), `--cacert` — §23.7.
 
-`<sb>` — ID или slug. Если не указан, берётся `SBX_SANDBOX`, затем текущая sandbox shell, затем (внутри VM) `SBX_SANDBOX_ID` из env платформы (S3 §8.2; там UUID из S6, CLI сам переводит его в `sb_…`, §5.3).
+`<sb>` — ID или slug. Если не указан, берётся `UMIAK_SANDBOX`, затем текущая sandbox shell, затем (внутри VM) `UMIAK_SANDBOX_ID` из env платформы (S3 §8.2; там UUID из S6, CLI сам переводит его в `sb_…`, §5.3).
 
-**Текущая sandbox** [MVP-рек. R1]. `create`, `fork` и любая команда с явным `<sb>` делают эту sandbox текущей для shell. Ключ shell — `SBX_SESSION`, если задан, иначе PID родительского процесса и время его старта; состояние — `$XDG_STATE_HOME/sbx/current/<key>` (на Windows — `%LOCALAPPDATA%\sbx\`), старше 7 дней удаляется. `sbx current` печатает `{sandbox}` (ресурс §8.1) или выходит с кодом `3`, если текущей нет или она удалена.
+**Текущая sandbox** [MVP-рек. R1]. `create`, `fork` и любая команда с явным `<sb>` делают эту sandbox текущей для shell. Ключ shell — `UMIAK_SESSION`, если задан, иначе PID родительского процесса и время его старта; состояние — `$XDG_STATE_HOME/umiak/current/<key>` (на Windows — `%LOCALAPPDATA%\umiak\`), старше 7 дней удаляется. `umiak current` печатает `{sandbox}` (ресурс §8.1) или выходит с кодом `3`, если текущей нет или она удалена.
 
 ### 14.3 Вывод и коды выхода
 
-- **JSON, когда stdout не TTY** [MVP-рек. R1]. В TTY — таблицы и строки для человека; если stdout не TTY — JSON, как с `--json`. `--json` (или `SBX_OUTPUT=json`) включает JSON и в TTY, `--human` (`SBX_OUTPUT=human`) — текст и без TTY. (Команды с сырым выводом переключает в NDJSON только явный `--json`, не `SBX_OUTPUT`, §23.7.) Исключение — команды, чей stdout — это данные: `exec`, `run`, `logs`, `shell`, `ssh`, `cp`/`push` в stdout пишут сырой вывод при любом stdout (`sbx exec sb -- cat f > out` пишет байты файла); для `exec`, `run`, `logs` с явным `--json` — кадры NDJSON как в API.
+- **JSON, когда stdout не TTY** [MVP-рек. R1]. В TTY — таблицы и строки для человека; если stdout не TTY — JSON, как с `--json`. `--json` (или `UMIAK_OUTPUT=json`) включает JSON и в TTY, `--human` (`UMIAK_OUTPUT=human`) — текст и без TTY. (Команды с сырым выводом переключает в NDJSON только явный `--json`, не `UMIAK_OUTPUT`, §23.7.) Исключение — команды, чей stdout — это данные: `exec`, `run`, `logs`, `shell`, `ssh`, `cp`/`push` в stdout пишут сырой вывод при любом stdout (`umiak exec sb -- cat f > out` пишет байты файла); для `exec`, `run`, `logs` с явным `--json` — кадры NDJSON как в API.
 - **Форма JSON.** Обычные команды — одна JSON-структура (ресурс API как есть). Ждущие команды (`create --wait`, `fork --wait`, `resume --wait`, `recover --wait`, `stop --wait`) — JSON Lines: `{"event":"accepted","sandbox":{...},"operation":{...}}`, `{"event":"state",...}` при смене состояния, последним — `{"event":"ready","sandbox":{...}}` (у `stop --wait` — `{"event":"stopped",...}`). `snapshot save --wait` — так же: `{"event":"accepted","snapshot":{...},"operation":{...}}`, последним — `{"event":"ready","snapshot":{...}}` (у снапшота нет промежуточных состояний, строк `state` нет). Поле-дискриминатор строк JSONL у CLI всегда `event`: кадры API (§9.5) в `exec`/`run`/`logs --json` печатаются с `event` вместо `type`.
 - **Ошибка — последняя строка stdout** в режиме JSON: `{"event":"error","code","message","retryable","details","requestId"}` (поля из §5.5; ошибка CLI без ответа API — те же поля, `requestId: null`), у любой команды, в том числе после строк JSONL. Текст для человека — в stderr. У команд с сырым выводом (`exec`, `run`, `logs`, `cp`, `push`) без явного `--json` stdout занят данными, поэтому эта строка идёт в stderr.
 - Коды выхода (одинаковы в TTY и в JSON): `0` — успех; `1` — ошибка API или CLI; `2` — ошибка аргументов; `3` — не найдено; `4` — нет прав или нет входа; `75` — временная ошибка (retryable, исчерпаны повторы); для `exec`/`run`/`logs -f` — код команды (`128 + n` для сигнала, `124` для `timed_out`, `125` для `lost`/`failed_to_start`).
@@ -927,21 +927,21 @@ Cleanup S6 (§15.4 S6) удаляет строки старше суток; S7 �
 
 - Маршруты описываются через `createRoute` из `@hono/zod-openapi`; zod-схемы — источник правды для валидации и документа. OpenAPI 3.1.
 - `operationId` — `<resource>.<action>` (`sandboxes.create`, `commands.attach`); у каждой операции `summary` и `description`, написанные для человека и LLM (их использует S11).
-- NDJSON-ручки: `content: application/x-ndjson` со схемой кадра (`oneOf` с `discriminator: type`). WebSocket в OpenAPI 3.1 не описывается: ручка `connect` описана как `GET` с ответом `101` и расширением `x-sbx-websocket: {subprotocol: "sbx.pty.v1"}`, протокол — в документации.
-- **Security schemes:** `keycloak` — `type: openIdConnect`, `openIdConnectUrl: {issuer}/.well-known/openid-configuration` (Keycloak JWT, §7.10); `teamKey` — `type: http`, `scheme: bearer`, `bearerFormat: "sbx_"` (§7.2). Глобально `security: [{keycloak: []}, {teamKey: []}]`; ручки только для человека (SSH-ключи, выпуск и ротация ключей) — `[{keycloak: []}]`; `/v1/meta`, `/v1/openapi.json`, `/v1/docs` — `security: []`. Браузерная сессия (proxied listener) в документе не описывается: она для дашборда того же origin.
+- NDJSON-ручки: `content: application/x-ndjson` со схемой кадра (`oneOf` с `discriminator: type`). WebSocket в OpenAPI 3.1 не описывается: ручка `connect` описана как `GET` с ответом `101` и расширением `x-umiak-websocket: {subprotocol: "umiak.pty.v1"}`, протокол — в документации.
+- **Security schemes:** `keycloak` — `type: openIdConnect`, `openIdConnectUrl: {issuer}/.well-known/openid-configuration` (Keycloak JWT, §7.10); `teamKey` — `type: http`, `scheme: bearer`, `bearerFormat: "umiak_"` (§7.2). Глобально `security: [{keycloak: []}, {teamKey: []}]`; ручки только для человека (SSH-ключи, выпуск и ротация ключей) — `[{keycloak: []}]`; `/v1/meta`, `/v1/openapi.json`, `/v1/docs` — `security: []`. Браузерная сессия (proxied listener) в документе не описывается: она для дашборда того же origin.
 - Enum ответов помечены `x-extensible-enum`; генераторы настроены так, чтобы неизвестное значение не роняло клиент (§15.2, §15.3).
-- `pnpm --filter @sbx/api openapi` пишет `apps/api/openapi/v1.json` (коммитится). CI: регенерация без расхождений, `oasdiff breaking` против `main`.
+- `pnpm --filter @umiak/api openapi` пишет `apps/api/openapi/v1.json` (коммитится). CI: регенерация без расхождений, `oasdiff breaking` против `main`.
 - Документация — `GET /v1/docs` (Scalar) по тому же документу; только public listener, версия закреплена с SRI (§23.3).
 
-### 15.2 TypeScript: `@sbx/sdk`
+### 15.2 TypeScript: `@umiak/sdk`
 
 - `openapi-typescript` генерирует `src/gen/v1.d.ts` (коммитится, CI проверяет свежесть); транспорт — `openapi-fetch`. Работает на Node ≥ 22, Bun, Deno и в браузере (без PTY через Bearer, §10.2).
 - Фасад:
 
 ```ts
-const sbx = new Sbx({ baseUrl: "https://api.example.com", team?: "team_..." }) // credentials: apiKey | accessToken | tokenProvider, else chain §7.6
+const umiak = new Umiak({ baseUrl: "https://api.example.com", team?: "team_..." }) // credentials: apiKey | accessToken | tokenProvider, else chain §7.6
 
-const sb = await sbx.sandboxes.create({ template: "linux", secrets: { TOKEN: "..." } }, { wait: true })
+const sb = await umiak.sandboxes.create({ template: "linux", secrets: { TOKEN: "..." } }, { wait: true })
 const r = await sb.exec("npm test", { cwd: "app", timeoutSeconds: 600 })        // sync result
 for await (const ev of sb.run("npm run build")) { /* stdout/stderr/exit, auto-reattach */ }
 const cmd = await sb.start("python3 -m http.server 8000")                     // detached
@@ -950,20 +950,20 @@ await sb.files.writeText("notes.txt", "hi"); const s = await sb.files.readText("
 await sb.files.upload("big.tar", fileOrStream)                                // chunked, resumable
 const port = await sb.ports.host(8000, { access: "public" })
 const pty = await sb.pty({ cols: 120, rows: 32 }); pty.onData(b => ...); pty.write("ls\n"); pty.resize(100, 30)
-for await (const s of sbx.sandboxes.list({ label: { session: "42" } })) { /* all pages */ }
+for await (const s of umiak.sandboxes.list({ label: { session: "42" } })) { /* all pages */ }
 await sb.delete()
 ```
 
-- Низкоуровневый клиент (`sbx.raw`) — сам `openapi-fetch` со всеми операциями.
-- Учётные данные — цепочка §7.6 (явные параметры → `SBX_API_KEY` → `SBX_ACCESS_TOKEN` → `sbx auth token --json`); на `401 token_expired` SDK один раз берёт новый токен и повторяет запрос.
-- Ошибки — класс `SbxError {status, code, message, retryable, details, requestId}`.
-- Каждый метод фасада и `sbx.raw` принимает `signal: AbortSignal` (прерывает запрос, long-poll, чтение стрима и повторы) и `retryBudgetMs` (общий срок повторов на этот вызов вместо 60 s, §15.4). Нужно MCP для срока вызова инструмента (S11 §7.5).
+- Низкоуровневый клиент (`umiak.raw`) — сам `openapi-fetch` со всеми операциями.
+- Учётные данные — цепочка §7.6 (явные параметры → `UMIAK_API_KEY` → `UMIAK_ACCESS_TOKEN` → `umiak auth token --json`); на `401 token_expired` SDK один раз берёт новый токен и повторяет запрос.
+- Ошибки — класс `UmiakError {status, code, message, retryable, details, requestId}`.
+- Каждый метод фасада и `umiak.raw` принимает `signal: AbortSignal` (прерывает запрос, long-poll, чтение стрима и повторы) и `retryBudgetMs` (общий срок повторов на этот вызов вместо 60 s, §15.4). Нужно MCP для срока вызова инструмента (S11 §7.5).
 
-### 15.3 Python: `sbx-sdk`
+### 15.3 Python: `umiak-sdk`
 
-- `openapi-python-client` генерирует `sbx_sdk/_gen` (httpx + attrs, sync и async), конфиг генератора с `literal_enums: false` и разбором неизвестных значений; сгенерированное коммитится. Python ≥ 3.11. Проект на uv (`pyproject.toml`), тесты pytest, линт ruff.
-- Фасады `Sbx` и `AsyncSbx` с теми же методами в `snake_case` (`sb.exec`, `sb.run`, `cmd.follow`, `sb.files.read_text`, `sb.files.upload`, `sb.pty`, `sbx.sandboxes.list` как итератор). NDJSON — `httpx` `stream()` + `iter_lines()`; PTY — `websockets` (sync и asyncio API).
-- `SbxError` с теми же полями.
+- `openapi-python-client` генерирует `umiak_sdk/_gen` (httpx + attrs, sync и async), конфиг генератора с `literal_enums: false` и разбором неизвестных значений; сгенерированное коммитится. Python ≥ 3.11. Проект на uv (`pyproject.toml`), тесты pytest, линт ruff.
+- Фасады `Umiak` и `AsyncUmiak` с теми же методами в `snake_case` (`sb.exec`, `sb.run`, `cmd.follow`, `sb.files.read_text`, `sb.files.upload`, `sb.pty`, `umiak.sandboxes.list` как итератор). NDJSON — `httpx` `stream()` + `iter_lines()`; PTY — `websockets` (sync и asyncio API).
+- `UmiakError` с теми же полями.
 - В реализации MVP: без `pty` и `upload_dir`/`download_dir`; вместо `signal` — `timeout` и `retry_budget`; синхронный фасад генерируется из асинхронного (§23.8).
 
 ### 15.4 Хелперы и политика повторов (одинаковы в TS и Python)
@@ -979,7 +979,7 @@ await sb.delete()
 | `upload(path, src)`, `download(path, dest)` | чанки 4 MiB с докачкой по `HEAD`; скачивание с `Range` и `If-Range` | у boat signed URL без докачки |
 | `uploadDir(local, path)`, `downloadDir(path, local)` | каталог одним tar-потоком через `/files/archive` | у boat только в CLI |
 | `pty(opts)` | WebSocket с автопереподключением по offset | у boat нет |
-| `stopAndDelete()` | delete с `Sbx-Confirm-Delete` (§5.12; stop не нужен) | |
+| `stopAndDelete()` | delete с `Umiak-Confirm-Delete` (§5.12; stop не нужен) | |
 | `sandboxes.list()` | итератор по всем страницам | |
 
 **Политика повторов транспорта SDK** [решение S7]:
@@ -989,8 +989,8 @@ await sb.delete()
 
 ### 15.5 Распространение
 
-- В монорепо `apps/web` (S8), `apps/mcp` (S11), `apps/cli` используют `@sbx/sdk` как workspace-пакет.
-- Релиз по тегу `sdk-v<semver>` / `cli-v<semver>` (GitHub Actions в приватном репозитории): в GitHub Releases кладутся wheel и sdist `sbx-sdk`, `npm pack`-архив `@sbx/sdk`, бинарники CLI и `SHA256SUMS`. Установка: `pip install <url wheel>` / `npm install <url tgz>` с токеном GitHub, CLI — скачивание бинарника. GitHub Packages (npm под scope владельца) — по необходимости позже.
+- В монорепо `apps/web` (S8), `apps/mcp` (S11), `apps/cli` используют `@umiak/sdk` как workspace-пакет.
+- Релиз по тегу `sdk-v<semver>` / `cli-v<semver>` (GitHub Actions в приватном репозитории): в GitHub Releases кладутся wheel и sdist `umiak-sdk`, `npm pack`-архив `@umiak/sdk`, бинарники CLI и `SHA256SUMS`. Установка: `pip install <url wheel>` / `npm install <url tgz>` с токеном GitHub, CLI — скачивание бинарника. GitHub Packages (npm под scope владельца) — по необходимости позже.
 - Версия SDK независима от версии API; SDK поддерживает весь `/v1`.
 
 ## 16. Тесты и приёмка
@@ -1004,34 +1004,34 @@ await sb.delete()
 
 **Интеграционные** (Postgres 18, `packages/core` S6 с фейком worker, настоящие gateway-библиотека и туннель из `tunnelharness` `s2-impl`).
 
-(В реализации Go-фейка нет: тесты идут на TS-фейке `FakeAgent` с настоящими процессами, решение 3, §23.9.) Двойник `sbx.testing.v1.Process` из S2 для этих тестов не годится: у него нет `pty_offset`, `SendInput`, `Kill`, `Get`, `Filesystem`, `/files/*` и `ListPorts`. Поэтому [решение S7, по прецеденту S6 §16]: исполнитель S7 добавляет в Go фейковый агент `sbx.agent.v1` (`libs/tunnel/tunneltest/agentv1fake`) и флаг `tunnelharness -agent fake-v1`, согласуя это с `s2-impl` (добавление, существующие тесты S2 не трогает). Фейк:
+(В реализации Go-фейка нет: тесты идут на TS-фейке `FakeAgent` с настоящими процессами, решение 3, §23.9.) Двойник `umiak.testing.v1.Process` из S2 для этих тестов не годится: у него нет `pty_offset`, `SendInput`, `Kill`, `Get`, `Filesystem`, `/files/*` и `ListPorts`. Поэтому [решение S7, по прецеденту S6 §16]: исполнитель S7 добавляет в Go фейковый агент `umiak.agent.v1` (`libs/tunnel/tunneltest/agentv1fake`) и флаг `tunnelharness -agent fake-v1`, согласуя это с `s2-impl` (добавление, существующие тесты S2 не трогает). Фейк:
 - запускает настоящие дочерние процессы и пишет их вывод в файлы с offset-ами;
 - реализует `Process` (включая PTY через `creack/pty`, `SendInput`, `Update`, `Kill`, `Get`, `Attach` с `tail_bytes`/`follow`), `Filesystem` и `/files/*` поверх временного каталога, `System/ListPorts`;
-- соблюдает контракты S2 §9 и S3 §9–§11: идемпотентность `Start`, `Sbx-Request-Id`, `exit` после всего вывода, `truncated`.
-Сгенерированный TS-код `sbx.agent.v1` берётся из `proto/sbx/agent/v1` (S3). Если `s3-impl` ещё не положил proto, S7 начинает с протокола из S3 §9–§13 и сверяется при слиянии. Поведение настоящего агента проверяет E2E на `pve`.
+- соблюдает контракты S2 §9 и S3 §9–§11: идемпотентность `Start`, `Umiak-Request-Id`, `exit` после всего вывода, `truncated`.
+Сгенерированный TS-код `umiak.agent.v1` берётся из `proto/umiak/agent/v1` (S3). Если `s3-impl` ещё не положил proto, S7 начинает с протокола из S3 §9–§13 и сверяется при слиянии. Поведение настоящего агента проверяет E2E на `pve`.
 
 Сценарии:
 - **Chaos стрима (главный).** SDK `run()` команды на 3000 строк × 512 B; каждые 100–400 ms случайный сбой: обрыв туннеля, drain gateway, перезапуск агента, **остановка процесса `api`** (второй экземпляр `api` подхватывает). sha256 stdout и stderr совпадают с ожидаемыми, код выхода верный, `Start` агента выполнен один раз.
 - **Идемпотентность команд.** Повтор `POST /commands` с тем же ключом после обрыва в каждой точке (до `Start`, после `Start` до ответа, в середине стрима) — одна команда у агента.
 - **Безопасность:** `X-Auth-Request-Email` на public listener-е игнорируется; запрос на proxied без `Origin` или с чужим `Origin` — `403`; WebSocket upgrade с чужим `Origin` — отказ; код `port-auth` второй раз и с чужим `label` — `invalid_code`; секреты не попадают в логи (перехват логгера в тестах create, `PUT /env`, `POST /api-keys`).
-- **Keycloak JWT** (тестовый Keycloak 26.8 в контейнере или подписанные тестовым JWKS токены): чужой `iss`, нет `aud=sbx-api`, `alg: none` и `HS256`, истёкший (`token_expired`), ID token и refresh token вместо access token, чужой `azp` → `401`; неизвестный `kid` → JWKS перечитывается один раз; первый запрос с JWT создаёт пользователя так же, как браузер, и `sub` совпадает с `X-Auth-Request-User`; деактивированный пользователь с живым токеном → `403 user_disabled`; device grant: `sbx login` → `sbx auth token` → SDK использует тот же токен; выключенный в Keycloak пользователь не обновляет токен.
+- **Keycloak JWT** (тестовый Keycloak 26.8 в контейнере или подписанные тестовым JWKS токены): чужой `iss`, нет `aud=umiak-api`, `alg: none` и `HS256`, истёкший (`token_expired`), ID token и refresh token вместо access token, чужой `azp` → `401`; неизвестный `kid` → JWKS перечитывается один раз; первый запрос с JWT создаёт пользователя так же, как браузер, и `sub` совпадает с `X-Auth-Request-User`; деактивированный пользователь с живым токеном → `403 user_disabled`; device grant: `umiak login` → `umiak auth token` → SDK использует тот же токен; выключенный в Keycloak пользователь не обновляет токен.
 - **Командные ключи:** `member` и ключ не могут выпустить ключ (`403`); ключ работает после удаления создателя из команды и после его деактивации; `owner` отзывает ключ; ключ не вызывает человеческие ручки (`user_required`).
 - **SSH-сертификаты:** сертификат от чужого CA, истёкший, с principal другой sandbox, по отозванному ключу или деактивированному пользователю → вход отклонён; `KeyId` в журнале sshd VM (S4 §9.3).
 - **Файлы:** загрузка 100 MiB с обрывом в середине и докачкой через `HEAD`; `Range` и `If-Range`; `checksum_mismatch`; архив каталога туда и обратно (sha256 файлов совпадают), отказ на `..`, абсолютном пути и записи через symlink, пределы `413`.
-- **Контракт CLI и ошибок:** без TTY CLI печатает JSON, `create --wait` даёт JSONL с последней строкой `ready`, ошибка — последняя строка `{"event":"error",…}`; у любой ошибки API есть `retryable` и `requestId`; `DELETE` без `Sbx-Confirm-Delete` или с чужим ID — `428`, ничего не удалено; `failFast` при пустом пуле — `503 pool_exhausted`, в БД нет новой sandbox, операции и ключа идемпотентности (**фаза 2, вне публичного контракта MVP, решение Ильи 2026-10-29**; в MVP тесты проверяют, что этих слов нет в OpenAPI, а `failFast` в теле — `400 validation`).
+- **Контракт CLI и ошибок:** без TTY CLI печатает JSON, `create --wait` даёт JSONL с последней строкой `ready`, ошибка — последняя строка `{"event":"error",…}`; у любой ошибки API есть `retryable` и `requestId`; `DELETE` без `Umiak-Confirm-Delete` или с чужим ID — `428`, ничего не удалено; `failFast` при пустом пуле — `503 pool_exhausted`, в БД нет новой sandbox, операции и ключа идемпотентности (**фаза 2, вне публичного контракта MVP, решение Ильи 2026-10-29**; в MVP тесты проверяют, что этих слов нет в OpenAPI, а `failFast` в теле — `400 validation`).
 - **PTY:** эхо, resize, обрыв WebSocket и переподключение с offset без потерь вывода; закрытие `1012` при остановке пода.
 - **Long-poll:** `waitFor=ready` возвращается по `NOTIFY` до таймаута.
 - **Контракт:** запросы и ответы всех интеграционных тестов валидируются по `openapi/v1.json`.
 
 **SDK:** тесты TS и Python против поднятого `api` с фейками (один набор сценариев: create/wait/exec/run/follow/files/upload/pty/errors), включая повторы на `503` и reattach.
 
-**E2E на `pve`** (после S3–S6): сценарий `sbx-bench s7` в `apps/bench` через CLI: `login --key-stdin` → `create --wait` → `exec` стрим 10 min с перезапуском пода `api` и агента посреди → `cp` 200 MiB туда и обратно с обрывом → `port --public` и `--token` через gateway (curl) → `ssh` → `shell` → `snapshot save` → `create --from` → `rm`. Замеры: create-to-ready через API, задержка первого байта `exec`, p99 эха PTY.
+**E2E на `pve`** (после S3–S6): сценарий `umiak-bench s7` в `apps/bench` через CLI: `login --key-stdin` → `create --wait` → `exec` стрим 10 min с перезапуском пода `api` и агента посреди → `cp` 200 MiB туда и обратно с обрывом → `port --public` и `--token` через gateway (curl) → `ssh` → `shell` → `snapshot save` → `create --from` → `rm`. Замеры: create-to-ready через API, задержка первого байта `exec`, p99 эха PTY.
 
 **Критерий готовности S7:** unit, интеграционные и SDK-тесты проходят; OpenAPI без расхождений и без ломающих изменений; E2E на `pve` проходит, после него нет следов (S1 `inventory`).
 
 ## 17. Интерфейсы и требования к другим областям
 
-### 17.1 S2 (`@sbx/agent-client`, `s2-impl`)
+### 17.1 S2 (`@umiak/agent-client`, `s2-impl`)
 
 - **Маршрутизирующий HTTP-`fetch`** (передано в `s2-impl` master-сессией): `AgentClient.fetch(machineId, path, init)` к `/v1/machines/{id}/files/*` внутреннего listener-а gateway с теми же правилами, что у Connect-транспорта: поиск экземпляра, `421` → другой экземпляр, `503 agent_unavailable` и ошибки соединения → ожидание до 30 s. Повтор возможен, пока тело запроса не начало отправляться или если тело — буфер (чанки загрузки); потоковое тело (`PUT /files/content`) после начала отправки не повторяется. Ответ — потоковый, без буферизации.
 - `resumableAttach` (S2 план, Task 11) используется как есть, вместе с `pty_offset` (S3).
@@ -1064,34 +1064,34 @@ interface IdentityStore {
 - **ID в Payload — UUID** (`idType: 'uuid'` адаптера Postgres): S6 хранит `team_id`, `created_by`, `principal_id` как `uuid`, а кодеки `usr_`/`team_`/`key_`/`sshk_` (§5.3) рассчитаны на 128 бит. Это требование к S8.
 - Коллекции: `users` (email, name, active, isOperator из групп IdP, defaultTeam), `teams`, `memberships` (user, team, role), `api-keys` (`name`, `team`, `createdBy` (аудит, на работу ключа не влияет, §7.2), `kind` (`team`; `sandbox` зарезервирован, §7.2), `sandbox` (uuid, null), `secretHash` unique, `prefix`, `last4`, `scopes[]` (имена §7.3), `expiresAt` (обязателен), `revokedAt`, `lastUsedAt`, `createdVia`), `ssh-keys` (`user`, `name`, `publicKey`, `fingerprint` unique, `type`, `lastUsedAt`).
 - `Template`: + `loginUser` (по умолчанию `user`), `capabilities`. `PlatformDefaults`: + `defaultTemplate`, `publicPortsEnabled`, `ssoPortPolicy (any | team)`, лимиты частоты. Блокировки портов и sandbox оператором — поля, которые читает `routes.lookup`.
-- `afterChange`-хуки коллекций `users`, `memberships`, `api-keys`, `ssh-keys` шлют `NOTIFY sbx_identity '<collection>:<id>'`.
+- `afterChange`-хуки коллекций `users`, `memberships`, `api-keys`, `ssh-keys` шлют `NOTIFY umiak_identity '<collection>:<id>'`.
 - Ключи создаются только через `packages/auth` (формат §7.2). UI ключей в дашборде вызывает API S7, а не пишет в коллекцию напрямую.
-- Дашборд работает через `@sbx/sdk` на `app.<domain>/api/v1` (тот же origin, cookie oauth2-proxy), команда — заголовок `Sbx-Team`.
+- Дашборд работает через `@umiak/sdk` на `app.<domain>/api/v1` (тот же origin, cookie oauth2-proxy), команда — заголовок `Umiak-Team`.
 
 ### 17.4 S4
 
-- Пути и формы внутренних ручек — §12.1 (S4 §6.1, §8.4, §9.2). Вход по SSH-сертификату (S7 §11.3, S4 §9.2) и разрыв сессий `NOTIFY sbx_ssh_revoke` (S4 §9.5) согласованы с S4 решением Ильи 2026-10-29.
+- Пути и формы внутренних ручек — §12.1 (S4 §6.1, §8.4, §9.2). Вход по SSH-сертификату (S7 §11.3, S4 §9.2) и разрыв сессий `NOTIFY umiak_ssh_revoke` (S4 §9.5) согласованы с S4 решением Ильи 2026-10-29.
 - **[переопределяет S4 §6.3]** `sandboxState` — состояния S6; gateway обрабатывает `starting` как `creating`. Значения `running` и `resuming` не приходят.
-- `sandboxId` и `teamId` в ответах — публичный формат (`sb_...`, `team_...`), а не `sbx_...`, как в примере S4.
+- `sandboxId` и `teamId` в ответах — публичный формат (`sb_...`, `team_...`), а не `umiak_...`, как в примере S4.
 - Slug — грамматика S4 §4.2, генерирует S7 (§5.4). Список зарезервированных суффиксов и портов — общая константа (`packages/auth` экспортирует его и для Go как JSON-файл в `docs/`/конфиге; исполнители договариваются о месте).
 
 ### 17.5 S11 (MCP): что нужно от API
 
-- **Инструменты** строятся поверх `@sbx/sdk`: create (с `failFast` — **фаза 2, вне публичного контракта MVP, решение Ильи 2026-10-29**)/list/get/stop/resume/fork/delete (с `Sbx-Confirm-Delete`, §5.12), `limits`, `exec` (sync с таймаутом, хвост вывода, `commandId`), `start` + чтение вывода по offset (`/output` — для опроса без стримов), `kill`, файлы (read text с ограничением размера, write, list, stat, mkdir, move, delete), порты (host, list), snapshots, templates/sizes.
+- **Инструменты** строятся поверх `@umiak/sdk`: create (с `failFast` — **фаза 2, вне публичного контракта MVP, решение Ильи 2026-10-29**)/list/get/stop/resume/fork/delete (с `Umiak-Confirm-Delete`, §5.12), `limits`, `exec` (sync с таймаутом, хвост вывода, `commandId`), `start` + чтение вывода по offset (`/output` — для опроса без стримов), `kill`, файлы (read text с ограничением размера, write, list, stat, mkdir, move, delete), порты (host, list), snapshots, templates/sizes.
 - **Описания:** `summary`/`description` операций и полей в OpenAPI пишутся так, чтобы из них получались описания инструментов (§15.1).
 - **Безопасные повторы:** `Idempotency-Key` для create/fork/commands, чтобы повтор вызова инструмента не создавал второй ресурс и не запускал команду дважды.
 - **Ответы для LLM:** ошибки с понятным `message` и `retryable`; большие выводы — с флагами усечения и offset-ами, а не огромными телами; `waitFor` long-poll вместо опроса.
-- **Аутентификация:** MCP по stdio — цепочка SDK (§7.6): вход человека через `sbx auth token` или командный ключ `SBX_API_KEY`; удалённый MCP по HTTP — решает S11 (вероятно, OAuth через Keycloak с `aud=sbx-api`). Ключи с ограничением по sandbox — позже (§19), если S11 их попросит.
+- **Аутентификация:** MCP по stdio — цепочка SDK (§7.6): вход человека через `umiak auth token` или командный ключ `UMIAK_API_KEY`; удалённый MCP по HTTP — решает S11 (вероятно, OAuth через Keycloak с `aud=umiak-api`). Ключи с ограничением по sandbox — позже (§19), если S11 их попросит.
 - Чего нет в v1 и может понадобиться S11: скриншоты и computer-use (S10), поиск по файлам (через exec).
-- Решено в S11 (`docs/specs/s11-mcp.md`): новых ручек MCP не нужно; удалённый MCP принимает те же bearer и проверяет их через `GET /v1/me`; добавлен клиент Keycloak `sbx-mcp` (§7.10) и команда `sbx mcp` (§14.2).
+- Решено в S11 (`docs/specs/s11-mcp.md`): новых ручек MCP не нужно; удалённый MCP принимает те же bearer и проверяет их через `GET /v1/me`; добавлен клиент Keycloak `umiak-mcp` (§7.10) и команда `umiak mcp` (§14.2).
 
 ### 17.6 S12
 
-- Ingress: `api.<domain>` → `:8080`; `app.<domain>` пути `/api/*` (с отрезанием `/api`), `/sbx-auth/*` → oauth2-proxy → `:8081`. Поддержка WebSocket upgrade на обоих хостах; буферизация ответа выключена для `application/x-ndjson`; таймаут чтения ingress и `--upstream-timeout` oauth2-proxy ≥ 660 s (sync-команды до 600 s молчат, §9.2; стримы покрывают heartbeat каждые 15 s); тело запроса без предела для `/files/*`, 16 MiB для остального.
+- Ingress: `api.<domain>` → `:8080`; `app.<domain>` пути `/api/*` (с отрезанием `/api`), `/umiak-auth/*` → oauth2-proxy → `:8081`. Поддержка WebSocket upgrade на обоих хостах; буферизация ответа выключена для `application/x-ndjson`; таймаут чтения ingress и `--upstream-timeout` oauth2-proxy ≥ 660 s (sync-команды до 600 s молчат, §9.2; стримы покрывают heartbeat каждые 15 s); тело запроса без предела для `/files/*`, 16 MiB для остального.
 - NetworkPolicy: `:8081` — только от oauth2-proxy; `:8082` — только от gateway; `:9090` — от Prometheus.
 - Deployment `api`: 2 реплики, `terminationGracePeriodSeconds: 30`, readiness `/readyz` (Postgres, Payload, `LISTEN`-соединения).
-- Secrets: service tokens (`SBX_API_SERVICE_TOKENS_FILE`), `SBX_API_CURSOR_KEY`, ключи данных S6 (`SBX_DATA_KEYS_FILE`), публичные SSH host keys gateway, закрытый ключ SSH login CA (`SBX_SSH_LOGIN_CA_KEY_FILE`, §11.3).
-- Keycloak (realm `sbx`, клиенты и сроки — architecture §10): `SBX_OIDC_ISSUER`, `SBX_OIDC_AUDIENCE=sbx-api`, `SBX_OIDC_ALLOWED_CLIENTS=sbx-cli,sbx-mcp`; `api` ходит к Keycloak только за discovery и JWKS.
+- Secrets: service tokens (`UMIAK_API_SERVICE_TOKENS_FILE`), `UMIAK_API_CURSOR_KEY`, ключи данных S6 (`UMIAK_DATA_KEYS_FILE`), публичные SSH host keys gateway, закрытый ключ SSH login CA (`UMIAK_SSH_LOGIN_CA_KEY_FILE`, §11.3).
+- Keycloak (realm `umiak`, клиенты и сроки — architecture §10): `UMIAK_OIDC_ISSUER`, `UMIAK_OIDC_AUDIENCE=umiak-api`, `UMIAK_OIDC_ALLOWED_CLIENTS=umiak-cli,umiak-mcp`; `api` ходит к Keycloak только за discovery и JWKS.
 
 ## 18. Библиотеки и инструменты
 
@@ -1111,7 +1111,7 @@ interface IdentityStore {
 | CLI: хранилище ОС | `Bun.secrets` (Bun ≥ 1.3) | Bun из `mise.toml` |
 | IdP | Keycloak (S12) / oauth2-proxy | 26.8.1 / v7.15.5 |
 | ULID | `ulid` | 3.0.2 |
-| Агент | `@sbx/agent-client` (S2: `@connectrpc/connect`, `-node` 2.3.0) | workspace |
+| Агент | `@umiak/agent-client` (S2: `@connectrpc/connect`, `-node` 2.3.0) | workspace |
 | TS SDK: типы / клиент | `openapi-typescript` / `openapi-fetch` | 7.13.0 / 0.17.0 |
 | CLI: аргументы | `commander` | 15.0.0 |
 | CLI: сборка | Bun (`mise.toml`) | 1.4.4 |
@@ -1132,7 +1132,7 @@ interface IdentityStore {
 | Фаза | Что входит |
 |---|---|
 | **PoC** | Public и internal listener-ы; `StaticIdentityStore` и ключи из YAML; create/get/list/patch (без slug)/delete, operations, long-poll; команды: sync, stream, detached, attach, output, input, kill, signal, list; файлы: content (чтение с `Range`, запись потоком), stat, list, mkdir, move, delete; templates, sizes, `/me`, `/meta`; `agent-events`; ошибки, пагинация, идемпотентность, лимиты; OpenAPI + CI; CLI: `login --key-stdin`, `create`, `list`, `info`, `rm`, `exec`, `logs`, `kill`, `cp` (без докачки) |
-| **MVP** | stop/resume/fork/recover/extend; rename slug; `GET`/`PUT /env`; PTY по WebSocket; загрузка чанками; chmod; порты и режимы доступа, ручки gateway (routes, port-auth, SSO authorize); SSH-ключи, `/ssh`, `ssh/authorize`; saved snapshots; API-ключи; proxied listener (реализация `IdentityStore` на Payload — S8); `sbx login` (device grant Keycloak), проверка JWT, командные ключи, SSH-сертификаты; `/limits`; SDK TS и Python с хелперами; полный CLI; релизы. По MVP-рекомендациям: архив каталога (`/files/archive`), `failFast` (перенесён в фазу 2, решение Ильи 2026-10-29), env и секреты на fork и resume, `Sbx-Confirm-Delete`, scopes «ресурс × действие», контракт вывода CLI и `sbx current` |
+| **MVP** | stop/resume/fork/recover/extend; rename slug; `GET`/`PUT /env`; PTY по WebSocket; загрузка чанками; chmod; порты и режимы доступа, ручки gateway (routes, port-auth, SSO authorize); SSH-ключи, `/ssh`, `ssh/authorize`; saved snapshots; API-ключи; proxied listener (реализация `IdentityStore` на Payload — S8); `umiak login` (device grant Keycloak), проверка JWT, командные ключи, SSH-сертификаты; `/limits`; SDK TS и Python с хелперами; полный CLI; релизы. По MVP-рекомендациям: архив каталога (`/files/archive`), `failFast` (перенесён в фазу 2, решение Ильи 2026-10-29), env и секреты на fork и resume, `Umiak-Confirm-Delete`, scopes «ресурс × действие», контракт вывода CLI и `umiak current` |
 | **Граница с S8** | MVP S7 считается готовым против `StaticIdentityStore` (с сессиями из заголовков для теста proxied listener-а) и `StaticConfigReader`, расширенного полями из §17.3 (`loginUser`, `capabilities`, `defaultTemplate`, `publicPortsEnabled`, `ssoPortPolicy`). Реализация `IdentityStore` и этих полей на Payload — работа S8; S7 её не ждёт |
 | **Позже** | Подписанные URL файлов; история вывода команд вне VM; webhooks; `ps`; desktop и computer-use (S10); ключи типа `sandbox` (§7.2) и командные ключи с ограничением по sandbox, environments или labels (S24); программный доступ к `sso`-портам (S4 §17); self-update CLI; публикация в GitHub Packages |
 
@@ -1145,10 +1145,10 @@ interface IdentityStore {
 | O1 | S6 §14.2, §4 (схема) | `/internal/v1/routes/{label}`, `/internal/v1/ssh/authorize` | `/internal/v1/gateway/routes/{label}`, `/internal/v1/gateway/ssh/authorize`, `/internal/v1/gateway/port-auth/exchange` (пути S4) |
 | O2 | S6 §14.2 | `ssh/authorize {sandbox, user, publicKeyFingerprint}` → `{allowed, machineId, state}` | форма S4 §9.2: `{sandbox, publicKey, fingerprint}` или `{sandbox, certificate: {keyId, serial, principal, validBefore}}` → `{allowed, actor, userId, email, sandboxId, machineId, sandboxState, loginUser}` (§12.1) |
 | O3 | S4 §6.3 | `sandboxState` может быть `running`, `resuming` | только состояния S6; `starting` обрабатывается как `creating` (§12.1) |
-| O4 | S4 §6.1 (пример) | `sandboxId: "sbx_..."` | `sb_...`; `teamId: "team_..."` |
+| O4 | S4 §6.1 (пример) | `sandboxId: "umiak_..."` | `sb_...`; `teamId: "team_..."` |
 | O5 | S6 §5.6 | slug — 10 символов `[a-z0-9]` | грамматика S4 §4.2, по умолчанию три слова, генерирует S7 (§5.4) |
 | O6 | S6 §5.12 | `runtime` — 0200+ | S6 — 0200–0299, S7 — 0300–0399 |
-| O7 | S6 §14.2 | `NOTIFY sbx_routes '<label>'`, по одному на метку | payload — **slug** (S4 §6.2): gateway выкидывает все записи со slug; `'*'` очищает весь кэш. Триггеры на `sandboxes` и `hosted_ports` — в миграциях S6 (0200–0299): смена `state`, `machine_id`, slug (два уведомления: старый и новый), любое изменение строки `hosted_ports` (режим, токен, блокировка). `'*'` шлёт hook S8 при смене `publicPortsEnabled` |
+| O7 | S6 §14.2 | `NOTIFY umiak_routes '<label>'`, по одному на метку | payload — **slug** (S4 §6.2): gateway выкидывает все записи со slug; `'*'` очищает весь кэш. Триггеры на `sandboxes` и `hosted_ports` — в миграциях S6 (0200–0299): смена `state`, `machine_id`, slug (два уведомления: старый и новый), любое изменение строки `hosted_ports` (режим, токен, блокировка). `'*'` шлёт hook S8 при смене `publicPortsEnabled` |
 
 ### 20.2 Добавления к S6 (`packages/core`)
 
@@ -1157,7 +1157,7 @@ interface IdentityStore {
 1. `updateEnv(p, id, {env?, secrets?, secretFiles?})` → `{delivered}` и `getEnv(p, id)`; блоб `sandbox_secrets` хранит три набора (`env`, `secrets` → S3 `secret_env`, `secretFiles`); create и fork принимают `secrets` отдельно от `env`.
 2. `createCommand(p, id, spec, idemKey?)` — по ключу возвращает существующую команду (scope `commands.create`); в `commands` добавить `user`, `tags jsonb`, `argv jsonb null`. `listCommands`, `getCommand`.
 3. `hostPort(p, id, port, {access, hostRewrite, appProtocol})`; в `hosted_ports` — `host_rewrite`, `app_protocol`, `blocked`, `block_reason`; `listHostedPorts`; блокировка sandbox оператором. `routes.lookup` отдаёт поля S4 §6.1.
-4. `rename(p, id, slug)` — меняет `hosted_ports.label` всех портов, `authEpoch+1`, `NOTIFY sbx_routes` со старым и новым slug.
+4. `rename(p, id, slug)` — меняет `hosted_ports.label` всех портов, `authEpoch+1`, `NOTIFY umiak_routes` со старым и новым slug.
 5. `usage(teamId)` для `/limits` и число `warm` machine по парам (шаблон, размер) (число `warm` — фаза 2).
 6. `listSavedSnapshots` отдаёт и `creating` (по `pending_name`), и `failed` за сутки; `getSavedSnapshot(p, name)`.
 7. `resume` и `recover` при активной операции того же вида возвращают её (как `stop`).
@@ -1166,7 +1166,7 @@ interface IdentityStore {
 10. Cleanup удаляет `port_auth_codes` старше суток.
 11. Общий для `api` и `core` механизм идемпотентности по scope (`sandboxes.create`, `sandboxes.fork`, `commands.create`, `snapshots.create`); `saveSnapshot` принимает `idemKey`. В hash входит и sandbox из пути.
 12. `extend(p, id, ttlSeconds?)`.
-13. `NOTIFY sbx_operations '<operationId>'` при переходе операции в терминальное состояние (триггер) — для `GET /operations/{id}?waitSeconds` (`save_snapshot` и fork на источнике не меняют `state` sandbox, поэтому `sbx_sandboxes` их не покрывает).
+13. `NOTIFY umiak_operations '<operationId>'` при переходе операции в терминальное состояние (триггер) — для `GET /operations/{id}?waitSeconds` (`save_snapshot` и fork на источнике не меняют `state` sandbox, поэтому `umiak_sandboxes` их не покрывает).
 
 Что из списка сделано и чем дополнено — §23.11.
 
@@ -1197,6 +1197,8 @@ MVP-рекомендации R2 и R11 (2026-10-29) внесены прямо в
 - **Роли в команде** (`owner`/`member`): решает S8; до этого действует допущение §7.5 (любой участник команды имеет доступ к её sandbox в пределах scopes).
 
 ## 23. Реализация MVP (`s7-impl`)
+
+> Исторический отчёт до R1; действующие имена — `docs/specs/rename-umiak.md`.
 
 Добавлено после реализации (ветка `s7-impl`, 2026-10-30). Здесь записано, что сделано иначе или подробнее, чем в разделах выше; такие места выше помечены ссылкой на §23. «Решение N» — список «Решения исполнителя» в `docs/plans/s7-public-api.md`; остальное решено по ходу реализации. Разделы 1–22 остаются историей согласования.
 

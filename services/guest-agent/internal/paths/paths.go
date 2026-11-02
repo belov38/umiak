@@ -18,7 +18,7 @@ type Layout struct {
 	// CurrentLink and PreviousLink are symlinks to version directories.
 	CurrentLink  string
 	PreviousLink string
-	// BinLink is the CLI symlink to current/sbx-agent.
+	// BinLink is the CLI symlink to current/umiak-agent.
 	BinLink string
 
 	// StateDir is the root of persistent agent state.
@@ -74,8 +74,8 @@ type Layout struct {
 	SecretsStateFile string
 	// CmdSpecDir holds command specs until the shim reads them.
 	CmdSpecDir string
-	// SbxEnvFile is the non-secret sandbox environment read by PAM.
-	SbxEnvFile string
+	// UmiakEnvFile is the non-secret sandbox environment read by PAM.
+	UmiakEnvFile string
 
 	// EtcDir is the agent configuration directory.
 	EtcDir string

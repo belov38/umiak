@@ -1,4 +1,4 @@
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runAutostop } from "../src/controllers/autostop.ts";
 import { createWorld, type TestWorld } from "./fakes/world.ts";

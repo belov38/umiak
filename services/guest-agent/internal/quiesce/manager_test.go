@@ -14,13 +14,13 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/libs/tunnel/rpcconv"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/docker"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/system"
+	"github.com/belov38/umiak/services/guest-agent/internal/docker"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
+	"github.com/belov38/umiak/services/guest-agent/internal/system"
 )
 
 var _ system.Quiescer = (*Manager)(nil)
@@ -83,7 +83,7 @@ func TestQuiesceOrderAndRollback(t *testing.T) {
 			t.Errorf("frozen = %v", res.GetFrozenMounts())
 		}
 		argv, ok := e.sv.Watchdog("lease-1")
-		if want := []string{"/usr/local/bin/sbx-agent", "quiesce-watchdog", "--lease", "lease-1"}; !ok || !slices.Equal(argv, want) {
+		if want := []string{"/usr/local/bin/umiak-agent", "quiesce-watchdog", "--lease", "lease-1"}; !ok || !slices.Equal(argv, want) {
 			t.Errorf("watchdog argv = %v, %v; want %v", argv, ok, want)
 		}
 		l, err := readLease(e.l.QuiesceFile)

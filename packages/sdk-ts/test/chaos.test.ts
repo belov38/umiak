@@ -16,20 +16,24 @@
 // byte for byte, the exit code must be right, the command must start once
 // and every close() must end within the shutdown grace.
 //
-// The RNG is seeded; SBX_CHAOS_SEED=<n> replays a run, SBX_CHAOS_LOG=1
+// The RNG is seeded; UMIAK_CHAOS_SEED=<n> replays a run, UMIAK_CHAOS_LOG=1
 // prints what the faults did and the timings.
 import { createHash, randomInt } from "node:crypto";
-import { type RunningApi, SHUTDOWN_GRACE_MS, startApi } from "@sbx/api";
+import { type RunningApi, SHUTDOWN_GRACE_MS, startApi } from "@umiak/api";
 import {
 	FakeAgent,
 	issueApiKey,
 	makeTestDeps,
 	testSettings,
-} from "@sbx/api/testing";
-import { type ServiceEnv, serviceEnv } from "@sbx/core/testing";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+} from "@umiak/api/testing";
+import { type ServiceEnv, serviceEnv } from "@umiak/core/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type Command, type Sandbox, Sbx } from "../src/index.ts";
+import { type Command, type Sandbox, Umiak } from "../src/index.ts";
 import { markSandboxReady, sandboxRow } from "./helpers/api.ts";
 import { startTcpProxy, type TcpProxy } from "./helpers/tcp-proxy.ts";
 
@@ -136,12 +140,12 @@ describe.skipIf(skipPg())("stream chaos across api restarts", () => {
 	let current: RunningApi;
 
 	const settings = testSettings({
-		SBX_API_RATE_BURST: "100000",
-		SBX_API_RATE_STARTS_PER_MIN: "100000",
-		SBX_API_PUBLIC_PORT: "0",
-		SBX_API_PROXIED_PORT: "0",
-		SBX_API_INTERNAL_PORT: "0",
-		SBX_API_METRICS_PORT: "0",
+		UMIAK_API_RATE_BURST: "100000",
+		UMIAK_API_RATE_STARTS_PER_MIN: "100000",
+		UMIAK_API_PUBLIC_PORT: "0",
+		UMIAK_API_PROXIED_PORT: "0",
+		UMIAK_API_INTERNAL_PORT: "0",
+		UMIAK_API_METRICS_PORT: "0",
 	});
 
 	/** A new api instance on the shared database and agent (real listeners). */
@@ -179,7 +183,7 @@ describe.skipIf(skipPg())("stream chaos across api restarts", () => {
 	});
 
 	it("run delivers both streams byte for byte and starts the command once", async () => {
-		const given = process.env.SBX_CHAOS_SEED;
+		const given = process.env.UMIAK_CHAOS_SEED;
 		const seed = given ? Number(given) : randomInt(2 ** 31);
 		const rng = rngOf(seed);
 		const trace: string[] = [];
@@ -203,7 +207,7 @@ describe.skipIf(skipPg())("stream chaos across api restarts", () => {
 		// Requests the SDK sent while the command ran (its POSTs and reattaches).
 		const sent = { posts: 0, streams: 0 };
 		let counting = false;
-		const sbx = new Sbx({
+		const umiak = new Umiak({
 			baseUrl: `http://127.0.0.1:${proxy.port}`,
 			apiKey: secret,
 			env: {},
@@ -221,7 +225,7 @@ describe.skipIf(skipPg())("stream chaos across api restarts", () => {
 				});
 			}) as typeof fetch,
 		});
-		const sb: Sandbox = await sbx.sandboxes.create({
+		const sb: Sandbox = await umiak.sandboxes.create({
 			labels: { suite: "chaos" },
 		});
 		await markSandboxReady(db.pool, sb.slug);
@@ -406,7 +410,7 @@ describe.skipIf(skipPg())("stream chaos across api restarts", () => {
 			const status = await command?.refresh();
 			expect(status).toMatchObject({ status: "exited", exitCode: EXIT_CODE });
 
-			if (process.env.SBX_CHAOS_LOG) {
+			if (process.env.UMIAK_CHAOS_LOG) {
 				console.log(
 					JSON.stringify({
 						seed,
@@ -422,7 +426,7 @@ describe.skipIf(skipPg())("stream chaos across api restarts", () => {
 			}
 		} catch (e) {
 			const err = e instanceof Error ? e : new Error(String(e));
-			err.message = `[chaos seed ${seed}; replay with SBX_CHAOS_SEED=${seed}]\n${err.message}\nlast actions:\n${trace.slice(-25).join("\n")}`;
+			err.message = `[chaos seed ${seed}; replay with UMIAK_CHAOS_SEED=${seed}]\n${err.message}\nlast actions:\n${trace.slice(-25).join("\n")}`;
 			throw err;
 		}
 	}, 90_000);

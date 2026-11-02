@@ -13,15 +13,15 @@ import (
 
 	"github.com/shirou/gopsutil/v4/host"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/quiesce"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/system"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/update"
+	"github.com/belov38/umiak/services/guest-agent/internal/quiesce"
+	"github.com/belov38/umiak/services/guest-agent/internal/system"
+	"github.com/belov38/umiak/services/guest-agent/internal/update"
 )
 
 // agentPackage is the proto package of the agent API.
-const agentPackage = "sbx.agent.v1"
+const agentPackage = "umiak.agent.v1"
 
 // CapQuiesceWipeSecrets is announced on Windows only: Quiesce accepts
 // wipe_secret_files and PrepareStop reports secret_files_wiped.
@@ -54,7 +54,7 @@ func capabilityList() []string {
 }
 
 // infoResponse is the Control/Info answer. The tunnel library appends
-// sbx.tunnel.v1 to the proto packages.
+// umiak.tunnel.v1 to the proto packages.
 func (a *agent) infoResponse() *tunnelv1.InfoResponse {
 	caps := capabilityList()
 	if a.cfg.DesktopEnabled {

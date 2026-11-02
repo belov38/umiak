@@ -1,8 +1,8 @@
 // Keycloak endpoints of the CLI (S7 §7.6): the OAuth 2.0 Device Authorization
-// Grant (RFC 8628) with the public client `sbx-cli`, the refresh_token grant
+// Grant (RFC 8628) with the public client `umiak-cli`, the refresh_token grant
 // and revocation (RFC 7009). Paths are Keycloak's under the issuer.
 
-import { NETWORK_ERROR, SbxError } from "@sbx/sdk";
+import { NETWORK_ERROR, UmiakError } from "@umiak/sdk";
 import { CliError, LOGIN_FAILED, LOGIN_REQUIRED } from "../exit-codes.ts";
 import { type Fetch, send } from "../http.ts";
 
@@ -77,7 +77,7 @@ async function readText(res: Response): Promise<string> {
 	try {
 		return await res.text();
 	} catch (err) {
-		throw new SbxError({
+		throw new UmiakError({
 			status: 0,
 			code: NETWORK_ERROR,
 			message: `Keycloak: ${(err as Error).message}`,
@@ -88,8 +88,8 @@ async function readText(res: Response): Promise<string> {
 }
 
 /** Keycloak answered something that is not OAuth: retryable on 5xx and 429. */
-function idpError(status: number, message: string): SbxError {
-	return new SbxError({
+function idpError(status: number, message: string): UmiakError {
+	return new UmiakError({
 		status,
 		code: "idp_error",
 		message: `Keycloak: ${message}`,
@@ -182,7 +182,7 @@ export async function deviceLogin(o: DeviceLoginOptions): Promise<TokenSet> {
 function expired(): CliError {
 	return new CliError({
 		code: LOGIN_FAILED,
-		message: "the login code expired before it was confirmed; run: sbx login",
+		message: "the login code expired before it was confirmed; run: umiak login",
 		retryable: false,
 	});
 }
@@ -210,7 +210,7 @@ export async function refreshTokens(o: {
 	if (oauthError(a) === "invalid_grant") {
 		throw new CliError({
 			code: LOGIN_REQUIRED,
-			message: "the login session has ended; run: sbx login",
+			message: "the login session has ended; run: umiak login",
 			retryable: false,
 		});
 	}

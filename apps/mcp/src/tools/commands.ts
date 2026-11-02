@@ -7,8 +7,8 @@ import {
 	type Command,
 	type CommandData,
 	type ExitEvent,
-	SbxError,
-} from "@sbx/sdk";
+	UmiakError,
+} from "@umiak/sdk";
 import { z } from "zod";
 import type { ToolContext } from "../context.ts";
 import { RESPONSE_MARGIN_MS } from "../deadline.ts";
@@ -232,7 +232,7 @@ export const execRun = defineTool({
 			args.idempotency_key,
 			sandboxId,
 		);
-		const sb = ctx.sbx().sandboxes.handle(args.sandbox);
+		const sb = ctx.umiak().sandboxes.handle(args.sandbox);
 		const max = args.max_output_bytes ?? DEFAULT_OUTPUT_BYTES;
 		const tails: Record<Stream, ByteTail> = {
 			stdout: new ByteTail(max),
@@ -316,7 +316,7 @@ export const execRun = defineTool({
 			}
 			if (!stopped) {
 				// 401 and bugs go to the call wrapper (re-login, the log).
-				if (!(err instanceof SbxError) || err.status === 401) throw err;
+				if (!(err instanceof UmiakError) || err.status === 401) throw err;
 				throw lostStream(err, args.sandbox, command.id, modelKey);
 			}
 		} finally {
@@ -344,7 +344,7 @@ export const execRun = defineTool({
  * error (retryable and the hint of its code as they are) plus where to read on.
  */
 function lostStream(
-	err: SbxError,
+	err: UmiakError,
 	sandbox: string,
 	id: string,
 	modelKey: string,
@@ -456,7 +456,7 @@ export const execStart = defineTool({
 		const timeout =
 			args.timeout_seconds === 0 ? undefined : args.timeout_seconds;
 		const r = await withUnknownOutcome(ctx, modelKey, () =>
-			ctx.sbx().raw.POST(COMMANDS_PATH, {
+			ctx.umiak().raw.POST(COMMANDS_PATH, {
 				params: { path: { sandbox: args.sandbox } },
 				body: {
 					command: args.command,
@@ -509,24 +509,26 @@ async function readOutput(
 	offset: number,
 	limit: number,
 ): Promise<Chunk> {
-	const { data, response } = await ctx.sbx().raw.GET(`${COMMAND_PATH}/output`, {
-		params: { path, query: { stream, offset, limit } },
-		parseAs: "arrayBuffer",
-		...ctx.call,
-	});
+	const { data, response } = await ctx
+		.umiak()
+		.raw.GET(`${COMMAND_PATH}/output`, {
+			params: { path, query: { stream, offset, limit } },
+			parseAs: "arrayBuffer",
+			...ctx.call,
+		});
 	const bytes = new Uint8Array((data as ArrayBuffer | undefined) ?? []);
 	const h = response.headers;
 	const num = (name: string, dflt: number) => {
 		const v = h.get(name);
 		return v === null ? dflt : Number(v);
 	};
-	const start = num("Sbx-Offset", offset);
-	const end = h.get("Sbx-Stream-End");
+	const start = num("Umiak-Offset", offset);
+	const end = h.get("Umiak-Stream-End");
 	return {
 		data: bytes,
 		offset: start,
-		nextOffset: num("Sbx-Next-Offset", start + bytes.length),
-		availableFrom: num("Sbx-Available-From", 0),
+		nextOffset: num("Umiak-Next-Offset", start + bytes.length),
+		availableFrom: num("Umiak-Available-From", 0),
 		end: end === null ? null : Number(end),
 	};
 }
@@ -535,7 +537,7 @@ async function getCommand(
 	ctx: ToolContext,
 	path: { sandbox: string; command: string },
 ): Promise<CommandData> {
-	const { data } = await ctx.sbx().raw.GET(COMMAND_PATH, {
+	const { data } = await ctx.umiak().raw.GET(COMMAND_PATH, {
 		params: { path },
 		...ctx.call,
 	});
@@ -572,7 +574,7 @@ async function waitForOutput(
 ): Promise<void> {
 	const waitMs = endsAt - Date.now();
 	if (waitMs <= 0) return;
-	const sb = ctx.sbx().sandboxes.handle(sandbox);
+	const sb = ctx.umiak().sandboxes.handle(sandbox);
 	const stop = new AbortController();
 	const timer = setTimeout(() => stop.abort(), waitMs);
 	let settle: ReturnType<typeof setTimeout> | undefined;
@@ -815,7 +817,7 @@ export const execList = defineTool({
 			.describe("next_cursor of the previous page"),
 	},
 	async handler(args, ctx) {
-		const { data } = await ctx.sbx().raw.GET(COMMANDS_PATH, {
+		const { data } = await ctx.umiak().raw.GET(COMMANDS_PATH, {
 			params: {
 				path: { sandbox: args.sandbox },
 				query: compact({
@@ -878,12 +880,12 @@ export const execKill = defineTool({
 		const signal = args.signal ?? "SIGTERM";
 		const { data } =
 			signal === "SIGTERM"
-				? await ctx.sbx().raw.POST(`${COMMAND_PATH}/kill`, {
+				? await ctx.umiak().raw.POST(`${COMMAND_PATH}/kill`, {
 						params: { path },
 						body: { graceMs: SIGTERM_GRACE_MS },
 						...ctx.call,
 					})
-				: await ctx.sbx().raw.POST(`${COMMAND_PATH}/signal`, {
+				: await ctx.umiak().raw.POST(`${COMMAND_PATH}/signal`, {
 						params: { path },
 						body: { signal },
 						...ctx.call,

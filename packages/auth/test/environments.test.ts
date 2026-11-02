@@ -7,8 +7,12 @@ import {
 import { cp, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { MIGRATIONS_DIR, migrate } from "@sbx/db";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { MIGRATIONS_DIR, migrate } from "@umiak/db";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	type EnvironmentKeys,
@@ -17,7 +21,7 @@ import {
 import { IdentityError, type IdentityErrorCode } from "../src/identity.ts";
 import type { SecretSets } from "../src/secret-sets.ts";
 
-// AES-256-GCM with the AAD layout of KeyRing in @sbx/core (S6 §13.1); auth must
+// AES-256-GCM with the AAD layout of KeyRing in @umiak/core (S6 §13.1); auth must
 // not depend on core, so the tests carry their own ring.
 function testKeys(): EnvironmentKeys & { aads: string[] } {
 	const key = randomBytes(32);
@@ -316,7 +320,7 @@ describe.skipIf(skipPg())("migration 0400 environments_runtime", () => {
 		t = await createTestDatabase({ migrated: false });
 		// Everything before 0400 first, so identity.environments holds rows
 		// when 0400 runs.
-		dir = await mkdtemp(path.join(tmpdir(), "sbx-env-mig-"));
+		dir = await mkdtemp(path.join(tmpdir(), "umiak-env-mig-"));
 		for (const n of await readdir(MIGRATIONS_DIR)) {
 			if (/^\d{4}_/.test(n) && Number(n.slice(0, 4)) < 400) {
 				await cp(path.join(MIGRATIONS_DIR, n), path.join(dir, n));

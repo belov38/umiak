@@ -3,15 +3,15 @@
 # by every step: `. "$(dirname "$0")/../lib.sh"`. Steps run as root in the
 # build VM with the seed ISO at /mnt/seed and cwd /mnt/seed/build.
 
-SBX_BUILD_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-SBX_FILES_DIR=$SBX_BUILD_DIR/files
+UMIAK_BUILD_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+UMIAK_FILES_DIR=$UMIAK_BUILD_DIR/files
 # Downloads and unpacked archives; /var/tmp is emptied by 90-cleanup.
-SBX_WORK_DIR=/var/tmp/sbx-build
+UMIAK_WORK_DIR=/var/tmp/umiak-build
 
-# SBX_BUILD_ID, SBX_BUILD_VERSION, SBX_AGENT_VERSION, SBX_APT_SNAPSHOT
+# UMIAK_BUILD_ID, UMIAK_BUILD_VERSION, UMIAK_AGENT_VERSION, UMIAK_APT_SNAPSHOT
 set -a
 # shellcheck source=/dev/null
-. "$SBX_BUILD_DIR/env"
+. "$UMIAK_BUILD_DIR/env"
 set +a
 
 export DEBIAN_FRONTEND=noninteractive
@@ -22,7 +22,7 @@ export LC_ALL=C.UTF-8
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # The standard Ubuntu PATH a sandbox command gets (spec S5 section 8.9).
-SBX_STD_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+UMIAK_STD_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Removed by 00-base and checked by 90-cleanup (spec S5 section 8.1). Glob
 # patterns as in bash `case`; systemd-zram-generator because there is no swap
@@ -117,7 +117,7 @@ fetch_verify() {
 
 # toml_get <dotted.key>: a scalar from build/versions.toml; fails when absent.
 toml_get() {
-	python3 -I - "$SBX_BUILD_DIR/versions.toml" "$1" <<'PY'
+	python3 -I - "$UMIAK_BUILD_DIR/versions.toml" "$1" <<'PY'
 import sys, tomllib
 v = tomllib.load(open(sys.argv[1], "rb"))
 for part in sys.argv[2].split("."):
@@ -133,12 +133,12 @@ PY
 # toml_has <table>: whether versions.toml has the top-level table.
 toml_has() {
 	python3 -I -c 'import sys, tomllib; sys.exit(not isinstance(tomllib.load(open(sys.argv[1], "rb")).get(sys.argv[2]), dict))' \
-		"$SBX_BUILD_DIR/versions.toml" "$1"
+		"$UMIAK_BUILD_DIR/versions.toml" "$1"
 }
 
 # toml_table <table>: `key=value` lines of a flat table of versions.toml.
 toml_table() {
-	python3 -I - "$SBX_BUILD_DIR/versions.toml" "$1" <<'PY'
+	python3 -I - "$UMIAK_BUILD_DIR/versions.toml" "$1" <<'PY'
 import sys, tomllib
 t = tomllib.load(open(sys.argv[1], "rb")).get(sys.argv[2])
 if not isinstance(t, dict):
@@ -161,11 +161,11 @@ gpg_primary_fprs() {
 
 # install_file <path> [mode]: /<path> from files/<path>.
 install_file() {
-	install -D -o root -g root -m "${2:-0644}" "$SBX_FILES_DIR/$1" "/$1"
+	install -D -o root -g root -m "${2:-0644}" "$UMIAK_FILES_DIR/$1" "/$1"
 }
 
 # Runs a command as `user` with the env of a sandbox command (spec S3 8.2).
 as_user() {
 	runuser -u user -- env -i HOME=/home/user USER=user LOGNAME=user \
-		SHELL=/bin/bash LANG=C.UTF-8 PATH="$SBX_STD_PATH" "$@"
+		SHELL=/bin/bash LANG=C.UTF-8 PATH="$UMIAK_STD_PATH" "$@"
 }

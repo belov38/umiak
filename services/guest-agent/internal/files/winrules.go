@@ -6,7 +6,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
 )
 
 // The Windows rules are plain string functions, so they are tested on every

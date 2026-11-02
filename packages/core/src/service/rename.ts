@@ -1,4 +1,4 @@
-import { withTx } from "@sbx/db";
+import { withTx } from "@umiak/db";
 import { invalidState, slugTaken } from "../errors.ts";
 import type { Principal } from "../principal.ts";
 import type { Sandbox } from "../rows.ts";
@@ -13,7 +13,7 @@ import {
 // Slug change (S7 §5.4, §20.2 item 4). In one transaction under the sandbox row
 // lock: the new slug, the new labels `<slug>-<port>` of all live hosted ports
 // and their `auth_epoch + 1`, so old URLs and cookies stop working at once
-// (S4 §8.2). The triggers notify `sbx_routes` with the old and the new slug.
+// (S4 §8.2). The triggers notify `umiak_routes` with the old and the new slug.
 //
 // Epochs never repeat per label: a cookie is bound to {label, mode,
 // authEpoch}, and `hostPort` continues a label above every row it has. The

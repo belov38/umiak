@@ -2,11 +2,11 @@
 // websocket (or webrtc) viewer N times on one sandbox, right after create by
 // default, and saves viewer counters plus guest logs for every attempt.
 //
-//   SBX_PROBE_TEMPLATE=windows-desktop SBX_PROBE_ATTEMPTS=3 node infra/dev-cp/desktop-media-probe.ts
+//   UMIAK_PROBE_TEMPLATE=windows-desktop UMIAK_PROBE_ATTEMPTS=3 node infra/dev-cp/desktop-media-probe.ts
 //
-// SBX_PROBE_SANDBOX reuses a sandbox; SBX_PROBE_KEEP=1 keeps a created one;
-// SBX_PROBE_SUNSHINE_LOG sets Sunshine's min_log_level before the first open
-// (restarts the streamer); SBX_PROBE_HOLD_MS keeps a black viewer open for
+// UMIAK_PROBE_SANDBOX reuses a sandbox; UMIAK_PROBE_KEEP=1 keeps a created one;
+// UMIAK_PROBE_SUNSHINE_LOG sets Sunshine's min_log_level before the first open
+// (restarts the streamer); UMIAK_PROBE_HOLD_MS keeps a black viewer open for
 // manual inspection. Needs the same environment as e2e-desktop.sh.
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -15,28 +15,28 @@ import {
 	launchViewerBrowser,
 	viewerStats,
 } from "../../apps/web/e2e/desktop-media.ts";
-import { type Sandbox, Sbx } from "../../packages/sdk-ts/src/index.ts";
+import { type Sandbox, Umiak } from "../../packages/sdk-ts/src/index.ts";
 import { waitForDesktopBudget } from "./desktop-budget.ts";
 import { guestRoot, pwsh } from "./guest-root.ts";
 
-const client = new Sbx();
-const template = process.env.SBX_PROBE_TEMPLATE ?? "windows-desktop";
+const client = new Umiak();
+const template = process.env.UMIAK_PROBE_TEMPLATE ?? "windows-desktop";
 const windows = template.startsWith("windows");
-const attempts = Number(process.env.SBX_PROBE_ATTEMPTS ?? 3);
-const transport = (process.env.SBX_PROBE_TRANSPORT ?? "websocket") as
+const attempts = Number(process.env.UMIAK_PROBE_ATTEMPTS ?? 3);
+const transport = (process.env.UMIAK_PROBE_TRANSPORT ?? "websocket") as
 	| "websocket"
 	| "webrtc";
-const output = process.env.SBX_E2E_OUTPUT ?? "";
-if (!output) throw new Error("SBX_E2E_OUTPUT is required");
+const output = process.env.UMIAK_E2E_OUTPUT ?? "";
+if (!output) throw new Error("UMIAK_E2E_OUTPUT is required");
 await mkdir(output, { recursive: true, mode: 0o700 });
 
 const sunDir = windows
 	? "C:\\Program Files\\Sunshine\\config"
-	: "/home/user/.local/state/sbx-sunshine";
+	: "/home/user/.local/state/umiak-sunshine";
 const logs = windows
 	? {
 			"web-server.log": pwsh(
-				"Get-Content -Tail 600 'C:\\ProgramData\\sbx-agent\\state\\desktop-moonlight\\web-server.log'",
+				"Get-Content -Tail 600 'C:\\ProgramData\\umiak-agent\\state\\desktop-moonlight\\web-server.log'",
 			),
 			"sunshine.log": pwsh(`Get-Content -Tail 3000 '${sunDir}\\sunshine.log'`),
 			"udp.txt": pwsh(
@@ -47,7 +47,7 @@ const logs = windows
 			"web-server.log": [
 				"journalctl",
 				"-u",
-				"sbx-moonlight-web",
+				"umiak-moonlight-web",
 				"--no-pager",
 				"-n",
 				"600",
@@ -96,7 +96,7 @@ async function attempt(sb: Sandbox, n: number) {
 			`${label} open ${opened - started} ms, ${ok ? "picture" : "BLACK"} after ${Date.now() - opened} ms (ws video ${video}, decoded ${decoded})`,
 		);
 		if (!ok) {
-			const hold = Number(process.env.SBX_PROBE_HOLD_MS ?? 0);
+			const hold = Number(process.env.UMIAK_PROBE_HOLD_MS ?? 0);
 			if (hold > 0) {
 				console.log(`holding the black viewer for ${hold} ms`);
 				await page.waitForTimeout(hold);
@@ -127,7 +127,7 @@ async function attempt(sb: Sandbox, n: number) {
 	}
 }
 
-const reuse = process.env.SBX_PROBE_SANDBOX;
+const reuse = process.env.UMIAK_PROBE_SANDBOX;
 await waitForDesktopBudget();
 const sb = reuse
 	? await client.sandboxes.get(reuse)
@@ -142,7 +142,7 @@ console.log(`sandbox ${sb.data.slug}`);
 let failures = 0;
 try {
 	await sb.waitUntilReady({ timeoutMs: windows ? 600_000 : 300_000 });
-	const level = process.env.SBX_PROBE_SUNSHINE_LOG;
+	const level = process.env.UMIAK_PROBE_SUNSHINE_LOG;
 	if (level) {
 		if (!/^(verbose|debug|info)$/.test(level))
 			throw new Error("invalid Sunshine log level");
@@ -166,7 +166,7 @@ try {
 	}
 	for (let n = 1; n <= attempts; n++) if (!(await attempt(sb, n))) failures++;
 } finally {
-	if (!reuse && process.env.SBX_PROBE_KEEP !== "1")
+	if (!reuse && process.env.UMIAK_PROBE_KEEP !== "1")
 		await sb.delete({ wait: true });
 }
 console.log(`${failures} of ${attempts} black; artifacts ${output}`);

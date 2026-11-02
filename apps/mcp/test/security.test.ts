@@ -3,7 +3,7 @@
 // unknown tool, (c) a sandbox of another team is not found and nothing of it
 // changes, (d) delete cannot be confirmed by anything but the right value,
 // and no secret reaches the logs.
-import { Sbx } from "@sbx/sdk";
+import { Umiak } from "@umiak/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createLogger, REDACT_PATHS } from "../src/log.ts";
 import {
@@ -82,7 +82,7 @@ interface Fence {
 }
 
 const FENCE =
-	/<<<sbx-untrusted id=([0-9a-f]{6}) ([^>\n]*)>>>\n([\s\S]*?)\n<<<end id=\1>>>/g;
+	/<<<umiak-untrusted id=([0-9a-f]{6}) ([^>\n]*)>>>\n([\s\S]*?)\n<<<end id=\1>>>/g;
 
 function fences(a: Answer): Fence[] {
 	return [...a.texts.join("\n").matchAll(FENCE)].map((m) => ({
@@ -115,7 +115,7 @@ function expectContained(a: Answer, what: string) {
 		expect(f.nonce).toMatch(/^[0-9a-f]{6}$/);
 		expect(f.nonce).not.toBe("aaaaaa");
 		expect(all.split(`<<<end id=${f.nonce}>>>`).length - 1, what).toBe(
-			all.split(`<<<sbx-untrusted id=${f.nonce} `).length - 1,
+			all.split(`<<<umiak-untrusted id=${f.nonce} `).length - 1,
 		);
 	}
 	// Invisible characters are visible escapes, in the header too.
@@ -351,13 +351,13 @@ describe("(b) scope filter", () => {
 		http = await startHttp({
 			api: {
 				tokens: {
-					sbx_ci: {
+					umiak_ci: {
 						kind: "team_key",
 						scopes: CI_SCOPES,
 						teamId: FAKE_TEAM,
 						keyId: "key_ci",
 					},
-					sbx_noports: {
+					umiak_noports: {
 						kind: "team_key",
 						scopes: FULL_SCOPES.filter((s) => s !== "ports:write"),
 						teamId: FAKE_TEAM,
@@ -366,7 +366,7 @@ describe("(b) scope filter", () => {
 				},
 			},
 		});
-		const ci = await http.connect("sbx_ci");
+		const ci = await http.connect("umiak_ci");
 		const ciNames = (await ci.client.listTools()).tools.map((t) => t.name);
 		expect(ciNames).toHaveLength(26);
 		expect(ciNames).not.toContain("snapshot_save");
@@ -375,7 +375,7 @@ describe("(b) scope filter", () => {
 			ci.client.callTool({ name: "desktop_url", arguments: { sandbox: "x" } }),
 		).rejects.toThrow(/desktop_url not found/);
 
-		const np = await http.connect("sbx_noports");
+		const np = await http.connect("umiak_noports");
 		const npNames = (await np.client.listTools()).tools.map((t) => t.name);
 		expect(npNames).toHaveLength(36);
 		expect(npNames).not.toContain("port_expose");
@@ -416,7 +416,7 @@ function digest(api: FakeApi): string {
 describe("(c) cross-team", () => {
 	it("a sandbox of another team is not_found for every sandbox tool and nothing changes", async () => {
 		const hh = await start();
-		const other = new Sbx({
+		const other = new Umiak({
 			baseUrl: hh.api.url,
 			apiKey: FAKE_TOKENS.otherTeam,
 			env: {},

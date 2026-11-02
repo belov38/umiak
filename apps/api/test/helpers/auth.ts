@@ -1,12 +1,12 @@
-// Postgres-backed identity for auth tests: the PgIdentityStore of @sbx/auth,
-// its seeding helpers and a live `sbx_identity` listener.
+// Postgres-backed identity for auth tests: the PgIdentityStore of @umiak/auth,
+// its seeding helpers and a live `umiak_identity` listener.
 import { randomUUID } from "node:crypto";
-import { PgIdentityStore } from "@sbx/auth";
-import { pgIdentitySeeding } from "@sbx/auth/testing";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { PgIdentityStore } from "@umiak/auth";
+import { pgIdentitySeeding } from "@umiak/auth/testing";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { IdentityListener } from "../../src/index.ts";
 
-export const OPERATOR_GROUP = "sbx-operators";
+export const OPERATOR_GROUP = "umiak-operators";
 
 export interface IdentityWorld {
 	db: TestDatabase;

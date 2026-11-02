@@ -4,8 +4,8 @@ import {
 	type MachineState,
 	releaseCloneSlot,
 	tryPoweredStart,
-} from "@sbx/core";
-import { s2SerialPayload } from "@sbx/pve";
+} from "@umiak/core";
+import { s2SerialPayload } from "@umiak/pve";
 import type { WorkerCtx } from "./context.ts";
 import {
 	insertDisks,
@@ -67,7 +67,7 @@ export function isOwnerMismatch(e: unknown): boolean {
 
 export type OwnedPowerOp = "start" | "stop" | "shutdown" | "delete";
 
-/** Log and `sbx_owner_mismatch_total{op}` of a refused power operation. */
+/** Log and `umiak_owner_mismatch_total{op}` of a refused power operation. */
 export function noteOwnerMismatch(
 	ctx: WorkerCtx,
 	e: unknown,
@@ -77,7 +77,7 @@ export function noteOwnerMismatch(
 		{ ...errFields(e), ...fields },
 		"S1 refused a power operation: the VMID is not leased to the machine",
 	);
-	ctx.metrics.inc("sbx_owner_mismatch_total", { op: fields.op });
+	ctx.metrics.inc("umiak_owner_mismatch_total", { op: fields.op });
 }
 
 /**

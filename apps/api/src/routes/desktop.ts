@@ -1,6 +1,6 @@
 import { createRoute, type RouteConfig, z } from "@hono/zod-openapi";
-import type { Sandbox } from "@sbx/core";
-import { stepRequestId } from "@sbx/core";
+import type { Sandbox } from "@umiak/core";
+import { stepRequestId } from "@umiak/core";
 import type { Context } from "hono";
 import { authOf } from "../auth/principal.ts";
 import { requireScope } from "../auth/scopes.ts";
@@ -362,12 +362,12 @@ export function registerDesktopRoutes(app: ApiApp, deps: ApiDeps): void {
 				image = r.image as { width: number; height: number },
 				point = r.cursor as { x: number; y: number };
 			for (const [k, v] of Object.entries({
-				"Sbx-Screen-Width": screen.width,
-				"Sbx-Screen-Height": screen.height,
-				"Sbx-Image-Width": image.width,
-				"Sbx-Image-Height": image.height,
-				"Sbx-Cursor-X": point.x,
-				"Sbx-Cursor-Y": point.y,
+				"Umiak-Screen-Width": screen.width,
+				"Umiak-Screen-Height": screen.height,
+				"Umiak-Image-Width": image.width,
+				"Umiak-Image-Height": image.height,
+				"Umiak-Cursor-X": point.x,
+				"Umiak-Cursor-Y": point.y,
 			}))
 				c.header(k, String(v));
 			c.header("Cache-Control", "no-store");

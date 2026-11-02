@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
+	"github.com/belov38/umiak/libs/tunnel/agent"
 )
 
 // Dial defaults.
@@ -20,7 +20,7 @@ const (
 	defaultTotal   = 10 * time.Second
 )
 
-// Dial error reasons reported to the gateway (Sbx-Dial-Error).
+// Dial error reasons reported to the gateway (Umiak-Dial-Error).
 const (
 	ReasonRefused = "refused"
 	ReasonTimeout = "timeout"

@@ -8,7 +8,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
 )
 
 // Event types written to the journal.

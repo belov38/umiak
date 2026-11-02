@@ -1,4 +1,4 @@
-// setDefaultTeam (S8 §6.1, §9.9): the team used without Sbx-Team.
+// setDefaultTeam (S8 §6.1, §9.9): the team used without Umiak-Team.
 import { z } from "zod";
 import {
 	type ActionCtx,

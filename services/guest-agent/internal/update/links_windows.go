@@ -10,12 +10,12 @@ import (
 
 	"golang.org/x/sys/windows/registry"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // BinaryName is the agent binary in a package and a version directory of
 // this OS.
-const BinaryName = "sbx-agent.exe"
+const BinaryName = "umiak-agent.exe"
 
 // pointLink points the junction link (current or previous) at version v
 // (S9 spec 12.12). A junction cannot be renamed over another, so the new
@@ -25,7 +25,7 @@ const BinaryName = "sbx-agent.exe"
 // A missing current is not covered by the service failure actions: the
 // image path does not resolve, so no process runs and the rollback command
 // (under current or previous) may not exist either. The recovery is the
-// boot step `sbx-agent early`, which recreates a missing current from
+// boot step `umiak-agent early`, which recreates a missing current from
 // pending-update.json or previous (S9 Task 17), or the QEMU guest agent.
 func pointLink(l paths.Layout, link, v string) error {
 	target, err := filepath.Abs(VersionDir(l, v))

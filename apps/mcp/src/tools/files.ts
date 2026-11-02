@@ -4,7 +4,7 @@
 // character boundary. Names and text from the sandbox appear only inside a
 // fence, or sanitized when they must be in the JSON header.
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import { type FileInfo, SbxError } from "@sbx/sdk";
+import { type FileInfo, UmiakError } from "@umiak/sdk";
 import { z } from "zod";
 import type { ToolContext } from "../context.ts";
 import { ToolError } from "../errors.ts";
@@ -75,7 +75,7 @@ const userShape = z
 	.describe("Guest user (default: login user)");
 
 const SIZE_HINT =
-	"for larger files and directories ask the human to run `sbx cp` or `sbx push` in a terminal.";
+	"for larger files and directories ask the human to run `umiak cp` or `umiak push` in a terminal.";
 
 function tooLarge(what: string, bytes: number): ToolError {
 	return new ToolError({
@@ -126,7 +126,7 @@ interface FileRef {
 /**
  * `GET /files/content` with `Range: bytes=start-(start+length-1)`. An API
  * that ignores the range (200) is handled: the part is cut from the body. A
- * start at or past the end is a 416 SbxError (the real API sends the size
+ * start at or past the end is a 416 UmiakError (the real API sends the size
  * only in a header the SDK drops): see `readWindow`.
  */
 async function readRange(
@@ -137,7 +137,7 @@ async function readRange(
 ): Promise<Part> {
 	{
 		const { data, response } = await ctx
-			.sbx()
+			.umiak()
 			.raw.GET(`${FILES_PATH}/content`, {
 				params: {
 					path: { sandbox: f.sandbox },
@@ -184,9 +184,9 @@ async function readWindow(
 	try {
 		return await readRange(ctx, f, start, length);
 	} catch (err) {
-		if (!(err instanceof SbxError) || err.status !== 416) throw err;
+		if (!(err instanceof UmiakError) || err.status !== 416) throw err;
 		const info = await ctx
-			.sbx()
+			.umiak()
 			.sandboxes.handle(f.sandbox)
 			.files.stat(f.path, { ...compact({ user: f.user }), ...ctx.call });
 		const modifiedAt = info.modifiedAt ?? undefined;
@@ -449,7 +449,7 @@ export const filesWrite = defineTool({
 	name: "files_write",
 	title: "Write a file",
 	description:
-		"Writes a file atomically; creates parent directories and replaces an existing file by default. Up to 1 MiB: for larger files and directories ask the human to run sbx cp or sbx push in a terminal. mode is octal, e.g. 0644.",
+		"Writes a file atomically; creates parent directories and replaces an existing file by default. Up to 1 MiB: for larger files and directories ask the human to run umiak cp or umiak push in a terminal. mode is octal, e.g. 0644.",
 	toolset: "files",
 	scopes: ["files:write"],
 	annotations: REPEATABLE_DESTRUCTIVE,
@@ -480,7 +480,7 @@ export const filesWrite = defineTool({
 		// Checked before the API: a big body never travels through the model's context.
 		const bytes = decodeContent(args.content, args.encoding ?? "utf8");
 		const info = await ctx
-			.sbx()
+			.umiak()
 			.sandboxes.handle(args.sandbox)
 			.files.writeBytes(args.path, bytes, {
 				...(args.mode === undefined
@@ -574,7 +574,7 @@ export const filesEdit = defineTool({
 				"old_text and new_text are identical; nothing to change",
 			);
 		}
-		const files = ctx.sbx().sandboxes.handle(args.sandbox).files;
+		const files = ctx.umiak().sandboxes.handle(args.sandbox).files;
 		const o = () => ({ ...compact({ user: args.user }), ...ctx.call });
 
 		// 1. A regular UTF-8 text file up to 1 MiB, read whole.
@@ -726,10 +726,10 @@ export const filesList = defineTool({
 	async handler(args, ctx) {
 		const path = args.path ?? "~";
 		const sandbox = { sandbox: args.sandbox };
-		const files = ctx.sbx().sandboxes.handle(args.sandbox).files;
+		const files = ctx.umiak().sandboxes.handle(args.sandbox).files;
 		// The directory's own path: entries are shown relative to it.
 		const [{ data }, dir] = await Promise.all([
-			ctx.sbx().raw.GET(`${FILES_PATH}/list`, {
+			ctx.umiak().raw.GET(`${FILES_PATH}/list`, {
 				params: {
 					path: sandbox,
 					query: {
@@ -774,14 +774,14 @@ export const filesStat = defineTool({
 		let info: FileInfo;
 		try {
 			info = await ctx
-				.sbx()
+				.umiak()
 				.sandboxes.handle(args.sandbox)
 				.files.stat(args.path, {
 					...compact({ user: args.user }),
 					...ctx.call,
 				});
 		} catch (err) {
-			if (err instanceof SbxError && err.code === "path_not_found") {
+			if (err instanceof UmiakError && err.code === "path_not_found") {
 				return toolText({ path: args.path, exists: false });
 			}
 			throw err;
@@ -832,7 +832,7 @@ export const filesDelete = defineTool({
 	async handler(args, ctx) {
 		const recursive = args.recursive === true;
 		const { existed } = await ctx
-			.sbx()
+			.umiak()
 			.sandboxes.handle(args.sandbox)
 			.files.remove(args.path, {
 				recursive,

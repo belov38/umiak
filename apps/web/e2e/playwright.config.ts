@@ -1,5 +1,5 @@
 // Playwright E2E of the dashboard (S8 §15) against the compose E2E stack
-// (deploy/compose/e2e.yaml). `pnpm --filter @sbx/web test:e2e` brings the
+// (deploy/compose/e2e.yaml). `pnpm --filter @umiak/web test:e2e` brings the
 // stack up, runs this config and tears it down (run.ts); `pnpm exec
 // playwright test -c e2e` runs against a stack that is already up.
 import { defineConfig, devices } from "@playwright/test";

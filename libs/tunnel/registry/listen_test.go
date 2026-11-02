@@ -12,10 +12,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/registry"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/pgtest"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // freezeProxy forwards TCP to a target. freeze makes every connection open
@@ -202,7 +202,7 @@ func TestListenExtraChannels(t *testing.T) {
 	other := make(chan string, 64)
 	h := ev.handlers()
 	h.Channels = map[string]func(string){
-		"sbx_routes":   func(p string) { routes <- p },
+		"umiak_routes": func(p string) { routes <- p },
 		"Mixed Case.x": func(p string) { other <- p },
 	}
 	done := make(chan error, 1)
@@ -220,13 +220,13 @@ func TestListenExtraChannels(t *testing.T) {
 	})
 	expect(t, ev.session, "", "initial session resync")
 	expect(t, ev.instance, "", "initial instance resync")
-	expect(t, routes, "", "initial sbx_routes resync")
+	expect(t, routes, "", "initial umiak_routes resync")
 	expect(t, other, "", "initial quoted channel resync")
 
-	if _, err := pool.Exec(ctx, `SELECT pg_notify('sbx_routes', 'a')`); err != nil {
+	if _, err := pool.Exec(ctx, `SELECT pg_notify('umiak_routes', 'a')`); err != nil {
 		t.Fatal(err)
 	}
-	expect(t, routes, "a", "sbx_routes notification")
+	expect(t, routes, "a", "umiak_routes notification")
 	if _, err := pool.Exec(ctx, `SELECT pg_notify('Mixed Case.x', 'b')`); err != nil {
 		t.Fatal(err)
 	}
@@ -251,13 +251,13 @@ func TestListenExtraChannels(t *testing.T) {
 	}
 	expect(t, ev.session, "", "session resync after reconnect")
 	expect(t, ev.instance, "", "instance resync after reconnect")
-	expect(t, routes, "", "sbx_routes resync after reconnect")
+	expect(t, routes, "", "umiak_routes resync after reconnect")
 	expect(t, other, "", "quoted channel resync after reconnect")
 
-	if _, err := pool.Exec(ctx, `SELECT pg_notify('sbx_routes', 'c')`); err != nil {
+	if _, err := pool.Exec(ctx, `SELECT pg_notify('umiak_routes', 'c')`); err != nil {
 		t.Fatal(err)
 	}
-	expect(t, routes, "c", "sbx_routes notification after reconnect")
+	expect(t, routes, "c", "umiak_routes notification after reconnect")
 }
 
 // Channel names that clash with the tunnel channels, or that Postgres would
@@ -269,7 +269,7 @@ func TestListenRejectsBadChannels(t *testing.T) {
 			t.Errorf("Validate accepted channel %q", name)
 		}
 	}
-	ok := registry.ListenHandlers{Channels: map[string]func(string){"sbx_routes": nil, strings.Repeat("x", 63): func(string) {}}}
+	ok := registry.ListenHandlers{Channels: map[string]func(string){"umiak_routes": nil, strings.Repeat("x", 63): func(string) {}}}
 	if err := ok.Validate(); err != nil {
 		t.Fatalf("Validate = %v", err)
 	}

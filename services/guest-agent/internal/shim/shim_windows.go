@@ -18,13 +18,13 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/output"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/winapi"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/wincmd"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/winproc"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/output"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/winapi"
+	"github.com/belov38/umiak/services/guest-agent/internal/wincmd"
+	"github.com/belov38/umiak/services/guest-agent/internal/winproc"
 )
 
 // Exit codes of the Windows shim.
@@ -37,9 +37,9 @@ const (
 )
 
 // JobName returns the name of the permanent job of command id
-// (`Global\sbx-cmd-<id>`, S9 spec 12.6).
+// (`Global\umiak-cmd-<id>`, S9 spec 12.6).
 func JobName(id string) string {
-	return "sbx-cmd-" + id
+	return "umiak-cmd-" + id
 }
 
 const (
@@ -57,7 +57,7 @@ const (
 	consoleCloseWait = 5 * time.Second
 )
 
-// Main runs `sbx-agent shim --id <id> [--layout-root <dir>]` with its log
+// Main runs `umiak-agent shim --id <id> [--layout-root <dir>]` with its log
 // on os.Stderr (shim.log, opened by the supervisor). See Run.
 func Main(args []string) int {
 	return Run(args, os.Stderr)
@@ -86,7 +86,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 		return exitUsage
 	}
 	if !validID(*id) || fs.NArg() != 0 {
-		log.Error("shim: usage: sbx-agent shim --id <id> [--layout-root <dir>]")
+		log.Error("shim: usage: umiak-agent shim --id <id> [--layout-root <dir>]")
 		return exitUsage
 	}
 	l := paths.Default()
@@ -637,7 +637,7 @@ func (s *shim) startFailed(cause error) int {
 	s.log.Warn("shim: start failed", "err", cause)
 	s.removeScript()
 	st := s.streams[len(s.streams)-1] // stderr, or the only pty stream
-	s.writeLog(st, fmt.Appendf(nil, "sbx-agent: cannot start command: %v\n", cause))
+	s.writeLog(st, fmt.Appendf(nil, "umiak-agent: cannot start command: %v\n", cause))
 	e := ExitFile{
 		Status:      shimproto.StatusExited,
 		Code:        127,

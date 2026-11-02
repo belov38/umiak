@@ -9,7 +9,7 @@ import (
 	"connectrpc.com/connect"
 	"golang.org/x/sys/windows"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
+	"github.com/belov38/umiak/libs/tunnel/rpcconv"
 )
 
 func TestFromErrnoWindowsSharingViolation(t *testing.T) {

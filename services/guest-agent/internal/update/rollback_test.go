@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 func TestRollback(t *testing.T) {

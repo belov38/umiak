@@ -1,29 +1,37 @@
 import { cp, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import type { Payload } from "payload";
 import { getConstructionPlans } from "pg-boss";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
-	buildSbxConfig,
-	migrateSbxPayload,
+	buildUmiakConfig,
+	migrateUmiakPayload,
 	PAYLOAD_MIGRATIONS_DIR,
 } from "../src/index.ts";
 import { closePayload, openPayload, testOptions } from "./helpers.ts";
 
-describe("buildSbxConfig", () => {
+describe("buildUmiakConfig", () => {
 	it("moves REST to /cms-api, disables GraphQL, pins CSRF and cookies", async () => {
-		const c = await buildSbxConfig(testOptions("postgres://u:p@127.0.0.1:1/x"));
+		const c = await buildUmiakConfig(
+			testOptions("postgres://u:p@127.0.0.1:1/x"),
+		);
 		expect(c.routes.api).toBe("/cms-api");
 		expect(c.routes.admin).toBe("/admin");
 		expect(c.graphQL.disable).toBe(true);
-		expect(c.csrf).toEqual(["https://app.sbx.test"]);
+		expect(c.csrf).toEqual(["https://app.umiak.test"]);
 		expect(c.cookiePrefix).toBe("__Host-payload");
 		expect(c.admin.user).toBe("users");
 		expect(c.admin.avatar).toBe("default");
 		expect(c.telemetry).toBe(false);
-		expect(c.custom).toEqual({ sbx: { operatorGroups: ["sbx-operators"] } });
+		expect(c.custom).toEqual({
+			umiak: { operatorGroups: ["umiak-operators"] },
+		});
 		const users = c.collections.find((x) => x.slug === "users");
 		expect(users?.auth.disableLocalStrategy).toBe(true);
 		expect(users?.auth.strategies.map((s) => s.name)).toEqual(["oauth2-proxy"]);
@@ -34,7 +42,7 @@ describe("buildSbxConfig", () => {
 
 	it("has no CSRF origin without appOrigin", async () => {
 		const { appOrigin: _, ...o } = testOptions("postgres://u:p@127.0.0.1:1/x");
-		expect((await buildSbxConfig(o)).csrf).toEqual([]);
+		expect((await buildUmiakConfig(o)).csrf).toEqual([]);
 	});
 });
 
@@ -48,7 +56,7 @@ describe.skipIf(skipPg())("payload schema", () => {
 		t = await createTestDatabase({ max: 2 });
 		await t.pool.query(getConstructionPlans("pgboss"));
 		payload = await openPayload(t.url);
-		await migrateSbxPayload(payload);
+		await migrateUmiakPayload(payload);
 	});
 	afterAll(async () => {
 		if (t) await closePayload(t.url);
@@ -109,7 +117,7 @@ describe.skipIf(skipPg())("payload schema", () => {
 	});
 
 	it("has no drift: a migration generated from the config is empty", async () => {
-		const dir = await mkdtemp(path.join(tmpdir(), "sbx-payload-drift-"));
+		const dir = await mkdtemp(path.join(tmpdir(), "umiak-payload-drift-"));
 		const saved = payload.db.migrationDir;
 		await cp(PAYLOAD_MIGRATIONS_DIR, dir, { recursive: true });
 		const before = (await readdir(dir)).sort();

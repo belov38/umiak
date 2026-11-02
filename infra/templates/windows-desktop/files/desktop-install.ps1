@@ -1,12 +1,12 @@
 # S10 installer library. OS/network operations can be replaced by fake boundaries.
 Set-StrictMode -Version Latest
-function Get-SbxDesktopArtifact {
+function Get-UmiakDesktopArtifact {
     param($Pin,[string]$Destination,[scriptblock]$Download={param($Url,$Destination) Invoke-WebRequest -Uri $Url -OutFile $Destination})
     & $Download $Pin.url $Destination
     $hash=(Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
     if($hash -ne $Pin.sha256){throw 'desktop artifact SHA256 mismatch'}
 }
-function Invoke-SbxDesktopNative {
+function Invoke-UmiakDesktopNative {
     param([string]$File,[string[]]$Arguments)
     $start=[Diagnostics.ProcessStartInfo]::new($File)
     $start.UseShellExecute=$false
@@ -23,23 +23,23 @@ function Invoke-SbxDesktopNative {
 # audio socket for the video address (S10 spec 8.6). The recipe ships a build of the same
 # release with moonlight-web/ping-order.patch (moonlight-web/build.sh); only the server
 # binary of the pinned zip is replaced.
-function Install-SbxPatchedMoonlight {
+function Install-UmiakPatchedMoonlight {
     param([string]$Source,[string]$VersionDir)
     $exe=Join-Path $Source 'web-server.exe';$build=Join-Path $Source 'build.json'
     if(-not (Test-Path -LiteralPath $exe) -or -not (Test-Path -LiteralPath $build)){throw 'patched moonlight-web missing: run infra/templates/windows-desktop/moonlight-web/build.sh'}
     $info=Get-Content -Raw -LiteralPath $build | ConvertFrom-Json
     if((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $info.sha256){throw 'patched moonlight-web SHA256 mismatch'}
     Copy-Item -LiteralPath $exe -Destination (Join-Path $VersionDir 'web-server.exe') -Force
-    Copy-Item -LiteralPath $build -Destination (Join-Path $VersionDir 'sbx-build.json') -Force
+    Copy-Item -LiteralPath $build -Destination (Join-Path $VersionDir 'umiak-build.json') -Force
 }
-function Install-SbxDesktop {
+function Install-UmiakDesktop {
     param([string]$ProgramRoot,[string]$AgentRoot,[string]$WorkRoot,[string]$FilesRoot,[hashtable]$Ops=@{})
     $defaults=@{
-        Fetch={param($Pin,$Path) Get-SbxDesktopArtifact $Pin $Path}
-        Native={param($File,$Arguments) Invoke-SbxDesktopNative $File $Arguments}
+        Fetch={param($Pin,$Path) Get-UmiakDesktopArtifact $Pin $Path}
+        Native={param($File,$Arguments) Invoke-UmiakDesktopNative $File $Arguments}
         Expand={param($Path,$Directory) Expand-Archive -LiteralPath $Path -DestinationPath $Directory -Force}
         Link={param($Link,$Target) New-Item -ItemType Junction -Path $Link -Target $Target -Force | Out-Null}
-        Generate={param($Binary,$Config) Invoke-SbxDesktopNative $Binary @('--config-path',$Config,'config','generate')}
+        Generate={param($Binary,$Config) Invoke-UmiakDesktopNative $Binary @('--config-path',$Config,'config','generate')}
     }
     foreach($key in $defaults.Keys){if(-not $Ops.ContainsKey($key)){$Ops[$key]=$defaults[$key]}}
     $pins=Get-Content -Raw (Join-Path $FilesRoot 'desktop-pins.json') | ConvertFrom-Json
@@ -51,7 +51,7 @@ function Install-SbxDesktop {
     & $Ops.Native 'sc.exe' @('config','SunshineService','start=','demand')
     foreach($key in @('moonlight','cua')){
         $folder=if($key -eq 'moonlight'){'moonlight-web'}else{'cua-driver'}
-        $parent=Join-Path (Join-Path $ProgramRoot 'sbx-desktop') $folder
+        $parent=Join-Path (Join-Path $ProgramRoot 'umiak-desktop') $folder
         $versionDir=Join-Path $parent $pins.$key.version
         $unpack=Join-Path $WorkRoot "$key-unpack"
         & $Ops.Expand (Join-Path $WorkRoot $assets[$key]) $unpack
@@ -60,7 +60,7 @@ function Install-SbxDesktop {
         Copy-Item -LiteralPath $source -Destination $versionDir -Recurse -Force
         $binary=Join-Path $versionDir $(if($key -eq 'moonlight'){'web-server.exe'}else{'cua-driver.exe'})
         if(-not (Test-Path -LiteralPath $binary)){throw "desktop archive missing executable: $key"}
-        if($key -eq 'moonlight'){Install-SbxPatchedMoonlight (Join-Path $FilesRoot 'moonlight-web') $versionDir}
+        if($key -eq 'moonlight'){Install-UmiakPatchedMoonlight (Join-Path $FilesRoot 'moonlight-web') $versionDir}
         & $Ops.Link (Join-Path $parent 'current') $versionDir
     }
     $bundle=Join-Path $WorkRoot 'cua.sigstore.json'
@@ -68,23 +68,23 @@ function Install-SbxDesktop {
     & $Ops.Fetch $signature $bundle
     & $Ops.Native (Join-Path $WorkRoot 'cosign.exe') @('verify-blob','--bundle',$bundle,'--certificate-identity',"https://github.com/trycua/cua/.github/workflows/cd-rust-cua-driver.yml@refs/tags/cua-driver-rs-v$($pins.cua.version)",'--certificate-oidc-issuer','https://token.actions.githubusercontent.com',(Join-Path $WorkRoot 'cua.zip'))
     # The service account must exist before the directory ACL names it.
-    $agent=Join-Path $ProgramRoot 'sbx-agent/current/sbx-agent.exe'
-    & $Ops.Native 'sc.exe' @('create','sbx-moonlight-web','binPath=',("`"$agent`" stream-web"),'start=','demand','obj=','NT SERVICE\sbx-moonlight-web')
-    & $Ops.Native 'sc.exe' @('config','sbx-moonlight-web','binPath=',("`"$agent`" stream-web"),'start=','demand','obj=','NT SERVICE\sbx-moonlight-web')
-    & $Ops.Native 'sc.exe' @('sidtype','sbx-moonlight-web','unrestricted')
-    & $Ops.Native 'sc.exe' @('failure','sbx-moonlight-web','reset=','86400','actions=','restart/15000/restart/30000/restart/60000')
+    $agent=Join-Path $ProgramRoot 'umiak-agent/current/umiak-agent.exe'
+    & $Ops.Native 'sc.exe' @('create','umiak-moonlight-web','binPath=',("`"$agent`" stream-web"),'start=','demand','obj=','NT SERVICE\umiak-moonlight-web')
+    & $Ops.Native 'sc.exe' @('config','umiak-moonlight-web','binPath=',("`"$agent`" stream-web"),'start=','demand','obj=','NT SERVICE\umiak-moonlight-web')
+    & $Ops.Native 'sc.exe' @('sidtype','umiak-moonlight-web','unrestricted')
+    & $Ops.Native 'sc.exe' @('failure','umiak-moonlight-web','reset=','86400','actions=','restart/15000/restart/30000/restart/60000')
     $desktop=Join-Path $AgentRoot 'desktop'
     New-Item -ItemType Directory -Force $desktop | Out-Null
     # Directory ACL first; every file below only inherits it (no per-file grants).
-    & $Ops.Native 'icacls.exe' @($desktop,'/inheritance:r','/grant:r','*S-1-5-18:(OI)(CI)F','*S-1-5-32-544:(OI)(CI)F','NT SERVICE\sbx-moonlight-web:(OI)(CI)RX','/Q')
+    & $Ops.Native 'icacls.exe' @($desktop,'/inheritance:r','/grant:r','*S-1-5-18:(OI)(CI)F','*S-1-5-32-544:(OI)(CI)F','NT SERVICE\umiak-moonlight-web:(OI)(CI)RX','/Q')
     $config=Join-Path $desktop 'moonlight.json'
-    $web=Join-Path (Join-Path $ProgramRoot 'sbx-desktop') 'moonlight-web/current/web-server.exe'
+    $web=Join-Path (Join-Path $ProgramRoot 'umiak-desktop') 'moonlight-web/current/web-server.exe'
     & $Ops.Generate $web $config
     $settings=Get-Content -Raw $config | ConvertFrom-Json -AsHashtable
     $settings.web_server['bind_address']='127.0.0.1:47800'
     $settings.web_server['first_login_create_admin']=$true
     $settings.web_server['first_login_assign_global_hosts']=$false
-    $settings.web_server['forwarded_header']=@{username_header='X-Sbx-Desktop-User';auto_create_missing_user=$false}
+    $settings.web_server['forwarded_header']=@{username_header='X-Umiak-Desktop-User';auto_create_missing_user=$false}
     $settings.webrtc['ice_servers']=@()
     $settings.webrtc['ice_server_script']=Join-Path $desktop 'ice-servers.cmd'
     [IO.File]::WriteAllText($config,($settings | ConvertTo-Json -Depth 30))

@@ -1,4 +1,4 @@
-// A fake gateway internal listener: h2c with the sbx.testing.v1.Process test
+// A fake gateway internal listener: h2c with the umiak.testing.v1.Process test
 // service under /v1/machines/<id>/rpc (connect-node), HTTP/1.1 and h2c
 // /v1/machines/<id>/files/* routes, and scripted 421/503 answers that match the
 // Go gateway's wire format (Task 8 report) byte for byte where it matters.
@@ -11,13 +11,13 @@ import net from "node:net";
 import { create, toBinary } from "@bufbuild/protobuf";
 import { Code, ConnectError, type ConnectRouter } from "@connectrpc/connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
-import { ErrorDetailSchema } from "@sbx/proto";
+import { ErrorDetailSchema } from "@umiak/proto";
 import {
 	type AttachResponse,
 	AttachResponseSchema,
 	Process,
 	Stream,
-} from "../gen/sbx/testing/v1/process_pb.js";
+} from "../gen/umiak/testing/v1/process_pb.js";
 
 type Req = IncomingMessage | Http2ServerRequest;
 type NodeRes = ServerResponse | Http2ServerResponse;
@@ -41,17 +41,17 @@ export interface RecordedRequest {
 
 export type ScriptedAnswer =
 	/**
-	 * 421 with Sbx-Error-Code: machine_moved and Sbx-Instance-Url, and the
+	 * 421 with Umiak-Error-Code: machine_moved and Umiak-Instance-Url, and the
 	 * URL in the body (ErrorDetail.instance_url or instanceUrl). headers:
-	 * false leaves the Sbx-* headers out (the body alone carries the hint);
+	 * false leaves the Umiak-* headers out (the body alone carries the hint);
 	 * code is the Connect code of the rpc body (default unavailable).
 	 */
 	| { kind: "moved"; instanceUrl: string; headers?: boolean; code?: string }
-	/** 503 with Sbx-Error-Code: agent_unavailable and Retry-After: 1. */
+	/** 503 with Umiak-Error-Code: agent_unavailable and Retry-After: 1. */
 	| { kind: "unavailable" }
 	/** 200 Connect stream, half an envelope, then RST_STREAM INTERNAL_ERROR. */
 	| { kind: "reset-mid-envelope" }
-	/** A plain status without the gateway's Sbx-Error-Code (an agent answer). */
+	/** A plain status without the gateway's Umiak-Error-Code (an agent answer). */
 	| { kind: "plain"; status: number }
 	/** A redirect (an agent answer passed through) to location. */
 	| { kind: "redirect"; status: number; location: string }
@@ -123,7 +123,7 @@ function writeScripted(
 						message: "machine_moved",
 						details: [
 							{
-								type: "sbx.tunnel.v1.ErrorDetail",
+								type: "umiak.tunnel.v1.ErrorDetail",
 								value: detailValue("machine_moved", answer.instanceUrl),
 								debug: {
 									code: "machine_moved",
@@ -141,8 +141,8 @@ function writeScripted(
 			"content-type": "application/json",
 		};
 		if (answer.headers !== false) {
-			headers["sbx-error-code"] = "machine_moved";
-			headers["sbx-instance-url"] = answer.instanceUrl;
+			headers["umiak-error-code"] = "machine_moved";
+			headers["umiak-instance-url"] = answer.instanceUrl;
 		}
 		if (route === "files") {
 			headers["x-content-type-options"] = "nosniff";
@@ -159,7 +159,7 @@ function writeScripted(
 						message: "agent_unavailable",
 						details: [
 							{
-								type: "sbx.tunnel.v1.ErrorDetail",
+								type: "umiak.tunnel.v1.ErrorDetail",
 								value: detailValue("agent_unavailable"),
 								debug: { code: "agent_unavailable", retryable: true },
 							},
@@ -169,7 +169,7 @@ function writeScripted(
 		res.writeHead(503, {
 			"content-type": "application/json",
 			"retry-after": "1",
-			"sbx-error-code": "agent_unavailable",
+			"umiak-error-code": "agent_unavailable",
 		});
 		res.end(body);
 		return;

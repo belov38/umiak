@@ -5,7 +5,7 @@ import { z } from "@hono/zod-openapi";
 import type { ApiApp } from "../deps.ts";
 
 /** Placeholder values of the committed document; the served one is filled from settings. */
-export const DOC_ISSUER_PLACEHOLDER = "https://auth.example.com/realms/sbx";
+export const DOC_ISSUER_PLACEHOLDER = "https://auth.example.com/realms/umiak";
 export const DOC_API_URL_PLACEHOLDER = "https://api.example.com";
 
 export const ErrorSchema = z
@@ -116,7 +116,7 @@ export function registerSecuritySchemes(app: ApiApp): void {
 	app.openAPIRegistry.registerComponent("securitySchemes", "teamKey", {
 		type: "http",
 		scheme: "bearer",
-		bearerFormat: "sbx_",
-		description: "Team API key (sbx_...) for automation and CI",
+		bearerFormat: "umiak_",
+		description: "Team API key (umiak_...) for automation and CI",
 	});
 }

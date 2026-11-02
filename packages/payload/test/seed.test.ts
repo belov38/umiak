@@ -1,9 +1,13 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { encodeUuid, PRESETS } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { encodeUuid, PRESETS } from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import type { Payload } from "payload";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { migrateSbxPayload, seedPayloadIdentity } from "../src/index.ts";
+import { migrateUmiakPayload, seedPayloadIdentity } from "../src/index.ts";
 import { payloadContractSubject } from "../src/testing.ts";
 import { closePayload, Listener, openPayload } from "./helpers.ts";
 
@@ -73,9 +77,13 @@ apiKeys:
 	beforeAll(async () => {
 		t = await createTestDatabase({ migrated: false, max: 2 });
 		payload = await openPayload(t.url);
-		await migrateSbxPayload(payload);
+		await migrateUmiakPayload(payload);
 		listener = new Listener(t.url);
-		await listener.start(["sbx_identity", "sbx_config", "sbx_ssh_revoke"]);
+		await listener.start([
+			"umiak_identity",
+			"umiak_config",
+			"umiak_ssh_revoke",
+		]);
 	});
 	afterAll(async () => {
 		await listener?.stop();
@@ -99,12 +107,12 @@ apiKeys:
 		);
 		expect(notes).toEqual(
 			expect.arrayContaining([
-				`sbx_identity teams:${team}`,
-				`sbx_config teams:${team}`,
-				`sbx_identity users:${alice}`,
-				`sbx_identity users:${bob}`,
-				`sbx_identity memberships:${alice}:${team}`,
-				`sbx_identity api-keys:${ciKey}`,
+				`umiak_identity teams:${team}`,
+				`umiak_config teams:${team}`,
+				`umiak_identity users:${alice}`,
+				`umiak_identity users:${bob}`,
+				`umiak_identity memberships:${alice}:${team}`,
+				`umiak_identity api-keys:${ciKey}`,
 			]),
 		);
 		const first = await snapshot();
@@ -164,7 +172,7 @@ apiKeys:
 		});
 	});
 
-	it("a deactivation by the file sends sbx_ssh_revoke user:<usr_>", async () => {
+	it("a deactivation by the file sends umiak_ssh_revoke user:<usr_>", async () => {
 		const id = randomUUID();
 		const email = `f-${randomBytes(4).toString("hex")}@example.com`;
 		await seedPayloadIdentity(payload, `users: [{id: ${id}, email: ${email}}]`);
@@ -174,7 +182,7 @@ apiKeys:
 		);
 		await listener.waitFor(
 			(n) =>
-				n.channel === "sbx_ssh_revoke" &&
+				n.channel === "umiak_ssh_revoke" &&
 				n.payload === `user:${encodeUuid("user", id)}`,
 		);
 	});

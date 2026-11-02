@@ -1,0 +1,19 @@
+[Unit]
+Description=Sandbox Moonlight web stream
+After=network.target
+[Service]
+User=umiakstream
+Group=umiakstream
+StateDirectory=umiak-stream
+StateDirectoryMode=0700
+WorkingDirectory=/opt/umiak-desktop/moonlight-web/current
+ExecStart=/opt/umiak-desktop/moonlight-web/current/web-server --config-path /var/lib/umiak-stream/config.json --disable-default-webrtc-ice-servers
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=3
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

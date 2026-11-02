@@ -1,5 +1,7 @@
 # S7: доработки по итогам приёмки и подключение агента S3
 
+> Исторический план до R1. Действующие имена и контракты — `docs/specs/rename-umiak.md`.
+
 > **Для исполнителей:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development и superpowers:test-driven-development. Шаги — чекбоксы `- [ ]`.
 
 **Цель:** закрыть замечания приёмки S7 (master, 2026-10-30): слияние `main` с S5, детерминированные тесты, мелкие хвосты, подключение настоящего агента S3 (`ConnectAgentApi`), хранение `outputTruncated`, диапазоны миграций в roadmap.

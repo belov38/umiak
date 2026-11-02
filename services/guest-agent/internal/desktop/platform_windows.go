@@ -10,7 +10,7 @@ import (
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // NativeSession opens the logged-in console desktop, never session zero.
@@ -101,7 +101,7 @@ func NewPlatform(l paths.Layout, _ string) (Session, Streamer, func(context.Cont
 	h.Service = func(ctx context.Context, action, name string) error {
 		unit := "SunshineService"
 		if name == "moonlight" {
-			unit = "sbx-moonlight-web"
+			unit = "umiak-moonlight-web"
 		}
 		return windowsService(ctx, action, unit)
 	}
@@ -117,7 +117,7 @@ func NewPlatform(l paths.Layout, _ string) (Session, Streamer, func(context.Cont
 	h.Own = func(ctx context.Context, path, kind string) error {
 		account := "user"
 		if kind == "moon" {
-			account = `NT SERVICE\sbx-moonlight-web`
+			account = `NT SERVICE\umiak-moonlight-web`
 		}
 		return windowsACL(ctx, path, account)
 	}

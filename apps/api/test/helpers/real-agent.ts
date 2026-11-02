@@ -1,15 +1,15 @@
-// The real guest agent for api tests: runs the sbx-agent-harness binary
+// The real guest agent for api tests: runs the umiak-agent-harness binary
 // (built by agent-harness-global.ts) against the test database, for one
 // machine, and a ConnectAgentApi over AgentClient + PgRegistry to it.
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { AgentClient, PgRegistry } from "@sbx/agent-client";
+import { AgentClient, PgRegistry } from "@umiak/agent-client";
 import type pg from "pg";
 import { inject } from "vitest";
 import { ConnectAgentApi } from "../../src/index.ts";
 import "./agent-harness-provided.ts";
 
-/** The JSON line of sbx-agent-harness. */
+/** The JSON line of umiak-agent-harness. */
 export interface HarnessInfo {
 	internalUrl: string;
 	serviceToken: string;
@@ -31,7 +31,7 @@ export interface RealAgent {
 
 /** Why the real-agent tests skip ("" when the harness was built). */
 export function realAgentSkip(): string {
-	return inject("sbxAgentHarness").skip;
+	return inject("umiakAgentHarness").skip;
 }
 
 /** How long the harness may take to serve its machine. */
@@ -43,7 +43,7 @@ export async function startRealAgent(
 	machineId: string,
 ): Promise<RealAgent> {
 	const dbUrl = db.url;
-	const { bin } = inject("sbxAgentHarness");
+	const { bin } = inject("umiakAgentHarness");
 	const token = randomBytes(24).toString("base64url");
 	const child = spawn(
 		bin,
@@ -53,8 +53,8 @@ export async function startRealAgent(
 	let stderr = "";
 	child.stderr?.on("data", (b: Buffer) => {
 		stderr = (stderr + b.toString()).slice(-16_384);
-		// SBX_HARNESS_LOG=1: the harness logs, shown as they come.
-		if (process.env.SBX_HARNESS_LOG) process.stderr.write(b);
+		// UMIAK_HARNESS_LOG=1: the harness logs, shown as they come.
+		if (process.env.UMIAK_HARNESS_LOG) process.stderr.write(b);
 	});
 	const exited = new Promise<void>((r) => child.once("exit", () => r()));
 	let info: HarnessInfo;

@@ -24,7 +24,7 @@ async function admin(
 	path: string,
 	body?: unknown,
 ): Promise<Response> {
-	const r = await fetch(`${KEYCLOAK}/admin/realms/sbx${path}`, {
+	const r = await fetch(`${KEYCLOAK}/admin/realms/umiak${path}`, {
 		method,
 		headers: {
 			authorization: `Bearer ${await adminToken()}`,
@@ -103,15 +103,15 @@ export async function deleteUser(id: string): Promise<void> {
 }
 
 /**
- * `sbx login` as the CLI does it (S7 §7.6): the device grant of the public
- * client `sbx-cli`, approved in `page` (a browser already signed in to
+ * `umiak login` as the CLI does it (S7 §7.6): the device grant of the public
+ * client `umiak-cli`, approved in `page` (a browser already signed in to
  * Keycloak), then the token endpoint polled at the given interval.
  */
 export async function deviceLogin(page: Page): Promise<string> {
-	const oidc = `${KEYCLOAK}/realms/sbx/protocol/openid-connect`;
+	const oidc = `${KEYCLOAK}/realms/umiak/protocol/openid-connect`;
 	const start = await fetch(`${oidc}/auth/device`, {
 		method: "POST",
-		body: new URLSearchParams({ client_id: "sbx-cli", scope: "openid" }),
+		body: new URLSearchParams({ client_id: "umiak-cli", scope: "openid" }),
 	});
 	if (!start.ok) throw new Error(`device start: ${start.status}`);
 	const d = (await start.json()) as {
@@ -128,7 +128,7 @@ export async function deviceLogin(page: Page): Promise<string> {
 			method: "POST",
 			body: new URLSearchParams({
 				grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-				client_id: "sbx-cli",
+				client_id: "umiak-cli",
 				device_code: d.device_code,
 			}),
 		});

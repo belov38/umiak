@@ -1,13 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NETWORK_ERROR, SbxError, UNEXPECTED_RESPONSE } from "../src/errors.ts";
+import {
+	NETWORK_ERROR,
+	UmiakError,
+	UNEXPECTED_RESPONSE,
+} from "../src/errors.ts";
 import { backoffMs, withRetry } from "../src/retry.ts";
 
 function apiError(
 	status: number,
 	retryable: boolean,
 	extra: { code?: string; retryAfterMs?: number } = {},
-): SbxError {
-	return new SbxError({
+): UmiakError {
+	return new UmiakError({
 		status,
 		code: extra.code ?? "out_of_capacity",
 		message: "test",
@@ -18,8 +22,8 @@ function apiError(
 	});
 }
 
-function rawError(status: number): SbxError {
-	return new SbxError({
+function rawError(status: number): UmiakError {
+	return new UmiakError({
 		status,
 		code: UNEXPECTED_RESPONSE,
 		message: `HTTP ${status}`,
@@ -162,10 +166,10 @@ describe("which failures are retried", () => {
 			retried: true,
 		},
 		{
-			name: "network_error SbxError marked retryable",
+			name: "network_error UmiakError marked retryable",
 			method: "POST",
 			idempotent: true,
-			error: new SbxError({
+			error: new UmiakError({
 				status: 0,
 				code: NETWORK_ERROR,
 				message: "x",
@@ -248,7 +252,7 @@ describe("Retry-After that asks for no wait", () => {
 			random: () => 0,
 		}).catch((e: unknown) => e);
 		await vi.runAllTimersAsync();
-		expect(await p).toBeInstanceOf(SbxError);
+		expect(await p).toBeInstanceOf(UmiakError);
 		expect(calls).toHaveLength(1);
 	});
 });
@@ -284,7 +288,7 @@ describe("budget", () => {
 		const p = withRetry(fn, { method: "GET", random: () => 1 });
 		p.catch(() => {});
 		await vi.runAllTimersAsync();
-		await expect(p).rejects.toBeInstanceOf(SbxError);
+		await expect(p).rejects.toBeInstanceOf(UmiakError);
 		// Waits 0.5 + 1 + 2 + 4 + 6 × 8 = 55.5 s before the 11th attempt; one more
 		// 8 s wait would end at 63.5 s > 60 s.
 		expect(calls).toHaveLength(11);

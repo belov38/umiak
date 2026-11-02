@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { withTx } from "@sbx/db";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { withTx } from "@umiak/db";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	RecordingJobSender,
@@ -252,7 +256,7 @@ describe.skipIf(skipPg())(
 					"validation",
 				);
 				await expectCode(
-					env.svc.resume(env.p, s.sandboxId, { env: { SBX_X: "1" } }),
+					env.svc.resume(env.p, s.sandboxId, { env: { UMIAK_X: "1" } }),
 					"validation",
 				);
 				await expectCode(

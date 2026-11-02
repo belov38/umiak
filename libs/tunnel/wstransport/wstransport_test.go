@@ -22,10 +22,10 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wstransport"
+	"github.com/belov38/umiak/libs/tunnel/h2"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/wstransport"
 )
 
 // fakeAdmitter records the Hello and serves an HTTP/2 client over the admitted
@@ -346,7 +346,7 @@ func rawGet(t *testing.T, ts *httptest.Server, pool *x509.CertPool, h http.Heade
 
 func TestWrongSubprotocol426(t *testing.T) {
 	for name, protos := range map[string][]string{
-		"other":  {"sbx-tunnel.v2"},
+		"other":  {"umiak-tunnel.v2"},
 		"absent": nil,
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -375,7 +375,7 @@ func TestWrongSubprotocol426(t *testing.T) {
 
 func TestCustomSubprotocols(t *testing.T) {
 	adm := newFakeAdmitter()
-	ts, pool := newTLSServer(t, wstransport.NewHandler(adm, wstransport.HandlerOptions{Subprotocols: []string{"sbx-tunnel.v2", wire.Subprotocol}}))
+	ts, pool := newTLSServer(t, wstransport.NewHandler(adm, wstransport.HandlerOptions{Subprotocols: []string{"umiak-tunnel.v2", wire.Subprotocol}}))
 	c, resp, err := websocket.Dial(context.Background(), ts.URL+wire.ConnectPath, &websocket.DialOptions{
 		HTTPClient:   &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig(pool)}},
 		HTTPHeader:   testHello(transport.AuthToken).Header(),

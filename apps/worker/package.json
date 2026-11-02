@@ -1,5 +1,5 @@
 {
-	"name": "@sbx/worker",
+	"name": "@umiak/worker",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
@@ -8,25 +8,25 @@
 		".": "./src/index.ts"
 	},
 	"bin": {
-		"sbx-admin": "./src/admin/main.ts"
+		"umiak-admin": "./src/admin/main.ts"
 	},
 	"scripts": {
 		"start": "node src/main.ts",
 		"admin": "node src/admin/main.ts",
 		"test": "vitest run",
-		"typecheck": "pnpm --filter \"@sbx/agent-client...\" run build && tsc --noEmit -p ."
+		"typecheck": "pnpm --filter \"@umiak/agent-client...\" run build && tsc --noEmit -p ."
 	},
 	"dependencies": {
 		"@bufbuild/protobuf": "2.16.0",
 		"@connectrpc/connect": "2.3.0",
-		"@sbx/agent-client": "workspace:*",
-		"@sbx/auth": "workspace:*",
-		"@sbx/config": "workspace:*",
-		"@sbx/core": "workspace:*",
-		"@sbx/db": "workspace:*",
-		"@sbx/payload": "workspace:*",
-		"@sbx/proto": "workspace:*",
-		"@sbx/pve": "workspace:*",
+		"@umiak/agent-client": "workspace:*",
+		"@umiak/auth": "workspace:*",
+		"@umiak/config": "workspace:*",
+		"@umiak/core": "workspace:*",
+		"@umiak/db": "workspace:*",
+		"@umiak/payload": "workspace:*",
+		"@umiak/proto": "workspace:*",
+		"@umiak/pve": "workspace:*",
 		"pg": "8.23.1",
 		"pg-boss": "12.38.0",
 		"pino": "10.4.0",

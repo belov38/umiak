@@ -6,8 +6,8 @@ import {
 } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type ExecResult, PveApiError, type UploadFile } from "@sbx/pve";
-import { FakePve } from "@sbx/pve/testing";
+import { type ExecResult, PveApiError, type UploadFile } from "@umiak/pve";
+import { FakePve } from "@umiak/pve/testing";
 import { FAIL_STEP_SCRIPT } from "../src/build.ts";
 import type { GuestIo } from "../src/runner.ts";
 
@@ -273,10 +273,10 @@ export class FakeGuest implements GuestIo {
 	started: { step: string; script: string }[] = [];
 	packages = FAKE_PACKAGES;
 	tools =
-		'{"node":{"direct":"v24.11.0","login":"v24.11.0"},"sbx":{"direct":"missing","login":"missing"}}';
+		'{"node":{"direct":"v24.11.0","login":"v24.11.0"},"umiak":{"direct":"missing","login":"missing"}}';
 	/** Called when systemd-run starts a step. */
 	onStep?: (step: string) => void;
-	/** Exit status of `sbx-agent seal`. */
+	/** Exit status of `umiak-agent seal`. */
 	sealExit = 0;
 	/** Exit status of the random seed stop and removal. */
 	randomSeedExit = 0;
@@ -294,7 +294,7 @@ export class FakeGuest implements GuestIo {
 		this.calls.push(o?.input === undefined ? { cmd } : { cmd, input: o.input });
 		const [c0, c1] = cmd;
 		if (c0 === "systemd-run") {
-			const step = String(cmd[1]).replace("--unit=sbx-build-", "");
+			const step = String(cmd[1]).replace("--unit=umiak-build-", "");
 			const script = String(cmd.at(-1));
 			this.started.push({ step, script });
 			this.log.push(`guest:step ${step}`);
@@ -317,7 +317,7 @@ export class FakeGuest implements GuestIo {
 			this.log.push("guest:dpkg-query");
 			return ok(this.packages);
 		}
-		if (c0 === "sbx-agent" && c1 === "seal") {
+		if (c0 === "umiak-agent" && c1 === "seal") {
 			this.log.push("guest:seal");
 			return this.sealExit === 0
 				? ok("sealed\n")
@@ -346,7 +346,7 @@ export class FakeGuest implements GuestIo {
 		}
 		if (c0 === "bash" && c1 === "-c") {
 			const s = String(cmd[2]);
-			if (s.includes("rm -rf /var/log/sbx-build"))
+			if (s.includes("rm -rf /var/log/umiak-build"))
 				this.log.push("guest:rm-build-logs");
 			if (s.includes("journalctl --relinquish-var"))
 				this.log.push("guest:drop-journal");
@@ -369,7 +369,7 @@ export class FakeGuest implements GuestIo {
 	}
 
 	async readFile(path: string, offset: number): Promise<Buffer> {
-		const m = /^\/var\/log\/sbx-build\/(.+)\.(rc|log)$/.exec(path);
+		const m = /^\/var\/log\/umiak-build\/(.+)\.(rc|log)$/.exec(path);
 		if (!m) return Buffer.alloc(0);
 		const [, step = "", kind] = m;
 		const run = this.started.findLast((s) => s.step === step);
@@ -468,17 +468,17 @@ export class FakeWinGuest implements GuestIo {
 	sealExit = 0;
 	/** Content of C:\Windows\System32\Sysprep\Panther\setuperr.log. */
 	setupErr = "";
-	/** Exit codes of the next removals of C:\sbx-build (then 0). */
+	/** Exit codes of the next removals of C:\umiak-build (then 0). */
 	rmBuildDirExits: number[] = [];
-	/** C:\Windows\Setup\Scripts\sbx-offline.log; null: missing. */
+	/** C:\Windows\Setup\Scripts\umiak-offline.log; null: missing. */
 	offlineLog: string | null =
-		"sbx offline stage: drivers w11\r\nOK HKLM\\OFFSYS\\ControlSet001\\Services\\WinDefend Start 4\r\nDONE errors 0\r\n";
+		"umiak offline stage: drivers w11\r\nOK HKLM\\OFFSYS\\ControlSet001\\Services\\WinDefend Start 4\r\nDONE errors 0\r\n";
 	/** Start values the offline check reads; services not listed have Start=4. */
 	serviceStart: Record<string, number | null> = {};
 	msMpEng = false;
 	/** Exit code of the script that sets the one-time WinPE boot entry. */
 	peSetupExit = 0;
-	/** Exit code of the script that removes the WinPE boot entry and C:\sbx-pe. */
+	/** Exit code of the script that removes the WinPE boot entry and C:\umiak-pe. */
 	peCleanupExit = 0;
 	onStep?: (step: string) => void;
 	/** The one-time WinPE boot entry was set. */
@@ -502,7 +502,7 @@ export class FakeWinGuest implements GuestIo {
 		const script = String(cmd.at(-1));
 		if (c0 === "schtasks.exe") {
 			const task = String(cmd.at(c1 === "/delete" ? 4 : 3));
-			const step = task.replace(/^sbx-build-/, "");
+			const step = task.replace(/^umiak-build-/, "");
 			if (c1 === "/run") {
 				this.started.push(step);
 				this.log.push(`guest:step ${step}`);
@@ -539,20 +539,20 @@ export class FakeWinGuest implements GuestIo {
 							"bcdedit /create failed (exit 1): The parameter is incorrect.",
 					};
 				this.onPeSetup?.();
-				return ok("SBXPE {6a7c3b1e-0d2f-11f1-9a3c-525400a1b2c3}\r\n");
+				return ok("UMIAKPE {6a7c3b1e-0d2f-11f1-9a3c-525400a1b2c3}\r\n");
 			}
-			if (text.includes("C:\\sbx-pe")) {
+			if (text.includes("C:\\umiak-pe")) {
 				this.log.push("guest:pe-cleanup");
 				return this.peCleanupExit === 0
-					? ok("SBXPE removed\r\n")
+					? ok("UMIAKPE removed\r\n")
 					: {
 							exitCode: this.peCleanupExit,
 							stdout: "",
 							stderr:
-								"BCD entries 'sbx offline' left: {6a7c3b1e-0d2f-11f1-9a3c-525400a1b2c3}",
+								"BCD entries 'umiak offline' left: {6a7c3b1e-0d2f-11f1-9a3c-525400a1b2c3}",
 						};
 			}
-			if (text.includes("sbx-offline.log")) {
+			if (text.includes("umiak-offline.log")) {
 				this.log.push("guest:check-offline");
 				const names = (/\$names = @\(([^)]*)\)/.exec(text)?.[1] ?? "")
 					.split(",")
@@ -572,19 +572,19 @@ export class FakeWinGuest implements GuestIo {
 				this.log.push("guest:facts");
 				return ok(`noise\r\nFACTS ${JSON.stringify(this.facts)}\r\n`);
 			}
-			if (text.includes("C:\\sbx-build")) {
-				this.log.push("guest:rm-sbx-build");
+			if (text.includes("C:\\umiak-build")) {
+				this.log.push("guest:rm-umiak-build");
 				const code = this.rmBuildDirExits.shift() ?? 0;
 				return code === 0
 					? ok()
 					: { exitCode: code, stdout: "", stderr: "file in use" };
 			}
-			if (text.includes("sbx-template")) {
-				this.log.push("guest:mkdir-sbx-template");
+			if (text.includes("umiak-template")) {
+				this.log.push("guest:mkdir-umiak-template");
 				return ok();
 			}
 		}
-		if (c0?.endsWith("sbx-agent.exe") && c1 === "seal") {
+		if (c0?.endsWith("umiak-agent.exe") && c1 === "seal") {
 			this.log.push("guest:seal");
 			return this.sealExit === 0
 				? ok("sealed\r\n")
@@ -596,7 +596,7 @@ export class FakeWinGuest implements GuestIo {
 	#readFiles(r: GuestFilesRequest): ExecResult {
 		if (r.log.endsWith("\\setuperr.log"))
 			return guestFilesAnswer(r, undefined, Buffer.from(this.setupErr));
-		const m = /^C:\\sbx-build\\logs\\(.+)\.log$/.exec(r.log);
+		const m = /^C:\\umiak-build\\logs\\(.+)\.log$/.exec(r.log);
 		const step = m?.[1] ?? "";
 		if (!m || !this.started.includes(step))
 			return guestFilesAnswer(r, undefined, undefined);
@@ -682,7 +682,7 @@ export function writeAgentPackage(
 		"base64url",
 	);
 	const keyLine = `ed25519 ${raw.toString("base64")} test`;
-	const binary = o.os === "windows" ? "sbx-agent.exe" : "sbx-agent";
+	const binary = o.os === "windows" ? "umiak-agent.exe" : "umiak-agent";
 	const files: Record<string, Buffer> = {
 		[binary]: Buffer.from("agent binary"),
 		"trust/tunnel-ca.pem": Buffer.from("ca"),
@@ -691,7 +691,7 @@ export function writeAgentPackage(
 	const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
 	const manifest = Buffer.from(
 		`${JSON.stringify({
-			format: "sbx-agent-manifest/v1",
+			format: "umiak-agent-manifest/v1",
 			version: o.version ?? "0.4.0-test",
 			os: o.os,
 			arch: o.arch ?? "amd64",
@@ -708,7 +708,7 @@ export function writeAgentPackage(
 		...tarEntry("manifest.sig", sig),
 		Buffer.alloc(1024),
 	]);
-	const tarPath = join(dir, `sbx-agent-${o.os}.tar`);
+	const tarPath = join(dir, `umiak-agent-${o.os}.tar`);
 	const keysPath = join(dir, `update-keys-${o.os}.pub`);
 	writeFileSync(tarPath, tar);
 	writeFileSync(keysPath, `${keyLine}\n`);

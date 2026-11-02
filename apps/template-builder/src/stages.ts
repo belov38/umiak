@@ -15,7 +15,7 @@ import {
 	type NodeOps,
 	type PveClient,
 	type UploadFile,
-} from "@sbx/pve";
+} from "@umiak/pve";
 import { pveImageName } from "./image.ts";
 import type { Manifest, VerifyResult } from "./manifest.ts";
 import {
@@ -30,18 +30,18 @@ import { writeGuestFile } from "./seal.ts";
 import { renderSeed, SEED_AGENT_PACKAGE, type SeedInput } from "./seed.ts";
 import { isProtectedVmid } from "./vmid-guard.ts";
 
-// Stages of `sbx-tpl build` (spec S5 section 7.2); build.ts runs them in order and rolls back.
+// Stages of `umiak-tpl build` (spec S5 section 7.2); build.ts runs them in order and rolls back.
 
 /** Storage of the base images and seed ISOs. */
 export const MEDIA_STORAGE = "local";
-export const BUILD_TAG = "sbx-tpl";
+export const BUILD_TAG = "umiak-tpl";
 /** smbios1 of the build VM: serial "ds=nocloud" (base64). Removed with the seed ISO. */
 export const BUILD_SMBIOS1 = `serial=${Buffer.from("ds=nocloud").toString("base64")},base64=1`;
 export const DISK_OPTIONS = { discard: "on", iothread: "1", ssd: "1" };
 const STEP_DIR = "/mnt/seed/build/steps";
 /** `--fail-step` runs this script instead of the step (the seed stays unchanged). */
-export const FAIL_STEP_SCRIPT = "/run/sbx-tpl-fail-step.sh";
-const FAIL_STEP_BODY = 'echo "sbx-tpl: --fail-step"\nexit 1\n';
+export const FAIL_STEP_SCRIPT = "/run/umiak-tpl-fail-step.sh";
+const FAIL_STEP_BODY = 'echo "umiak-tpl: --fail-step"\nexit 1\n';
 
 const MIN = 60_000;
 export const TASK_TIMEOUT_MS = 30 * MIN;
@@ -122,7 +122,7 @@ export interface BuildOptions {
 	pool: string;
 	vnet: string;
 	agentPackage: string;
-	sbxCli?: string;
+	umiakCli?: string;
 	apiUrl?: string;
 	tunnelUrl?: string;
 	sshUserCa?: string;
@@ -283,7 +283,7 @@ export const SEED_SLOT = "scsi1";
 
 /** Name of the seed image in local:import. */
 export function seedName(m: Manifest): string {
-	return `sbx-seed-${m.buildId}.raw`;
+	return `umiak-seed-${m.buildId}.raw`;
 }
 
 export async function stageSeed(
@@ -302,12 +302,12 @@ export async function stageSeed(
 		agentPackage: o.agentPackage,
 		agentVersion: st.m.agentVersion,
 		manifestBase: guestManifest(st.m),
-		...opt("sbxCli"),
+		...opt("umiakCli"),
 		...opt("apiUrl"),
 		...opt("tunnelUrl"),
 		...opt("sshUserCa"),
 	};
-	const dir = mkdtempSync(join(tmpdir(), "sbx-tpl-seed-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-tpl-seed-"));
 	try {
 		const name = seedName(st.m);
 		const path = join(dir, "seed.iso");
@@ -389,7 +389,7 @@ export async function stageVm(
 		[SEED_SLOT]: `${o.storage}:0,import-from=${MEDIA_STORAGE}:import/${seedName(st.m)}`,
 		net0: `virtio=${mac},bridge=${o.vnet},firewall=1`,
 		boot: `order=${recipe.disk.slot}`,
-		description: `sbx-tpl build ${st.m.buildId}\ngit ${o.gitCommit}`,
+		description: `umiak-tpl build ${st.m.buildId}\ngit ${o.gitCommit}`,
 	});
 	await api.waitTask(o.node, upid, { timeoutMs: TASK_TIMEOUT_MS });
 	const vmPath = `/nodes/${o.node}/qemu/${vmid}`;
@@ -523,7 +523,7 @@ export async function shutdown(
 }
 
 /**
- * The build VM's firewall (ipfilter with its IPAM address, the sbx-egress rule) must not stay on
+ * The build VM's firewall (ipfilter with its IPAM address, the umiak-egress rule) must not stay on
  * the template: a Proxmox clone copies it, and the copy then collides with the clone's own.
  */
 export async function dropBuildFirewall(
@@ -557,7 +557,7 @@ export async function stageTemplate(
 		await deps.api.waitTask(o.node, r, { timeoutMs: TASK_TIMEOUT_MS });
 	await deps.node.call("media.remove", { names: [seedName(st.m)] });
 	st.seedUploaded = false;
-	// The sbx-tpl tag on the disk makes it a clone origin for sbx-node (as 599's).
+	// The umiak-tpl tag on the disk makes it a clone origin for umiak-node (as 599's).
 	await deps.node.call("lv.tagTemplate", { vmid });
 	await checkTemplateDisk(deps, `base-${vmid}-disk-0`, st);
 	await deps.allocator.markActive(vmid);

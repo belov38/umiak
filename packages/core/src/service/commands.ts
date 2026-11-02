@@ -1,4 +1,4 @@
-import { withTx } from "@sbx/db";
+import { withTx } from "@umiak/db";
 import { ulid } from "ulid";
 import { requestHash } from "../canonical.ts";
 import {

@@ -5,7 +5,7 @@ import type { TunnelRegistrar } from "./verify.ts";
 // psql in the CT's compose project over ssh, SQL on stdin. Dev stand only.
 
 const PSQL =
-	"cd boat-dev-clone/deploy/compose && docker compose exec -T postgres psql -U sbx -d sbx -v ON_ERROR_STOP=1 -Atq";
+	"cd umiak/deploy/compose && docker compose exec -T postgres psql -U umiak -d umiak -v ON_ERROR_STOP=1 -Atq";
 const UUID_RE =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;

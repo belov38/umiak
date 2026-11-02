@@ -5,8 +5,12 @@ import {
 	parseSshPublicKey,
 	parseUserCertificate,
 	type SshCa,
-} from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+} from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { testSettings } from "../src/testing/index.ts";
 import type { HarnessResponse } from "./helpers/harness.ts";
@@ -73,12 +77,12 @@ describe.skipIf(skipPg())("SSH (S7 §11.3)", () => {
 			const r = await harness().request("GET", `/v1/sandboxes/${s.slug}/ssh`);
 			expect(r.status, r.text).toBe(200);
 			expect(body(r)).toEqual({
-				host: "ssh.sbx.test",
+				host: "ssh.umiak.test",
 				port: 22,
 				username: s.slug,
 				loginUser,
-				command: `ssh ${s.slug}@ssh.sbx.test`,
-				knownHosts: hostKeys.map((k) => `ssh.sbx.test ${k}`),
+				command: `ssh ${s.slug}@ssh.umiak.test`,
+				knownHosts: hostKeys.map((k) => `ssh.umiak.test ${k}`),
 				hasKeys: false,
 			});
 			// By sb_ id too.
@@ -92,9 +96,9 @@ describe.skipIf(skipPg())("SSH (S7 §11.3)", () => {
 		it("another port: `[host]:port` known_hosts lines and `ssh -p`", async () => {
 			const s = await w.seed({ state: "stopped", machineState: "stopped" });
 			const settings = testSettings({
-				SBX_SSH_HOST: "ssh.example.com",
-				SBX_SSH_PORT: "2222",
-				SBX_API_RATE_BURST: "100000",
+				UMIAK_SSH_HOST: "ssh.example.com",
+				UMIAK_SSH_PORT: "2222",
+				UMIAK_API_RATE_BURST: "100000",
 			});
 			const r = await harness({ settings }).request(
 				"GET",
@@ -173,7 +177,7 @@ describe.skipIf(skipPg())("SSH (S7 §11.3)", () => {
 				json: { publicKey },
 			});
 
-		it("a team key: principal sb_..., KeyId sbx:key:key_..., 10 min, signed by the login CA", async () => {
+		it("a team key: principal sb_..., KeyId umiak:key:key_..., 10 min, signed by the login CA", async () => {
 			const s = await w.seed({ state: "ready" });
 			const userKey = ed25519PublicKey();
 			const before = Math.floor(Date.now() / 1000);
@@ -184,16 +188,16 @@ describe.skipIf(skipPg())("SSH (S7 §11.3)", () => {
 			const sb = encodeUuid("sandbox", s.sandboxId);
 			expect(b).toMatchObject({
 				principal: sb,
-				host: "ssh.sbx.test",
+				host: "ssh.umiak.test",
 				port: 22,
 				username: s.slug,
-				knownHosts: hostKeys.map((k) => `ssh.sbx.test ${k}`),
+				knownHosts: hostKeys.map((k) => `ssh.umiak.test ${k}`),
 			});
 
 			const cert = parseUserCertificate(b.certificate);
 			expect(cert.type).toBe("ssh-ed25519-cert-v01@openssh.com");
 			expect(cert.principals).toEqual([sb]);
-			expect(cert.keyId).toBe(`sbx:key:${encodeUuid("apiKey", w.keyId)}`);
+			expect(cert.keyId).toBe(`umiak:key:${encodeUuid("apiKey", w.keyId)}`);
 			expect(cert.publicKey).toBe(bareKey(userKey));
 			expect(cert.signatureKey).toBe(ca.publicKey);
 			expect(cert.extensions).toEqual(EXTENSIONS);
@@ -209,7 +213,7 @@ describe.skipIf(skipPg())("SSH (S7 §11.3)", () => {
 			expect(Date.parse(b.validBefore)).toBe(cert.validBefore.getTime());
 		});
 
-		it("a person: KeyId sbx:user:usr_...; ecdsa and RSA 3072 keys are accepted", async () => {
+		it("a person: KeyId umiak:user:usr_...; ecdsa and RSA 3072 keys are accepted", async () => {
 			const s = await w.seed({ state: "ready" });
 			const p = await w.dbSession({
 				role: "member",
@@ -218,7 +222,7 @@ describe.skipIf(skipPg())("SSH (S7 §11.3)", () => {
 			const r = await certify(p.h, s.slug, ecdsaP256PublicKey(), p.headers);
 			expect(r.status, r.text).toBe(200);
 			const cert = parseUserCertificate(body(r).certificate);
-			expect(cert.keyId).toBe(`sbx:user:${encodeUuid("user", p.userId)}`);
+			expect(cert.keyId).toBe(`umiak:user:${encodeUuid("user", p.userId)}`);
 			expect(cert.type).toBe("ecdsa-sha2-nistp256-cert-v01@openssh.com");
 
 			const rsa = await certify(harness(), s.slug, rsaPublicKey(3072));
@@ -253,7 +257,7 @@ describe.skipIf(skipPg())("SSH (S7 §11.3)", () => {
 			expect(r.status).toBe(200);
 		});
 
-		it("without SBX_SSH_LOGIN_CA_KEY_FILE: 500 internal, SSH login CA is not configured", async () => {
+		it("without UMIAK_SSH_LOGIN_CA_KEY_FILE: 500 internal, SSH login CA is not configured", async () => {
 			const s = await w.seed({ state: "ready" });
 			const r = await certify(
 				harness({ sshCa: null }),

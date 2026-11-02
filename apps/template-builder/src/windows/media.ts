@@ -22,8 +22,8 @@ import {
 
 // Contents of the build ISO (spec S9 section 6.3) and the offline ISO (section 6.4)
 
-export const BUILD_ISO_LABEL = "SBXBUILD";
-export const OFFLINE_ISO_LABEL = "SBXOFFL";
+export const BUILD_ISO_LABEL = "UMIAKBUILD";
+export const OFFLINE_ISO_LABEL = "UMIAKOFFL";
 
 /** Services and drivers each offline stage sets to Start=4 (spec S9 sections 8.1, 10.3). */
 export const OFFLINE_SERVICES: Record<OfflineStage, string[]> = {
@@ -41,7 +41,7 @@ export const OFFLINE_SERVICES: Record<OfflineStage, string[]> = {
 /**
  * Services of spec S9 section 8.1 that stay Manual through the build: sysprep /generalize can
  * hang or fail with dmwappushservice disabled. The offline boot comes before sysprep, so they are
- * not in its set; the specialize pass of sbx-unattend.xml disables them on each clone.
+ * not in its set; the specialize pass of umiak-unattend.xml disables them on each clone.
  */
 export const SYSPREP_DEFERRED_SERVICES = ["dmwappushservice"];
 
@@ -67,7 +67,7 @@ function crlf(s: string): string {
 export function agentPackageName(version: string): string {
 	if (!AGENT_VERSION_RE.test(version))
 		throw new Error(`invalid agent version "${version}"`);
-	return `sbx-agent-${version}-windows-amd64.tar`;
+	return `umiak-agent-${version}-windows-amd64.tar`;
 }
 
 /** Windows reads the Joliet tree; xorriso would silently truncate longer names. */
@@ -86,7 +86,7 @@ export interface BuildIsoInput {
 	/** The verified agent package (.tar). */
 	agentTar: Buffer;
 	agentVersion: string;
-	/** Content of `C:\ProgramData\sbx-agent\agent.toml`. */
+	/** Content of `C:\ProgramData\umiak-agent\agent.toml`. */
 	agentToml: string;
 	/** Content of the template SSH user CA public keys. */
 	sshUserCa?: string;
@@ -130,7 +130,7 @@ export function genericProductKey(
 		: resolveProductKey(recipe, versions.iso.productKey);
 }
 
-/** File map of the build ISO (volume label `SBXBUILD`); recipe files are looked up child recipe first. */
+/** File map of the build ISO (volume label `UMIAKBUILD`); recipe files are looked up child recipe first. */
 export function buildIsoFiles(i: BuildIsoInput): Map<string, string | Buffer> {
 	const { recipe, versions } = i;
 	const read = (rel: string) => readFileSync(recipeFile(recipe, rel), "utf8");
@@ -175,9 +175,9 @@ export function buildIsoFiles(i: BuildIsoInput): Map<string, string | Buffer> {
 	out.set("build/versions.json", versionsJson(i));
 	out.set("build/agent.toml", i.agentToml);
 	out.set(`build/${agentTarName}`, i.agentTar);
-	// Always present, empty without a CA, so 50-sbx-agent copies it unconditionally.
+	// Always present, empty without a CA, so 50-umiak-agent copies it unconditionally.
 	out.set("build/ssh-user-ca.pub", i.sshUserCa ?? "");
-	out.set("build/sbx-unattend.xml", read("sbx-unattend.xml"));
+	out.set("build/umiak-unattend.xml", read("umiak-unattend.xml"));
 	assertJolietNames(out);
 	return out;
 }
@@ -191,7 +191,7 @@ export interface OfflineIsoInput {
 }
 
 /**
- * File map of the offline ISO (volume label `SBXOFFL`): the windowsPE-only answer file,
+ * File map of the offline ISO (volume label `UMIAKOFFL`): the windowsPE-only answer file,
  * offline.cmd and offline-config.cmd with the virtio-win driver folder and the services.
  */
 export function offlineIsoFiles(
@@ -214,14 +214,14 @@ export function offlineIsoFiles(
 		[
 			"offline-config.cmd",
 			crlf(
-				`set SBX_DRIVERS=${drivers}\nset SBX_SERVICES=${services.join(" ")}\n`,
+				`set UMIAK_DRIVERS=${drivers}\nset UMIAK_SERVICES=${services.join(" ")}\n`,
 			),
 		],
 	]);
 }
 
 /**
- * `C:\ProgramData\sbx-agent\agent.toml` of the template (spec S9 section 12.1). The values equal
+ * `C:\ProgramData\umiak-agent\agent.toml` of the template (spec S9 section 12.1). The values equal
  * the agent's Windows defaults; the file makes them visible on the image. A desktop recipe adds
  * the desktop readiness phase and excludes the loopback streamer ports (spec S10 section 8.1).
  */

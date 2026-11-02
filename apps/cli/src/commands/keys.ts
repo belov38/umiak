@@ -1,9 +1,9 @@
-// `sbx keys list|create|rotate|rm` (S7 §7.2, §13): team API keys. create and
-// rotate need an owner logged in with Keycloak (`sbx login`): a team key
+// `umiak keys list|create|rotate|rm` (S7 §7.2, §13): team API keys. create and
+// rotate need an owner logged in with Keycloak (`umiak login`): a team key
 // cannot issue keys, so they stop before any request (`user_required`,
 // exit 4). The secret is printed only by create and rotate.
 
-import type { components } from "@sbx/sdk";
+import type { components } from "@umiak/sdk";
 import type { Command } from "commander";
 import { collect, parseDuration } from "../args.ts";
 import type { Context } from "../context.ts";
@@ -21,7 +21,7 @@ async function requirePerson(ctx: Context, what: string): Promise<void> {
 	if ((await ctx.bearer()).kind === "oidc") return;
 	throw new CliError({
 		code: "user_required",
-		message: `${what} needs an owner logged in with Keycloak (run: sbx login); a team key cannot issue keys`,
+		message: `${what} needs an owner logged in with Keycloak (run: umiak login); a team key cannot issue keys`,
 		retryable: false,
 	});
 }
@@ -42,7 +42,7 @@ export function register(program: Command, run: Runner): void {
 		.description("list the keys of the team (revoked ones too)")
 		.action(
 			run(async (ctx) => {
-				const { data } = await ctx.sbx().raw.GET("/v1/api-keys");
+				const { data } = await ctx.umiak().raw.GET("/v1/api-keys");
 				ctx.out.result(data, (v) =>
 					table(
 						[
@@ -57,7 +57,7 @@ export function register(program: Command, run: Runner): void {
 						v.data.map((k) => [
 							k.id,
 							k.name,
-							`sbx_${k.prefix}…${k.last4}`,
+							`umiak_${k.prefix}…${k.last4}`,
 							k.scopes.join(","),
 							k.expiresAt,
 							k.lastUsedAt,
@@ -98,7 +98,7 @@ export function register(program: Command, run: Runner): void {
 						"--expires",
 					);
 				}
-				const { data } = await ctx.sbx().raw.POST("/v1/api-keys", { body });
+				const { data } = await ctx.umiak().raw.POST("/v1/api-keys", { body });
 				ctx.out.result(data, secretText);
 			}),
 		);
@@ -110,9 +110,11 @@ export function register(program: Command, run: Runner): void {
 		.action(
 			run(async (ctx, args) => {
 				await requirePerson(ctx, "keys rotate");
-				const { data } = await ctx.sbx().raw.POST("/v1/api-keys/{key}/rotate", {
-					params: { path: { key: args[0] as string } },
-				});
+				const { data } = await ctx
+					.umiak()
+					.raw.POST("/v1/api-keys/{key}/rotate", {
+						params: { path: { key: args[0] as string } },
+					});
 				ctx.out.result(data, secretText);
 			}),
 		);
@@ -124,7 +126,7 @@ export function register(program: Command, run: Runner): void {
 		.action(
 			run(async (ctx, args) => {
 				for (const id of args[0] as string[]) {
-					await ctx.sbx().raw.DELETE("/v1/api-keys/{key}", {
+					await ctx.umiak().raw.DELETE("/v1/api-keys/{key}", {
 						params: { path: { key: id } },
 					});
 					ctx.out.result({ id, revoked: true }, (v) => `Revoked ${v.id}`);

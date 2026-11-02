@@ -1,9 +1,9 @@
 // Saved snapshots (S7 §13, S6 §7.8): create from a sandbox (202 with the
 // save_snapshot operation, Idempotency-Key), list, get by name, delete with
-// Sbx-Confirm-Delete (`snap_...` or the name).
+// Umiak-Confirm-Delete (`snap_...` or the name).
 import { createRoute, z } from "@hono/zod-openapi";
-import { encodeUuid } from "@sbx/auth";
-import { isSbxError } from "@sbx/core";
+import { encodeUuid } from "@umiak/auth";
+import { isUmiakError } from "@umiak/core";
 import { authOf } from "../auth/principal.ts";
 import { requireScope } from "../auth/scopes.ts";
 import type { ApiApp, ApiDeps } from "../deps.ts";
@@ -49,7 +49,7 @@ const IdempotencyHeaders = z.object({
 });
 
 const ConfirmDeleteHeaders = z.object({
-	"Sbx-Confirm-Delete": z
+	"Umiak-Confirm-Delete": z
 		.string()
 		.optional()
 		.openapi({
@@ -141,7 +141,7 @@ const deleteSnapshot = createRoute({
 	summary: "Delete a saved snapshot",
 	description:
 		"Deletes the ready snapshot of this name; the name is free at once, the disk is " +
-		"removed in the background. Needs the header Sbx-Confirm-Delete with the snapshot id " +
+		"removed in the background. Needs the header Umiak-Confirm-Delete with the snapshot id " +
 		"(or name) — otherwise 428 and nothing happens. Sandboxes created from it stay.",
 	tags: TAGS,
 	middleware: [requireScope("snapshots:write")] as const,
@@ -153,7 +153,7 @@ const deleteSnapshot = createRoute({
 			"`invalid_state` (details.state `creating`): wait until it is ready",
 		),
 		428: errorResponse(
-			"`confirmation_required`: Sbx-Confirm-Delete is missing or names another resource",
+			"`confirmation_required`: Umiak-Confirm-Delete is missing or names another resource",
 		),
 		...ERROR_RESPONSES,
 	},
@@ -218,7 +218,7 @@ export function registerSnapshotRoutes(app: ApiApp, deps: ApiDeps): void {
 			await svc.deleteSavedSnapshot(p, name, s.id);
 		} catch (e) {
 			if (
-				isSbxError(e, "snapshot_not_found") &&
+				isUmiakError(e, "snapshot_not_found") &&
 				e.details.reason === "id_mismatch"
 			) {
 				throw new ApiError(

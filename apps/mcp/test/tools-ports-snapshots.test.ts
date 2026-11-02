@@ -1,6 +1,6 @@
 // Port and snapshot tools (S11 8.5, 8.6, 11.1, 11.4) against the fake API.
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import { Sbx } from "@sbx/sdk";
+import { Umiak } from "@umiak/sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ToolContext } from "../src/context.ts";
 import { Deadline, RESPONSE_MARGIN_MS } from "../src/deadline.ts";
@@ -43,11 +43,11 @@ async function sandbox(hh: Harness): Promise<string> {
 async function withScopes(hh: Harness, scopes: string[]) {
 	const token = `scoped_${scopes.join("_")}`;
 	hh.api.tokens.set(token, { kind: "team_key", scopes, teamId: FAKE_TEAM });
-	const sbx = new Sbx({ baseUrl: hh.api.url, apiKey: token, env: {} });
+	const umiak = new Umiak({ baseUrl: hh.api.url, apiKey: token, env: {} });
 	const conn = await connectInMemory(
 		createServer({
 			tools: ALL_TOOLS,
-			sbx: () => sbx,
+			umiak: () => umiak,
 			transport: "stdio",
 			log: createLogger({ level: "silent" }),
 		}),
@@ -222,7 +222,7 @@ describe("port_expose", () => {
 		});
 		expect(r.json.url).toMatch(/^https:\/\/.+-3000\./);
 		expect(r.json.url_with_token).toBeUndefined();
-		expect(JSON.stringify(r.texts)).not.toContain("sbxp_");
+		expect(JSON.stringify(r.texts)).not.toContain("umiakp_");
 		const put = hh.to("PUT", `${PORTS(sb)}/3000`);
 		expect(put).toHaveLength(1);
 		expect(put[0]?.body).toEqual({ access: "sso" });
@@ -238,7 +238,7 @@ describe("port_expose", () => {
 		});
 		expect(r.isError).toBe(false);
 		expect(r.json.access).toBe("token");
-		expect(r.json.url_with_token).toMatch(/\/\?_token=sbxp_[0-9a-f]+$/);
+		expect(r.json.url_with_token).toMatch(/\/\?_token=umiakp_[0-9a-f]+$/);
 		expect(r.lines).toContain(SECRET);
 	});
 
@@ -254,7 +254,7 @@ describe("port_expose", () => {
 			status: "unchanged",
 		});
 		expect(again.json.url_with_token).toBeUndefined();
-		expect(JSON.stringify(again.texts)).not.toContain("sbxp_");
+		expect(JSON.stringify(again.texts)).not.toContain("umiakp_");
 		expect(again.lines).toContain("rotate_token=true");
 		expect(hh.to("PUT", `${PORTS(sb)}/3000`)).toHaveLength(1);
 		expect(hh.to("GET", PORTS(sb)).length).toBeGreaterThanOrEqual(2);
@@ -276,7 +276,7 @@ describe("port_expose", () => {
 	it("a new access on an existing port is a PUT that keeps hostRewrite and appProtocol", async () => {
 		const hh = await start();
 		const sb = await sandbox(hh);
-		await hh.sbx.sandboxes.handle(sb).ports.host(4000, {
+		await hh.umiak.sandboxes.handle(sb).ports.host(4000, {
 			access: "sso",
 			hostRewrite: "localhost",
 			appProtocol: "h2c",
@@ -294,7 +294,7 @@ describe("port_expose", () => {
 			hostRewrite: "localhost",
 			appProtocol: "h2c",
 		});
-		const listed = await hh.sbx.sandboxes.handle(sb).ports.list();
+		const listed = await hh.umiak.sandboxes.handle(sb).ports.list();
 		expect(listed.hosted[0]).toMatchObject({
 			access: "token",
 			hostRewrite: "localhost",
@@ -317,7 +317,7 @@ describe("port_expose", () => {
 		});
 		expect(r.isError).toBe(false);
 		expect(r.json.status).toBe("token_rotated");
-		expect(r.json.url_with_token).toMatch(/_token=sbxp_/);
+		expect(r.json.url_with_token).toMatch(/_token=umiakp_/);
 		expect(r.json.url_with_token).not.toBe(first.json.url_with_token);
 		expect(r.lines).toContain(SECRET);
 		expect(hh.to("POST", `${PORTS(sb)}/3000/rotate-token`)).toHaveLength(1);
@@ -400,7 +400,7 @@ describe("port_expose", () => {
 			port: 3000,
 			access: "token",
 		});
-		const token = /sbxp_[0-9a-f]+/.exec(r.json.url_with_token)?.[0] as string;
+		const token = /umiakp_[0-9a-f]+/.exec(r.json.url_with_token)?.[0] as string;
 		expect(token).toBeTruthy();
 		expect(JSON.stringify(hh.logs)).not.toContain(token);
 	});
@@ -511,7 +511,7 @@ describe("port_list", () => {
 		expect(r.json.count).toBe(3);
 		const body = r.texts.join("\n");
 		const m =
-			/<<<sbx-untrusted id=([0-9a-f]+) kind=ports>>>\n([\s\S]*?)\n<<<end id=\1>>>/.exec(
+			/<<<umiak-untrusted id=([0-9a-f]+) kind=ports>>>\n([\s\S]*?)\n<<<end id=\1>>>/.exec(
 				body,
 			);
 		expect(m).not.toBeNull();
@@ -532,7 +532,7 @@ describe("port_list", () => {
 		expect(rows[1].access).toBeUndefined();
 		expect(rows[2].process).toBeUndefined();
 		expect(r.lines).toContain("published but nothing listens: 9000");
-		expect(JSON.stringify(r.texts)).not.toContain("sbxp_");
+		expect(JSON.stringify(r.texts)).not.toContain("umiakp_");
 	});
 
 	it("a stopped sandbox gives the stored report and no 'nothing listens' claim", async () => {
@@ -564,7 +564,7 @@ describe("port_list", () => {
 		expect(body).not.toContain("\u{1b}");
 		expect(body).not.toContain("\u{202e}");
 		expect(body).toContain("\\u{202E}");
-		expect(body).toMatch(/<<<sbx-untrusted id=[0-9a-f]+ kind=ports>>>/);
+		expect(body).toMatch(/<<<umiak-untrusted id=[0-9a-f]+ kind=ports>>>/);
 		// Nothing from the sandbox is outside the fence.
 		expect(r.texts[0]).not.toContain("ignore");
 	});
@@ -598,7 +598,9 @@ describe("port_unexpose", () => {
 		const r = await hh.call("port_unexpose", { sandbox: sb, port: 3000 });
 		expect(r.isError).toBe(false);
 		expect(r.json).toEqual({ port: 3000, published: false });
-		expect((await hh.sbx.sandboxes.handle(sb).ports.list()).hosted).toEqual([]);
+		expect((await hh.umiak.sandboxes.handle(sb).ports.list()).hosted).toEqual(
+			[],
+		);
 		const again = await hh.call("port_unexpose", { sandbox: sb, port: 3000 });
 		expect(again.isError).toBe(false);
 	});
@@ -773,7 +775,7 @@ describe("snapshot_save", () => {
 	});
 
 	it("a save that gets no answer is deadline_exceeded with the model key", async () => {
-		const hang = new Sbx({
+		const hang = new Umiak({
 			baseUrl: "http://127.0.0.1:9",
 			apiKey: "k",
 			env: {},
@@ -787,7 +789,7 @@ describe("snapshot_save", () => {
 		});
 		const deadline = new Deadline(new AbortController().signal, 300);
 		const ctx: ToolContext = {
-			sbx: () => hang,
+			umiak: () => hang,
 			deadline,
 			get call() {
 				return {
@@ -976,7 +978,7 @@ describe("snapshot_delete", () => {
 		expect(r.texts[0]).toContain("error: confirmation_required");
 		expect(r.texts[0]).toContain("hint:");
 		const sent = hh.to("DELETE", "/v1/snapshots/web-stack");
-		expect(sent[0]?.headers.get("Sbx-Confirm-Delete")).toBe("other-name");
+		expect(sent[0]?.headers.get("Umiak-Confirm-Delete")).toBe("other-name");
 		expect((await hh.call("snapshot_list")).json.count).toBe(1);
 	});
 

@@ -13,8 +13,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
 )
 
 // quotaWriter writes to f until room bytes are used, then fails with errno

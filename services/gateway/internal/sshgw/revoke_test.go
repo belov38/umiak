@@ -8,12 +8,12 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/server"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/sshgw"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv/sshdtest"
+	"github.com/belov38/umiak/libs/tunnel/wire"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/server"
+	"github.com/belov38/umiak/services/gateway/internal/sshgw"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/services/gateway/internal/testenv/sshdtest"
 )
 
 // openCat starts "cat" on a new session channel (it runs until stdin
@@ -119,7 +119,7 @@ func TestRevokeE2E(t *testing.T) {
 	eventually(t, "two session channels", func() bool { return sshgw.SessionChannels(srv) == 2 })
 
 	f.env.Notify(server.ChannelSSHRevoke, "user:usr_1")
-	if got := readAllWithin(t, stderr, 2*time.Second); got != "sbx: access revoked\r\n" {
+	if got := readAllWithin(t, stderr, 2*time.Second); got != "umiak: access revoked\r\n" {
 		t.Fatalf("stderr %q", got)
 	}
 	done := make(chan struct{})
@@ -157,7 +157,7 @@ func TestRecheckOnReconnect(t *testing.T) {
 	if err != nil || killed != 1 {
 		t.Fatalf("terminate listener: killed=%d err=%v", killed, err)
 	}
-	if got := readAllWithin(t, stderr, testenv.WaitTimeout); got != "sbx: access revoked\r\n" {
+	if got := readAllWithin(t, stderr, testenv.WaitTimeout); got != "umiak: access revoked\r\n" {
 		t.Fatalf("stderr %q", got)
 	}
 	waitClosed(t, c)
@@ -197,7 +197,7 @@ func TestOwnerDrainE2E(t *testing.T) {
 	}
 	start := time.Now()
 	env.Notify(wire.NotifyInstancesChannel, a.Name)
-	want := "sbx: gateway restarting, this SSH session will close in 1 min; reconnect to continue\r\n"
+	want := "umiak: gateway restarting, this SSH session will close in 1 min; reconnect to continue\r\n"
 	readWithin(t, stderr, want, 5*time.Second)
 	waitClosed(t, c)
 	if took := time.Since(start); took > 3*time.Second {
@@ -217,6 +217,6 @@ func TestDrainWarnOnPTY(t *testing.T) {
 		t.Fatalf("exec during the drain: %v", r)
 	}
 	stderr := openShell(t, c)
-	want := "sbx: gateway restarting, this SSH session will close in 10 min; reconnect to continue\r\n"
+	want := "umiak: gateway restarting, this SSH session will close in 10 min; reconnect to continue\r\n"
 	readWithin(t, stderr, want, 5*time.Second)
 }

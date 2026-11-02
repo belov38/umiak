@@ -1,4 +1,4 @@
-import { SCOPES as AUTH_SCOPES } from "@sbx/auth";
+import { SCOPES as AUTH_SCOPES } from "@umiak/auth";
 import { describe, expect, it } from "vitest";
 import { idempotencyPrincipal, type Principal, SCOPES } from "../src/index.ts";
 
@@ -38,7 +38,7 @@ describe("idempotencyPrincipal", () => {
 });
 
 describe("SCOPES", () => {
-	it("is the @sbx/auth list", () => {
+	it("is the @umiak/auth list", () => {
 		expect([...SCOPES]).toEqual([...AUTH_SCOPES]);
 		expect(SCOPES).toBe(AUTH_SCOPES);
 	});

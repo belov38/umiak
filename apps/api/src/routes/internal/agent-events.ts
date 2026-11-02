@@ -11,12 +11,12 @@ import {
 	toBinary,
 	toJsonString,
 } from "@bufbuild/protobuf";
-import { ingestAgentEvents } from "@sbx/core";
+import { ingestAgentEvents } from "@umiak/core";
 import {
 	type AgentEventsRequest,
 	AgentEventsRequestSchema,
 	AgentEventsResponseSchema,
-} from "@sbx/proto";
+} from "@umiak/proto";
 import {
 	AGENT_EVENT_PAYLOAD_REGISTRY,
 	decodeAgentEvents,

@@ -1,12 +1,12 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Machines, s2SerialPayload } from "@sbx/pve";
+import { Machines, s2SerialPayload } from "@umiak/pve";
 import { type Ctx, RamGuard } from "./context.ts";
 import { redact, table } from "./report.ts";
 import { type Summary, summarize } from "./stats.ts";
 
-// sbx-bench s5 (spec S5 section 13.1): boot timing of a template build against a baseline.
+// umiak-bench s5 (spec S5 section 13.1): boot timing of a template build against a baseline.
 // One VM at a time: create (S1, 2 vCPU / 2 GB) -> start -> measure -> hard stop -> start ->
 // measure -> delete.
 
@@ -90,10 +90,10 @@ export function agentReadyMs(
 
 const GUEST_SCRIPT = [
 	"cat /proc/uptime",
-	"systemctl show -p ActiveEnterTimestampMonotonic --value sbx-agent.service 2>/dev/null || echo 0",
+	"systemctl show -p ActiveEnterTimestampMonotonic --value umiak-agent.service 2>/dev/null || echo 0",
 	"systemd-analyze 2>/dev/null | head -1",
 	"echo ---",
-	"systemd-analyze critical-chain sbx-agent.service 2>/dev/null | tail -n +3 | head -15",
+	"systemd-analyze critical-chain umiak-agent.service 2>/dev/null | tail -n +3 | head -15",
 	"echo ---",
 	"systemd-analyze blame 2>/dev/null | head -10",
 ].join("\n");

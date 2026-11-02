@@ -1,5 +1,5 @@
 // Catalog and quotas (S11 8.1): who am I and what can I create.
-import type { components } from "@sbx/sdk";
+import type { components } from "@umiak/sdk";
 import { toolText } from "../output/result.ts";
 import { defineTool } from "../registry.ts";
 import { compact, snakeKeys } from "./view.ts";
@@ -17,7 +17,7 @@ export const limitsGet = defineTool({
 	name: "limits_get",
 	title: "Show identity and limits",
 	description:
-		"Shows who you are, the team, scopes, quota with usage and remaining, can_create, and the sizes allowed now per template (with the reason when not). Call before creating many sandboxes or after quota_exceeded.",
+		"Shows your identity, team, scopes, quota usage and remaining, can_create, and allowed sizes per template (with denial reasons). Call before creating many sandboxes or after quota_exceeded.",
 	toolset: "core",
 	scopes: [],
 	annotations: {
@@ -29,10 +29,10 @@ export const limitsGet = defineTool({
 	sandboxArg: false,
 	shape: {},
 	async handler(_args, ctx) {
-		const sbx = ctx.sbx();
+		const umiak = ctx.umiak();
 		const [me, limits] = await Promise.all([
-			sbx.raw.GET("/v1/me", ctx.call),
-			sbx.raw.GET("/v1/limits", ctx.call),
+			umiak.raw.GET("/v1/me", ctx.call),
+			umiak.raw.GET("/v1/limits", ctx.call),
 		]);
 		const { user, team, auth } = me.data;
 		const l = limits.data;
@@ -87,10 +87,10 @@ export const templatesList = defineTool({
 	sandboxArg: false,
 	shape: {},
 	async handler(_args, ctx) {
-		const sbx = ctx.sbx();
+		const umiak = ctx.umiak();
 		const [templates, sizes] = await Promise.all([
-			sbx.raw.GET("/v1/templates", ctx.call),
-			sbx.raw.GET("/v1/sizes", ctx.call),
+			umiak.raw.GET("/v1/templates", ctx.call),
+			umiak.raw.GET("/v1/sizes", ctx.call),
 		]);
 		return toolText({
 			templates: templates.data.data.map((t) => ({

@@ -1,10 +1,10 @@
-// NOTIFY sbx_ssh_revoke for open SSH sessions (S8 §8, S4 §9.5), the payloads
+// NOTIFY umiak_ssh_revoke for open SSH sessions (S8 §8, S4 §9.5), the payloads
 // of the stand-in triggers (db/migrations/0302, 0303) with public ids:
 //   user deactivated or deleted while active -> user:<usr_...>
 //   membership deleted                      -> member:<team_...>:<usr_...>
 //   key revoked, rotated or deleted while live -> key:<key_...>
 //   team deleted                            -> team:<team_...>
-import { encodeUuid } from "@sbx/auth";
+import { encodeUuid } from "@umiak/auth";
 import type {
 	CollectionAfterChangeHook,
 	CollectionAfterDeleteHook,
@@ -26,7 +26,7 @@ export const usersRevokeAfterChange: CollectionAfterChangeHook = async ({
 		previousDoc?.active !== false &&
 		doc.active === false
 	) {
-		await notify(req, "sbx_ssh_revoke", userPayload(doc.id));
+		await notify(req, "umiak_ssh_revoke", userPayload(doc.id));
 	}
 	return doc;
 };
@@ -36,7 +36,7 @@ export const usersRevokeAfterDelete: CollectionAfterDeleteHook = async ({
 	req,
 }) => {
 	if (doc?.active !== false) {
-		await notify(req, "sbx_ssh_revoke", userPayload(doc.id));
+		await notify(req, "umiak_ssh_revoke", userPayload(doc.id));
 	}
 	return doc;
 };
@@ -50,7 +50,7 @@ export const membershipsRevokeAfterDelete: CollectionAfterDeleteHook = async ({
 	if (team !== null && user !== null) {
 		await notify(
 			req,
-			"sbx_ssh_revoke",
+			"umiak_ssh_revoke",
 			`member:${encodeUuid("team", team)}:${encodeUuid("user", user)}`,
 		);
 	}
@@ -71,7 +71,7 @@ export const apiKeysRevokeAfterChange: CollectionAfterChangeHook = async ({
 	const rotated =
 		prevHash !== undefined && nextHash !== undefined && prevHash !== nextHash;
 	if (doc.revokedAt || rotated) {
-		await notify(req, "sbx_ssh_revoke", keyPayload(doc.id));
+		await notify(req, "umiak_ssh_revoke", keyPayload(doc.id));
 	}
 	return doc;
 };
@@ -80,7 +80,8 @@ export const apiKeysRevokeAfterDelete: CollectionAfterDeleteHook = async ({
 	doc,
 	req,
 }) => {
-	if (!doc?.revokedAt) await notify(req, "sbx_ssh_revoke", keyPayload(doc.id));
+	if (!doc?.revokedAt)
+		await notify(req, "umiak_ssh_revoke", keyPayload(doc.id));
 	return doc;
 };
 
@@ -90,7 +91,7 @@ export const teamsRevokeAfterDelete: CollectionAfterDeleteHook = async ({
 }) => {
 	await notify(
 		req,
-		"sbx_ssh_revoke",
+		"umiak_ssh_revoke",
 		`team:${encodeUuid("team", String(doc.id))}`,
 	);
 	return doc;

@@ -8,9 +8,9 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
 )
 
 // info builds the CommandInfo of a record and the live state.

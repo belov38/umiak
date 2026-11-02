@@ -4,9 +4,9 @@
 # DISM must not leave a reboot pending either, sysprep follows without one),
 # downloads and caches, answer files with the build password, the clone's
 # SetupComplete.cmd and firstboot.ps1, event logs, TRIM, then a self-check.
-# The builder wrote C:\ProgramData\sbx-template\build.json right before this
-# step (it stays) and removes C:\sbx-build after reading this log; it runs
-# `sbx-agent seal` and sysprep itself.
+# The builder wrote C:\ProgramData\umiak-template\build.json right before this
+# step (it stays) and removes C:\umiak-build after reading this log; it runs
+# `umiak-agent seal` and sysprep itself.
 . (Join-Path $PSScriptRoot '..\lib.ps1')
 
 # Removes a path; files in use (Temp) are reported, not fatal.
@@ -22,7 +22,7 @@ function Remove-Leftover([string]$Path) {
     if ($items.Count -gt 0) { Write-BuildLog "removed $Path ($($items.Count))" }
 }
 
-$manifest = Join-Path $env:ProgramData 'sbx-template\build.json'
+$manifest = Join-Path $env:ProgramData 'umiak-template\build.json'
 if (-not (Test-Path -LiteralPath $manifest)) { throw "$manifest is missing: the builder writes it before this step" }
 
 # Keys of servicing operations that finish at the next boot.
@@ -41,7 +41,7 @@ if ($pending.Count -gt 0) {
 }
 
 # --- Windows Update services: the FoD is installed ---
-foreach ($s in $SbxUpdateServices) { Disable-SbxService -Name $s -StopNow }
+foreach ($s in $UmiakUpdateServices) { Disable-UmiakService -Name $s -StopNow }
 
 # --- Component store ---
 # Sysprep follows this step without a reboot: DISM must not leave one pending.
@@ -55,7 +55,7 @@ if ($pending.Count -gt 0) {
 # --- Downloads, installers, caches (of SYSTEM, which ran the steps) ---
 $sysProfile = Join-Path $env:SystemRoot 'System32\config\systemprofile'
 foreach ($p in @(
-        $SbxWorkDir,
+        $UmiakWorkDir,
         (Join-Path $env:SystemRoot 'Temp\*'),
         (Join-Path $env:SystemRoot 'SoftwareDistribution\Download\*'),
         (Join-Path $sysProfile 'AppData\Local\npm-cache'),
@@ -78,7 +78,7 @@ foreach ($p in @(
 }
 # Installer payloads cached by bundles (Python) during the build steps: the
 # subdirectories of Package Cache created after 00-base started.
-$buildStart = (Get-Item -LiteralPath (Join-Path $SbxLogDir '00-base.log')).CreationTimeUtc
+$buildStart = (Get-Item -LiteralPath (Join-Path $UmiakLogDir '00-base.log')).CreationTimeUtc
 $packageCache = Join-Path $env:ProgramData 'Package Cache'
 foreach ($d in @(Get-ChildItem -LiteralPath $packageCache -Directory -Force -ErrorAction SilentlyContinue |
             Where-Object { $_.CreationTimeUtc -ge $buildStart })) {
@@ -100,14 +100,14 @@ foreach ($p in @(
 # --- Clone first boot: SetupComplete.cmd runs firstboot.ps1 (spec 10.2) ---
 # Sysprep resets services, code pages, BCD, WinRE, NetBIOS and firewall rules.
 $setupComplete = Join-Path $env:SystemRoot 'Setup\Scripts\SetupComplete.cmd'
-$firstBoot = Join-Path $env:ProgramData 'sbx-template\firstboot.ps1'
+$firstBoot = Join-Path $env:ProgramData 'umiak-template\firstboot.ps1'
 # Written by firstboot.ps1 on the clone; the agent waits for it before the
 # rename reboot, so the image must not carry one.
-$firstBootDone = Join-Path $env:ProgramData 'sbx-template\firstboot.done'
+$firstBootDone = Join-Path $env:ProgramData 'umiak-template\firstboot.done'
 Remove-Leftover $firstBootDone
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $setupComplete) | Out-Null
 # cmd mis-parses files with bare LF line ends.
-$cmdText = (Get-Content -LiteralPath (Join-Path $SbxFilesDir 'SetupComplete-clone.cmd') -Raw) -replace "`r?`n", "`r`n"
+$cmdText = (Get-Content -LiteralPath (Join-Path $UmiakFilesDir 'SetupComplete-clone.cmd') -Raw) -replace "`r?`n", "`r`n"
 Set-Content -LiteralPath $setupComplete -Value $cmdText -Encoding Ascii -NoNewline
 Write-BuildLog "$setupComplete <- files\SetupComplete-clone.cmd"
 Copy-BuildFile -Name 'firstboot.ps1' -Destination $firstBoot
@@ -136,7 +136,7 @@ try {
 
 # --- Self-check ---
 $problems = [Collections.Generic.List[string]]::new()
-foreach ($s in $SbxDisabledServices) {
+foreach ($s in $UmiakDisabledServices) {
     $svc = Get-Service -Name $s -ErrorAction SilentlyContinue
     if ($null -eq $svc) { continue }
     if ($svc.Status -eq 'Running') { $problems.Add("service $s is running") }
@@ -150,7 +150,7 @@ foreach ($k in $keys) { $problems.Add("$($k.FullName) exists") }
 # Answer files with a password element anywhere setup keeps its logs.
 foreach ($dir in @((Join-Path $env:SystemRoot 'Panther'), (Join-Path $env:SystemRoot 'System32\Sysprep'))) {
     foreach ($f in @(Get-ChildItem -LiteralPath $dir -Recurse -Force -File -Include '*.xml' -ErrorAction SilentlyContinue)) {
-        if ($f.Name -ieq 'sbx-unattend.xml' -and $f.DirectoryName -ieq (Join-Path $env:SystemRoot 'System32\Sysprep')) { continue }
+        if ($f.Name -ieq 'umiak-unattend.xml' -and $f.DirectoryName -ieq (Join-Path $env:SystemRoot 'System32\Sysprep')) { continue }
         if (Select-String -LiteralPath $f.FullName -Pattern '<(Password|AdministratorPassword|AutoLogon)>' -Quiet) {
             $problems.Add("$($f.FullName) has a password element")
         }
@@ -174,7 +174,7 @@ $bde = Get-BitLockerStatus
 if ($bde.Conversion -ne '' -and ($bde.Conversion -ne 'Fully Decrypted' -or $bde.Protection -ne 'Protection Off')) {
     $problems.Add("BitLocker C: is '$($bde.Conversion)', '$($bde.Protection)'")
 }
-if (-not (Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\Sysprep\sbx-unattend.xml'))) { $problems.Add('sbx-unattend.xml is missing') }
+if (-not (Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\Sysprep\umiak-unattend.xml'))) { $problems.Add('umiak-unattend.xml is missing') }
 foreach ($f in @($setupComplete, $firstBoot)) {
     if (-not (Test-Path -LiteralPath $f)) { $problems.Add("$f is missing") }
 }

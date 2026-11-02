@@ -6,10 +6,10 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/wincmd"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/wincmd"
 )
 
 // shellArgv runs a shell command with pwsh and the exit-code epilogue

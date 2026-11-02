@@ -1,9 +1,9 @@
 {
-	"name": "@sbx/pve",
+	"name": "@umiak/pve",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
-	"description": "Proxmox foundation: PVE API client, sbx-node client, lvmthin driver, machine primitives, VMID/MAC allocator",
+	"description": "Proxmox foundation: PVE API client, umiak-node client, lvmthin driver, machine primitives, VMID/MAC allocator",
 	"exports": {
 		".": "./src/index.ts",
 		"./testing": "./test/fakes.ts"

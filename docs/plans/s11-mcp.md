@@ -1,5 +1,7 @@
 # S11 MCP-сервер: план реализации
 
+> Исторический план до R1. Действующие имена и контракты — `docs/specs/rename-umiak.md`.
+
 > **Для исполнителей:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development (по задаче на субагента, после каждой задачи — ревью свежим субагентом) и superpowers:test-driven-development. Шаги — чекбоксы `- [ ]`.
 
 **Цель:** реализовать MVP S11 по `docs/specs/s11-mcp.md`: пакет `@sbx/mcp` (`apps/mcp`) с 38 инструментами в 5 toolsets, stdio-сервер `sbx mcp` в бинарнике CLI и удалённый Streamable HTTP сервер `/mcp` без состояния, сервис `mcp` в `deploy/compose` и маршрут dev-стенда.

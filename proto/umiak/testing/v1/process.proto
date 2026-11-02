@@ -1,0 +1,158 @@
+syntax = "proto3";
+
+package umiak.testing.v1;
+
+import "google/protobuf/duration.proto";
+
+option go_package = "github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1;testingv1";
+
+// Process is a test-only double of the command API used to exercise the tunnel
+// (commandId, offsets, exit contract). It is not part of the shipped protocol.
+service Process {
+  // Start creates a command. Repeating the same command_id returns created=false.
+  rpc Start(StartRequest) returns (StartResponse);
+  // Attach streams output from the given offsets, then an exit event.
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc Attach(AttachRequest) returns (stream AttachResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Run starts a command and streams its output in one call.
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc Run(RunRequest) returns (stream AttachResponse);
+  // SetLabel is a mutating unary call that exercises Umiak-Request-Id dedup.
+  rpc SetLabel(SetLabelRequest) returns (SetLabelResponse);
+  rpc Signal(SignalRequest) returns (SignalResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+  // Echo returns the payload. The tunnel harness serves it on a hostile
+  // machine with the response headers and trailers named by attack.
+  rpc Echo(EchoRequest) returns (EchoResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // EchoStream sends count messages with their index and the payload; attack
+  // as in Echo.
+  rpc EchoStream(EchoStreamRequest) returns (stream EchoStreamResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// CommandSpec describes the synthetic output of a test command.
+message CommandSpec {
+  uint32 lines = 1;
+  uint32 line_bytes = 2;
+  // Pause between lines.
+  google.protobuf.Duration interval = 3;
+  int32 exit_code = 4;
+}
+
+message StartRequest {
+  string command_id = 1;
+  CommandSpec spec = 2;
+}
+
+message StartResponse {
+  string command_id = 1;
+  bool created = 2;
+}
+
+message RunRequest {
+  string command_id = 1;
+  CommandSpec spec = 2;
+}
+
+message AttachRequest {
+  string command_id = 1;
+  uint64 stdout_offset = 2;
+  uint64 stderr_offset = 3;
+}
+
+enum Stream {
+  STREAM_UNSPECIFIED = 0;
+  STREAM_STDOUT = 1;
+  STREAM_STDERR = 2;
+  STREAM_PTY = 3;
+}
+
+enum ExitStatus {
+  EXIT_STATUS_UNSPECIFIED = 0;
+  EXIT_STATUS_EXITED = 1;
+  EXIT_STATUS_KILLED = 2;
+  EXIT_STATUS_LOST = 3;
+}
+
+message AttachResponse {
+  oneof event {
+    DataEvent data = 1;
+    HeartbeatEvent heartbeat = 2;
+    TruncatedEvent truncated = 3;
+    ExitEvent exit = 4;
+    StartedEvent started = 5;
+  }
+}
+
+message DataEvent {
+  Stream stream = 1;
+  uint64 offset = 2;
+  bytes data = 3;
+}
+
+message HeartbeatEvent {}
+
+message TruncatedEvent {
+  Stream stream = 1;
+  // Oldest offset still available after the buffer dropped earlier data.
+  uint64 available_from = 2;
+}
+
+message ExitEvent {
+  ExitStatus status = 1;
+  int32 code = 2;
+  string signal = 3;
+  uint64 stdout_end = 4;
+  uint64 stderr_end = 5;
+}
+
+message StartedEvent {
+  string command_id = 1;
+}
+
+message SetLabelRequest {
+  string command_id = 1;
+  string label = 2;
+}
+
+message SetLabelResponse {
+  // Number of real executions, used by dedup tests.
+  uint64 calls = 1;
+}
+
+message SignalRequest {
+  string command_id = 1;
+  string signal = 2;
+}
+
+message SignalResponse {}
+
+message EchoRequest {
+  bytes payload = 1;
+  // An attack case of the tunnel harness's hostile machine; ignored elsewhere.
+  string attack = 2;
+}
+
+message EchoResponse {
+  bytes payload = 1;
+}
+
+message EchoStreamRequest {
+  bytes payload = 1;
+  uint32 count = 2;
+  // As in EchoRequest.
+  string attack = 3;
+}
+
+message EchoStreamResponse {
+  uint32 index = 1;
+  bytes payload = 2;
+}

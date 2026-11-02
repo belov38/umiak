@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/docker"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/docker"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // Docker step limits (spec 14.2).
@@ -20,7 +20,7 @@ const (
 )
 
 // steps are the freeze and thaw actions shared by the agent, the watchdog
-// unit and `sbx-agent thaw --force`. A nil freezer or docker skips its part.
+// unit and `umiak-agent thaw --force`. A nil freezer or docker skips its part.
 type steps struct {
 	freezer Freezer
 	docker  DockerAPI
@@ -148,7 +148,7 @@ func (s steps) thawAllMounts(extra []string) ([]string, error) {
 	return s.thawMounts(all), nil
 }
 
-// ForceThaw implements `sbx-agent thaw --force` (spec 14.4, 17.6): FITHAW
+// ForceThaw implements `umiak-agent thaw --force` (spec 14.4, 17.6): FITHAW
 // every freezable mount (and every mount named in a lease file, if one is
 // left) and unpause every paused container. It works without the agent and
 // leaves the lease file and the markers to the agent and the watchdog. f
@@ -198,7 +198,7 @@ func LeaseOnDisk(l paths.Layout) (*Lease, error) {
 }
 
 // DropLease removes the lease file and the watchdog's claim of it:
-// `sbx-agent thaw --force` on Windows when the agent is not running. The
+// `umiak-agent thaw --force` on Windows when the agent is not running. The
 // filesystem was never frozen by the agent there (VSS thaws itself), and a
 // wiped secret file comes back with the next UpdateSecrets.
 func DropLease(l paths.Layout) error {

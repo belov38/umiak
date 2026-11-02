@@ -27,7 +27,7 @@ func TestJobAndConsoleProcsResolve(t *testing.T) {
 }
 
 func TestOpenJobObjectMissing(t *testing.T) {
-	_, err := OpenJobObject(windows.SYNCHRONIZE, false, `Global\sbx-test-no-such-job`)
+	_, err := OpenJobObject(windows.SYNCHRONIZE, false, `Global\umiak-test-no-such-job`)
 	if !errors.Is(err, windows.ERROR_FILE_NOT_FOUND) {
 		t.Fatalf("OpenJobObject of a missing job: %v", err)
 	}

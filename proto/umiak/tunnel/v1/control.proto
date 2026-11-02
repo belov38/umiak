@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package umiak.tunnel.v1;
+
+import "google/protobuf/duration.proto";
+
+option go_package = "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1;tunnelv1";
+
+// Control is served by the agent and called by the gateway over the tunnel.
+service Control {
+  // Info returns agent identity and capabilities. Also used as a liveness round trip.
+  rpc Info(InfoRequest) returns (InfoResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // SetToken replaces the machine token stored by the agent.
+  rpc SetToken(SetTokenRequest) returns (SetTokenResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+  // Drain asks the agent to move to another gateway instance.
+  rpc Drain(DrainRequest) returns (DrainResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+}
+
+message InfoRequest {}
+
+message InfoResponse {
+  string agent_version = 1;
+  string os = 2;
+  string arch = 3;
+  // Proto packages the agent serves, for example "umiak.tunnel.v1".
+  repeated string proto_packages = 4;
+  repeated string capabilities = 5;
+}
+
+message SetTokenRequest {
+  // Raw machine token bytes (not encoded).
+  bytes token = 1;
+}
+
+message SetTokenResponse {}
+
+message DrainRequest {
+  string reason = 1;
+  // How long established TCP streams may keep running on the old connection.
+  google.protobuf.Duration tcp_deadline = 2;
+}
+
+message DrainResponse {}

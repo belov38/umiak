@@ -12,8 +12,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	testingv1 "github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1/testingv1connect"
+	testingv1 "github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1/testingv1connect"
 )
 
 // The gateway's limits on what it passes from an agent answer to a caller

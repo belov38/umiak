@@ -16,7 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // AuthScheme selects which secret the agent presents.

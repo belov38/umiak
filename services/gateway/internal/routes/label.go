@@ -49,20 +49,20 @@ func DefaultGrammar() Grammar {
 	return Grammar{
 		ReservedPorts:    ports,
 		ReservedSuffixes: []string{KindDesktop},
-		ReservedSlugs:    []string{"api", "app", "www", "ssh", "tunnel", "admin", "static", "sbx"},
+		ReservedSlugs:    []string{"api", "app", "www", "ssh", "tunnel", "admin", "static", "umiak"},
 	}
 }
 
-// ParseHost parses "<label>.<sbxDomain>[:443]". It reports false for every
+// ParseHost parses "<label>.<umiakDomain>[:443]". It reports false for every
 // host outside the grammar: another domain, the apex, nested labels, a
 // trailing dot, a port other than 443, or an invalid label.
-func ParseHost(host, sbxDomain string, g Grammar) (Label, bool) {
+func ParseHost(host, umiakDomain string, g Grammar) (Label, bool) {
 	host = strings.ToLower(host)
 	host = strings.TrimSuffix(host, ":443")
 	if host == "" || strings.ContainsAny(host, ":[]") || strings.HasSuffix(host, ".") {
 		return Label{}, false
 	}
-	suffix := "." + strings.ToLower(sbxDomain)
+	suffix := "." + strings.ToLower(umiakDomain)
 	raw, found := strings.CutSuffix(host, suffix)
 	if !found || raw == "" || len(raw) > maxLabelLen || strings.Contains(raw, ".") {
 		return Label{}, false

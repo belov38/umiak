@@ -82,7 +82,7 @@
 						"type": "string"
 					},
 					"prefix": {
-						"description": "First 8 characters after `sbx_`",
+						"description": "First 8 characters after `umiak_`",
 						"example": "a1B2c3D4",
 						"type": "string"
 					},
@@ -169,7 +169,7 @@
 						"$ref": "#/components/schemas/ApiKey"
 					},
 					"secret": {
-						"description": "The secret (`sbx_...`), shown only in this answer; keep it like a password",
+						"description": "The secret (`umiak_...`), shown only in this answer; keep it like a password",
 						"type": "string"
 					}
 				},
@@ -1311,7 +1311,7 @@
 				"additionalProperties": {
 					"type": "string"
 				},
-				"description": "Variables `[A-Za-z_][A-Za-z0-9_]{0,127}`: up to 100, each value up to 32 KiB without NUL, 256 KiB per set. `SBX_` is reserved except SBX_API_KEY, SBX_API_URL, SBX_TEAM, SBX_PROFILE. Values with a newline are not visible in SSH sessions.",
+				"description": "Variables `[A-Za-z_][A-Za-z0-9_]{0,127}`: up to 100, each value up to 32 KiB without NUL, 256 KiB per set. `UMIAK_` is reserved except UMIAK_API_KEY, UMIAK_API_URL, UMIAK_TEAM, UMIAK_PROFILE. Values with a newline are not visible in SSH sessions.",
 				"type": "object"
 			},
 			"EnvVarsPatch": {
@@ -1321,7 +1321,7 @@
 						"null"
 					]
 				},
-				"description": "Variables `[A-Za-z_][A-Za-z0-9_]{0,127}`: up to 100, each value up to 32 KiB without NUL, 256 KiB per set. `SBX_` is reserved except SBX_API_KEY, SBX_API_URL, SBX_TEAM, SBX_PROFILE. Values with a newline are not visible in SSH sessions. Merged by key: null deletes the key.",
+				"description": "Variables `[A-Za-z_][A-Za-z0-9_]{0,127}`: up to 100, each value up to 32 KiB without NUL, 256 KiB per set. `UMIAK_` is reserved except UMIAK_API_KEY, UMIAK_API_URL, UMIAK_TEAM, UMIAK_PROFILE. Values with a newline are not visible in SSH sessions. Merged by key: null deletes the key.",
 				"type": "object"
 			},
 			"Environment": {
@@ -1907,7 +1907,7 @@
 						"type": "integer"
 					},
 					"url": {
-						"example": "https://quiet-otter-lamp-3000.sbx.example.com",
+						"example": "https://quiet-otter-lamp-3000.umiak.example.com",
 						"type": "string"
 					}
 				},
@@ -1984,11 +1984,11 @@
 					},
 					"token": {
 						"description": "Only when this call issued a token (a new token port or a switch to token). It is not stored and never shown again: replace a lost one with rotate-token",
-						"example": "sbxp_...",
+						"example": "umiakp_...",
 						"type": "string"
 					},
 					"url": {
-						"example": "https://quiet-otter-lamp-3000.sbx.example.com",
+						"example": "https://quiet-otter-lamp-3000.umiak.example.com",
 						"type": "string"
 					},
 					"urlWithToken": {
@@ -2365,7 +2365,7 @@
 				"type": "object"
 			},
 			"MeTeam": {
-				"description": "Team of this request (Sbx-Team or the default team)",
+				"description": "Team of this request (Umiak-Team or the default team)",
 				"properties": {
 					"id": {
 						"example": "team_01jbx2v7d3m6c8q9w0e4r5t6y7",
@@ -2432,14 +2432,14 @@
 						]
 					},
 					"oidc": {
-						"description": "Keycloak for people (device flow of `sbx login`); null when only team keys work",
+						"description": "Keycloak for people (device flow of `umiak login`); null when only team keys work",
 						"properties": {
 							"audience": {
-								"example": "sbx-api",
+								"example": "umiak-api",
 								"type": "string"
 							},
 							"clientId": {
-								"example": "sbx-cli",
+								"example": "umiak-cli",
 								"type": "string"
 							},
 							"issuer": {
@@ -2456,11 +2456,6 @@
 							"object",
 							"null"
 						]
-					},
-					"sbxDomain": {
-						"description": "Domain of published ports: https://<slug>-<port>.<sbxDomain>",
-						"example": "sbx.example.com",
-						"type": "string"
 					},
 					"ssh": {
 						"properties": {
@@ -2487,6 +2482,11 @@
 							"hostKeys"
 						],
 						"type": "object"
+					},
+					"umiakDomain": {
+						"description": "Domain of published ports: https://<slug>-<port>.<umiakDomain>",
+						"example": "umiak.example.com",
+						"type": "string"
 					}
 				},
 				"required": [
@@ -2494,7 +2494,7 @@
 					"build",
 					"appUrl",
 					"apiUrl",
-					"sbxDomain",
+					"umiakDomain",
 					"oidc",
 					"ssh",
 					"minCliVersion",
@@ -2679,7 +2679,7 @@
 				"description": "The new token; the old token and its cookies stopped working",
 				"properties": {
 					"token": {
-						"example": "sbxp_...",
+						"example": "umiakp_...",
 						"type": "string"
 					},
 					"urlWithToken": {
@@ -2869,7 +2869,7 @@
 							},
 							"portUrlTemplate": {
 								"description": "URL of a published port; replace {port}",
-								"example": "https://quiet-otter-lamp-{port}.sbx.example.com",
+								"example": "https://quiet-otter-lamp-{port}.umiak.example.com",
 								"type": "string"
 							},
 							"ssh": {
@@ -4156,20 +4156,20 @@
 		"securitySchemes": {
 			"keycloak": {
 				"description": "Keycloak access token of a person (CLI, SDK, MCP)",
-				"openIdConnectUrl": "https://auth.example.com/realms/sbx/.well-known/openid-configuration",
+				"openIdConnectUrl": "https://auth.example.com/realms/umiak/.well-known/openid-configuration",
 				"type": "openIdConnect"
 			},
 			"teamKey": {
-				"bearerFormat": "sbx_",
-				"description": "Team API key (sbx_...) for automation and CI",
+				"bearerFormat": "umiak_",
+				"description": "Team API key (umiak_...) for automation and CI",
 				"scheme": "bearer",
 				"type": "http"
 			}
 		}
 	},
 	"info": {
-		"description": "API of sbx: VM sandboxes for AI agents on Proxmox VE.\n\nErrors always have the shape {error: {code, message, retryable, details, requestId}}.\nEvery response carries a Request-Id header.",
-		"title": "sbx API",
+		"description": "API of umiak: VM sandboxes for AI agents on Proxmox VE.\n\nErrors always have the shape {error: {code, message, retryable, details, requestId}}.\nEvery response carries a Request-Id header.",
+		"title": "umiak API",
 		"version": "v1"
 	},
 	"openapi": "3.1.0",
@@ -4206,7 +4206,7 @@
 				]
 			},
 			"post": {
-				"description": "Issues a key of the team for automation and CI with `scopes` or a `preset` (read-only, ci, full) and a lifetime (default 90 days, at most 365). The secret is in this answer only. Only an owner of the team, as a person (dashboard or `sbx login`); a key cannot issue keys. People use `sbx login` instead of keys.",
+				"description": "Issues a key of the team for automation and CI with `scopes` or a `preset` (read-only, ci, full) and a lifetime (default 90 days, at most 365). The secret is in this answer only. Only an owner of the team, as a person (dashboard or `umiak login`); a key cannot issue keys. People use `umiak login` instead of keys.",
 				"operationId": "apiKeys.create",
 				"requestBody": {
 					"content": {
@@ -4274,7 +4274,7 @@
 		},
 		"/v1/api-keys/self": {
 			"delete": {
-				"description": "The team key of this request revokes itself (`sbx logout --revoke`); it stops working at once on every server. Any team key, no scope needed.",
+				"description": "The team key of this request revokes itself (`umiak logout --revoke`); it stops working at once on every server. Any team key, no scope needed.",
 				"operationId": "apiKeys.revokeSelf",
 				"responses": {
 					"204": {
@@ -4820,7 +4820,7 @@
 		},
 		"/v1/me": {
 			"get": {
-				"description": "Who is calling: the person (null for a team API key), the team this request acts in, the person's teams with roles, operator rights, and the credential (kind, scopes, expiry). `sbx login` and `sbx whoami` call it to show the account and the default team.",
+				"description": "Who is calling: the person (null for a team API key), the team this request acts in, the person's teams with roles, operator rights, and the credential (kind, scopes, expiry). `umiak login` and `umiak whoami` call it to show the account and the default team.",
 				"operationId": "me.get",
 				"responses": {
 					"200": {
@@ -4852,7 +4852,7 @@
 		},
 		"/v1/meta": {
 			"get": {
-				"description": "Public facts about this deployment: API and dashboard URLs, the domain of published ports, the Keycloak issuer for `sbx login`, the SSH endpoint with its host keys, and CLI versions. Needs no authentication; clients call it first to configure themselves.",
+				"description": "Public facts about this deployment: API and dashboard URLs, the domain of published ports, the Keycloak issuer for `umiak login`, the SSH endpoint with its host keys, and CLI versions. Needs no authentication; clients call it first to configure themselves.",
 				"operationId": "meta.get",
 				"responses": {
 					"200": {
@@ -5255,7 +5255,7 @@
 		},
 		"/v1/sandboxes/{sandbox}": {
 			"delete": {
-				"description": "Deletes the sandbox and its VM; any running operation is superseded. Needs the header Sbx-Confirm-Delete with the sandbox id (or slug) — otherwise 428 and nothing happens. Answers 202 with the delete operation; on an already deleted sandbox 200 with `operation: null`. Repeating is safe.",
+				"description": "Deletes the sandbox and its VM; any running operation is superseded. Needs the header Umiak-Confirm-Delete with the sandbox id (or slug) — otherwise 428 and nothing happens. Answers 202 with the delete operation; on an already deleted sandbox 200 with `operation: null`. Repeating is safe.",
 				"operationId": "sandboxes.delete",
 				"parameters": [
 					{
@@ -5272,7 +5272,7 @@
 					{
 						"description": "Required: the id (`sb_...`) or slug of the sandbox in the path; without it or with another sandbox the answer is 428 and nothing is deleted",
 						"in": "header",
-						"name": "Sbx-Confirm-Delete",
+						"name": "Umiak-Confirm-Delete",
 						"required": false,
 						"schema": {
 							"description": "Required: the id (`sb_...`) or slug of the sandbox in the path; without it or with another sandbox the answer is 428 and nothing is deleted",
@@ -5319,7 +5319,7 @@
 								}
 							}
 						},
-						"description": "`confirmation_required`: Sbx-Confirm-Delete is missing or names another resource"
+						"description": "`confirmation_required`: Umiak-Confirm-Delete is missing or names another resource"
 					},
 					"default": {
 						"content": {
@@ -5493,7 +5493,7 @@
 		},
 		"/v1/sandboxes/{sandbox}/block": {
 			"post": {
-				"description": "Blocks the sandbox: the gateway refuses all its ports and SSH, and for everyone but an operator only reads, stop and delete are allowed; anything else is 403 `forbidden` with details.reason `sandbox_blocked`. The reason and note are recorded. The same reason again changes nothing. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Sbx-Team needed.",
+				"description": "Blocks the sandbox: the gateway refuses all its ports and SSH, and for everyone but an operator only reads, stop and delete are allowed; anything else is 403 `forbidden` with details.reason `sandbox_blocked`. The reason and note are recorded. The same reason again changes nothing. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.",
 				"operationId": "sandboxes.block",
 				"parameters": [
 					{
@@ -5690,7 +5690,7 @@
 				]
 			},
 			"post": {
-				"description": "Starts a process in a ready sandbox (a creating or starting one is awaited up to 60 s). Exactly one of `command` (bash -lc) and `argv`. Modes: `sync` (default) answers 200 SyncCommandResult once the process exits (timeout at most 600 s; the connection is silent until then, so proxies may cut it: SDKs use stream); `stream` answers 200 application/x-ndjson frames (first `started`, last `exit`, `reconnect` or `error`) with `Sbx-Command-Id`; `detached` answers 201 Command right after the start. With an Idempotency-Key a repeat never starts the command twice: sync waits for the same command, stream streams it from offset 0 with `started.replayed: true`, detached answers 200.",
+				"description": "Starts a process in a ready sandbox (a creating or starting one is awaited up to 60 s). Exactly one of `command` (bash -lc) and `argv`. Modes: `sync` (default) answers 200 SyncCommandResult once the process exits (timeout at most 600 s; the connection is silent until then, so proxies may cut it: SDKs use stream); `stream` answers 200 application/x-ndjson frames (first `started`, last `exit`, `reconnect` or `error`) with `Umiak-Command-Id`; `detached` answers 201 Command right after the start. With an Idempotency-Key a repeat never starts the command twice: sync waits for the same command, stream streams it from offset 0 with `started.replayed: true`, detached answers 200.",
 				"operationId": "commands.create",
 				"parameters": [
 					{
@@ -5758,7 +5758,7 @@
 									"type": "string"
 								}
 							},
-							"Sbx-Command-Id": {
+							"Umiak-Command-Id": {
 								"description": "Id (`cmd_...`) of the command",
 								"schema": {
 									"type": "string"
@@ -5776,7 +5776,7 @@
 						},
 						"description": "detached: the started command",
 						"headers": {
-							"Sbx-Command-Id": {
+							"Umiak-Command-Id": {
 								"description": "Id (`cmd_...`) of the command",
 								"schema": {
 									"type": "string"
@@ -6086,7 +6086,7 @@
 		},
 		"/v1/sandboxes/{sandbox}/commands/{command}/output": {
 			"get": {
-				"description": "Raw bytes of one stream from `offset` (up to `limit`, at most 4 MiB). Headers: Sbx-Offset (where the bytes start), Sbx-Next-Offset, Sbx-Available-From, Sbx-Stream-End (only once the stream ended), Sbx-Truncated: true when `offset` was already evicted and reading started at Sbx-Available-From. An offset past the end is 416. For polling without streams.",
+				"description": "Raw bytes of one stream from `offset` (up to `limit`, at most 4 MiB). Headers: Umiak-Offset (where the bytes start), Umiak-Next-Offset, Umiak-Available-From, Umiak-Stream-End (only once the stream ended), Umiak-Truncated: true when `offset` was already evicted and reading started at Umiak-Available-From. An offset past the end is 416. For polling without streams.",
 				"operationId": "commands.output",
 				"parameters": [
 					{
@@ -6163,28 +6163,28 @@
 						},
 						"description": "The bytes",
 						"headers": {
-							"Sbx-Available-From": {
+							"Umiak-Available-From": {
 								"schema": {
 									"type": "integer"
 								}
 							},
-							"Sbx-Next-Offset": {
+							"Umiak-Next-Offset": {
 								"schema": {
 									"type": "integer"
 								}
 							},
-							"Sbx-Offset": {
+							"Umiak-Offset": {
 								"schema": {
 									"type": "integer"
 								}
 							},
-							"Sbx-Stream-End": {
+							"Umiak-Stream-End": {
 								"description": "Final size of the stream, once it ended",
 								"schema": {
 									"type": "integer"
 								}
 							},
-							"Sbx-Truncated": {
+							"Umiak-Truncated": {
 								"schema": {
 									"enum": [
 										"true"
@@ -6453,7 +6453,7 @@
 						},
 						"description": "NDJSON frames",
 						"headers": {
-							"Sbx-Command-Id": {
+							"Umiak-Command-Id": {
 								"description": "Id (`cmd_...`) of the command",
 								"schema": {
 									"type": "string"
@@ -8358,7 +8358,7 @@
 		},
 		"/v1/sandboxes/{sandbox}/files/content": {
 			"get": {
-				"description": "The bytes of a file, streamed from the sandbox. One `Range` (`bytes=a-b`, `a-`, `-n`; several ranges give the whole file with 200) and `If-Range` (ETag or date); ETag, Last-Modified, Accept-Ranges. Always `application/octet-stream` with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`. A directory is 409 is_directory. In the browser (dashboard origin) `?team=` may replace the Sbx-Team header.",
+				"description": "The bytes of a file, streamed from the sandbox. One `Range` (`bytes=a-b`, `a-`, `-n`; several ranges give the whole file with 200) and `If-Range` (ETag or date); ETag, Last-Modified, Accept-Ranges. Always `application/octet-stream` with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`. A directory is 409 is_directory. In the browser (dashboard origin) `?team=` may replace the Umiak-Team header.",
 				"operationId": "files.download",
 				"parameters": [
 					{
@@ -9252,7 +9252,7 @@
 		},
 		"/v1/sandboxes/{sandbox}/files/uploads": {
 			"post": {
-				"description": "Starts a resumable upload of a large file. Nothing is stored by the api; the partial file lives in the sandbox and is dropped after 24 h without activity. Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Sbx-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Sbx-Upload-Offset, details.offset): continue from there.",
+				"description": "Starts a resumable upload of a large file. Nothing is stored by the api; the partial file lives in the sandbox and is dropped after 24 h without activity. Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Umiak-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Umiak-Upload-Offset, details.offset): continue from there.",
 				"operationId": "files.createUpload",
 				"parameters": [
 					{
@@ -9395,7 +9395,7 @@
 				]
 			},
 			"head": {
-				"description": "Sbx-Upload-Offset: the bytes received so far, where the next chunk starts. 404 when the upload does not exist (expired, cancelled, committed with a bad checksum, or no chunk yet). Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Sbx-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Sbx-Upload-Offset, details.offset): continue from there.",
+				"description": "Umiak-Upload-Offset: the bytes received so far, where the next chunk starts. 404 when the upload does not exist (expired, cancelled, committed with a bad checksum, or no chunk yet). Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Umiak-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Umiak-Upload-Offset, details.offset): continue from there.",
 				"operationId": "files.uploadOffset",
 				"parameters": [
 					{
@@ -9425,7 +9425,7 @@
 					"200": {
 						"description": "The upload exists",
 						"headers": {
-							"Sbx-Upload-Offset": {
+							"Umiak-Upload-Offset": {
 								"description": "Bytes received so far",
 								"schema": {
 									"type": "integer"
@@ -9456,7 +9456,7 @@
 				]
 			},
 			"put": {
-				"description": "Appends the body (up to 8 MiB, any content type) at `offset`. Send the destination as `path` too: it tells the sandbox where to keep the partial file. Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Sbx-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Sbx-Upload-Offset, details.offset): continue from there.",
+				"description": "Appends the body (up to 8 MiB, any content type) at `offset`. Send the destination as `path` too: it tells the sandbox where to keep the partial file. Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Umiak-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Umiak-Upload-Offset, details.offset): continue from there.",
 				"operationId": "files.putChunk",
 				"parameters": [
 					{
@@ -9544,7 +9544,7 @@
 						},
 						"description": "Bytes received so far",
 						"headers": {
-							"Sbx-Upload-Offset": {
+							"Umiak-Upload-Offset": {
 								"description": "Bytes received so far",
 								"schema": {
 									"type": "integer"
@@ -9580,7 +9580,7 @@
 								}
 							}
 						},
-						"description": "`upload_offset_mismatch` (details.offset, header Sbx-Upload-Offset), `invalid_state` (already committed), `sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability)"
+						"description": "`upload_offset_mismatch` (details.offset, header Umiak-Upload-Offset), `invalid_state` (already committed), `sandbox_not_ready`, `sandbox_starting` (retryable), `agent_outdated` (details.capability)"
 					},
 					"413": {
 						"content": {
@@ -9611,7 +9611,7 @@
 		},
 		"/v1/sandboxes/{sandbox}/files/uploads/{upload}/commit": {
 			"post": {
-				"description": "Moves the uploaded bytes to `path`. Idempotent by upload id: a repeat returns the same FileInfo (24 h). A `sha256` that does not match is 422 checksum_mismatch and the upload is dropped (start over). Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Sbx-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Sbx-Upload-Offset, details.offset): continue from there.",
+				"description": "Moves the uploaded bytes to `path`. Idempotent by upload id: a repeat returns the same FileInfo (24 h). A `sha256` that does not match is 422 checksum_mismatch and the upload is dropped (start over). Flow: POST .../uploads {path} → PUT .../uploads/{upload}?offset=N&path= (chunks up to 8 MiB, offset = bytes so far) → POST .../uploads/{upload}/commit {path, sha256}. After a break, HEAD .../uploads/{upload} gives Umiak-Upload-Offset to resume from. A chunk whose offset is not the current size is 409 upload_offset_mismatch with the current offset (header Umiak-Upload-Offset, details.offset): continue from there.",
 				"operationId": "files.commitUpload",
 				"parameters": [
 					{
@@ -9971,7 +9971,7 @@
 				]
 			},
 			"put": {
-				"description": "Publishes the guest port at `https://<slug>-<port>.<sbxDomain>` with the given settings (PUT: omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1). 201 for a new port, 200 for a change or the same settings. A new token port or a switch to token returns `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links and cookies. Allowed in any state but deleting and deleted.",
+				"description": "Publishes the guest port at `https://<slug>-<port>.<umiakDomain>` with the given settings (PUT: omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1). 201 for a new port, 200 for a change or the same settings. A new token port or a switch to token returns `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links and cookies. Allowed in any state but deleting and deleted.",
 				"operationId": "ports.put",
 				"parameters": [
 					{
@@ -10090,7 +10090,7 @@
 		},
 		"/v1/sandboxes/{sandbox}/ports/{port}/block": {
 			"post": {
-				"description": "Blocks the port: the gateway refuses it, and for everyone but an operator PUT, rotate-token and DELETE of the port are 403 `forbidden` (details.reason `port_blocked`), so the block survives an unpublish and a new publish. The same reason again changes nothing. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Sbx-Team needed.",
+				"description": "Blocks the port: the gateway refuses it, and for everyone but an operator PUT, rotate-token and DELETE of the port are 403 `forbidden` (details.reason `port_blocked`), so the block survives an unpublish and a new publish. The same reason again changes nothing. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.",
 				"operationId": "ports.block",
 				"parameters": [
 					{
@@ -10287,7 +10287,7 @@
 		},
 		"/v1/sandboxes/{sandbox}/ports/{port}/unblock": {
 			"post": {
-				"description": "Lifts the port's block at once; on a port that is not blocked nothing changes. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Sbx-Team needed.",
+				"description": "Lifts the port's block at once; on a port that is not blocked nothing changes. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.",
 				"operationId": "ports.unblock",
 				"parameters": [
 					{
@@ -10442,7 +10442,7 @@
 									"type": "string"
 								}
 							},
-							"Sbx-Command-Id": {
+							"Umiak-Command-Id": {
 								"description": "Id (`cmd_...`) of the command",
 								"schema": {
 									"type": "string"
@@ -10460,7 +10460,7 @@
 						},
 						"description": "The started PTY command",
 						"headers": {
-							"Sbx-Command-Id": {
+							"Umiak-Command-Id": {
 								"description": "Id (`cmd_...`) of the command",
 								"schema": {
 									"type": "string"
@@ -10517,7 +10517,7 @@
 		},
 		"/v1/sandboxes/{sandbox}/ptys/{command}/connect": {
 			"get": {
-				"description": "WebSocket upgrade with the subprotocol `sbx.pty.v1` (required). Server → client: binary frames are consecutive PTY output bytes; text frames are JSON: `{\"type\":\"attached\",\"offset\":N}` first, `{\"type\":\"truncated\",\"availableFrom\":N}`, `{\"type\":\"exit\",...}` (as in NDJSON), `{\"type\":\"error\",\"code\",\"message\",\"retryable\",\"details\",\"requestId\"}`, `{\"type\":\"reconnect\",\"offset\":N,\"reason\"}`. The client counts the offset itself: `attached.offset` (or `availableFrom` after truncated) plus the bytes received. Client → server: binary frames are input (a key typed while the socket drops may be lost, never applied twice); text `{\"type\":\"resize\",\"cols\":N,\"rows\":N}`. Close codes: 1000 after exit; 1012 server shutdown (after `reconnect`); 4401 unauthorized; 4403 forbidden; 4404 no such PTY; 4409 sandbox not ready; 4416 `offset` past the end of the output (`range_not_satisfiable`, details.size; final); 4503 agent unavailable (reconnect later); 1008 malformed control frame. Reconnect with `offset` = your count; `tailBytes` for scrollback (it wins over `offset`). Pings every 15 s. Authentication as for other requests; in the browser (dashboard origin) the session, with `Origin` checked and `?team=` instead of the Sbx-Team header.",
+				"description": "WebSocket upgrade with the subprotocol `umiak.pty.v1` (required). Server → client: binary frames are consecutive PTY output bytes; text frames are JSON: `{\"type\":\"attached\",\"offset\":N}` first, `{\"type\":\"truncated\",\"availableFrom\":N}`, `{\"type\":\"exit\",...}` (as in NDJSON), `{\"type\":\"error\",\"code\",\"message\",\"retryable\",\"details\",\"requestId\"}`, `{\"type\":\"reconnect\",\"offset\":N,\"reason\"}`. The client counts the offset itself: `attached.offset` (or `availableFrom` after truncated) plus the bytes received. Client → server: binary frames are input (a key typed while the socket drops may be lost, never applied twice); text `{\"type\":\"resize\",\"cols\":N,\"rows\":N}`. Close codes: 1000 after exit; 1012 server shutdown (after `reconnect`); 4401 unauthorized; 4403 forbidden; 4404 no such PTY; 4409 sandbox not ready; 4416 `offset` past the end of the output (`range_not_satisfiable`, details.size; final); 4503 agent unavailable (reconnect later); 1008 malformed control frame. Reconnect with `offset` = your count; `tailBytes` for scrollback (it wins over `offset`). Pings every 15 s. Authentication as for other requests; in the browser (dashboard origin) the session, with `Origin` checked and `?team=` instead of the Umiak-Team header.",
 				"operationId": "ptys.connect",
 				"parameters": [
 					{
@@ -10573,7 +10573,7 @@
 				],
 				"responses": {
 					"101": {
-						"description": "Switching Protocols: the WebSocket with the subprotocol sbx.pty.v1"
+						"description": "Switching Protocols: the WebSocket with the subprotocol umiak.pty.v1"
 					},
 					"400": {
 						"content": {
@@ -10583,7 +10583,7 @@
 								}
 							}
 						},
-						"description": "`validation`: the subprotocol sbx.pty.v1 was not offered, or a bad query"
+						"description": "`validation`: the subprotocol umiak.pty.v1 was not offered, or a bad query"
 					},
 					"426": {
 						"content": {
@@ -10620,8 +10620,8 @@
 				"tags": [
 					"ptys"
 				],
-				"x-sbx-websocket": {
-					"subprotocol": "sbx.pty.v1"
+				"x-umiak-websocket": {
+					"subprotocol": "umiak.pty.v1"
 				}
 			}
 		},
@@ -11084,7 +11084,7 @@
 		},
 		"/v1/sandboxes/{sandbox}/unblock": {
 			"post": {
-				"description": "Lifts the block at once; on a sandbox that is not blocked nothing changes. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Sbx-Team needed.",
+				"description": "Lifts the block at once; on a sandbox that is not blocked nothing changes. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.",
 				"operationId": "sandboxes.unblock",
 				"parameters": [
 					{
@@ -11318,7 +11318,7 @@
 		},
 		"/v1/snapshots/{name}": {
 			"delete": {
-				"description": "Deletes the ready snapshot of this name; the name is free at once, the disk is removed in the background. Needs the header Sbx-Confirm-Delete with the snapshot id (or name) — otherwise 428 and nothing happens. Sandboxes created from it stay.",
+				"description": "Deletes the ready snapshot of this name; the name is free at once, the disk is removed in the background. Needs the header Umiak-Confirm-Delete with the snapshot id (or name) — otherwise 428 and nothing happens. Sandboxes created from it stay.",
 				"operationId": "snapshots.delete",
 				"parameters": [
 					{
@@ -11335,7 +11335,7 @@
 					{
 						"description": "Required: the id (`snap_...`) or the name of the snapshot in the path; without it or with another snapshot the answer is 428 and nothing is deleted",
 						"in": "header",
-						"name": "Sbx-Confirm-Delete",
+						"name": "Umiak-Confirm-Delete",
 						"required": false,
 						"schema": {
 							"description": "Required: the id (`snap_...`) or the name of the snapshot in the path; without it or with another snapshot the answer is 428 and nothing is deleted",
@@ -11375,7 +11375,7 @@
 								}
 							}
 						},
-						"description": "`confirmation_required`: Sbx-Confirm-Delete is missing or names another resource"
+						"description": "`confirmation_required`: Umiak-Confirm-Delete is missing or names another resource"
 					},
 					"default": {
 						"content": {
@@ -11449,7 +11449,7 @@
 		},
 		"/v1/ssh-keys": {
 			"get": {
-				"description": "SSH public keys of the calling person, oldest first. Only a person (browser session or `sbx login`).",
+				"description": "SSH public keys of the calling person, oldest first. Only a person (browser session or `umiak login`).",
 				"operationId": "sshKeys.list",
 				"responses": {
 					"200": {

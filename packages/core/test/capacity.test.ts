@@ -1,12 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { withTx } from "@sbx/db";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { withTx } from "@umiak/db";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	admit,
 	checkQuota,
 	DELETE_RETRY_LIMIT,
-	isSbxError,
+	isUmiakError,
 	lockNode,
 	lockTeam,
 	MACHINE_STATES,
@@ -158,7 +162,7 @@ describe.skipIf(skipPg())("capacity", () => {
 
 		it("unknown node is not_found", async () => {
 			await expect(ram(randomUUID())).rejects.toSatisfy((e) =>
-				isSbxError(e, "not_found"),
+				isUmiakError(e, "not_found"),
 			);
 		});
 	});
@@ -432,12 +436,12 @@ describe.skipIf(skipPg())("capacity", () => {
 				withTx(t.pool, (tx) =>
 					tryPoweredStart(tx, { machineId: id, toState: "booting" }),
 				),
-			).rejects.toSatisfy((e) => isSbxError(e, "invalid_state"));
+			).rejects.toSatisfy((e) => isUmiakError(e, "invalid_state"));
 			await expect(
 				withTx(t.pool, (tx) =>
 					tryPoweredStart(tx, { machineId: id, toState: "starting" }),
 				),
-			).rejects.toSatisfy((e) => isSbxError(e, "invalid_state"));
+			).rejects.toSatisfy((e) => isUmiakError(e, "invalid_state"));
 		});
 
 		it("unknown machine is not_found", async () => {
@@ -445,7 +449,7 @@ describe.skipIf(skipPg())("capacity", () => {
 				withTx(t.pool, (tx) =>
 					tryPoweredStart(tx, { machineId: randomUUID(), toState: "booting" }),
 				),
-			).rejects.toSatisfy((e) => isSbxError(e, "not_found"));
+			).rejects.toSatisfy((e) => isUmiakError(e, "not_found"));
 		});
 
 		it("10 concurrent starts at cap 6144 start exactly three 2048 MB machines", async () => {
@@ -487,8 +491,8 @@ describe.skipIf(skipPg())("capacity", () => {
 			const err = await withTx(t.pool, (tx) =>
 				checkQuota(tx, teamId, quota, { addSandboxes: 1, addRamMb: 1024 }),
 			).catch((e: unknown) => e);
-			expect(isSbxError(err, "quota_exceeded")).toBe(true);
-			expect(isSbxError(err) && err.details).toEqual({
+			expect(isUmiakError(err, "quota_exceeded")).toBe(true);
+			expect(isUmiakError(err) && err.details).toEqual({
 				quota: "maxActiveSandboxes",
 				limit: 3,
 				current: 3,
@@ -539,8 +543,8 @@ describe.skipIf(skipPg())("capacity", () => {
 			const err = await withTx(t.pool, (tx) =>
 				checkQuota(tx, teamId, quota, { addSandboxes: 1, addRamMb: 4096 }),
 			).catch((e: unknown) => e);
-			expect(isSbxError(err, "quota_exceeded")).toBe(true);
-			expect(isSbxError(err) && err.details.quota).toBe("maxRamMb");
+			expect(isUmiakError(err, "quota_exceeded")).toBe(true);
+			expect(isUmiakError(err) && err.details.quota).toBe("maxRamMb");
 			await expect(
 				withTx(t.pool, (tx) =>
 					checkQuota(tx, teamId, quota, { addSandboxes: 1, addRamMb: 2048 }),
@@ -570,8 +574,8 @@ describe.skipIf(skipPg())("capacity", () => {
 			const err = await withTx(t.pool, (tx) =>
 				checkQuota(tx, teamId, quota, { addSavedSnapshots: 1 }),
 			).catch((e: unknown) => e);
-			expect(isSbxError(err, "quota_exceeded")).toBe(true);
-			expect(isSbxError(err) && err.details).toEqual({
+			expect(isUmiakError(err, "quota_exceeded")).toBe(true);
+			expect(isUmiakError(err) && err.details).toEqual({
 				quota: "maxSavedSnapshots",
 				limit: 2,
 				current: 2,

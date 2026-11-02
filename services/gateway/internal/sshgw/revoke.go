@@ -11,7 +11,7 @@ import (
 const (
 	// revokedMessage goes to the stderr of every session channel of a
 	// revoked connection (spec 9.5).
-	revokedMessage = "sbx: access revoked"
+	revokedMessage = "umiak: access revoked"
 	// revokeNoticeTimeout is how long the notice may take before the
 	// connection is closed anyway.
 	revokeNoticeTimeout = time.Second
@@ -29,7 +29,7 @@ const (
 	revokeTeam   = "team"
 )
 
-// revokeRule is a parsed sbx_ssh_revoke payload.
+// revokeRule is a parsed umiak_ssh_revoke payload.
 type revokeRule struct {
 	kind                  string
 	userID, teamID, keyID string
@@ -76,8 +76,8 @@ func (r revokeRule) matches(id identity) bool {
 	return false
 }
 
-// Revoke handles an sbx_ssh_revoke payload (spec 9.5): the matching
-// sessions get "sbx: access revoked" on every session channel and are
+// Revoke handles an umiak_ssh_revoke payload (spec 9.5): the matching
+// sessions get "umiak: access revoked" on every session channel and are
 // closed. "" (sent after every (re)LISTEN, when notifications may have been
 // lost) schedules a Recheck. A malformed payload is logged and ignored.
 // Revoke does not block: the work runs on the server's queue.
@@ -88,7 +88,7 @@ func (s *Server) Revoke(payload string) {
 	}
 	r, err := parseRevoke(payload)
 	if err != nil {
-		s.log.Warn("sshgw: ignoring sbx_ssh_revoke payload", "payload", payload, "err", err)
+		s.log.Warn("sshgw: ignoring umiak_ssh_revoke payload", "payload", payload, "err", err)
 		return
 	}
 	s.enqueue(s.revokes, "revoke:"+payload, func(context.Context) {

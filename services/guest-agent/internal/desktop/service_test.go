@@ -13,8 +13,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	v1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
+	v1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
 )
 
 // Fake session and streamer keep desktop tests independent of X11 and Sunshine.

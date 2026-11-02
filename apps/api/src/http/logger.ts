@@ -34,7 +34,7 @@ export function createApiLogger(
 ): Logger {
 	const options = {
 		level: opts.level ?? "info",
-		name: "sbx-api",
+		name: "umiak-api",
 		redact: { paths: REDACT_PATHS, censor: "[redacted]" },
 	};
 	return destination ? pino(options, destination) : pino(options);

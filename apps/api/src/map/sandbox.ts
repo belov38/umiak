@@ -1,11 +1,11 @@
 // Sandbox (core) -> Sandbox resource (S7 §8.1). Ids through the codecs of
-// @sbx/auth, ISO times with ms, `origin` as an object, endpoints from the
+// @umiak/auth, ISO times with ms, `origin` as an object, endpoints from the
 // settings, internal `reprovision` hidden as `activeOperation: null`.
 // `environment` is always null and `excludeOwnerSecrets` false until the
 // sandbox stores them (decision 7).
-import { decodeUuid, encodeUuid } from "@sbx/auth";
-import type { ConfigReader } from "@sbx/config";
-import { isUuid, type Sandbox } from "@sbx/core";
+import { decodeUuid, encodeUuid } from "@umiak/auth";
+import type { ConfigReader } from "@umiak/config";
+import { isUuid, type Sandbox } from "@umiak/core";
 import type pg from "pg";
 import { notFoundError } from "../http/errors.ts";
 import { isPublicOperation } from "../http/wait.ts";
@@ -23,7 +23,7 @@ export interface SandboxExtras {
 }
 
 export interface SandboxMapContext {
-	settings: Pick<Settings, "sbxDomain" | "sshHost" | "sshPort">;
+	settings: Pick<Settings, "umiakDomain" | "sshHost" | "sshPort">;
 	extras: SandboxExtras | undefined;
 }
 
@@ -48,7 +48,7 @@ export function sandboxEndpoints(
 ): SandboxResource["endpoints"] {
 	const port = s.sshPort === 22 ? "" : ` -p ${s.sshPort}`;
 	return {
-		portUrlTemplate: `https://${slug}-{port}.${s.sbxDomain}`,
+		portUrlTemplate: `https://${slug}-{port}.${s.umiakDomain}`,
 		ssh: `ssh${port} ${slug}@${s.sshHost}`,
 	};
 }
@@ -172,7 +172,7 @@ export async function sandboxResources(
 					"desktop",
 				)
 			)
-				resource.endpoints.desktop = `https://${s.slug}-desktop.${deps.settings.sbxDomain}/`;
+				resource.endpoints.desktop = `https://${s.slug}-desktop.${deps.settings.umiakDomain}/`;
 			return resource;
 		}),
 	);

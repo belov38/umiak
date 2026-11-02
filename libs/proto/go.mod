@@ -1,4 +1,4 @@
-module github.com/belov38/boat-dev-clone/libs/proto
+module github.com/belov38/umiak/libs/proto
 
 go 1.27
 

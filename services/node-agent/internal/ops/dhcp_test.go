@@ -41,7 +41,7 @@ func (s *seqFS) ReadFile(name string) ([]byte, error) {
 	return s.base.ReadFile(name)
 }
 
-const leaseFile = "var/lib/misc/dnsmasq.sbx.leases"
+const leaseFile = "var/lib/misc/dnsmasq.umiak.leases"
 
 func seqHarness(seq map[string][]string, base fstest.MapFS) (*harness, *seqFS) {
 	h := newHarness(nil)
@@ -67,20 +67,20 @@ func TestDHCPLeasesReadsAroundAnInPlaceRewrite(t *testing.T) {
 func TestDHCPReleaseSurvivesAnEmptyLeaseRead(t *testing.T) {
 	h, _ := seqHarness(map[string][]string{leaseFile: {"", leases}}, nil)
 	resultMap(t, h.call(t, "dhcp.release", map[string]any{"mac": "02:01:00:00:01:F4"}))
-	if len(h.run.calls) == 0 || strings.Join(h.run.calls[0], " ") != "dhcp_release sbx0 10.88.0.100 02:01:00:00:01:f4" {
+	if len(h.run.calls) == 0 || strings.Join(h.run.calls[0], " ") != "dhcp_release umiak0 10.88.0.100 02:01:00:00:01:f4" {
 		t.Errorf("calls = %v", h.run.calls)
 	}
 }
 
 func TestDHCPReleaseSendsReleaseForTheEthersIP(t *testing.T) {
 	h := newHarness(fstest.MapFS{
-		leaseFile:                  {Data: []byte("")},
-		"etc/dnsmasq.d/sbx/ethers": {Data: []byte(ethers)},
+		leaseFile:                    {Data: []byte("")},
+		"etc/dnsmasq.d/umiak/ethers": {Data: []byte(ethers)},
 	})
-	files := &fakeFiles{files: map[string][]byte{"/etc/dnsmasq.d/sbx/ethers": []byte(ethers)}}
+	files := &fakeFiles{files: map[string][]byte{"/etc/dnsmasq.d/umiak/ethers": []byte(ethers)}}
 	h.srv.Host.Replace = files.replace
 	m := resultMap(t, h.call(t, "dhcp.release", map[string]any{"mac": "02:01:00:00:01:F4"}))
-	if m["released"] != true || len(h.run.calls) == 0 || strings.Join(h.run.calls[0], " ") != "dhcp_release sbx0 10.88.0.101 02:01:00:00:01:f4" {
+	if m["released"] != true || len(h.run.calls) == 0 || strings.Join(h.run.calls[0], " ") != "dhcp_release umiak0 10.88.0.101 02:01:00:00:01:f4" {
 		t.Errorf("result %v, calls = %v", m, h.run.calls)
 	}
 }

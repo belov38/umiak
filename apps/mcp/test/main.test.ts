@@ -25,8 +25,8 @@ const MAIN = join(
 
 describe("loadSettings", () => {
 	const base = {
-		SBX_MCP_API_URL: "http://api:8080/",
-		SBX_MCP_PUBLIC_URL: "https://api.example.com/mcp",
+		UMIAK_MCP_API_URL: "http://api:8080/",
+		UMIAK_MCP_PUBLIC_URL: "https://api.example.com/mcp",
 	};
 
 	it("has the defaults of spec 16.3", () => {
@@ -45,17 +45,18 @@ describe("loadSettings", () => {
 	it("reads every variable", () => {
 		const s = loadSettings({
 			...base,
-			SBX_MCP_PORT: "18080",
-			SBX_MCP_OPS_PORT: "19090",
-			SBX_OIDC_ISSUER: "https://kc.example.com/realms/sbx/",
-			SBX_MCP_ALLOWED_ORIGINS: "https://app.example.com, http://localhost:3000",
-			SBX_MCP_ALLOWED_HOSTS: "mcp.internal:8080,mcp",
-			SBX_LOG_LEVEL: "debug",
+			UMIAK_MCP_PORT: "18080",
+			UMIAK_MCP_OPS_PORT: "19090",
+			UMIAK_OIDC_ISSUER: "https://kc.example.com/realms/umiak/",
+			UMIAK_MCP_ALLOWED_ORIGINS:
+				"https://app.example.com, http://localhost:3000",
+			UMIAK_MCP_ALLOWED_HOSTS: "mcp.internal:8080,mcp",
+			UMIAK_LOG_LEVEL: "debug",
 		});
 		expect(s).toMatchObject({
 			port: 18080,
 			opsPort: 19090,
-			issuer: "https://kc.example.com/realms/sbx",
+			issuer: "https://kc.example.com/realms/umiak",
 			allowedOrigins: ["https://app.example.com", "http://localhost:3000"],
 			allowedHosts: ["mcp.internal:8080", "mcp"],
 			logLevel: "debug",
@@ -66,10 +67,10 @@ describe("loadSettings", () => {
 		let err: unknown;
 		try {
 			loadSettings({
-				SBX_MCP_PUBLIC_URL: "ftp://x",
-				SBX_MCP_PORT: "x",
-				SBX_MCP_ALLOWED_ORIGINS: "https://app.example.com/path",
-				SBX_LOG_LEVEL: "loud",
+				UMIAK_MCP_PUBLIC_URL: "ftp://x",
+				UMIAK_MCP_PORT: "x",
+				UMIAK_MCP_ALLOWED_ORIGINS: "https://app.example.com/path",
+				UMIAK_LOG_LEVEL: "loud",
 			});
 		} catch (e) {
 			err = e;
@@ -77,11 +78,11 @@ describe("loadSettings", () => {
 		expect(err).toBeInstanceOf(SettingsError);
 		const m = (err as Error).message;
 		for (const k of [
-			"SBX_MCP_API_URL: required",
-			"SBX_MCP_PUBLIC_URL: must be an http",
-			"SBX_MCP_PORT: must be an integer",
-			"SBX_MCP_ALLOWED_ORIGINS.0: must be origins",
-			"SBX_LOG_LEVEL",
+			"UMIAK_MCP_API_URL: required",
+			"UMIAK_MCP_PUBLIC_URL: must be an http",
+			"UMIAK_MCP_PORT: must be an integer",
+			"UMIAK_MCP_ALLOWED_ORIGINS.0: must be origins",
+			"UMIAK_LOG_LEVEL",
 		]) {
 			expect(m).toContain(k);
 		}
@@ -118,18 +119,18 @@ describe("node src/main.ts", () => {
 	it("exits 1 with the problems of a bad environment", async () => {
 		const s = await start({});
 		expect(await s.exited).toBe(1);
-		expect(s.stderr()).toContain("SBX_MCP_API_URL: required");
+		expect(s.stderr()).toContain("UMIAK_MCP_API_URL: required");
 	});
 
 	it("serves both listeners and stops on SIGTERM once the call in flight ends", async () => {
 		api = await startFakeApi();
 		const s = await start({
-			SBX_MCP_PORT: "0",
-			SBX_MCP_OPS_PORT: "0",
-			SBX_MCP_API_URL: api.url,
+			UMIAK_MCP_PORT: "0",
+			UMIAK_MCP_OPS_PORT: "0",
+			UMIAK_MCP_API_URL: api.url,
 			// Host check: the test connects to 127.0.0.1.
-			SBX_MCP_PUBLIC_URL: "http://127.0.0.1/mcp",
-			SBX_MCP_ALLOWED_HOSTS: "127.0.0.1",
+			UMIAK_MCP_PUBLIC_URL: "http://127.0.0.1/mcp",
+			UMIAK_MCP_ALLOWED_HOSTS: "127.0.0.1",
 		});
 		let ports: { port: number; opsPort: number } | undefined;
 		await vi.waitFor(
@@ -178,7 +179,7 @@ describe("node src/main.ts", () => {
 		});
 		await vi.waitFor(() => expect(api?.state.commands.size).toBe(1));
 		const metrics = await (await fetch(`${ops}/metrics`)).text();
-		expect(metrics).toContain("sbx_mcp_tool_calls_in_flight 1");
+		expect(metrics).toContain("umiak_mcp_tool_calls_in_flight 1");
 
 		const t0 = Date.now();
 		s.p.kill("SIGTERM");

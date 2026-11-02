@@ -1,6 +1,6 @@
 // What the /app shell sends to the browser: public ids only (`usr_`,
 // `team_`), never the UUIDs of the payload schema.
-import { encodeUuid, type SessionIdentity } from "@sbx/auth";
+import { encodeUuid, type SessionIdentity } from "@umiak/auth";
 
 export interface AppTeam {
 	/** `team_...` */

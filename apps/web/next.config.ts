@@ -7,7 +7,12 @@ const config: NextConfig = {
 	// Trace dependencies from the repo root (pnpm workspace).
 	outputFileTracingRoot: new URL("../..", import.meta.url).pathname,
 	// Workspace packages ship TypeScript sources with `.ts` import extensions.
-	transpilePackages: ["@sbx/auth", "@sbx/config", "@sbx/payload", "@sbx/sdk"],
+	transpilePackages: [
+		"@umiak/auth",
+		"@umiak/config",
+		"@umiak/payload",
+		"@umiak/sdk",
+	],
 	// Types are checked by `pnpm typecheck` (TypeScript 7 has no JS API for Next).
 	typescript: { ignoreBuildErrors: true },
 	poweredByHeader: false,

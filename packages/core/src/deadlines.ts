@@ -1,4 +1,4 @@
-import type { TemplateOs } from "@sbx/config";
+import type { TemplateOs } from "@umiak/config";
 import type { OperationKind } from "./rows.ts";
 
 // Operation deadlines (S6 §7.9). `operations.deadline_at = created_at + deadline`;

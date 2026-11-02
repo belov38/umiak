@@ -13,8 +13,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/edge"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
+	"github.com/belov38/umiak/services/gateway/internal/edge"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
 )
 
 // promptClose is how fast a conn over a handshake cap must be closed: far
@@ -23,7 +23,7 @@ const promptClose = 2 * time.Second
 
 // capDispatcher serves a dispatcher on a fresh loopback listener (wrapped
 // with PROXY v2 trusting 127.0.0.0/8 when proxy is set). Tunnel conns are
-// accepted and closed; sbx conns are served by an HTTP server.
+// accepted and closed; umiak conns are served by an HTTP server.
 func capDispatcher(t *testing.T, proxy bool, mod func(*edge.DispatchConfig)) (d *edge.Dispatcher, addr string, roots *x509.CertPool, m *obs.Metrics) {
 	t.Helper()
 	raw, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
@@ -41,8 +41,8 @@ func capDispatcher(t *testing.T, proxy bool, mod func(*edge.DispatchConfig)) (d 
 			mod(c)
 		}
 	})
-	srv := &http.Server{Handler: hostApp("sbx"), ReadHeaderTimeout: 10 * time.Second}
-	go func() { _ = srv.Serve(d.Sbx()) }()
+	srv := &http.Server{Handler: hostApp("umiak"), ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = srv.Serve(d.Umiak()) }()
 	go func() {
 		for {
 			c, err := d.Tunnel().Accept()
@@ -218,7 +218,7 @@ func TestDispatcherPerIPHandshakeCapProxy(t *testing.T) {
 	})
 
 	// The general budget is nearly full: a normal client is served.
-	if err := getVia(t, addr, header(t, client), "a-80.sbx.test", roots); err != nil {
+	if err := getVia(t, addr, header(t, client), "a-80.umiak.test", roots); err != nil {
 		t.Fatalf("normal client GET: %v", err)
 	}
 
@@ -249,7 +249,7 @@ func TestDispatcherPerIPHandshakeCapProxy(t *testing.T) {
 	}
 	_ = c.Close()
 	// A normal client is shed now: the general cap is the last resort.
-	if c, err := tlsVia(addr, header(t, client), "a-80.sbx.test", roots); err == nil {
+	if c, err := tlsVia(addr, header(t, client), "a-80.umiak.test", roots); err == nil {
 		_ = c.Close()
 		t.Fatal("a non-exempt handshake passed with the general budget full")
 	}
@@ -271,7 +271,7 @@ func TestDispatcherHandshakeFloodRegression(t *testing.T) {
 	}
 	// The default per-IP cap is 64.
 	waitInFlight(t, d, "192.0.2.1", 64)
-	if err := getVia(t, addr, header(t, "198.51.100.7"), "a-80.sbx.test", roots); err != nil {
+	if err := getVia(t, addr, header(t, "198.51.100.7"), "a-80.umiak.test", roots); err != nil {
 		t.Fatalf("GET of another IP: %v", err)
 	}
 	c, err := tlsVia(addr, header(t, "198.51.100.8"), "tunnel.test", roots)

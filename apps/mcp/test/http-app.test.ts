@@ -74,7 +74,7 @@ describe("both protocol eras", () => {
 		const call = h.apiCalls.find((a) => a.path === "/v1/limits");
 		expect(call?.headers.get("traceparent")).toBe(tp);
 		expect(call?.headers.get("user-agent")).toMatch(
-			/^sbx-mcp\/\S+ \(test-client\/9\.9\.9; http\)$/,
+			/^umiak-mcp\/\S+ \(test-client\/9\.9\.9; http\)$/,
 		);
 		// No traceparent: no header.
 		await c.client.callTool({ name: "limits_get", arguments: {} });
@@ -520,7 +520,7 @@ describe("health and metrics", () => {
 		await c.client.callTool({ name: "limits_get", arguments: {} });
 		await h.raw("POST", "/mcp", { headers: json, body: LIST });
 		await h.raw("POST", "/mcp", {
-			headers: { ...json, authorization: "Bearer sbx_bad" },
+			headers: { ...json, authorization: "Bearer umiak_bad" },
 			body: LIST,
 		});
 		const ops = createOpsApp({ metrics: h.metrics, ready: () => true });
@@ -537,18 +537,18 @@ describe("health and metrics", () => {
 			expect((await fetch(`${base}/readyz`)).status).toBe(200);
 			const text = await (await fetch(`${base}/metrics`)).text();
 			expect(text).toContain(
-				'sbx_mcp_tool_calls_total{tool="limits_get",outcome="ok"} 1',
+				'umiak_mcp_tool_calls_total{tool="limits_get",outcome="ok"} 1',
 			);
 			expect(text).toContain(
-				'sbx_mcp_auth_rejections_total{status="401",reason="no_bearer"} 1',
+				'umiak_mcp_auth_rejections_total{status="401",reason="no_bearer"} 1',
 			);
 			expect(text).toContain(
-				'sbx_mcp_auth_rejections_total{status="401",reason="unauthorized"} 1',
+				'umiak_mcp_auth_rejections_total{status="401",reason="unauthorized"} 1',
 			);
-			expect(text).toContain("sbx_mcp_me_cache_misses_total 2");
-			expect(text).toContain("sbx_mcp_tool_call_duration_seconds_bucket");
-			expect(text).toContain("sbx_mcp_tool_response_bytes_bucket");
-			expect(text).toContain("sbx_mcp_tool_calls_in_flight 0");
+			expect(text).toContain("umiak_mcp_me_cache_misses_total 2");
+			expect(text).toContain("umiak_mcp_tool_call_duration_seconds_bucket");
+			expect(text).toContain("umiak_mcp_tool_response_bytes_bucket");
+			expect(text).toContain("umiak_mcp_tool_calls_in_flight 0");
 			expect(text).not.toContain(FAKE_TOKENS.full);
 		} finally {
 			await new Promise<void>((resolve) => server.close(() => resolve()));

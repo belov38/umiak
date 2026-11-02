@@ -16,11 +16,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/docker"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/supervisor"
+	"github.com/belov38/umiak/services/guest-agent/internal/docker"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/supervisor"
 )
 
 // testLog discards the logs of the code under test.
@@ -265,7 +265,7 @@ func newEnv(t *testing.T, mod func(*Options)) *env {
 		Freezer:    e.fz,
 		Supervisor: e.sv,
 		Emit:       e.rec,
-		Self:       "/usr/local/bin/sbx-agent",
+		Self:       "/usr/local/bin/umiak-agent",
 		Log:        testLog,
 	}
 	if mod != nil {

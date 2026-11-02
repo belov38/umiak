@@ -6,9 +6,9 @@ set -euo pipefail
 # shellcheck source=SCRIPTDIR/../lib.sh
 . "$(dirname "$0")/../lib.sh"
 
-dl=$SBX_WORK_DIR/downloads
+dl=$UMIAK_WORK_DIR/downloads
 mkdir -p "$dl"
-chmod 0755 "$SBX_WORK_DIR" "$dl"
+chmod 0755 "$UMIAK_WORK_DIR" "$dl"
 
 # Node LTS (+ npm, npx) into /usr/local.
 v=$(toml_get tools.node.version)

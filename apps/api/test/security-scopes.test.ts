@@ -4,8 +4,12 @@
 // with only that scope gets past the guards, person-only operations refuse
 // keys (user_required), owner-only operations refuse members (role), and
 // /me, /limits, /templates, /sizes and DELETE /api-keys/self take any key.
-import { SCOPES, type Scope } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { SCOPES, type Scope } from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ApiDeps } from "../src/index.ts";
 import {
@@ -90,13 +94,13 @@ describe("the route table", () => {
 		}
 	});
 
-	it("websocket entries are exactly the operations with x-sbx-websocket", () => {
+	it("websocket entries are exactly the operations with x-umiak-websocket", () => {
 		for (const [id, r] of ROUTE_LIST) {
 			const op = OPENAPI_DOC.paths[r.path]?.[r.method.toLowerCase()] as Record<
 				string,
 				unknown
 			>;
-			expect(r.websocket === true, id).toBe("x-sbx-websocket" in op);
+			expect(r.websocket === true, id).toBe("x-umiak-websocket" in op);
 		}
 		expect(ROUTE_LIST.filter(([, r]) => r.websocket).length).toBeGreaterThan(0);
 	});

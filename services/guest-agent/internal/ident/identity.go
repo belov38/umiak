@@ -9,13 +9,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/libs/tunnel/wire"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
 )
 
 const (
 	// familyPrefix marks a tunnel URL override in product_family (S5 section 14).
-	familyPrefix = "sbxt1:"
+	familyPrefix = "umiakt1:"
 	// maxTunnelURL is the longest accepted tunnel URL in bytes.
 	maxTunnelURL = 200
 	// hostnameSuffixLen is the number of trailing machine id hex digits in the
@@ -91,14 +91,14 @@ func machineIDHex(s string) (string, bool) {
 	return h, true
 }
 
-// DefaultHostname returns sbx-<last 12 hex digits of the machine id>. It is
+// DefaultHostname returns umiak-<last 12 hex digits of the machine id>. It is
 // the hostname of a machine before claim.
 func DefaultHostname(machineID string) string {
 	h := strings.ToLower(strings.ReplaceAll(machineID, "-", ""))
 	if len(h) > hostnameSuffixLen {
 		h = h[len(h)-hostnameSuffixLen:]
 	}
-	return "sbx-" + h
+	return "umiak-" + h
 }
 
 // ValidHostname reports whether s is a single RFC 1123 label of at most 63

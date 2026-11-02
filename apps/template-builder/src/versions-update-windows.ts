@@ -285,7 +285,7 @@ export function formatWindowsVersionsToml(v: WindowsVersions): string {
 		"# [iso], [virtio_win] and [openssh] are written by hand; --update keeps them.",
 		"",
 		"# User's ISO in local:iso (spec S9 section 6.1). An empty sha256 means not",
-		"# known yet: `sbx-tpl build --accept-iso-sha256` computes it and writes it here.",
+		"# known yet: `umiak-tpl build --accept-iso-sha256` computes it and writes it here.",
 		"# product_key names a public generic key in _windows/keys.toml; omit it for",
 		"# evaluation media.",
 		"[iso]",

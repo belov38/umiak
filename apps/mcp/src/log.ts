@@ -31,7 +31,7 @@ export function createLogger(o: LoggerOptions = {}): Logger {
 	return pino(
 		{
 			level: o.level ?? "info",
-			name: "sbx-mcp",
+			name: "umiak-mcp",
 			redact: { paths: REDACT_PATHS, censor: "[redacted]" },
 		},
 		destination,

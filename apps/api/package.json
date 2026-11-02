@@ -1,5 +1,5 @@
 {
-	"name": "@sbx/api",
+	"name": "@umiak/api",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
@@ -10,7 +10,7 @@
 	},
 	"scripts": {
 		"test": "vitest run",
-		"typecheck": "pnpm --filter \"@sbx/agent-client...\" run build && tsc --noEmit -p .",
+		"typecheck": "pnpm --filter \"@umiak/agent-client...\" run build && tsc --noEmit -p .",
 		"openapi": "node scripts/openapi.ts"
 	},
 	"dependencies": {
@@ -18,13 +18,13 @@
 		"@connectrpc/connect": "2.3.0",
 		"@hono/node-server": "2.1.5",
 		"@hono/zod-openapi": "1.6.3",
-		"@sbx/agent-client": "workspace:*",
-		"@sbx/auth": "workspace:*",
-		"@sbx/config": "workspace:*",
-		"@sbx/core": "workspace:*",
-		"@sbx/db": "workspace:*",
-		"@sbx/payload": "workspace:*",
-		"@sbx/proto": "workspace:*",
+		"@umiak/agent-client": "workspace:*",
+		"@umiak/auth": "workspace:*",
+		"@umiak/config": "workspace:*",
+		"@umiak/core": "workspace:*",
+		"@umiak/db": "workspace:*",
+		"@umiak/payload": "workspace:*",
+		"@umiak/proto": "workspace:*",
 		"hono": "4.13.14",
 		"jose": "6.2.14",
 		"pg": "8.23.1",

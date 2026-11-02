@@ -1,20 +1,20 @@
 // The real api for the integration test (S11 14.4): apps/api's public app in
-// process on a real HTTP server, Postgres from @sbx/db/testing, core's
+// process on a real HTTP server, Postgres from @umiak/db/testing, core's
 // SandboxService over a test topology, a FakeAgent behind the command and
 // file routes, and a team key with every scope. Built from the exported
-// pieces of @sbx/api/testing like apps/cli/test/helpers/api.ts; the worker is
+// pieces of @umiak/api/testing like apps/cli/test/helpers/api.ts; the worker is
 // not running, so `markReady` and `markStopped` stand in for it.
 import type { AddressInfo } from "node:net";
-import { createApiServer, createPublicApp } from "@sbx/api";
+import { createApiServer, createPublicApp } from "@umiak/api";
 import {
 	FakeAgent,
 	issueApiKey,
 	makeTestDeps,
 	testSettings,
-} from "@sbx/api/testing";
-import { serviceEnv } from "@sbx/core/testing";
-import { withTx } from "@sbx/db";
-import { createTestDatabase } from "@sbx/db/testing";
+} from "@umiak/api/testing";
+import { serviceEnv } from "@umiak/core/testing";
+import { withTx } from "@umiak/db";
+import { createTestDatabase } from "@umiak/db/testing";
 
 export interface RealApi {
 	/** http://127.0.0.1:<port> */
@@ -63,8 +63,8 @@ export async function startRealApi(): Promise<RealApi> {
 	const agent = new FakeAgent();
 	const deps = makeTestDeps({
 		settings: testSettings({
-			SBX_API_RATE_BURST: "100000",
-			SBX_API_RATE_STARTS_PER_MIN: "100000",
+			UMIAK_API_RATE_BURST: "100000",
+			UMIAK_API_RATE_STARTS_PER_MIN: "100000",
 		}),
 		pool,
 		svc: env.svc,

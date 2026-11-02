@@ -1,20 +1,20 @@
-# @sbx/api
+# @umiak/api
 
 Публичное API v1 (S7): Hono + `@hono/zod-openapi` на Node. Спецификация — `docs/specs/s7-public-api.md`, отличия
 реализации — её §23. Маршруты вызывают `SandboxService` (`packages/core`, S6) и агента через интерфейс `AgentApi`.
 
 ## Запуск
 
-Сам `api` не собирается: `node src/main.ts` (type stripping). `@sbx/proto` и `@sbx/agent-client` в рантайме
+Сам `api` не собирается: `node src/main.ts` (type stripping). `@umiak/proto` и `@umiak/agent-client` в рантайме
 берутся из `dist`, их надо собрать один раз и после изменений:
 
 ```sh
-mise exec -- pnpm --filter "@sbx/agent-client..." run build   # или mise exec -- pnpm build
+mise exec -- pnpm --filter "@umiak/agent-client..." run build   # или mise exec -- pnpm build
 mise exec -- node apps/api/src/main.ts                         # переменные окружения — ниже
 ```
 
 Личности (пользователи, команды, ключи) и конфиг (шаблоны, размеры, квоты, `defaults`) берутся из Payload
-(`@sbx/payload`: `PayloadIdentityStore`, `PayloadConfigReader` с `LISTEN sbx_config`, свой пул на 10 соединений).
+(`@umiak/payload`: `PayloadIdentityStore`, `PayloadConfigReader` с `LISTEN umiak_config`, свой пул на 10 соединений).
 Миграции схемы `payload` `api` не применяет: это делает `node packages/payload/src/migrate.ts` (в compose —
 `web-migrate`) до старта; до тех пор `/readyz` отвечает `503`.
 
@@ -27,19 +27,19 @@ sync-командам — `503 server_shutting_down`, выход не позже
 
 | Порт (env) | По умолчанию | Кто | Аутентификация |
 |---|---|---|---|
-| `SBX_API_PUBLIC_PORT` | 8080 | SDK, CLI, MCP, CI | Keycloak JWT или командный ключ `sbx_`; `X-Auth-Request-*` вырезаются |
-| `SBX_API_PROXIED_PORT` | 8081 | браузер через oauth2-proxy | заголовки oauth2-proxy, проверка `Origin`; `SBX_API_PROXIED_ENABLED=0` — не запускать |
-| `SBX_API_INTERNAL_PORT` | 8082 | gateway (S4) | service token |
-| `SBX_API_METRICS_PORT` | 9090 | Prometheus, пробы | нет: `/healthz`, `/readyz`, `/metrics` |
+| `UMIAK_API_PUBLIC_PORT` | 8080 | SDK, CLI, MCP, CI | Keycloak JWT или командный ключ `umiak_`; `X-Auth-Request-*` вырезаются |
+| `UMIAK_API_PROXIED_PORT` | 8081 | браузер через oauth2-proxy | заголовки oauth2-proxy, проверка `Origin`; `UMIAK_API_PROXIED_ENABLED=0` — не запускать |
+| `UMIAK_API_INTERNAL_PORT` | 8082 | gateway (S4) | service token |
+| `UMIAK_API_METRICS_PORT` | 9090 | Prometheus, пробы | нет: `/healthz`, `/readyz`, `/metrics` |
 
-`/readyz` готов, когда работают Postgres и `LISTEN sbx_identity`, применены все известные коду миграции Payload и
+`/readyz` готов, когда работают Postgres и `LISTEN umiak_identity`, применены все известные коду миграции Payload и
 процесс не останавливается; иначе `503 not_ready` с `details.reasons` (`postgres`, `identity_listener`,
 `payload_migrations`, `shutting_down`).
 OpenAPI — `GET /v1/openapi.json`, документация — `GET /v1/docs` (без аутентификации; docs — только на public:
 страница грузит Scalar с jsDelivr, закреплённый с SRI).
 
 **Ingress перед public и proxied должен ограничивать частоту запросов по IP клиента.** Лимиты `api` считаются по
-principal, то есть после аутентификации; до неё каждый запрос с `Bearer sbx_…` — поиск ключа (кэш 30 s / 5 s на
+principal, то есть после аутентификации; до неё каждый запрос с `Bearer umiak_…` — поиск ключа (кэш 30 s / 5 s на
 неизвестный хеш, дальше Postgres), каждый JWT — проверка подписи. Тела запросов до аутентификации не читаются,
 ограниченные тела должны прийти за 60 s; чанк загрузки — без общего срока, но не дольше 30 s без новых байт
 (`408 request_timeout`, retryable).
@@ -52,36 +52,36 @@ principal, то есть после аутентификации; до неё к
 |---|---|---|
 | `DATABASE_URL` | обязательна | Postgres (`postgres://…`) |
 | `PAYLOAD_SECRET` | обязательна | секрет конфига Payload (тот же, что у `web` и `worker`) |
-| `SBX_DATA_KEYS_FILE` | обязательна | ключи данных S6 (формат `deploy/compose/config/data-keys.example.json`) |
-| `SBX_API_CURSOR_KEY` | обязательна | base64, не меньше 32 байт: HMAC курсоров |
-| `SBX_API_SERVICE_TOKENS_FILE` | обязательна | JSON `{"gateway": ["<t1>", "<t2>"]}`: токены, которые принимает internal listener |
-| `SBX_API_GATEWAY_TOKEN_FILE` | — | токен `api` для internal listener gateway (одна строка). Без него RPC агента и `/files/*` — `503 agent_unavailable` |
-| `SBX_IDENTITY_FILE` | — | YAML личностей: `teams`, `users`, `apiKeys` по sha256 (формат — `packages/auth/src/seed.ts`); upsert в Payload (`seedPayloadIdentity`) при каждом старте; без применённых миграций Payload старт падает |
-| `SBX_OPERATOR_GROUPS` | — | группы IdP операторов, через запятую |
-| `SBX_OIDC_ISSUER` | — | issuer Keycloak (`https://<keycloak>/realms/sbx`); без него JWT не принимаются, `/v1/meta` `oidc: null` |
-| `SBX_OIDC_DISCOVERY_URL` | `<issuer>/.well-known/openid-configuration` | discovery по внутреннему адресу |
-| `SBX_OIDC_JWKS_URL` | `jwks_uri` из discovery | JWKS по внутреннему адресу |
-| `SBX_OIDC_AUDIENCE` | `sbx-api` | обязательный `aud` |
-| `SBX_OIDC_ALLOWED_CLIENTS` | `sbx-cli,sbx-mcp` | допустимые `azp` |
-| `SBX_API_URL` | обязательна | публичный адрес API (`/v1/meta` `apiUrl`) |
-| `SBX_APP_URL` | обязательна | адрес дашборда (`/v1/meta` `appUrl`) |
-| `SBX_APP_ORIGIN` | origin `SBX_APP_URL` | `Origin`, который принимает proxied listener |
-| `SBX_SBX_DOMAIN` | обязательна | домен портов (`<slug>-<port>.<domain>`) |
-| `SBX_SSH_HOST`, `SBX_SSH_PORT` | `ssh.<SBX_SBX_DOMAIN>`, `22` | SSH gateway для `/v1/meta` и `/ssh` |
-| `SBX_SSH_HOST_KEYS_FILE` | — | публичные host keys gateway, по одному в строке |
-| `SBX_SSH_LOGIN_CA_KEY_FILE` | — | закрытый ed25519 SSH login CA без пароля (PKCS#8 PEM или OpenSSH); без него `ssh/certificate` недоступен |
-| `SBX_API_TRUSTED_PROXY_CIDRS` | — | CIDR через запятую: от них `X-Forwarded-For` идёт в `clientIp` лога |
-| `SBX_API_RATE_RPS`, `SBX_API_RATE_BURST` | `20`, `100` | лимит запросов на principal: `burst` за `burst/rps` s |
-| `SBX_API_RATE_STARTS_PER_MIN` | `30` | create, fork, resume в минуту на команду |
-| `SBX_API_MAX_STREAMS` | `100` | открытых стримов и PTY на principal на процесс |
-| `SBX_MIN_CLI_VERSION`, `SBX_LATEST_CLI_VERSION` | — | `/v1/meta` |
-| `SBX_BUILD` | `dev` | `/v1/meta` `build` |
-| `SBX_LOG_LEVEL` | `info` | pino: `fatal` … `trace`, `silent` |
+| `UMIAK_DATA_KEYS_FILE` | обязательна | ключи данных S6 (формат `deploy/compose/config/data-keys.example.json`) |
+| `UMIAK_API_CURSOR_KEY` | обязательна | base64, не меньше 32 байт: HMAC курсоров |
+| `UMIAK_API_SERVICE_TOKENS_FILE` | обязательна | JSON `{"gateway": ["<t1>", "<t2>"]}`: токены, которые принимает internal listener |
+| `UMIAK_API_GATEWAY_TOKEN_FILE` | — | токен `api` для internal listener gateway (одна строка). Без него RPC агента и `/files/*` — `503 agent_unavailable` |
+| `UMIAK_IDENTITY_FILE` | — | YAML личностей: `teams`, `users`, `apiKeys` по sha256 (формат — `packages/auth/src/seed.ts`); upsert в Payload (`seedPayloadIdentity`) при каждом старте; без применённых миграций Payload старт падает |
+| `UMIAK_OPERATOR_GROUPS` | — | группы IdP операторов, через запятую |
+| `UMIAK_OIDC_ISSUER` | — | issuer Keycloak (`https://<keycloak>/realms/umiak`); без него JWT не принимаются, `/v1/meta` `oidc: null` |
+| `UMIAK_OIDC_DISCOVERY_URL` | `<issuer>/.well-known/openid-configuration` | discovery по внутреннему адресу |
+| `UMIAK_OIDC_JWKS_URL` | `jwks_uri` из discovery | JWKS по внутреннему адресу |
+| `UMIAK_OIDC_AUDIENCE` | `umiak-api` | обязательный `aud` |
+| `UMIAK_OIDC_ALLOWED_CLIENTS` | `umiak-cli,umiak-mcp` | допустимые `azp` |
+| `UMIAK_API_URL` | обязательна | публичный адрес API (`/v1/meta` `apiUrl`) |
+| `UMIAK_APP_URL` | обязательна | адрес дашборда (`/v1/meta` `appUrl`) |
+| `UMIAK_APP_ORIGIN` | origin `UMIAK_APP_URL` | `Origin`, который принимает proxied listener |
+| `UMIAK_PREVIEW_DOMAIN` | обязательна | домен портов (`<slug>-<port>.<domain>`) |
+| `UMIAK_SSH_HOST`, `UMIAK_SSH_PORT` | `ssh.<UMIAK_PREVIEW_DOMAIN>`, `22` | SSH gateway для `/v1/meta` и `/ssh` |
+| `UMIAK_SSH_HOST_KEYS_FILE` | — | публичные host keys gateway, по одному в строке |
+| `UMIAK_SSH_LOGIN_CA_KEY_FILE` | — | закрытый ed25519 SSH login CA без пароля (PKCS#8 PEM или OpenSSH); без него `ssh/certificate` недоступен |
+| `UMIAK_API_TRUSTED_PROXY_CIDRS` | — | CIDR через запятую: от них `X-Forwarded-For` идёт в `clientIp` лога |
+| `UMIAK_API_RATE_RPS`, `UMIAK_API_RATE_BURST` | `20`, `100` | лимит запросов на principal: `burst` за `burst/rps` s |
+| `UMIAK_API_RATE_STARTS_PER_MIN` | `30` | create, fork, resume в минуту на команду |
+| `UMIAK_API_MAX_STREAMS` | `100` | открытых стримов и PTY на principal на процесс |
+| `UMIAK_MIN_CLI_VERSION`, `UMIAK_LATEST_CLI_VERSION` | — | `/v1/meta` |
+| `UMIAK_BUILD` | `dev` | `/v1/meta` `build` |
+| `UMIAK_LOG_LEVEL` | `info` | pino: `fatal` … `trace`, `silent` |
 | порты listener-ов | см. выше | `0` — любой свободный (тесты) |
 
 ## Внутренние ручки для gateway (S4)
 
-Все — на internal listener-е с `Authorization: Bearer <токен из SBX_API_SERVICE_TOKENS_FILE>`. Ошибки кладут
+Все — на internal listener-е с `Authorization: Bearer <токен из UMIAK_API_SERVICE_TOKENS_FILE>`. Ошибки кладут
 `code` и на верхний уровень тела (`{"code": "route_not_found", "error": {...}}`).
 
 | Ручка | Что |
@@ -91,9 +91,9 @@ principal, то есть после аутентификации; до неё к
 | `POST /internal/v1/gateway/port-auth/exchange` | одноразовый код SSO порта → `{userId, email, label, authEpoch}` или `400 invalid_code` |
 | `POST /internal/v1/agent-events` | binary protobuf `AgentEventsRequest` → `{ackedSeq}` |
 
-Изменения маршрутов gateway узнаёт по `NOTIFY sbx_routes '<slug>'` (триггеры миграций `0201` и `0204`, в том числе
-блокировки, `0206`), разрывы SSH-сессий — по `NOTIFY sbx_ssh_revoke`: личности, членства, ключи и команды — из хуков
-Payload (`@sbx/payload`, те же payload-ы, что у триггеров `0302`/`0303` на `identity`), блокировка sandbox —
+Изменения маршрутов gateway узнаёт по `NOTIFY umiak_routes '<slug>'` (триггеры миграций `0201` и `0204`, в том числе
+блокировки, `0206`), разрывы SSH-сессий — по `NOTIFY umiak_ssh_revoke`: личности, членства, ключи и команды — из хуков
+Payload (`@umiak/payload`, те же payload-ы, что у триггеров `0302`/`0303` на `identity`), блокировка sandbox —
 `''` из `SandboxService.block` (gateway перепроверяет все сессии через `ssh/authorize`).
 
 ## Агент: `AgentApi`
@@ -101,12 +101,12 @@ Payload (`@sbx/payload`, те же payload-ы, что у триггеров `030
 `src/agent/types.ts` — всё, что `api` делает с агентом: `capabilities`, `requireCapability`, `start`, `attach`,
 `sendInput`, `update`, `signal`, `kill`, `get`, `stat`, `list`, `makeDir`, `move`, `chmod`, `remove`, `listPorts`,
 `updateEnv`, `updateSecrets`, `files` (HTTP `/files*` агента). Ошибки — `AgentUnavailableError`, `AgentOutdatedError`
-(`@sbx/agent-client`) и `AgentCallError` (`src/agent/errors.ts`); отображение в HTTP — `src/agent/errors.ts`.
+(`@umiak/agent-client`) и `AgentCallError` (`src/agent/errors.ts`); отображение в HTTP — `src/agent/errors.ts`.
 
-- Тесты — `FakeAgent` из `@sbx/api/testing`: настоящие процессы, PTY без терминала, файлы во временном каталоге.
-- Процесс `api` — `ConnectAgentApi` (`src/agent/connect.ts`): RPC — клиенты `sbx.agent.v1` (`@sbx/proto/agent/v1`)
+- Тесты — `FakeAgent` из `@umiak/api/testing`: настоящие процессы, PTY без терминала, файлы во временном каталоге.
+- Процесс `api` — `ConnectAgentApi` (`src/agent/connect.ts`): RPC — клиенты `umiak.agent.v1` (`@umiak/proto/agent/v1`)
   поверх `AgentClient.transport(machineId)` (поиск gateway, `421`, ожидание агента до 30 s), `files` — через
-  `AgentClient.fetch`, capabilities — из `tunnel.tunnel_sessions`. Без `SBX_API_GATEWAY_TOKEN_FILE` все вызовы —
+  `AgentClient.fetch`, capabilities — из `tunnel.tunnel_sessions`. Без `UMIAK_API_GATEWAY_TOKEN_FILE` все вызовы —
   `503 agent_unavailable`. `attach` — один поток `Process/Attach`; переподключение — `resumableAttach` в
   `src/commands/attach.ts`.
 - Ошибки — по таблице в doc-комментарии `agentErrorToHttp` (`src/agent/errors.ts`): Connect
@@ -116,11 +116,11 @@ Payload (`@sbx/payload`, те же payload-ы, что у триггеров `030
   при неизвестном исходе — `503 agent_unavailable`, `retryable: false`, `details.outcome: "unknown"`
   (`agentMutationErrorToHttp`).
 - Интеграционные тесты против настоящего агента — `test/agent-real.test.ts`: Go-программа
-  `services/guest-agent/cmd/sbx-agent-harness` (собирается в global setup через `mise exec -- go build`) поднимает
+  `services/guest-agent/cmd/umiak-agent-harness` (собирается в global setup через `mise exec -- go build`) поднимает
   в одном процессе gateway S2 и агента S3 с фейковыми зависимостями ОС; команды — процессы хоста под текущим
   пользователем. Без `go` тесты пропускаются с причиной в выводе. Ограничения (нет cgroups, пользователя `user`,
   claim) — в заголовке файла.
-- Не сделано: chaos стрима через туннель (spec §16) и E2E `sbx-bench s7` на `pve`.
+- Не сделано: chaos стрима через туннель (spec §16) и E2E `umiak-bench s7` на `pve`.
 
 ### Wiring S3: адаптер proto ↔ `AgentApi`
 
@@ -134,7 +134,7 @@ Payload (`@sbx/payload`, те же payload-ы, что у триггеров `030
   `<= Number.MAX_SAFE_INTEGER`, иначе ошибка адаптера (не обрезать). Обратно — `BigInt(n)`.
 - `CommandInfo.streams` — список `StreamInfo` с полем `stream`; в `AgentApi` — объект по имени потока, только
   потоки команды (у PTY — один `pty`).
-- `Sbx-Request-Id` (S2 §9.2) ставить на мутирующих вызовах: `Start` (`requestId` из `opts`, UUIDv5 ключа
+- `Umiak-Request-Id` (S2 §9.2) ставить на мутирующих вызовах: `Start` (`requestId` из `opts`, UUIDv5 ключа
   идемпотентности), `MakeDir`/`Move`/`Chmod`/`Remove`, `UpdateEnv`/`UpdateSecrets`. Ответ `request_id_reused`
   значит другой запрос под тем же id → `409 idempotency_key_reused` (у `Start` его не бывает: агент
   проверяет `Start` по `commandId`, не по request id).
@@ -148,7 +148,7 @@ Payload (`@sbx/payload`, те же payload-ы, что у триггеров `030
   `commands/run.ts`).
 - `StreamInfo.size` — размер файла потока; после выхода оставшиеся процессы могут писать дальше `end`
   (S3 §10). Смещения, `tailBytes` и `sizeBytes` считать от `streamSize()` = `min(size, end)`.
-- Известное ограничение: `AgentClient` (S2) повторяет унарные вызовы с тем же `Sbx-Request-Id`, а кэш ответов
+- Известное ограничение: `AgentClient` (S2) повторяет унарные вызовы с тем же `Umiak-Request-Id`, а кэш ответов
   агента (S3) пропускает `IDEMPOTENT`-методы, среди них `Signal`. Потерянный ответ — сигнал доставлен дважды
   (безвредно для `TERM`/`KILL`/`INT`, не для счётных сигналов). Исправлять в S2 или S3 (S7 §23.9).
 
@@ -157,7 +157,7 @@ Payload (`@sbx/payload`, те же payload-ы, что у триггеров `030
 `openapi/v1.json` генерируется из zod-схем и коммитится:
 
 ```sh
-mise exec -- pnpm --filter @sbx/api openapi
+mise exec -- pnpm --filter @umiak/api openapi
 ```
 
 Тест `openapi-drift` падает, если документ устарел. После изменения схем — перегенерировать и SDK
@@ -166,11 +166,11 @@ mise exec -- pnpm --filter @sbx/api openapi
 ## Тесты
 
 ```sh
-mise exec -- pnpm --filter @sbx/api test        # vitest; Postgres — docker-контейнер из global setup
-mise exec -- pnpm --filter @sbx/api typecheck
+mise exec -- pnpm --filter @umiak/api test        # vitest; Postgres — docker-контейнер из global setup
+mise exec -- pnpm --filter @umiak/api typecheck
 ```
 
-- Postgres: без Docker — `SBX_TEST_DATABASE_URL`; `SBX_TEST_SKIP_PG=1` пропускает тесты с базой.
+- Postgres: без Docker — `UMIAK_TEST_DATABASE_URL`; `UMIAK_TEST_SKIP_PG=1` пропускает тесты с базой.
 - Запросы и ответы интеграционных тестов проверяются по `openapi/v1.json` (conformance).
-- Keycloak в тестах — свой OIDC-сервер с JWKS и device grant (`startTestOidcServer` из `@sbx/api/testing`);
+- Keycloak в тестах — свой OIDC-сервер с JWKS и device grant (`startTestOidcServer` из `@umiak/api/testing`);
   настоящий Keycloak проверяется smoke-проверкой compose (`deploy/compose/README.md`).

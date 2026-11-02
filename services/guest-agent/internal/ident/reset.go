@@ -1,6 +1,6 @@
 package ident
 
-import "github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+import "github.com/belov38/umiak/services/guest-agent/internal/paths"
 
 // Resetter performs the parts of an identity reset that touch the running
 // system rather than files.

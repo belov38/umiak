@@ -7,7 +7,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	v1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	v1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 )
 
 // PrepareRuntime rotates copied upstream files before desktop readiness, without video startup.

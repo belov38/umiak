@@ -12,13 +12,13 @@ import (
 var ErrShimExists = errors.New("winproc: shim mutex already exists")
 
 func shimMutexName(id string) (*uint16, error) {
-	if err := checkName("sbx-shim-" + id); err != nil {
+	if err := checkName("umiak-shim-" + id); err != nil {
 		return nil, err
 	}
-	return windows.UTF16PtrFromString(`Global\sbx-shim-` + id)
+	return windows.UTF16PtrFromString(`Global\umiak-shim-` + id)
 }
 
-// ShimMutex creates the named mutex `Global\sbx-shim-<id>` that marks the
+// ShimMutex creates the named mutex `Global\umiak-shim-<id>` that marks the
 // shim of command id as alive: the object exists while the shim holds the
 // handle and vanishes with the shim's process. Liveness is the existence of
 // the object, not ownership (ownership is per OS thread). release closes it;

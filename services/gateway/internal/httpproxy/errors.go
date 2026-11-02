@@ -7,37 +7,37 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/sbxerr"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/upstream"
+	"github.com/belov38/umiak/services/gateway/internal/umiakerr"
+	"github.com/belov38/umiak/services/gateway/internal/upstream"
 )
 
 // retryAfterAgent is the Retry-After of agent_unavailable (spec 7.6).
 const retryAfterAgent = 5
 
-func notFound() sbxerr.Error {
-	return sbxerr.Error{Status: http.StatusNotFound, Code: sbxerr.CodeRouteNotFound}
+func notFound() umiakerr.Error {
+	return umiakerr.Error{Status: http.StatusNotFound, Code: umiakerr.CodeRouteNotFound}
 }
 
-func lookupUnavailable() sbxerr.Error {
-	return sbxerr.Error{Status: http.StatusServiceUnavailable, Code: sbxerr.CodeRouteLookupUnavailable, Retryable: true}
+func lookupUnavailable() umiakerr.Error {
+	return umiakerr.Error{Status: http.StatusServiceUnavailable, Code: umiakerr.CodeRouteLookupUnavailable, Retryable: true}
 }
 
-func agentUnavailable() sbxerr.Error {
-	return sbxerr.Error{
-		Status: http.StatusServiceUnavailable, Code: sbxerr.CodeAgentUnavailable,
+func agentUnavailable() umiakerr.Error {
+	return umiakerr.Error{
+		Status: http.StatusServiceUnavailable, Code: umiakerr.CodeAgentUnavailable,
 		Retryable: true, RetryAfter: retryAfterAgent, Refresh: true,
 	}
 }
 
-func upstreamError() sbxerr.Error {
-	return sbxerr.Error{Status: http.StatusBadGateway, Code: sbxerr.CodeUpstreamError}
+func upstreamError() umiakerr.Error {
+	return umiakerr.Error{Status: http.StatusBadGateway, Code: umiakerr.CodeUpstreamError}
 }
 
 // rateLimited answers a refused request; Retry-After is the wait rounded up
 // to whole seconds, at least 1.
-func rateLimited(wait time.Duration) sbxerr.Error {
-	return sbxerr.Error{
-		Status: http.StatusTooManyRequests, Code: sbxerr.CodeRateLimited,
+func rateLimited(wait time.Duration) umiakerr.Error {
+	return umiakerr.Error{
+		Status: http.StatusTooManyRequests, Code: umiakerr.CodeRateLimited,
 		Retryable: true, RetryAfter: max(1, int(math.Ceil(wait.Seconds()))),
 	}
 }
@@ -47,10 +47,10 @@ func rateLimited(wait time.Duration) sbxerr.Error {
 // timeout is a net.Error with Timeout; everything else (the application
 // closed the conn, sent invalid HTTP or too large a header) is
 // upstream_error. The error text never reaches the client.
-func mapProxyError(err error) sbxerr.Error {
+func mapProxyError(err error) umiakerr.Error {
 	var ue *upstream.Error
 	if errors.As(err, &ue) {
-		e := sbxerr.Error{Status: ue.Status, Code: ue.Code}
+		e := umiakerr.Error{Status: ue.Status, Code: ue.Code}
 		switch ue.Code {
 		case upstream.CodeAgentUnavailable:
 			e = agentUnavailable()
@@ -61,7 +61,7 @@ func mapProxyError(err error) sbxerr.Error {
 	}
 	var ne net.Error
 	if errors.As(err, &ne) && ne.Timeout() {
-		return sbxerr.Error{Status: http.StatusGatewayTimeout, Code: sbxerr.CodeAppTimeout, Retryable: true}
+		return umiakerr.Error{Status: http.StatusGatewayTimeout, Code: umiakerr.CodeAppTimeout, Retryable: true}
 	}
 	return upstreamError()
 }

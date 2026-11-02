@@ -1,4 +1,4 @@
-import { withTx } from "@sbx/db";
+import { withTx } from "@umiak/db";
 import { invalidState, type ValidationIssue, validation } from "../errors.ts";
 import type { Principal } from "../principal.ts";
 import type { Sandbox } from "../rows.ts";

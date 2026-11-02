@@ -52,7 +52,7 @@ export async function insertNode(
 	const id = randomUUID();
 	await q.query(
 		`INSERT INTO runtime.nodes (id, provider_id, name, state, ram_cap_mb, clone_concurrency, node_agent_ref)
-		 VALUES ($1, $2, $3, $4, $5, $6, 'sbx-node')`,
+		 VALUES ($1, $2, $3, $4, $5, $6, 'umiak-node')`,
 		[
 			id,
 			providerId,
@@ -225,7 +225,7 @@ export async function insertSandbox(
 		 VALUES ($1, $2, $3, $4, '2gb', 2, $5, $6, 'template', $7, $8, $9, $10)`,
 		[
 			id,
-			`sbx-${id.slice(0, 8)}-${nextSeq()}`,
+			`umiak-${id.slice(0, 8)}-${nextSeq()}`,
 			opts.teamId,
 			topo.templateSlug,
 			opts.memoryMb ?? 2048,

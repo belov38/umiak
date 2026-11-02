@@ -1,6 +1,6 @@
-// PTY over WebSocket, subprotocol sbx.pty.v1 (S7 §10.2).
+// PTY over WebSocket, subprotocol umiak.pty.v1 (S7 §10.2).
 //
-// The WebSocket comes from `SbxOptions.webSocket` (default: the global
+// The WebSocket comes from `UmiakOptions.webSocket` (default: the global
 // WebSocket with `{protocols, headers}`, undici in Node, Bun) and carries
 // `Authorization: Bearer`. A factory can add TLS options (a private CA) or a
 // proxy. Browsers cannot set that header: there the PTY is reached only
@@ -28,11 +28,11 @@ import {
 	START_TIMEOUT_MS,
 	STREAM_MAX_FAILURES,
 } from "./commands.ts";
-import { SbxError, UNSUPPORTED_RUNTIME } from "./errors.ts";
+import { UmiakError, UNSUPPORTED_RUNTIME } from "./errors.ts";
 import { newIdempotencyKey } from "./ids.ts";
 import { isRetryable, retryDelayMs } from "./retry.ts";
 
-export const PTY_SUBPROTOCOL = "sbx.pty.v1";
+export const PTY_SUBPROTOCOL = "umiak.pty.v1";
 
 export interface PtyOptions extends CallOptions {
 	cols?: number;
@@ -111,7 +111,7 @@ export class Pty {
 	#attached = false;
 	#done = false;
 	#failures = 0;
-	#lastError: SbxError | undefined;
+	#lastError: UmiakError | undefined;
 	#size: { cols: number; rows: number } | undefined;
 	#queue: Uint8Array[] = [];
 	#queued = 0;
@@ -187,7 +187,7 @@ export class Pty {
 			return;
 		}
 		if (this.#queued + bytes.length > MAX_QUEUED_INPUT) {
-			throw new SbxError({
+			throw new UmiakError({
 				status: 0,
 				code: "pty_input_overflow",
 				message: `the PTY is reconnecting and ${this.#queued} bytes of input are queued already (at most ${MAX_QUEUED_INPUT}); write again later`,
@@ -210,7 +210,7 @@ export class Pty {
 	 */
 	close(): void {
 		this.#finish(
-			new SbxError({
+			new UmiakError({
 				status: 0,
 				code: "pty_closed",
 				message: "the PTY connection was closed by the client",
@@ -261,7 +261,7 @@ export class Pty {
 			if (creds.team !== undefined) url.searchParams.set("team", creds.team);
 		} else {
 			headers.Authorization = `Bearer ${await creds.getToken(false)}`;
-			if (creds.team !== undefined) headers["Sbx-Team"] = creds.team;
+			if (creds.team !== undefined) headers["Umiak-Team"] = creds.team;
 		}
 		return { url: url.toString(), headers };
 	}
@@ -273,7 +273,7 @@ export class Pty {
 			target = await this.#url();
 		} catch (err) {
 			if (signal?.aborted) return;
-			if (err instanceof SbxError && err.retryable) {
+			if (err instanceof UmiakError && err.retryable) {
 				this.#lastError = err;
 				this.#retry(false, false);
 			} else {
@@ -294,7 +294,7 @@ export class Pty {
 			});
 		} catch (err) {
 			this.#finish(
-				new SbxError({
+				new UmiakError({
 					status: 0,
 					code: UNSUPPORTED_RUNTIME,
 					message: `cannot open the PTY WebSocket: ${err instanceof Error ? err.message : String(err)}`,
@@ -363,7 +363,7 @@ export class Pty {
 			if (final !== undefined) {
 				this.#finish(
 					this.#lastError ??
-						new SbxError({
+						new UmiakError({
 							status: 0,
 							code: final,
 							message: `the PTY connection was closed (${ev.code}${ev.reason ? `: ${ev.reason}` : ""})`,
@@ -389,7 +389,7 @@ export class Pty {
 	 * (upgrade required) means the request itself is fine: retry. A final
 	 * answer (401, 403, 404, ...) ends the PTY; null: retry.
 	 */
-	async #probe(): Promise<SbxError | null> {
+	async #probe(): Promise<UmiakError | null> {
 		try {
 			await this.#core.raw.GET(
 				"/v1/sandboxes/{sandbox}/ptys/{command}/connect",
@@ -403,7 +403,7 @@ export class Pty {
 			);
 			return null;
 		} catch (err) {
-			if (!(err instanceof SbxError)) return null;
+			if (!(err instanceof UmiakError)) return null;
 			if (err.status === 426) return null;
 			if (isRetryable(err, true)) {
 				this.#lastError = err;
@@ -418,7 +418,7 @@ export class Pty {
 		if (this.#failures >= STREAM_MAX_FAILURES) {
 			this.#finish(
 				this.#lastError ??
-					new SbxError({
+					new UmiakError({
 						status: 0,
 						code: "network_error",
 						message: `the PTY connection failed ${this.#failures} times in a row`,

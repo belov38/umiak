@@ -1,4 +1,4 @@
-// `sbx push [dir] <sb>:<path>` (S7 §14.2): uploads a directory (default the
+// `umiak push [dir] <sb>:<path>` (S7 §14.2): uploads a directory (default the
 // working directory) into `<path>` as one tar.gz stream (PUT /files/archive,
 // existing files overwritten, nothing deleted).
 // - In a git work tree: the files of `git ls-files -co --exclude-standard`
@@ -11,7 +11,7 @@
 
 import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync } from "node:fs";
-import type { ArchiveResult, Sandbox } from "@sbx/sdk";
+import type { ArchiveResult, Sandbox } from "@umiak/sdk";
 import type { Command } from "commander";
 import type { Context } from "../context.ts";
 import { useSandbox } from "../current.ts";
@@ -90,7 +90,7 @@ export function register(program: Command, run: Runner): void {
 	program
 		.command("push")
 		.description(
-			"upload a directory into a sandbox (git ls-files in a repository): sbx push [dir] <sb>:<path>",
+			"upload a directory into a sandbox (git ls-files in a repository): umiak push [dir] <sb>:<path>",
 		)
 		.argument(
 			"<dir-or-dest>",
@@ -114,7 +114,7 @@ export function register(program: Command, run: Runner): void {
 					if (ctx.out.jsonFlag) ctx.out.result(r);
 					else if (ctx.interactive) {
 						ctx.out.info(
-							`sbx: pushed ${r.entries} entries (${r.sizeBytes} bytes) to ${sb.slug}:${r.path}`,
+							`umiak: pushed ${r.entries} entries (${r.sizeBytes} bytes) to ${sb.slug}:${r.path}`,
 						);
 					}
 				},

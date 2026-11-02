@@ -15,8 +15,8 @@
 // that does not exist, is `forbidden` for people: they never learn whether
 // a foreign team, membership or notice exists. Operators, who may see every
 // team, get `not_found` for a missing row. A malformed id is `validation`.
-import type { SessionIdentity } from "@sbx/auth";
-import { inTransaction, rows, sql, tbl, uniqueViolation } from "@sbx/payload";
+import type { SessionIdentity } from "@umiak/auth";
+import { inTransaction, rows, sql, tbl, uniqueViolation } from "@umiak/payload";
 import type { Payload, PayloadRequest } from "payload";
 import type { z } from "zod";
 import type { PermissionTeam, TeamRole } from "../permissions";

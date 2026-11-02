@@ -117,7 +117,7 @@ interface SnapshotItem {
 	activationSkip: boolean;
 }
 
-/** The sbx-node guard for snapshot ids; they end up in LV names and tags. */
+/** The umiak-node guard for snapshot ids; they end up in LV names and tags. */
 const SNAPSHOT_ID_RE = /^[a-z0-9]{1,32}$/;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -129,7 +129,7 @@ function randomId(): string {
 	);
 }
 
-/** Storage driver for LVM-thin: every clone and snapshot is a thin snapshot made by sbx-node. */
+/** Storage driver for LVM-thin: every clone and snapshot is a thin snapshot made by umiak-node. */
 export class LvmThinDriver implements StorageDriver {
 	readonly #o: Required<LvmThinOptions>;
 
@@ -184,7 +184,7 @@ export class LvmThinDriver implements StorageDriver {
 				items.push({
 					origin: d.lv,
 					name,
-					tags: ["sbx", `sbx-vm-${vmid}`],
+					tags: ["umiak", `umiak-vm-${vmid}`],
 					activationSkip: false,
 				});
 				disks.push({
@@ -233,11 +233,11 @@ export class LvmThinDriver implements StorageDriver {
 		const items: SnapshotItem[] = [];
 		const disks: DiskSet = [];
 		for (const d of sorted(m.disks)) {
-			const name = `sbx-snap-${id}-${d.slot satisfies DiskSlot}`;
+			const name = `umiak-snap-${id}-${d.slot satisfies DiskSlot}`;
 			items.push({
 				origin: d.lv,
 				name,
-				tags: ["sbx", `sbx-snap-${id}`, `sbx-src-${m.vmid}`],
+				tags: ["umiak", `umiak-snap-${id}`, `umiak-src-${m.vmid}`],
 				activationSkip: true,
 			});
 			disks.push({
@@ -315,7 +315,7 @@ export class LvmThinDriver implements StorageDriver {
 	async #discard(id: string, created: string[]): Promise<void> {
 		const { lvs } = await this.#o.node
 			.call<{ lvs: { name: string }[] }>("lv.list", {
-				tags: ["sbx", `sbx-snap-${id}`],
+				tags: ["umiak", `umiak-snap-${id}`],
 			})
 			.catch(() => ({ lvs: [] as { name: string }[] }));
 		const names = [...new Set([...created, ...lvs.map((l) => l.name)])];
@@ -375,10 +375,10 @@ export class LvmThinDriver implements StorageDriver {
 
 	async delete(ref: MachineDisksRef | SnapshotRef): Promise<void> {
 		const tag =
-			ref.kind === "machine" ? `sbx-vm-${ref.vmid}` : `sbx-snap-${ref.id}`;
+			ref.kind === "machine" ? `umiak-vm-${ref.vmid}` : `umiak-snap-${ref.id}`;
 		const { lvs } = await this.#o.node.call<{ lvs: { name: string }[] }>(
 			"lv.list",
-			{ tags: ["sbx", tag] },
+			{ tags: ["umiak", tag] },
 		);
 		if (lvs.length > 0)
 			await this.#o.node.call("lv.remove", { names: lvs.map((l) => l.name) });

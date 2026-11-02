@@ -1,9 +1,9 @@
 "use client";
+import { useQuery } from "@tanstack/react-query";
 // SSH tab (S8 §9.6): GET /sandboxes/{sb}/ssh — the command, the
 // known_hosts lines with copy, and a link to the account's SSH keys when
 // the person has none (`hasKeys: false`).
-import type { Sandbox, SandboxData } from "@sbx/sdk";
-import { useQuery } from "@tanstack/react-query";
+import type { Sandbox, SandboxData } from "@umiak/sdk";
 import Link from "next/link";
 import { CopyLine } from "@/components/app/copy-button";
 import { QueryError } from "@/components/app/query-error";
@@ -58,7 +58,7 @@ export function SshTab({
 						Add one to your account
 					</Link>{" "}
 					to use plain <code>ssh</code>, or use the CLI:{" "}
-					<code>sbx ssh {sandbox.slug}</code> signs a short-lived certificate.
+					<code>umiak ssh {sandbox.slug}</code> signs a short-lived certificate.
 				</p>
 			)}
 			<section className="space-y-1">

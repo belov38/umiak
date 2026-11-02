@@ -30,15 +30,15 @@ describe("exec, logs, kill, ps, run", () => {
 	});
 	beforeEach(() => {
 		home = cliHome();
-		env = { ...home.env, SBX_API_URL: w.url, SBX_API_KEY: w.secret };
+		env = { ...home.env, UMIAK_API_URL: w.url, UMIAK_API_KEY: w.secret };
 	});
 	afterEach(() => home.rm());
 
-	const sbx = (args: string[], o: { stdin?: string; tty?: boolean } = {}) =>
+	const umiak = (args: string[], o: { stdin?: string; tty?: boolean } = {}) =>
 		runCli(args, { env, ...o });
 
 	it("exec streams stdout to stdout and stderr to stderr and exits with the command's code", async () => {
-		const r = await sbx([
+		const r = await umiak([
 			"exec",
 			sb.slug,
 			"--",
@@ -50,21 +50,24 @@ describe("exec, logs, kill, ps, run", () => {
 		expect(r.stdout).toBe("out\n");
 		expect(r.stderr).toBe("err\n");
 		// The explicit <sb> became current.
-		const again = await sbx(["exec", "--", "echo current"]);
+		const again = await umiak(["exec", "--", "echo current"]);
 		expect(again.code, again.stderr).toBe(0);
 		expect(again.stdout).toBe("current\n");
 	});
 
 	it("exec of a command killed by a signal exits 128+n; a timeout exits 124", async () => {
-		const sig = await sbx(["exec", sb.id, "--", "sh", "-c", "kill -TERM $$"]);
+		const sig = await umiak(["exec", sb.id, "--", "sh", "-c", "kill -TERM $$"]);
 		expect(sig.code).toBe(128 + 15);
-		const t = await sbx(["exec", sb.id, "--timeout", "1", "--", "sleep 5"], {});
+		const t = await umiak(
+			["exec", sb.id, "--timeout", "1", "--", "sleep 5"],
+			{},
+		);
 		expect(t.code).toBe(124);
 	});
 
 	it("exec passes --env, --cwd and --stdin; binary output is byte exact", async () => {
-		expect((await sbx(["exec", sb.id, "--", "mkdir -p work"])).code).toBe(0);
-		const e = await sbx([
+		expect((await umiak(["exec", sb.id, "--", "mkdir -p work"])).code).toBe(0);
+		const e = await umiak([
 			"exec",
 			sb.id,
 			"--env",
@@ -76,7 +79,7 @@ describe("exec, logs, kill, ps, run", () => {
 		]);
 		expect(e.code, e.stderr).toBe(0);
 		expect(e.stdout).toMatch(/^hi .*\/work\n$/);
-		const s = await sbx(["exec", sb.id, "--stdin", "--", "tr a-z A-Z"], {
+		const s = await umiak(["exec", sb.id, "--stdin", "--", "tr a-z A-Z"], {
 			stdin: "piped text\n",
 		});
 		expect(s.code, s.stderr).toBe(0);
@@ -90,7 +93,7 @@ describe("exec, logs, kill, ps, run", () => {
 		});
 		expect(quick.code, quick.stderr).toBe(0);
 		expect(quick.stdout).toBe("done\n");
-		const bin = await sbx([
+		const bin = await umiak([
 			"exec",
 			sb.id,
 			"--",
@@ -101,7 +104,7 @@ describe("exec, logs, kill, ps, run", () => {
 	});
 
 	it("exec --json prints the API frames with `event` instead of `type`", async () => {
-		const r = await sbx([
+		const r = await umiak([
 			"exec",
 			sb.id,
 			"--json",
@@ -141,7 +144,7 @@ describe("exec, logs, kill, ps, run", () => {
 					"--tag",
 					`pipe=${json}`,
 					"--",
-					"yes sbx-pipe-test",
+					"yes umiak-pipe-test",
 				],
 				{ env, closeStdoutAfter: 1 },
 			);
@@ -149,12 +152,12 @@ describe("exec, logs, kill, ps, run", () => {
 			expect(r.stderr).toBe("");
 			expect(Date.now() - started).toBeLessThan(15_000);
 			// The remote `yes` was killed.
-			const ps = await sbx(["ps", sb.id, "--json"]);
+			const ps = await umiak(["ps", sb.id, "--json"]);
 			const cmd = (
 				ps.last().data as { id: string; tags: Record<string, string> }[]
 			).find((c) => c.tags.pipe === String(json));
 			expect(cmd).toBeDefined();
-			const logs = await sbx([
+			const logs = await umiak([
 				"logs",
 				sb.id,
 				cmd?.id ?? "",
@@ -167,16 +170,16 @@ describe("exec, logs, kill, ps, run", () => {
 		}
 	});
 
-	it("SBX_OUTPUT=json does not turn exec into frames: stdout stays the bytes", async () => {
+	it("UMIAK_OUTPUT=json does not turn exec into frames: stdout stays the bytes", async () => {
 		const r = await runCli(["exec", sb.id, "--", "echo raw"], {
-			env: { ...env, SBX_OUTPUT: "json" },
+			env: { ...env, UMIAK_OUTPUT: "json" },
 		});
 		expect(r.code, r.stderr).toBe(0);
 		expect(r.stdout).toBe("raw\n");
 	});
 
 	it("exec flag combinations are checked before any request", async () => {
-		const r = await sbx([
+		const r = await umiak([
 			"exec",
 			"no-such-box-here",
 			"--detach",
@@ -185,7 +188,7 @@ describe("exec, logs, kill, ps, run", () => {
 			"true",
 		]);
 		expect(r.code).toBe(2);
-		const t = await sbx([
+		const t = await umiak([
 			"exec",
 			"no-such-box-here",
 			"--timeout",
@@ -194,11 +197,11 @@ describe("exec, logs, kill, ps, run", () => {
 			"true",
 		]);
 		expect(t.code).toBe(2);
-		expect((await sbx(["current"])).code).toBe(3);
+		expect((await umiak(["current"])).code).toBe(3);
 	});
 
 	it("exec --help explains one word (shell) vs several (argv)", async () => {
-		const r = await sbx(["exec", "--help"]);
+		const r = await umiak(["exec", "--help"]);
 		expect(r.stdout).toContain("bash -lc");
 		expect(r.stdout).toMatch(/argv/);
 	});
@@ -297,9 +300,9 @@ describe("exec, logs, kill, ps, run", () => {
 	});
 
 	it("exec errors: no `--` is a usage error; an unknown sandbox exits 3 with the error on stderr", async () => {
-		const u = await sbx(["exec", sb.id]);
+		const u = await umiak(["exec", sb.id]);
 		expect(u.code).toBe(2);
-		const nf = await sbx(["exec", "no-such-box-here", "--", "true"]);
+		const nf = await umiak(["exec", "no-such-box-here", "--", "true"]);
 		expect(nf.code).toBe(3);
 		expect(nf.stdout).toBe("");
 		expect(JSON.parse(nf.stderr.trim().split("\n").at(-1) ?? "")).toMatchObject(
@@ -310,7 +313,7 @@ describe("exec, logs, kill, ps, run", () => {
 	});
 
 	it("exec --detach prints the command id; logs, logs -f, ps and kill", async () => {
-		const d = await sbx([
+		const d = await umiak([
 			"exec",
 			sb.id,
 			"--detach",
@@ -320,18 +323,18 @@ describe("exec, logs, kill, ps, run", () => {
 		expect(d.code, d.stderr).toBe(0);
 		const id = d.stdout.trim();
 		expect(id).toMatch(/^cmd_/);
-		const f = await sbx(["logs", sb.id, id, "-f"]);
+		const f = await umiak(["logs", sb.id, id, "-f"]);
 		expect(f.code, f.stderr).toBe(0);
 		expect(f.stdout).toBe("first\nthird\n");
 		expect(f.stderr).toBe("second\n");
-		const all = await sbx(["logs", id]);
+		const all = await umiak(["logs", id]);
 		expect(all.stdout).toBe("first\nthird\n");
-		const tail = await sbx(["logs", sb.id, id, "--tail", "6"]);
+		const tail = await umiak(["logs", sb.id, id, "--tail", "6"]);
 		expect(tail.stdout).toBe("third\n");
 
-		const long = await sbx(["exec", sb.id, "--detach", "--", "sleep 30"]);
+		const long = await umiak(["exec", sb.id, "--detach", "--", "sleep 30"]);
 		const longId = long.stdout.trim();
-		const ps = await sbx(["ps", sb.id]);
+		const ps = await umiak(["ps", sb.id]);
 		expect(ps.code, ps.stderr).toBe(0);
 		const listed = JSON.parse(ps.stdout).data as {
 			id: string;
@@ -340,29 +343,29 @@ describe("exec, logs, kill, ps, run", () => {
 		expect(listed.find((c) => c.id === longId)).toMatchObject({
 			status: "running",
 		});
-		const running = await sbx(["ps", sb.id, "--status", "running"]);
+		const running = await umiak(["ps", sb.id, "--status", "running"]);
 		expect(
 			JSON.parse(running.stdout).data.map((c: { id: string }) => c.id),
 		).toEqual([longId]);
-		const k = await sbx(["kill", sb.id, longId, "--signal", "SIGKILL"]);
+		const k = await umiak(["kill", sb.id, longId, "--signal", "SIGKILL"]);
 		expect(k.code, k.stderr).toBe(0);
 		expect(JSON.parse(k.stdout).id).toBe(longId);
-		const ended = await sbx(["logs", sb.id, longId, "-f", "--json"]);
+		const ended = await umiak(["logs", sb.id, longId, "-f", "--json"]);
 		expect(ended.last()).toMatchObject({
 			event: "exit",
 			status: "killed",
 			signal: "SIGKILL",
 		});
 		await until(async () => {
-			const r = await sbx(["ps", sb.id, "--status", "running"]);
+			const r = await umiak(["ps", sb.id, "--status", "running"]);
 			return JSON.parse(r.stdout).data.length === 0 ? true : undefined;
 		});
-		const table = await sbx(["ps", sb.id], { tty: true });
+		const table = await umiak(["ps", sb.id], { tty: true });
 		expect(table.stdout).toMatch(/ID\s+STATUS/);
 	});
 
 	it("logs -f exits with the command's code; logs without -f exits 0", async () => {
-		const d = await sbx([
+		const d = await umiak([
 			"exec",
 			sb.id,
 			"--detach",
@@ -372,18 +375,18 @@ describe("exec, logs, kill, ps, run", () => {
 			"echo done; exit 7",
 		]);
 		const id = d.stdout.trim();
-		const f = await sbx(["logs", sb.id, id, "-f"]);
+		const f = await umiak(["logs", sb.id, id, "-f"]);
 		expect(f.code, f.stderr).toBe(7);
 		expect(f.stdout).toBe("done\n");
-		const fj = await sbx(["logs", sb.id, id, "-f", "--json"]);
+		const fj = await umiak(["logs", sb.id, id, "-f", "--json"]);
 		expect(fj.code, fj.stderr).toBe(7);
 		expect(fj.last()).toMatchObject({ event: "exit", exitCode: 7 });
 		// Without -f it only prints the output, even of a finished command.
-		const plain = await sbx(["logs", sb.id, id]);
+		const plain = await umiak(["logs", sb.id, id]);
 		expect(plain.code, plain.stderr).toBe(0);
 		expect(plain.stdout).toBe("done\n");
 
-		const sig = await sbx([
+		const sig = await umiak([
 			"exec",
 			sb.id,
 			"--detach",
@@ -392,14 +395,14 @@ describe("exec, logs, kill, ps, run", () => {
 			"-c",
 			"kill -TERM $$",
 		]);
-		const killed = await sbx(["logs", sb.id, sig.stdout.trim(), "-f"]);
+		const killed = await umiak(["logs", sb.id, sig.stdout.trim(), "-f"]);
 		expect(killed.code, killed.stderr).toBe(128 + 15);
 	});
 
 	it("logs --json prints frames with `event`", async () => {
-		const d = await sbx(["exec", sb.id, "--detach", "--", "echo framed"]);
+		const d = await umiak(["exec", sb.id, "--detach", "--", "echo framed"]);
 		const id = d.stdout.trim();
-		const r = await sbx(["logs", sb.id, id, "-f", "--json"]);
+		const r = await umiak(["logs", sb.id, id, "-f", "--json"]);
 		expect(r.code, r.stderr).toBe(0);
 		const lines = r.lines();
 		expect(lines).toContainEqual(
@@ -410,7 +413,7 @@ describe("exec, logs, kill, ps, run", () => {
 
 	it("run creates a sandbox, executes, deletes it and exits with the command's code", async () => {
 		const tag = crypto.randomUUID();
-		const run = sbx([
+		const run = umiak([
 			"run",
 			"--label",
 			`run=${tag}`,
@@ -436,12 +439,12 @@ describe("exec, logs, kill, ps, run", () => {
 		);
 		expect(state.rows[0]?.state).toBe("deleting");
 		// A temporary sandbox does not become current.
-		expect((await sbx(["current"])).code).toBe(3);
+		expect((await umiak(["current"])).code).toBe(3);
 	});
 
 	it("run --keep keeps the sandbox and makes it current", async () => {
 		const tag = crypto.randomUUID();
-		const run = sbx(["run", "--keep", "--label", `run=${tag}`, "--", "true"]);
+		const run = umiak(["run", "--keep", "--label", `run=${tag}`, "--", "true"]);
 		const slug = await until(async () => {
 			const r = await w.db.pool.query<{ slug: string }>(
 				"SELECT slug FROM runtime.sandboxes WHERE labels->>'run' = $1",
@@ -452,7 +455,7 @@ describe("exec, logs, kill, ps, run", () => {
 		await w.markReady(slug);
 		const r = await run;
 		expect(r.code, r.stderr).toBe(0);
-		const cur = JSON.parse((await sbx(["current"])).stdout);
+		const cur = JSON.parse((await umiak(["current"])).stdout);
 		expect(cur.sandbox).toMatchObject({ slug, state: "ready" });
 	});
 });

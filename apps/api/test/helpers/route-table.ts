@@ -3,7 +3,7 @@
 // over a fixture of one team. The security matrices (security-*.test.ts)
 // iterate over it; a test checks that it lists exactly the operations of
 // the document, so a new operation fails until it is added here.
-import type { Scope } from "@sbx/auth";
+import type { Scope } from "@umiak/auth";
 import { ed25519PublicKey } from "./ssh.ts";
 
 /** Resources a request names, in its path or body (IDOR matrix). */
@@ -381,7 +381,7 @@ export const ROUTES: Record<string, Route> = {
 		resources: ["snapshot"],
 		request: (f) => ({
 			path: `/v1/snapshots/${f.snapshot}`,
-			headers: { "sbx-confirm-delete": f.snapshot },
+			headers: { "umiak-confirm-delete": f.snapshot },
 		}),
 	},
 
@@ -437,7 +437,7 @@ export const ROUTES: Record<string, Route> = {
 		resources: ["sandbox"],
 		request: (f) => ({
 			path: sb(f),
-			headers: { "sbx-confirm-delete": f.sandbox },
+			headers: { "umiak-confirm-delete": f.sandbox },
 		}),
 	},
 	"sandboxes.stop": {

@@ -12,7 +12,11 @@ import {
 } from "node:fs";
 import { join, relative } from "node:path";
 import { gzipSync } from "node:zlib";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FakeAgent } from "../src/testing/index.ts";
 import {

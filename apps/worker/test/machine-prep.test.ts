@@ -1,4 +1,4 @@
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleMachineOp } from "../src/handlers/machine-op.ts";
 import {
@@ -102,7 +102,7 @@ describe("prepareMachine from the template (pool provision)", () => {
 		// booting is committed before S1 start (§7.4 p. 6).
 		expect(startStates).toEqual(["booting"]);
 		const [vm] = w.infra.vmsOf(id);
-		expect(vm?.serial.startsWith(`sbx1:${id}:`)).toBe(true);
+		expect(vm?.serial.startsWith(`umiak1:${id}:`)).toBe(true);
 		expect(w.infra.callsOf("create")).toHaveLength(1);
 		await expectSingleVm(w, id);
 	});

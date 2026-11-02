@@ -22,8 +22,8 @@ import (
 
 // helperEnv makes the test binary act as a child process for the tests.
 const (
-	helperEnv    = "SBX_WINPROC_HELPER"
-	helperPidEnv = "SBX_WINPROC_PID"
+	helperEnv    = "UMIAK_WINPROC_HELPER"
+	helperPidEnv = "UMIAK_WINPROC_PID"
 )
 
 func TestMain(m *testing.M) {
@@ -141,7 +141,7 @@ func wait(t *testing.T, p *Process, d time.Duration) uint32 {
 }
 
 func TestOpenJobMissing(t *testing.T) {
-	if _, err := OpenJob(uniqueName(t, "sbx-test-none")); !errors.Is(err, ErrJobNotFound) {
+	if _, err := OpenJob(uniqueName(t, "umiak-test-none")); !errors.Is(err, ErrJobNotFound) {
 		t.Fatalf("OpenJob of a missing job: %v", err)
 	}
 }
@@ -158,7 +158,7 @@ func TestBadJobName(t *testing.T) {
 }
 
 func TestPermanentJobSurvivesHandleClose(t *testing.T) {
-	name := uniqueName(t, "sbx-test-perm")
+	name := uniqueName(t, "umiak-test-perm")
 	j := permanentJob(t, name)
 	if err := j.Close(); err != nil {
 		t.Fatal(err)
@@ -182,7 +182,7 @@ func TestPermanentJobSurvivesHandleClose(t *testing.T) {
 }
 
 func TestJobCollision(t *testing.T) {
-	name := uniqueName(t, "sbx-test-coll")
+	name := uniqueName(t, "umiak-test-coll")
 	j := permanentJob(t, name)
 	defer j.Close() //nolint:errcheck // test cleanup
 	if _, err := CreatePermanentJob(name); !errors.Is(err, ErrJobExists) {
@@ -327,8 +327,8 @@ func TestStartEnvAndDir(t *testing.T) {
 	out, read := pipe(t)
 	p := start(t, StartOptions{
 		Argv0Path:   cmdExe(),
-		CommandLine: `cmd.exe /d /c echo %SBX_T%&cd`,
-		Env:         []string{"SystemRoot=" + os.Getenv("SystemRoot"), "SBX_T=hello"},
+		CommandLine: `cmd.exe /d /c echo %UMIAK_T%&cd`,
+		Env:         []string{"SystemRoot=" + os.Getenv("SystemRoot"), "UMIAK_T=hello"},
 		Dir:         dir,
 		Stdout:      out,
 	})
@@ -342,7 +342,7 @@ func TestStartEnvAndDir(t *testing.T) {
 }
 
 func TestCreateJobCollision(t *testing.T) {
-	name := uniqueName(t, "sbx-test-wd")
+	name := uniqueName(t, "umiak-test-wd")
 	j, err := CreateJob(name)
 	if err != nil {
 		t.Fatal(err)
@@ -358,7 +358,7 @@ func TestCreateJobCollision(t *testing.T) {
 }
 
 func TestOpenJobPollsWithoutPort(t *testing.T) {
-	name := uniqueName(t, "sbx-test-open")
+	name := uniqueName(t, "umiak-test-open")
 	j, err := CreateJob(name)
 	if err != nil {
 		t.Fatal(err)

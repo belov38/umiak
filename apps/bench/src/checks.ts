@@ -1,4 +1,4 @@
-import type { Qga } from "@sbx/pve";
+import type { Qga } from "@umiak/pve";
 
 export interface Check {
 	name: string;
@@ -107,7 +107,7 @@ export interface NetTargets {
 
 /**
  * Host addresses a sandbox must not reach: the default management address,
- * then SBX_NODE_SSH_HOST and SBX_BENCH_HOST_ADDRESSES (whitespace-separated),
+ * then UMIAK_NODE_SSH_HOST and UMIAK_BENCH_HOST_ADDRESSES (whitespace-separated),
  * without repeats. An override adds to the default instead of replacing it.
  */
 export function hostAddresses(
@@ -116,8 +116,8 @@ export function hostAddresses(
 ): string[] {
 	const all = [
 		defaultAddress,
-		env.SBX_NODE_SSH_HOST ?? "",
-		...(env.SBX_BENCH_HOST_ADDRESSES ?? "").split(/\s+/),
+		env.UMIAK_NODE_SSH_HOST ?? "",
+		...(env.UMIAK_BENCH_HOST_ADDRESSES ?? "").split(/\s+/),
 	].filter((a) => a !== "");
 	return [...new Set(all)];
 }

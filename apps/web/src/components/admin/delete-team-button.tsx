@@ -1,13 +1,13 @@
 "use client";
 // The button of DeleteTeamControl: asks the api (as the operator, with
-// Sbx-Team of the team) whether sandboxes, saved snapshots or environments
+// Umiak-Team of the team) whether sandboxes, saved snapshots or environments
 // are left and refuses with what is left; otherwise confirms and deletes
 // the team through Payload REST, then goes back to the teams list.
 import { Button, ConfirmationModal, toast, useModal } from "@payloadcms/ui";
 import { useState } from "react";
 import { deleteTeam, refusalText, teamContents } from "@/lib/team-delete";
 
-const MODAL = "sbx-delete-team";
+const MODAL = "umiak-delete-team";
 
 function message(e: unknown): string {
 	return e instanceof Error && e.message !== "" ? e.message : "Unknown error";
@@ -72,7 +72,7 @@ export function DeleteTeamButton({
 				margin={false}
 				disabled={busy}
 				onClick={check}
-				id="sbx-delete-team"
+				id="umiak-delete-team"
 			>
 				{busy ? "Checking…" : "Delete team"}
 			</Button>

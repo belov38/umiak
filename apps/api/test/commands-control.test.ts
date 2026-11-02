@@ -1,7 +1,11 @@
 // Input, kill, signal, get and list (S7 §9.4), and access: another
 // sandbox's or team's command is 404 on every command route.
 import { randomUUID } from "node:crypto";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Frame } from "../src/index.ts";
 import {

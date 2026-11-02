@@ -1,9 +1,9 @@
-// `sbx logout [--revoke]` (S7 §7.6): a Keycloak login revokes its refresh
+// `umiak logout [--revoke]` (S7 §7.6): a Keycloak login revokes its refresh
 // token at Keycloak and is erased; a team key is only erased, and with
 // --revoke also revoked (DELETE /v1/api-keys/self: the key is the team's,
 // so it is not revoked by default). The profile stays in config.json.
 
-import { Sbx } from "@sbx/sdk";
+import { Umiak } from "@umiak/sdk";
 import type { Command } from "commander";
 import { revokeRefreshToken } from "../auth/device-grant.ts";
 import { withFileLock } from "../auth/lock.ts";
@@ -46,14 +46,14 @@ async function logout(ctx: Context, revokeKey: boolean): Promise<LogoutResult> {
 		}
 	} else if (cred?.kind === "key" && revokeKey) {
 		// A failure stops here: the key stays stored, so the revoke can be repeated.
-		const sbx = new Sbx({
+		const umiak = new Umiak({
 			baseUrl: p.apiUrl,
 			apiKey: cred.token,
 			fetch: ctx.fetch as typeof fetch,
-			userAgent: `sbx-cli/${CLI_VERSION}`,
+			userAgent: `umiak-cli/${CLI_VERSION}`,
 			env: {},
 		});
-		await sbx.raw.DELETE("/v1/api-keys/self");
+		await umiak.raw.DELETE("/v1/api-keys/self");
 		revoked = true;
 	}
 	await withFileLock(ctx.paths.lock, () => store.delete(name));

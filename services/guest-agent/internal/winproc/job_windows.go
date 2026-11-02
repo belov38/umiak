@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/winapi"
+	"github.com/belov38/umiak/services/guest-agent/internal/winapi"
 )
 
 var (
@@ -80,7 +80,7 @@ var permanentPrivilege = sync.OnceValue(func() error {
 	return winapi.EnablePrivileges("SeCreatePermanentPrivilege")
 })
 
-// CreatePermanentJob creates the job name (e.g. "sbx-cmd-<id>") in the
+// CreatePermanentJob creates the job name (e.g. "umiak-cmd-<id>") in the
 // global namespace with OBJ_PERMANENT: it outlives all its handles until
 // MakeTemporary or a reboot, so the agent finds it by name after the shim
 // died (spec 12.6). The Win32 name `Global\<name>` (OpenJob) is the NT path

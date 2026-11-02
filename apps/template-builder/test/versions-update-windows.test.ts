@@ -288,7 +288,7 @@ describe("updateVersionsFile: windows", () => {
 		for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 	});
 	function copyTemplates(): string {
-		const dir = mkdtempSync(join(tmpdir(), "sbx-tpl-winversions-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-tpl-winversions-"));
 		dirs.push(dir);
 		cpSync(templates, dir, { recursive: true });
 		return dir;

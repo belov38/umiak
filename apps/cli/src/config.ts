@@ -1,11 +1,11 @@
-// Files of `sbx` (S7 §14.1, §7.6):
-// - config dir: $XDG_CONFIG_HOME/sbx (default ~/.config/sbx; Windows
-//   %APPDATA%\sbx) with config.json (0600, no secrets), credentials.json
+// Files of `umiak` (S7 §14.1, §7.6):
+// - config dir: $XDG_CONFIG_HOME/umiak (default ~/.config/umiak; Windows
+//   %APPDATA%\umiak) with config.json (0600, no secrets), credentials.json
 //   (the file credential store, 0600) and .lock (the refresh lock);
-// - state dir: $XDG_STATE_HOME/sbx (default ~/.local/state/sbx; Windows
-//   %LOCALAPPDATA%\sbx) with current/<shell key>;
-// - system config /etc/sbx/config.json (only `apiUrl`; the VM template puts
-//   it there). SBX_SYSTEM_CONFIG replaces the path (tests).
+// - state dir: $XDG_STATE_HOME/umiak (default ~/.local/state/umiak; Windows
+//   %LOCALAPPDATA%\umiak) with current/<shell key>;
+// - system config /etc/umiak/config.json (only `apiUrl`; the VM template puts
+//   it there). UMIAK_SYSTEM_CONFIG replaces the path (tests).
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -19,12 +19,12 @@ export type StoreKind = "keychain" | "file";
 
 export interface Profile {
 	apiUrl: string;
-	/** Team chosen at login (`--team` / SBX_TEAM); else the default team of the user. */
+	/** Team chosen at login (`--team` / UMIAK_TEAM); else the default team of the user. */
 	team?: string;
 	auth: AuthKind;
 	/** Keycloak issuer of an `oidc` profile. */
 	issuer?: string;
-	/** Where `sbx login` stored the credentials. */
+	/** Where `umiak login` stored the credentials. */
 	credentialStore?: StoreKind;
 }
 
@@ -59,22 +59,22 @@ export function pathsOf(env: Env): Paths {
 		nonEmpty(env.XDG_STATE_HOME) ??
 		(win ? nonEmpty(env.LOCALAPPDATA) : undefined) ??
 		join(home, ".local", "state");
-	const configDir = join(configBase, "sbx");
+	const configDir = join(configBase, "umiak");
 	return {
 		configDir,
-		stateDir: join(stateBase, "sbx"),
+		stateDir: join(stateBase, "umiak"),
 		config: join(configDir, "config.json"),
 		credentials: join(configDir, "credentials.json"),
 		lock: join(configDir, ".lock"),
 		systemConfig:
-			nonEmpty(env.SBX_SYSTEM_CONFIG) ??
+			nonEmpty(env.UMIAK_SYSTEM_CONFIG) ??
 			(win
 				? join(
 						nonEmpty(env.ProgramData) ?? "C:\\ProgramData",
-						"sbx",
+						"umiak",
 						"config.json",
 					)
-				: "/etc/sbx/config.json"),
+				: "/etc/umiak/config.json"),
 	};
 }
 

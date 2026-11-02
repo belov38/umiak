@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { decodeUuid, encodeUuid } from "@sbx/auth";
-import { insertSavedSnapshot } from "@sbx/core/testing";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { decodeUuid, encodeUuid } from "@umiak/auth";
+import { insertSavedSnapshot } from "@umiak/core/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Harness, HarnessResponse } from "./helpers/harness.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
@@ -206,7 +210,7 @@ describe.skipIf(skipPg())("saved snapshots (S7 §13)", () => {
 		expect(body(g).error.code).toBe("snapshot_not_found");
 	});
 
-	it("DELETE needs Sbx-Confirm-Delete (snap_ id or name): 428 without or with another one, then 204", async () => {
+	it("DELETE needs Umiak-Confirm-Delete (snap_ id or name): 428 without or with another one, then 204", async () => {
 		const name = uniqueName("del");
 		const id = await insertSavedSnapshot(db.pool, w.env.topo, {
 			teamId: w.teamId,
@@ -218,7 +222,7 @@ describe.skipIf(skipPg())("saved snapshots (S7 §13)", () => {
 		expect(body(missing).error.details.reason).toBe("missing");
 
 		const wrong = await h.request("DELETE", `/v1/snapshots/${name}`, {
-			headers: { "Sbx-Confirm-Delete": "another-name" },
+			headers: { "Umiak-Confirm-Delete": "another-name" },
 		});
 		expect(wrong.status).toBe(428);
 		expect(body(wrong).error.details.reason).toBe("mismatch");
@@ -230,7 +234,7 @@ describe.skipIf(skipPg())("saved snapshots (S7 §13)", () => {
 
 		const byId = await h.request("DELETE", `/v1/snapshots/${name}`, {
 			headers: {
-				"Sbx-Confirm-Delete": encodeUuid("snapshot", id).toUpperCase(),
+				"Umiak-Confirm-Delete": encodeUuid("snapshot", id).toUpperCase(),
 			},
 		});
 		expect(byId.status).toBe(204);
@@ -249,7 +253,7 @@ describe.skipIf(skipPg())("saved snapshots (S7 §13)", () => {
 			name: name2,
 		});
 		const byName = await h.request("DELETE", `/v1/snapshots/${name2}`, {
-			headers: { "Sbx-Confirm-Delete": name2 },
+			headers: { "Umiak-Confirm-Delete": name2 },
 		});
 		expect(byName.status).toBe(204);
 	});
@@ -285,7 +289,7 @@ describe.skipIf(skipPg())("saved snapshots (S7 §13)", () => {
 		});
 		const rh = w.harness({ deps: { svc } });
 		const r = await rh.request("DELETE", `/v1/snapshots/${name}`, {
-			headers: { "Sbx-Confirm-Delete": encodeUuid("snapshot", first) },
+			headers: { "Umiak-Confirm-Delete": encodeUuid("snapshot", first) },
 		});
 		expect(r.status).toBe(428);
 		expect(body(r).error).toMatchObject({
@@ -306,14 +310,14 @@ describe.skipIf(skipPg())("saved snapshots (S7 §13)", () => {
 			json: { sandbox: s.slug, name },
 		});
 		const d = await h.request("DELETE", `/v1/snapshots/${name}`, {
-			headers: { "Sbx-Confirm-Delete": body(r).snapshot.id },
+			headers: { "Umiak-Confirm-Delete": body(r).snapshot.id },
 		});
 		expect(d.status).toBe(409);
 		expect(body(d).error.code).toBe("invalid_state");
 		expect(body(d).error.details.state).toBe("creating");
 
 		const none = await h.request("DELETE", "/v1/snapshots/no-such-snap", {
-			headers: { "Sbx-Confirm-Delete": "no-such-snap" },
+			headers: { "Umiak-Confirm-Delete": "no-such-snap" },
 		});
 		expect(none.status).toBe(404);
 		expect(body(none).error.code).toBe("snapshot_not_found");
@@ -333,7 +337,7 @@ describe.skipIf(skipPg())("saved snapshots (S7 §13)", () => {
 		const g = await h.request("GET", `/v1/snapshots/${name}`);
 		expect(g.status).toBe(404);
 		const d = await h.request("DELETE", `/v1/snapshots/${name}`, {
-			headers: { "Sbx-Confirm-Delete": name },
+			headers: { "Umiak-Confirm-Delete": name },
 		});
 		expect(d.status).toBe(404);
 		const state = await db.pool.query(
@@ -354,7 +358,7 @@ describe.skipIf(skipPg())("saved snapshots (S7 §13)", () => {
 		expect(c.status).toBe(403);
 		expect(body(c).error.details.requiredScope).toBe("snapshots:write");
 		const d = await rh.request("DELETE", "/v1/snapshots/x", {
-			headers: { "Sbx-Confirm-Delete": "x" },
+			headers: { "Umiak-Confirm-Delete": "x" },
 		});
 		expect(d.status).toBe(403);
 		expect(body(d).error.details.requiredScope).toBe("snapshots:write");

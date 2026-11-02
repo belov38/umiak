@@ -17,7 +17,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/config"
 )
 
 // certValidity is the lifetime of the certificates issued by default.
@@ -32,12 +32,12 @@ type PKI struct {
 	// Roots trusts CA only.
 	Roots *x509.CertPool
 
-	// Sbx is the wildcard certificate *.SbxDomain.
-	Sbx tls.Certificate
+	// Umiak is the wildcard certificate *.UmiakDomain.
+	Umiak tls.Certificate
 	// Tunnel is the certificate of TunnelHost.
 	Tunnel tls.Certificate
 
-	SbxCertFile, SbxKeyFile       string
+	UmiakCertFile, UmiakKeyFile   string
 	TunnelCertFile, TunnelKeyFile string
 }
 
@@ -53,7 +53,7 @@ func newPKI(dir string) (*PKI, error) {
 	now := time.Now()
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial(),
-		Subject:               pkix.Name{CommonName: "sbx test CA"},
+		Subject:               pkix.Name{CommonName: "umiak test CA"},
 		NotBefore:             now.Add(-time.Hour),
 		NotAfter:              now.Add(certValidity),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
@@ -71,8 +71,8 @@ func newPKI(dir string) (*PKI, error) {
 	p := &PKI{CA: ca, caKey: key, Roots: x509.NewCertPool()}
 	p.Roots.AddCert(ca)
 
-	p.SbxCertFile, p.SbxKeyFile = filepath.Join(dir, "sbx.crt"), filepath.Join(dir, "sbx.key")
-	if p.Sbx, err = p.issueFiles(p.SbxCertFile, p.SbxKeyFile, "*."+SbxDomain); err != nil {
+	p.UmiakCertFile, p.UmiakKeyFile = filepath.Join(dir, "umiak.crt"), filepath.Join(dir, "umiak.key")
+	if p.Umiak, err = p.issueFiles(p.UmiakCertFile, p.UmiakKeyFile, "*."+UmiakDomain); err != nil {
 		return nil, err
 	}
 	p.TunnelCertFile, p.TunnelKeyFile = filepath.Join(dir, "tunnel.crt"), filepath.Join(dir, "tunnel.key")

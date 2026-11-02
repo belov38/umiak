@@ -1,6 +1,6 @@
 # S5. Шаблон Linux: спецификация
 
-Статус: согласовано (master-сессия), 2026-10-29; ревью исполнителем пройдено, замечания внесены. Дополнено MVP-рекомендациями R5, R6 (`docs/roadmap-phase2.md` §6, решения master-сессии 2026-10-29). Область S5 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§4 агент, §5 хранилище, §6 warm pool). Опирается на `docs/specs/s1-proxmox-foundation.md` (примитивы, `packages/pve`, `sbx-bench`), `docs/specs/s3-guest-agent.md` (§7.3 `seal`, §17 пакет, §20 требования к шаблону), `docs/specs/s6-control-plane.md` (§5.2 `template_builds`, §9 warm pool, §14.3 регистрация), `docs/specs/s2-tunnel-protocol.md` (§5.2 smbios, §5.4 TLS).
+Статус: согласовано (master-сессия), 2026-10-29; ревью исполнителем пройдено, замечания внесены. Дополнено MVP-рекомендациями R5, R6 (`docs/roadmap-phase2.md` §6, решения master-сессии 2026-10-29). Область S5 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§4 агент, §5 хранилище, §6 warm pool). Опирается на `docs/specs/s1-proxmox-foundation.md` (примитивы, `packages/pve`, `umiak-bench`), `docs/specs/s3-guest-agent.md` (§7.3 `seal`, §17 пакет, §20 требования к шаблону), `docs/specs/s6-control-plane.md` (§5.2 `template_builds`, §9 warm pool, §14.3 регистрация), `docs/specs/s2-tunnel-protocol.md` (§5.2 smbios, §5.4 TLS).
 
 Решения в разделах 1–4 вопросов согласованы с master-сессией 2026-10-29. Пометка **[S5]** — решение автора спеки в рамках согласованного; его можно менять без нового согласования, если причина записана.
 
@@ -12,12 +12,12 @@
 1. Одна команда с Mac собирает шаблон из официального образа Ubuntu, проверяет его клоном и регистрирует. Человек внутри VM ничего не делает.
 2. Сборка повторяема: тот же рецепт, `versions.toml`, номер базового образа и снапшот apt дают тот же набор пакетов и версий инструментов.
 3. Новая сборка выкатывается в warm pool без простоя и откатывается повторным `promote`; sandbox и saved snapshots на старых сборках не затрагиваются.
-4. Загрузка клона на `pve`: медиана от start до ответа QEMU guest agent ≤ 8 s, до готовности агента ≤ 10 s (`sbx-bench s5`, сравнение с 599).
+4. Загрузка клона на `pve`: медиана от start до ответа QEMU guest agent ≤ 8 s, до готовности агента ≤ 10 s (`umiak-bench s5`, сравнение с 599).
 5. Пайплайн тот же для `linux-desktop` (S10) и Windows (S9): меняются рецепт, источник и способ запечатывания, а не сборщик.
 
 ## 2. Цели, не-цели, анти-цели
 
-**Цели:** рецепт `linux` v1 и его содержимое; сборщик `sbx-tpl` (TS, поверх `packages/pve`); проверка сборки; манифест и регистрация в `template_builds`; версии, выкатка, откат и сборка мусора; оптимизация загрузки и сценарий `sbx-bench s5`; переопределение URL туннеля через `smbios1`; переход с шаблона 599; список изменений в S1/S2/S3/S6.
+**Цели:** рецепт `linux` v1 и его содержимое; сборщик `umiak-tpl` (TS, поверх `packages/pve`); проверка сборки; манифест и регистрация в `template_builds`; версии, выкатка, откат и сборка мусора; оптимизация загрузки и сценарий `umiak-bench s5`; переопределение URL туннеля через `smbios1`; переход с шаблона 599; список изменений в S1/S2/S3/S6.
 
 **Не-цели:** внутренности агента (S3); примитивы Proxmox и драйвер (S1, здесь только запросы на небольшие изменения, §17); логика пула и состояний (S6); рабочий стол (S10); Windows (S9), кроме точек расширения (§16); обновление ОС в уже созданных sandbox (их диски свои; агент обновляется сам, S3 §17.4); пересборка по расписанию в CI (позже, S12).
 
@@ -32,10 +32,10 @@
 
 ## 3. Ограничения
 
-- Хост `pve`: Proxmox VE 9.2.21, ядро 7.0.14, `local-lvm` (VG `pve`, thin pool `data`, QLC). PoC: VMID 500–599, RAM всех VM платформы ≤ 8 GB, сеть `sbx0` (S1 §4.3) с egress в интернет и без доступа к LAN.
-- Доступ сборщика к хосту — только токен `sbx@pve!poc` через PVE API и (при необходимости) `sbx-node`. Root SSH и изменение файлов хоста сборщиком не используются. Новые права — только перечисленные в §17.1.
-- Сеть `sbx0` закрыта: с Mac до гостя по IP не дойти. Поэтому сборка управляется через QEMU guest agent (QGA), а не SSH.
-- Инструменты через mise. Все версии — последние стабильные на момент сборки (`sbx-tpl versions --update`, §6.3), фиксируются в `versions.toml` и манифесте.
+- Хост `pve`: Proxmox VE 9.2.21, ядро 7.0.14, `local-lvm` (VG `pve`, thin pool `data`, QLC). PoC: VMID 500–599, RAM всех VM платформы ≤ 8 GB, сеть `umiak0` (S1 §4.3) с egress в интернет и без доступа к LAN.
+- Доступ сборщика к хосту — только токен `umiak@pve!dev` через PVE API и (при необходимости) `umiak-node`. Root SSH и изменение файлов хоста сборщиком не используются. Новые права — только перечисленные в §17.1.
+- Сеть `umiak0` закрыта: с Mac до гостя по IP не дойти. Поэтому сборка управляется через QEMU guest agent (QGA), а не SSH.
+- Инструменты через mise. Все версии — последние стабильные на момент сборки (`umiak-tpl versions --update`, §6.3), фиксируются в `versions.toml` и манифесте.
 - Проверено 2026-10-29: Ubuntu 26.04.1 LTS (`resolute`) — текущий LTS; 26.10 вышла, но не LTS. Minimal cloud image `release-20261024` (310 пакетов, 420 MB) и обычный server image `release-20261017` (678 пакетов): systemd 259.9, ядро 7.0.0-38, dracut 110, cloud-init 26.2, OpenSSH 10.2p1. Node 26.13.0 — LTS «Lithium» с 2026-10-28.
 
 ## 4. Обзор
@@ -43,17 +43,17 @@
 ```
  Mac (PoC) / later a Kubernetes Job
  +-------------------------------------------------------------+
- | sbx-tpl build linux                                         |
+ | umiak-tpl build linux                                         |
  |  1 fetch base image + SHA256SUMS(.gpg), verify, cache       |
  |  2 render seed ISO (cidata): user-data, meta-data,          |
  |    network-config, build/ (steps, files, agent package)     |
  |  3 upload image (local:import) and ISO (local:iso)  --------+--> PVE API
  |  4 allocate VMID (purpose=template), create build VM:       |
  |    scsi0 import-from image, resize 64G, ide2 = seed ISO,    |
- |    net0 in sbx0 + firewall sbx-egress                       |
+ |    net0 in umiak0 + firewall umiak-egress                       |
  |  5 start, wait QGA; run steps as systemd units via QGA,     |
  |    stream logs by offset (file-read); reboot after base     |
- |  6 cleanup + sbx-agent seal + fstrim, poweroff              |
+ |  6 cleanup + umiak-agent seal + fstrim, poweroff              |
  |  7 detach ISO, convert to template (base-<vmid>-disk-0)     |
  |  8 verify: S1 create from template, boot, checks, hard      |
  |    stop + start, delete                                     |
@@ -75,7 +75,7 @@ infra/templates/
     versions.toml                  # pinned versions and checksums (§6.3)
     seed/user-data.tmpl, meta-data.tmpl, network-config
     steps/00-base.sh 10-system.sh 20-docker.sh 30-toolchains.sh
-          40-coding-agents.sh 50-sbx-agent.sh 90-cleanup.sh
+          40-coding-agents.sh 50-umiak-agent.sh 90-cleanup.sh
     files/                         # config files copied by the steps (§8)
 ```
 
@@ -104,8 +104,8 @@ hw:                              # copied into the template config, S1 whitelist
   rng0: "source=/dev/urandom"
   cloudinit: false               # sandboxes get no cloud-init drive (§17.1)
 build_vm: { cores: 4, memory_mb: 4096 }
-steps: [00-base, reboot, 10-system, 20-docker, 30-toolchains, 40-coding-agents, 50-sbx-agent, 90-cleanup]
-seal: sbx-agent                  # S9: sysprep
+steps: [00-base, reboot, 10-system, 20-docker, 30-toolchains, 40-coding-agents, 50-umiak-agent, 90-cleanup]
+seal: umiak-agent                  # S9: sysprep
 boot_timeout_s: 300
 vmids: [597, 599]                # template slots, first free wins; not inherited (S9: [598])
 ```
@@ -117,8 +117,8 @@ vmids: [597, 599]                # template slots, first free wins; not inherite
 ### 6.1 Образ
 
 - `https://cloud-images.ubuntu.com/minimal/releases/resolute/release-<serial>/ubuntu-26.04-minimal-cloudimg-amd64.img`. Serial закреплён в `versions.toml` (`base.serial`, `base.sha256`).
-- Сборщик скачивает образ, `SHA256SUMS` и `SHA256SUMS.gpg`, проверяет подпись закреплённым ключом из `infra/templates/keys/` (библиотека `openpgp`, без системного gpg) и sha256 образа. Кэш на машине сборщика: `~/.cache/sbx/images/`.
-- В Proxmox образ загружается один раз на serial: `local:import/sbx-ubuntu-26.04-minimal-<serial>.qcow2` (`POST /nodes/{node}/storage/local/upload`, `content=import`, `checksum` sha256: Proxmox проверяет его сам). Если такой файл уже есть и sha256 совпадает, загрузка пропускается.
+- Сборщик скачивает образ, `SHA256SUMS` и `SHA256SUMS.gpg`, проверяет подпись закреплённым ключом из `infra/templates/keys/` (библиотека `openpgp`, без системного gpg) и sha256 образа. Кэш на машине сборщика: `~/.cache/umiak/images/`.
+- В Proxmox образ загружается один раз на serial: `local:import/umiak-ubuntu-26.04-minimal-<serial>.qcow2` (`POST /nodes/{node}/storage/local/upload`, `content=import`, `checksum` sha256: Proxmox проверяет его сам). Если такой файл уже есть и sha256 совпадает, загрузка пропускается.
 - Почему minimal: вдвое меньше пакетов, нет лишних сервисов, которые потом пришлось бы выключать. Чего не хватает (man, vim и т.п.), ставит шаг `00-base`. `unminimize` не запускается.
 - Почему не 9000 и не 599: 9000 — личный dev-шаблон Ильи (пользователь `ib` с uid 1000, `tailscaled`, snapd, ufw, open-vm-tools, unattended-upgrades, три ядра). В 599 сеть привязана к MAC сборочной VM (`50-cloud-init.yaml`, `match: macaddress`), и `systemd-networkd-wait-online` ждал полные 2 минуты. Исправление 599 передано в `s1-impl` (§15).
 
@@ -163,17 +163,17 @@ google_chrome_stable = { version = "156.0.8078.73-1", sha256 = "..." }
 "@google/gemini-cli" = "0.66.0"
 "pnpm" = "12.16.1"
 
-[sbx]              # our CLI (S7 §15.5): linux-x64 binary, sha256 from the release SHA256SUMS
+[umiak]              # our CLI (S7 §15.5): linux-x64 binary, sha256 from the release SHA256SUMS
 cli = { version = "...", sha256 = "..." }
 ```
 
-- `sbx-tpl versions linux --update` находит последние стабильные версии (свежий serial образа, снапшот «сейчас», последняя Node LTS, последние Go/Rust/Bun/uv/gh/Docker/Chrome, последние версии npm-пакетов, последний релиз `sbx` CLI), скачивает официальные файлы контрольных сумм и переписывает `versions.toml`. Значения выше проверены 2026-10-29 (`npm view`, Chrome — versionhistory API Google) и даны как пример; в коммит идёт результат `--update`. Пакеты Ubuntu (JDK, ffmpeg, xdotool) закреплены снапшотом apt (§6.2), отдельной строки им не нужно.
-- `sbx-tpl build` использует файл как есть. `--refresh` = `versions --update` перед сборкой (обычный режим для новой сборки; файл после этого коммитится).
+- `umiak-tpl versions linux --update` находит последние стабильные версии (свежий serial образа, снапшот «сейчас», последняя Node LTS, последние Go/Rust/Bun/uv/gh/Docker/Chrome, последние версии npm-пакетов, последний релиз `umiak` CLI), скачивает официальные файлы контрольных сумм и переписывает `versions.toml`. Значения выше проверены 2026-10-29 (`npm view`, Chrome — versionhistory API Google) и даны как пример; в коммит идёт результат `--update`. Пакеты Ubuntu (JDK, ffmpeg, xdotool) закреплены снапшотом apt (§6.2), отдельной строки им не нужно.
+- `umiak-tpl build` использует файл как есть. `--refresh` = `versions --update` перед сборкой (обычный режим для новой сборки; файл после этого коммитится).
 - Воспроизводимость: тот же рецепт, `versions.toml` и git-коммит дают тот же список пакетов (`dpkg-query`) и те же версии инструментов. Побитовой одинаковости дисков не требуется.
 
-## 7. Сборщик `sbx-tpl` (`apps/template-builder`)
+## 7. Сборщик `umiak-tpl` (`apps/template-builder`)
 
-TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокатор, примитивы machine, firewall VM). Конфигурация и секреты — те же переменные, что в S1 §6.1 (`SBX_PVE_*`, `SBX_NODE_*`, `SBX_STATE_DB`, `SBX_VMID_RANGE`).
+TS CLI, использует `packages/pve` (PVE API, `umiak-node`, аллокатор, примитивы machine, firewall VM). Конфигурация и секреты — те же переменные, что в S1 §6.1 (`UMIAK_PVE_*`, `UMIAK_NODE_*`, `UMIAK_STATE_DB`, `UMIAK_VMID_RANGE`).
 
 ### 7.1 Команды
 
@@ -181,7 +181,7 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 |---|---|
 | `preflight [--node]` | только чтение: права токена (включая upload и чтение `local`, §17.1), content `import`/`iso` у `local`, свободная RAM под сборочную VM, инструмент для ISO, ключ подписи образов |
 | `versions <slug> [--update]` | показать или обновить `versions.toml` (§6.3) |
-| `build <slug> [--node pve] --agent-package <tar> [--sbx-cli <file>] [--api-url <url>] [--tunnel-url <wss-url>] [--ssh-user-ca <file>] [--refresh] [--keep-on-failure] [--no-verify]` | сборка (§7.2) и проверка (§10); итог — сборка в статусе `ready` |
+| `build <slug> [--node pve] --agent-package <tar> [--umiak-cli <file>] [--api-url <url>] [--tunnel-url <wss-url>] [--ssh-user-ca <file>] [--refresh] [--keep-on-failure] [--no-verify]` | сборка (§7.2) и проверка (§10); итог — сборка в статусе `ready` |
 | `verify <buildId>` | повторная проверка (§10) |
 | `promote <buildId>` | сделать сборку активной (§12.2); тот же вызов для отката |
 | `list [<slug>]`, `show <buildId>` | реестр и манифест |
@@ -195,20 +195,20 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 1. **Подготовка.** Прочитать рецепт и `versions.toml`. Проверить пакет агента на машине сборщика кодом на TS (бинарь linux/amd64 на Mac не запустить): ed25519-подпись `manifest.sig` над `manifest.json` (`node:crypto`), sha256 файлов, `os/arch = linux/amd64`. Ключи — закреплённые публичные ключи обновлений из репозитория, те же, что вшиты в установщик агента (S3 §17.1, §17.3; путь задаёт реализация S3). Это и есть корень доверия сборки: в госте `install-package` выполняет бинарь из того же пакета, и его самопроверка ничего не добавляет. Создать запись в реестре: `status = building`, `buildId` (UUIDv7), `version` (§11), `build_memory_mb`.
 2. **Образ** (§6.1): скачать, проверить, загрузить, если ещё нет.
 3. **Seed ISO** (`cidata`, ISO9660 + Joliet + Rock Ridge, если инструмент умеет):
-   - `meta-data`: `instance-id: <buildId>`, `local-hostname: sbx-build`;
+   - `meta-data`: `instance-id: <buildId>`, `local-hostname: umiak-build`;
    - `network-config`: v2, `match: {name: "en*"}`, `dhcp4: true`;
    - `user-data`: без пользователей и ключей (`users: []`, `ssh_pwauth: false`, `disable_root: true`), apt на снапшот (§6.2), `packages: [qemu-guest-agent]`, `runcmd: systemctl enable --now qemu-guest-agent`;
-   - `build/`: шаги, `files/`, `versions.toml`, пакет агента, бинарник `sbx` CLI и `config.json` с `--api-url` (§8.9), `agent.toml` (с URL туннеля по умолчанию, §14), ключи SSH CA шаблона (если переданы).
+   - `build/`: шаги, `files/`, `versions.toml`, пакет агента, бинарник `umiak` CLI и `config.json` с `--api-url` (§8.9), `agent.toml` (с URL туннеля по умолчанию, §14), ключи SSH CA шаблона (если переданы).
 
-   Инструмент: `xorriso` (Linux, CI) или `hdiutil makehybrid -iso -joliet` (macOS) **[S5]**. Шаги запускаются как `bash <file>`, поэтому exec-биты на ISO не нужны. Загрузка: `local:iso/sbx-seed-<buildId>.iso`.
-4. **Сборочная VM.** VMID из аллокатора с `purpose=template` (§17.1). `POST /nodes/{node}/qemu`: `name=sbx-tpl-<slug>-<version с дефисами>`, `pool=sandbox`, `tags=sbx-tpl` (по этому тегу уборка S1 и reconcile S6 не трогают сборочные VM и шаблоны, §17.1 п. 8, §17.4 п. 6), железо из `hw` рецепта, `cores`/`memory` из `build_vm`, `balloon=0`, `scsi0=local-lvm:0,import-from=local:import/<image>,discard=on,iothread=1,ssd=1`, `ide2=local:iso/sbx-seed-<buildId>.iso,media=cdrom`, `net0=virtio=<MAC>,bridge=sbx0,firewall=1`, `boot=order=scsi0`, `description` с buildId и git-коммитом. Затем `PUT resize scsi0 64G` и firewall как у sandbox (S1 §4.4). Перед стартом — проверка RAM: в PoC до S6 как в `sbx-bench` (сумма `memory` работающих VM pool + сборочная ≤ `--ram-cap`, дефолт 8 GB); при S6 — учёт строки `building` в admission (§17.4).
+   Инструмент: `xorriso` (Linux, CI) или `hdiutil makehybrid -iso -joliet` (macOS) **[S5]**. Шаги запускаются как `bash <file>`, поэтому exec-биты на ISO не нужны. Загрузка: `local:iso/umiak-seed-<buildId>.iso`.
+4. **Сборочная VM.** VMID из аллокатора с `purpose=template` (§17.1). `POST /nodes/{node}/qemu`: `name=umiak-tpl-<slug>-<version с дефисами>`, `pool=umiak`, `tags=umiak-tpl` (по этому тегу уборка S1 и reconcile S6 не трогают сборочные VM и шаблоны, §17.1 п. 8, §17.4 п. 6), железо из `hw` рецепта, `cores`/`memory` из `build_vm`, `balloon=0`, `scsi0=local-lvm:0,import-from=local:import/<image>,discard=on,iothread=1,ssd=1`, `ide2=local:iso/umiak-seed-<buildId>.iso,media=cdrom`, `net0=virtio=<MAC>,bridge=umiak0,firewall=1`, `boot=order=scsi0`, `description` с buildId и git-коммитом. Затем `PUT resize scsi0 64G` и firewall как у sandbox (S1 §4.4). Перед стартом — проверка RAM: в PoC до S6 как в `umiak-bench` (сумма `memory` работающих VM pool + сборочная ≤ `--ram-cap`, дефолт 8 GB); при S6 — учёт строки `building` в admission (§17.4).
 5. **Первая загрузка.** Start, ожидание `agent/ping` (до 10 min: cloud-init ставит QGA). cloud-init в этой загрузке расширяет корневой раздел до 64 GiB (`growpart`).
-6. **Шаги.** Каждый шаг выполняется в госте как transient unit: `systemd-run --unit=sbx-build-<n> --property=... bash /mnt/seed/build/steps/<n>.sh` (ISO монтируется в `/mnt/seed` первым вызовом). Вывод — в `/var/log/sbx-build/<n>.log`. Сборщик опрашивает `systemctl show -p ActiveState,Result,ExecMainStatus` (через `agent/exec`) и дочитывает лог через `agent/file-read` с `offset` и `count` (параметры есть в PVE 9.2, проверено `pvesh usage`) раз в 2 s, печатая его в консоль. Так длинный шаг не упирается в тайм-ауты QGA exec. Шаг `reboot`: `agent/exec systemctl reboot` (у `agent/shutdown` нет режима reboot, а `status/reboot` — это выключение и новый запуск QEMU), ожидание нового `boot_id` и `agent/ping`. Шаги пишутся идемпотентно, но повтор сборки после сбоя — всегда новая сборка с нуля (сборка одноразовая) **[S5]**.
-7. **Запечатывание.** `90-cleanup.sh` (§8.10), затем `sbx-agent seal` (S3 §7.3) последним вызовом, затем `fstrim -av`, `sync`, `agent/shutdown` (poweroff), ожидание `stopped`. После `seal` VM не загружается до превращения в template.
-8. **Template.** `PUT config` `delete=ide2`, `POST /nodes/{node}/qemu/{vmid}/template`. Диск становится `base-<vmid>-disk-0`. Удалить ISO через `sbx-node media.remove` (§17.1 п. 3).
+6. **Шаги.** Каждый шаг выполняется в госте как transient unit: `systemd-run --unit=umiak-build-<n> --property=... bash /mnt/seed/build/steps/<n>.sh` (ISO монтируется в `/mnt/seed` первым вызовом). Вывод — в `/var/log/umiak-build/<n>.log`. Сборщик опрашивает `systemctl show -p ActiveState,Result,ExecMainStatus` (через `agent/exec`) и дочитывает лог через `agent/file-read` с `offset` и `count` (параметры есть в PVE 9.2, проверено `pvesh usage`) раз в 2 s, печатая его в консоль. Так длинный шаг не упирается в тайм-ауты QGA exec. Шаг `reboot`: `agent/exec systemctl reboot` (у `agent/shutdown` нет режима reboot, а `status/reboot` — это выключение и новый запуск QEMU), ожидание нового `boot_id` и `agent/ping`. Шаги пишутся идемпотентно, но повтор сборки после сбоя — всегда новая сборка с нуля (сборка одноразовая) **[S5]**.
+7. **Запечатывание.** `90-cleanup.sh` (§8.10), затем `umiak-agent seal` (S3 §7.3) последним вызовом, затем `fstrim -av`, `sync`, `agent/shutdown` (poweroff), ожидание `stopped`. После `seal` VM не загружается до превращения в template.
+8. **Template.** `PUT config` `delete=ide2`, `POST /nodes/{node}/qemu/{vmid}/template`. Диск становится `base-<vmid>-disk-0`. Удалить ISO через `umiak-node media.remove` (§17.1 п. 3).
 9. **Проверка** (§10), если не `--no-verify`. Успех → манифест (§11) в реестр, `status = ready`.
 
-**Ошибка на любом этапе:** status `failed` (этап, шаг, последние 200 строк лога в манифесте). Если нет `--keep-on-failure`: `stop`, `DELETE /qemu/{vmid}?purge=1&destroy-unreferenced-disks=1`, удалить ISO (`sbx-node media.remove`), освободить VMID. Базовый образ в `local:import` остаётся (кэш).
+**Ошибка на любом этапе:** status `failed` (этап, шаг, последние 200 строк лога в манифесте). Если нет `--keep-on-failure`: `stop`, `DELETE /qemu/{vmid}?purge=1&destroy-unreferenced-disks=1`, удалить ISO (`umiak-node media.remove`), освободить VMID. Базовый образ в `local:import` остаётся (кэш).
 
 Ожидаемая длительность: 10–20 min, в основном apt, Docker и инструменты.
 
@@ -225,28 +225,28 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 
 ### 8.2 Пользователи и вход (`10-system`)
 
-- Пользователь `user`: uid/gid 1000, shell `/bin/bash`, группы `sudo`, `docker` (добавляется в `20-docker`) и `kvm` (§8.6), пароль заблокирован, `/etc/sudoers.d/90-sbx-user` `user ALL=(ALL) NOPASSWD:ALL` (0440, проверка `visudo -c`), `loginctl enable-linger user`. Пользователя `ubuntu` и других пользователей с uid ≥ 1000 нет. Пароль root заблокирован.
+- Пользователь `user`: uid/gid 1000, shell `/bin/bash`, группы `sudo`, `docker` (добавляется в `20-docker`) и `kvm` (§8.6), пароль заблокирован, `/etc/sudoers.d/90-umiak-user` `user ALL=(ALL) NOPASSWD:ALL` (0440, проверка `visudo -c`), `loginctl enable-linger user`. Пользователя `ubuntu` и других пользователей с uid ≥ 1000 нет. Пароль root заблокирован.
 - `authorized_keys` нет ни у кого.
 - Локаль `C.UTF-8`, часовой пояс `UTC`.
 
 ### 8.3 sshd и PAM
 
-- `/etc/ssh/sshd_config.d/10-sbx.conf`: `ListenAddress 127.0.0.1`, `ListenAddress ::1`, `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PermitRootLogin prohibit-password`, `TrustedUserCAKeys /etc/ssh/sbx_user_ca.pub`. `AuthorizedKeysFile` остаётся по умолчанию: файлов `authorized_keys` в образе нет, вход только по сертификату **[S5]**.
+- `/etc/ssh/sshd_config.d/10-umiak.conf`: `ListenAddress 127.0.0.1`, `ListenAddress ::1`, `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PermitRootLogin prohibit-password`, `TrustedUserCAKeys /etc/ssh/umiak_user_ca.pub`. `AuthorizedKeysFile` остаётся по умолчанию: файлов `authorized_keys` в образе нет, вход только по сертификату **[S5]**.
 - В Ubuntu 26.04 sshd запускается через `ssh.socket`, и генератор берёт `ListenAddress` из конфига. Проверка §10 смотрит фактические слушающие сокеты, а не только конфиг.
-- `/etc/sbx-agent/ssh-user-ca.pub` — ключи SSH CA из `--ssh-user-ca` или пустой файл; `/etc/ssh/sbx_user_ca.pub` — его копия (S3 §5).
-- `/etc/pam.d/sshd`: две строки `pam_env` из S3 §8.2; `/etc/sbx/env` создаётся пустым.
-- Host keys удаляет `seal`; новые создаёт `sbx-identity` при первой загрузке (S3 §7.2). Генерация ключей Ubuntu при старте sshd (`sshd-keygen`) не должна опередить `sbx-identity`: порядок задаёт unit S3 (`Before=ssh.service ssh.socket`).
+- `/etc/umiak-agent/ssh-user-ca.pub` — ключи SSH CA из `--ssh-user-ca` или пустой файл; `/etc/ssh/umiak_user_ca.pub` — его копия (S3 §5).
+- `/etc/pam.d/sshd`: две строки `pam_env` из S3 §8.2; `/etc/umiak/env` создаётся пустым.
+- Host keys удаляет `seal`; новые создаёт `umiak-identity` при первой загрузке (S3 §7.2). Генерация ключей Ubuntu при старте sshd (`sshd-keygen`) не должна опередить `umiak-identity`: порядок задаёт unit S3 (`Before=ssh.service ssh.socket`).
 
 ### 8.4 Сеть, DNS, время
 
-- `/etc/netplan/10-sbx.yaml`: ethernet `en` с `match: {name: "en*"}`, `dhcp4: true`, `dhcp6: false`, `accept-ra: false`. Файл `50-cloud-init.yaml` удаляется. Привязки к MAC нет нигде.
+- `/etc/netplan/10-umiak.yaml`: ethernet `en` с `match: {name: "en*"}`, `dhcp4: true`, `dhcp6: false`, `accept-ra: false`. Файл `50-cloud-init.yaml` удаляется. Привязки к MAC нет нигде.
 - `systemd-networkd-wait-online`: drop-in `ExecStart=… --any --timeout=15`.
-- `systemd-resolved`: DNS из DHCP (S1 §4.3 раздаёт `1.1.1.1`), `/etc/systemd/resolved.conf.d/10-sbx.conf` `FallbackDNS=1.1.1.1 9.9.9.9`. Это нужно, потому что у sandbox больше нет диска cloud-init с `nameserver` (§17.1).
+- `systemd-resolved`: DNS из DHCP (S1 §4.3 раздаёт `1.1.1.1`), `/etc/systemd/resolved.conf.d/10-umiak.conf` `FallbackDNS=1.1.1.1 9.9.9.9`. Это нужно, потому что у sandbox больше нет диска cloud-init с `nameserver` (§17.1).
 - `chrony` по умолчанию.
 
 ### 8.5 Загрузка: GRUB, ядро, initrd
 
-- `/etc/default/grub.d/90-sbx.cfg` (после `50-cloudimg-settings.cfg` из образа):
+- `/etc/default/grub.d/90-umiak.cfg` (после `50-cloudimg-settings.cfg` из образа):
   ```
   GRUB_TIMEOUT=0
   GRUB_TIMEOUT_STYLE=hidden
@@ -260,16 +260,16 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 
 ### 8.6 Ядро и лимиты
 
-- `/etc/sysctl.d/90-sbx.conf`:
+- `/etc/sysctl.d/90-umiak.conf`:
   - `kernel.apparmor_restrict_unprivileged_userns = 0` — непривилегированные user namespaces нужны песочницам coding-агентов (bubblewrap) и rootless-инструментам; граница доверия — VM (S3 §4);
   - `fs.inotify.max_user_watches = 524288`, `fs.inotify.max_user_instances = 1024` — dev-серверы и сборщики следят за файлами.
-- `/etc/systemd/system.conf.d/90-sbx.conf`: `DefaultLimitNOFILE=65536:524288` **[S5]**.
+- `/etc/systemd/system.conf.d/90-umiak.conf`: `DefaultLimitNOFILE=65536:524288` **[S5]**.
 - **KVM в госте — best-effort, не гарантия платформы в MVP** (MVP-рек. R6). `/dev/kvm` появляется, только если хост пробрасывает виртуализацию: `cpu: host` (§9) передаёт флаг `vmx`/`svm`, если на хосте модуль `kvm_intel`/`kvm_amd` загружен с `nested=1` (runbook S1 его не меняет, S1 §12). Шаблон ничего не включает сам: модули KVM есть в ядре `linux-image-virtual`, udev отдаёт `/dev/kvm` группе `kvm`, `user` в ней состоит (§8.2). Есть ли KVM в сборке, пишет проверка §10 п. 19; API это не обещает.
 - Swap нет: ни раздела, ни файла, ни zram (`systemd-zram-generator` не ставится). Проверка в `90-cleanup` и в §10.
 
 ### 8.7 journald
 
-`/etc/systemd/journald.conf.d/90-sbx.conf`: `Storage=persistent`, `SystemMaxUse=256M`, `RuntimeMaxUse=64M`.
+`/etc/systemd/journald.conf.d/90-umiak.conf`: `Storage=persistent`, `SystemMaxUse=256M`, `RuntimeMaxUse=64M`.
 
 ### 8.8 Docker (`20-docker`)
 
@@ -293,27 +293,27 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 | Java (OpenJDK 25 LTS: `java`, `javac`, `jar`) | apt `openjdk-25-jdk-headless` в `00-base` |
 | ffmpeg, xdotool | apt в `00-base`; `xdotool` работает только при X-дисплее (S10 или свой Xvfb пользователя) |
 | Google Chrome (`google-chrome`, `google-chrome-stable`) | `.deb` из `dl.google.com` по точной версии из `versions.toml` (sha256 сверяется), `apt install ./<deb>` в `30-toolchains`; для headless-запусков агентов и Playwright/Puppeteer. Песочница Chrome работает от `user` благодаря user namespaces (§8.6). Источник apt Google, который ставит пакет, остаётся: пользователь обновляет Chrome сам |
-| `sbx` CLI (S7 §14) | бинарник из `--sbx-cli` (linux-x64 релиз S7 §15.5, sha256 = `versions.toml`) → `/usr/local/bin/sbx` в `40-coding-agents`; `/etc/sbx/config.json` `{"apiUrl": "<--api-url>"}` (S7 §14.1). Ключа в образе нет: пользователь передаёт командный ключ (S7 §7.2) секретом sandbox `SBX_API_KEY`; ключ типа `sandbox` в VM — фаза 2 (S7 §7.2). Внутри VM sandbox по умолчанию — `SBX_SANDBOX_ID` (S3 §8.2). Пока у S7 нет релиза, `--sbx-cli` необязателен, в манифесте `tools.sbx = null` |
+| `umiak` CLI (S7 §14) | бинарник из `--umiak-cli` (linux-x64 релиз S7 §15.5, sha256 = `versions.toml`) → `/usr/local/bin/umiak` в `40-coding-agents`; `/etc/umiak/config.json` `{"apiUrl": "<--api-url>"}` (S7 §14.1). Ключа в образе нет: пользователь передаёт командный ключ (S7 §7.2) секретом sandbox `UMIAK_API_KEY`; ключ типа `sandbox` в VM — фаза 2 (S7 §7.2). Внутри VM sandbox по умолчанию — `UMIAK_SANDBOX_ID` (S3 §8.2). Пока у S7 нет релиза, `--umiak-cli` необязателен, в манифесте `tools.umiak = null` |
 
 - Версии и sha256 — из `versions.toml`, итоговые версии (`--version` каждого) — в манифесте.
 - Автообновление CLI агентов в sandbox выключено там, где это настраивается системно (например, managed settings Claude Code); версии обновляются новой сборкой шаблона **[S5]**. Пользователь может обновить их сам через `sudo`.
 - Кэши (`npm`, `go build`, `rustup` downloads, `uv`, `pip`) чистятся в `90-cleanup`.
-- Набор доведён до паритета с boat по MVP-рек. R5 (`docs/roadmap-phase2.md` §6): Node+pnpm, Python+uv, Go, Rust, Java, Docker+Compose+buildx, gh, rg, jq, Chrome, ffmpeg, xdotool, CLI coding-агентов и `sbx`. В `linux` не входит: рабочий стол (X-сервер, оконный менеджер, Sunshine — S10), Scala/Kotlin/Gradle/Maven, Deno, Ruby, PHP, .NET, R, Android, GitHub Actions runner; их пользователь ставит сам через `sudo`.
+- Набор доведён до паритета с boat по MVP-рек. R5 (`docs/roadmap-phase2.md` §6): Node+pnpm, Python+uv, Go, Rust, Java, Docker+Compose+buildx, gh, rg, jq, Chrome, ffmpeg, xdotool, CLI coding-агентов и `umiak`. В `linux` не входит: рабочий стол (X-сервер, оконный менеджер, Sunshine — S10), Scala/Kotlin/Gradle/Maven, Deno, Ruby, PHP, .NET, R, Android, GitHub Actions runner; их пользователь ставит сам через `sudo`.
 - Env по умолчанию шаблон не добавляет: `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` и остальной платформенный env ставит агент (S3 §8.2).
 
-### 8.10 Агент (`50-sbx-agent`) и очистка (`90-cleanup`)
+### 8.10 Агент (`50-umiak-agent`) и очистка (`90-cleanup`)
 
-`50-sbx-agent`:
-- `sbx-agent install-package /mnt/seed/build/sbx-agent-<v>-linux-amd64.tar` (S3 §17.1): проверка подписи, раскладка в `versions/<v>`, symlink-и `current`, `/usr/local/bin/sbx-agent`.
-- `/etc/sbx-agent/agent.toml` (S3 §5) из шаблона рецепта: `[tunnel] url` — URL туннеля по умолчанию (`--tunnel-url`, §14), `[user] default = "user"`, `[docker] enabled = true`, остальное — дефолты S3.
-- Unit-ы S3 §17.2 и §7.2 (`sbx-identity.service`, `sbx-agent.service`, `sbx-agent-rollback.service`, `sbx-cmd.slice`) включены.
+`50-umiak-agent`:
+- `umiak-agent install-package /mnt/seed/build/umiak-agent-<v>-linux-amd64.tar` (S3 §17.1): проверка подписи, раскладка в `versions/<v>`, symlink-и `current`, `/usr/local/bin/umiak-agent`.
+- `/etc/umiak-agent/agent.toml` (S3 §5) из шаблона рецепта: `[tunnel] url` — URL туннеля по умолчанию (`--tunnel-url`, §14), `[user] default = "user"`, `[docker] enabled = true`, остальное — дефолты S3.
+- Unit-ы S3 §17.2 и §7.2 (`umiak-identity.service`, `umiak-agent.service`, `umiak-agent-rollback.service`, `umiak-cmd.slice`) включены.
 - `qemu-guest-agent` включён (запасной канал S1/S3).
 
 `90-cleanup` (до `seal`):
 - источники apt → обычный архив (§6.2), `apt clean`, `rm -rf /var/lib/apt/lists/*`;
 - `cloud-init clean --logs --seed`, `touch /etc/cloud/cloud-init.disabled`, удалить `/etc/netplan/50-cloud-init.yaml` и `/etc/ssh/sshd_config.d/50-cloud-init.conf`; пакет cloud-init остаётся, но выключен (S3 §20) **[S5]**;
-- удалить: `/var/lib/systemd/random-seed`, `/var/lib/systemd/credential.secret`, `/var/log/sbx-build`, `/var/log/*` (содержимое, структура каталогов остаётся), `journalctl --rotate --vacuum-time=1s`, `/tmp/*`, `/var/tmp/*`, историю shell у root и `user`, кэши инструментов;
-- записать `/etc/sbx-template/build.json` — манифест без проверочной части (§11);
+- удалить: `/var/lib/systemd/random-seed`, `/var/lib/systemd/credential.secret`, `/var/log/umiak-build`, `/var/log/*` (содержимое, структура каталогов остаётся), `journalctl --rotate --vacuum-time=1s`, `/tmp/*`, `/var/tmp/*`, историю shell у root и `user`, кэши инструментов;
+- записать `/etc/umiak-template/build.json` — манифест без проверочной части (§11);
 - проверить: swap нет, ядро одно, пакетов из «удаляется» нет, `authorized_keys` нет.
 
 `seal` (S3 §7.3) стирает состояние агента, host keys и `/etc/machine-id` (пустой файл, а не `uninitialized`: так первая загрузка клона не считается first boot systemd и не применяет presets, которые могли бы включить отключённое; проверка §10 п. 13).
@@ -322,7 +322,7 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 
 Конфиг template VM = `hw` рецепта (§5) + `scsi0` (64 GiB, `discard=on,iothread=1,ssd=1`). Почему так **[S5]**:
 - SeaBIOS: Linux-шаблону не нужен UEFI, а прошивка OVMF загружается дольше. Образ Ubuntu поддерживает оба способа загрузки (раздел BIOS boot есть).
-- `rng0` (virtio-rng): у свежего клона сразу есть энтропия для `ssh-keygen` в `sbx-identity`.
+- `rng0` (virtio-rng): у свежего клона сразу есть энтропия для `ssh-keygen` в `umiak-identity`.
 - `tablet: 0`: USB-планшет headless-VM не нужен.
 - `vga: std` оставлен для консоли оператора; `serial0` — для xterm.js и логов загрузки.
 - Диска cloud-init у шаблона и у sandbox нет (`cloudinit: false`, §17.1).
@@ -340,16 +340,16 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 4. Слушающие сокеты (`ss -tulpn`):
    - TCP: только `127.0.0.1:22` и `[::1]:22` (владелец `systemd` через `ssh.socket` или `sshd`), resolved на `127.0.0.53:53` и `127.0.0.54:53`. Ни одного TCP-сокета на `0.0.0.0`, `::` или адресе интерфейса.
    - UDP: resolved на `127.0.0.53`/`127.0.0.54`, chronyd на loopback (`323`), DHCP-клиент `systemd-networkd` на `<ip>%en*:68`. Других нет.
-5. `sshd -T`: `passwordauthentication no`, `trustedusercakeys /etc/ssh/sbx_user_ca.pub`, оба `listenaddress`. SSH host keys есть и созданы при этой загрузке.
-6. `/etc/pam.d/sshd` содержит строки S3 §8.2; `/etc/sbx/env` существует.
+5. `sshd -T`: `passwordauthentication no`, `trustedusercakeys /etc/ssh/umiak_user_ca.pub`, оба `listenaddress`. SSH host keys есть и созданы при этой загрузке.
+6. `/etc/pam.d/sshd` содержит строки S3 §8.2; `/etc/umiak/env` существует.
 7. cloud-init: `cloud-init status` = disabled; `50-cloud-init.yaml` нет; netplan матчит `en*`; IPv4 из `10.88.0.0/24`.
 8. Пользователи: `user` uid 1000 в группах `sudo` и `docker`; `sudo -n true` от `user` работает; linger включён; `ubuntu` нет; других uid ≥ 1000 нет; пароли root и `user` заблокированы; файлов `authorized_keys` нет.
-9. Агент: `sbx-agent doctor --json` — версия = манифест, `identity` ready с `machineId` из тестового smbios, эффективный URL туннеля = тестовый из `family` (источник `smbios`), unit-ы `sbx-identity` и `sbx-agent` активны. Подключение к туннелю не проверяется: gateway в verify может не быть, и агент обязан быть `active` без него (§17.3 п. 4).
-10. Docker: `docker info` и `docker run --rm hello-world` (образ из интернета через egress `sbx0`).
+9. Агент: `umiak-agent doctor --json` — версия = манифест, `identity` ready с `machineId` из тестового smbios, эффективный URL туннеля = тестовый из `family` (источник `smbios`), unit-ы `umiak-identity` и `umiak-agent` активны. Подключение к туннелю не проверяется: gateway в verify может не быть, и агент обязан быть `active` без него (§17.3 п. 4).
+10. Docker: `docker info` и `docker run --rm hello-world` (образ из интернета через egress `umiak0`).
 11. Инструменты: каждая команда из §8.9 — `--version` (для Go — `go version`; для `gofmt`, `bunx`, `uvx`, `npx` — только `command -v`) от `user` прямым exec и через `bash -lc`; версии = манифест.
 12. Сеть: `getent hosts example.com`, `curl -fsS https://example.com`; `systemd-networkd-wait-online` уложился в 15 s.
 13. systemd: `is-system-running` = `running`; нет failed unit-ов; нет активных job; сервисы из «маскируется» и «удаляется» (§8.1) не активны и не включены.
-14. Остатки: нет `/var/log/sbx-build`, `/var/lib/cloud/instances/*`, истории shell; `/etc/sbx-template/build.json` есть.
+14. Остатки: нет `/var/log/umiak-build`, `/var/lib/cloud/instances/*`, истории shell; `/etc/umiak-template/build.json` есть.
 15. sysctl из §8.6 действуют; `unshare -Ur true` от `user` проходит.
 16. **Жёсткая остановка:** S1 `stop` (без shutdown), затем start. Время до `agent/ping` не больше времени первой загрузки + 3 s; в `grubenv` нет `recordfail` или он не даёт ожидания (`GRUB_RECORDFAIL_TIMEOUT=0` в `grub.cfg`).
 17. Диск: размер корня ≈ 64 GiB; `fstrim -v /` работает.
@@ -358,14 +358,14 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 
 ## 11. Версия, манифест, реестр
 
-- **Версия:** `<YYYYMMDD>.<n>` (UTC-дата начала сборки, `n` — порядковый номер за день для slug). Имя VM: `sbx-tpl-<slug>-<YYYYMMDD>-<n>`. `buildId` — UUIDv7 = `template_builds.id`.
+- **Версия:** `<YYYYMMDD>.<n>` (UTC-дата начала сборки, `n` — порядковый номер за день для slug). Имя VM: `umiak-tpl-<slug>-<YYYYMMDD>-<n>`. `buildId` — UUIDv7 = `template_builds.id`.
 - **Манифест** (`build.json`) **[S5: состав, формат JSON]**: `buildId`, `templateSlug`, `version`, `os`, `status`, `node`, `storage`, `pveVmid`, `gitCommit`, `recipeDigest` (sha256 каталога рецепта), `base` (distro, release, flavor, serial, sha256), `apt.snapshot`, `kernel`, `systemd`, `packages` (`dpkg-query` имя → версия), `tools` (имя → `--version`), `agentVersion`, `defaultTunnelUrl`, `hw`, `diskLayout`, `bootTimeoutS`, `buildMemoryMb`, `startedAt`, `finishedAt`, `verify` (результаты проверок, `boot`), `error` (при `failed`).
-- Копия без `verify` лежит в образе (`/etc/sbx-template/build.json`).
+- Копия без `verify` лежит в образе (`/etc/umiak-template/build.json`).
 - **Реестр** — интерфейс `TemplateRegistry` (`create`, `update`, `get`, `list`, `promote`, `retire`):
-  - до реализации S6: SQLite в `SBX_STATE_DB` (тот же файл, что у аллокатора S1), таблица с колонками `template_builds` S6;
-  - с S6: Postgres через `packages/db` (S6 §14.3: `sbx-admin template register|promote` или прямые вызовы того же кода).
-  - переход: `sbx-tpl registry migrate --to postgres` переносит строки сборок и их lease (`purpose=template`) из SQLite в Postgres. Выполняется до первого запуска reconcile S6 на этой ноде; до этого reconcile защищён тегом `sbx-tpl` (§17.4 п. 6).
-- `sbx-bench` и S3-стенд берут VMID шаблона из активной сборки (`sbx-tpl show --active linux --field pveVmid`) или из `SBX_TEMPLATE_VMID`.
+  - до реализации S6: SQLite в `UMIAK_STATE_DB` (тот же файл, что у аллокатора S1), таблица с колонками `template_builds` S6;
+  - с S6: Postgres через `packages/db` (S6 §14.3: `umiak-admin template register|promote` или прямые вызовы того же кода).
+  - переход: `umiak-tpl registry migrate --to postgres` переносит строки сборок и их lease (`purpose=template`) из SQLite в Postgres. Выполняется до первого запуска reconcile S6 на этой ноде; до этого reconcile защищён тегом `umiak-tpl` (§17.4 п. 6).
+- `umiak-bench` и S3-стенд берут VMID шаблона из активной сборки (`umiak-tpl show --active linux --field pveVmid`) или из `UMIAK_TEMPLATE_VMID`.
 
 ## 12. Выкатка, откат, сборка мусора
 
@@ -398,27 +398,27 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 - остаются `active` и две последние `deprecated` (по `deprecated_at`);
 - остальные `deprecated` удаляются, если `deprecated_at` старше 7 дней и нет machine с этим `template_build_id` в `allocating`, `provisioning`, `booting`, `warm` (новые клоны из `deprecated` не начинаются: пул и cold create берут только `active`). Удаление: `DELETE /nodes/{node}/qemu/{vmid}?purge=1`, проверка отсутствия LV `base-<vmid>-*`, освобождение VMID в аллокаторе, статус `retired`, `retired_at`;
 - `failed` с остатками → как `cleanup`;
-- базовые образы в `local:import/sbx-*`, на которые не ссылается ни одна не-`retired` сборка, удаляются; ISO `sbx-seed-*` старше 1 дня — тоже. Оба удаления — через `sbx-node media.remove` (§17.1 п. 3).
+- базовые образы в `local:import/umiak-*`, на которые не ссылается ни одна не-`retired` сборка, удаляются; ISO `umiak-seed-*` старше 1 дня — тоже. Оба удаления — через `umiak-node media.remove` (§17.1 п. 3).
 
-В PoC до S6 аллокатор не знает `template_build_id` machine. Поэтому `gc` удаляет сборку, только если в аллокаторе нет lease в `reserved` (клон в процессе) и в pool `sandbox` нет VM в создании (lock `clone`/`create` в конфиге); работающие machine старой сборки удалению не мешают (§12.3). В PoC `gc` запускается вручную. С S6 — тот же код в контроллере worker или в CronJob (выбор S6/S12); проверка «нет machine» — запрос к `runtime.machines`.
+В PoC до S6 аллокатор не знает `template_build_id` machine. Поэтому `gc` удаляет сборку, только если в аллокаторе нет lease в `reserved` (клон в процессе) и в pool `umiak` нет VM в создании (lock `clone`/`create` в конфиге); работающие machine старой сборки удалению не мешают (§12.3). В PoC `gc` запускается вручную. С S6 — тот же код в контроллере worker или в CronJob (выбор S6/S12); проверка «нет machine» — запрос к `runtime.machines`.
 
 ### 12.5 Пересборка
 
-В PoC вручную (`sbx-tpl build linux --refresh`, затем `promote`). Позже — раз в неделю в CI или Kubernetes Job (S12) тем же CLI; promote после зелёной проверки можно автоматизировать там же.
+В PoC вручную (`umiak-tpl build linux --refresh`, затем `promote`). Позже — раз в неделю в CI или Kubernetes Job (S12) тем же CLI; promote после зелёной проверки можно автоматизировать там же.
 
 ## 13. Время загрузки
 
-### 13.1 Метрики и `sbx-bench s5`
+### 13.1 Метрики и `umiak-bench s5`
 
-Новый сценарий `sbx-bench s5 --build <buildId> [--baseline 599] [--runs 5]` в `apps/bench`. Для каждой сборки N раз: S1 `create` → start → замеры → hard stop → start → замеры → delete.
+Новый сценарий `umiak-bench s5 --build <buildId> [--baseline 599] [--runs 5]` в `apps/bench`. Для каждой сборки N раз: S1 `create` → start → замеры → hard stop → start → замеры → delete.
 
 | Метрика | Как |
 |---|---|
 | `start_to_qga` | от вызова start до первого `agent/ping` (как `boot` в S1) |
 | `start_to_ip` | до IPv4 в `network-get-interfaces` |
-| `start_to_agent_ready` | хостовое время старта ядра (`t_ping − uptime` в момент ping) + монотонная метка готовности агента: фазы `agent` и `identity` ready, плюс `docker` ready (из `sbx-agent doctor --json`, §17.3); пока меток нет — `ActiveEnterTimestampMonotonic` unit-ов `sbx-agent` и `docker` |
+| `start_to_agent_ready` | хостовое время старта ядра (`t_ping − uptime` в момент ping) + монотонная метка готовности агента: фазы `agent` и `identity` ready, плюс `docker` ready (из `umiak-agent doctor --json`, §17.3); пока меток нет — `ActiveEnterTimestampMonotonic` unit-ов `umiak-agent` и `docker` |
 | `kernel`, `initrd`, `userspace` | `systemd-analyze` |
-| `critical_chain` | `systemd-analyze critical-chain sbx-agent.service` |
+| `critical_chain` | `systemd-analyze critical-chain umiak-agent.service` |
 | `blame_top10` | `systemd-analyze blame` |
 | `hard_stop_restart` | `start_to_qga` после `stop` без shutdown |
 
@@ -432,12 +432,12 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 
 Обязательные (в рецепте с первой сборки): GRUB без ожидания и без recordfail (§8.5), удалённые и замаскированные сервисы (§8.1), `wait-online --any --timeout=15`, cloud-init выключен, нет диска cloud-init у sandbox (§17.1), SeaBIOS, `boot: order=scsi0`.
 
-Эксперименты (каждый — отдельная сборка с флагом рецепта, сравнение `sbx-bench s5 --baseline`; принимается, если медиана `start_to_agent_ready` улучшается не меньше чем на 300 ms и проверка §10 зелёная):
+Эксперименты (каждый — отдельная сборка с флагом рецепта, сравнение `umiak-bench s5 --baseline`; принимается, если медиана `start_to_agent_ready` улучшается не меньше чем на 300 ms и проверка §10 зелёная):
 1. dracut `hostonly` с минимальным набором модулей (virtio, scsi, ext4).
 2. Загрузка без initrd (`root=PARTUUID=`), если virtio-scsi и ext4 в ядре встроены.
 3. Ядро `linux-kvm` вместо generic (нужны модули Docker: overlay, br_netfilter, veth, nf_tables).
 4. `docker.socket` вместо раннего `docker.service`.
-5. `sbx-agent.service` без `After=network-online.target` (агент сам повторяет подключение) — изменение S3, только если `wait-online` окажется на критическом пути.
+5. `umiak-agent.service` без `After=network-online.target` (агент сам повторяет подключение) — изменение S3, только если `wait-online` окажется на критическом пути.
 6. `vga: none` / только serial.
 
 ## 14. URL туннеля: значение по умолчанию и переопределение через `smbios1`
@@ -445,7 +445,7 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 Решение master-сессии: URL зашивается в образ только как значение по умолчанию, worker может переопределить его для каждой VM. Тогда одна сборка годится для dev и prod.
 
 - **По умолчанию:** `agent.toml [tunnel] url` из `--tunnel-url` при сборке (в манифесте `defaultTunnelUrl`).
-- **Переопределение:** поле `family` в `smbios1`: `family=<base64("sbxt1:" + url)>` при общем флаге `base64=1` (S2 §5.2). Агент читает `/sys/class/dmi/id/product_family`; при префиксе `sbxt1:` и корректном URL (`wss://`, непустой host, ≤ 200 байт) использует его, иначе — значение из `agent.toml` с предупреждением в лог. `doctor --json` показывает эффективный URL и источник.
+- **Переопределение:** поле `family` в `smbios1`: `family=<base64("umiakt1:" + url)>` при общем флаге `base64=1` (S2 §5.2). Агент читает `/sys/class/dmi/id/product_family`; при префиксе `umiakt1:` и корректном URL (`wss://`, непустой host, ≤ 200 байт) использует его, иначе — значение из `agent.toml` с предупреждением в лог. `doctor --json` показывает эффективный URL и источник.
 - **Проверено в исходниках Proxmox 9.2 (`PVE/QemuServer.pm`):** `smbios1` принимает `uuid`, `serial`, `manufacturer`, `product`, `version`, `sku`, `family`, `base64`; при `base64=1` все поля, кроме `uuid`, передаются в QEMU декодированными (запятые экранируются). Вся строка `smbios1` — не больше **512 символов**. Сейчас занято около 175: `uuid=<36>` (41), `,serial=<base64 от 85 байт>` (124), `,base64=1` (9). Остаётся около 335 символов, то есть `,family=` и до ~245 байт URL до base64. Лимит 200 байт для URL оставляет запас. Длину и чтение `product_family` проверяет стенд (§19, п. 3).
 - `product_family` в sysfs доступен всем пользователям VM (в отличие от `product_serial`). URL — не секрет, это допустимо.
 - `sku` не используется и остаётся резервом.
@@ -453,10 +453,10 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 
 ## 15. Шаблон 599 и переход
 
-- 599 (`sbx-ubuntu-poc`) — шаблон стенда S1: thin-снимок 9000 с `qemu-guest-agent`, собран runbook-ом S1 §4.6. Он наследует от 9000 пользователя `ib` (uid 1000, конфликт с `user` из S3), `tailscaled`, snapd и сеть, привязанную к MAC. Master-сессия передала исправление в `s1-impl` (2026-10-29).
+- 599 (`umiak-ubuntu-poc`) — шаблон стенда S1: thin-снимок 9000 с `qemu-guest-agent`, собран runbook-ом S1 §4.6. Он наследует от 9000 пользователя `ib` (uid 1000, конфликт с `user` из S3), `tailscaled`, snapd и сеть, привязанную к MAC. Master-сессия передала исправление в `s1-impl` (2026-10-29).
 - S5 от 599 и 9000 не зависит.
-- Пока первой сборки S5 нет, S1-стенд работает на 599. После первой `active` сборки `linux`: `sbx-bench s1`, стенд S3 и E2E S6 используют её (`SBX_TEMPLATE_VMID` из реестра, §11).
-- 599 остаётся как baseline для `sbx-bench s5 --baseline 599`, пока цели §13.2 не подтверждены и цифры не записаны. Затем удаляется шагом `infra/pve/setup.sh revert template` (S1). VMID 599 возвращается в аллокатор.
+- Пока первой сборки S5 нет, S1-стенд работает на 599. После первой `active` сборки `linux`: `umiak-bench s1`, стенд S3 и E2E S6 используют её (`UMIAK_TEMPLATE_VMID` из реестра, §11).
+- 599 остаётся как baseline для `umiak-bench s5 --baseline 599`, пока цели §13.2 не подтверждены и цифры не записаны. Затем удаляется шагом `infra/pve/setup.sh revert template` (S1). VMID 599 возвращается в аллокатор.
 
 ## 16. Расширяемость (S9, S10)
 
@@ -468,54 +468,54 @@ TS CLI, использует `packages/pve` (PVE API, `sbx-node`, аллокат
 | носитель сборки | seed ISO `cidata` | то же | ISO `autounattend` + каталог `build/` |
 | исполнитель шагов | `bash` через QGA | то же | PowerShell через QGA (virtio-win) |
 | `extends` | — | `linux`: шаги `linux` + свои; сборка тоже с чистого образа, а не поверх LV `linux` | — |
-| запечатывание | `sbx-agent seal` | то же | `sbx-agent seal` + `sysprep /generalize /oobe /shutdown` |
+| запечатывание | `umiak-agent seal` | то же | `umiak-agent seal` + `sysprep /generalize /oobe /shutdown` |
 | железо | SeaBIOS, `scsi0` | то же + видео по решению S10 | OVMF, `efidisk0`, `tpmstate0` (слоты уже есть в S1 `DiskSet`) |
 | проверка | §10 | §10 + рабочий стол | свой профиль |
 
-Реестр, версии, promote, gc и `sbx-bench s5` общие. `boot_timeout_s` из рецепта (Windows — 1200, S6 §5.2).
+Реестр, версии, promote, gc и `umiak-bench s5` общие. `boot_timeout_s` из рецепта (Windows — 1200, S6 §5.2).
 
 ## 17. Изменения в соседних областях
 
 Согласовано master-сессией; вносят исполнители этих областей (`s1-impl`, реализация S3, S6).
 
-### 17.1 S1 (`packages/pve`, `sbx-node`, runbook)
+### 17.1 S1 (`packages/pve`, `umiak-node`, runbook)
 
-1. **VMID шаблонов из аллокатора.** `allocate("template")` вместо зашитого 599; `ensureTemplate` резервирует VMID всех зарегистрированных сборок. `SBX_TEMPLATE_VMID` остаётся переопределением для стенда.
-2. **`sbx-node lv.snapshot`:** origin `base-<любой VMID диапазона>-*` вместо `base-<templateVmid>-*` (префикс `base-` бывает только у дисков template). Имя `vm-<id>-disk-*` запрещено, если у `<id>` есть LV `base-<id>-*`. Параметр `templateVmid` в `/etc/sbx-node.toml` убирается.
+1. **VMID шаблонов из аллокатора.** `allocate("template")` вместо зашитого 599; `ensureTemplate` резервирует VMID всех зарегистрированных сборок. `UMIAK_TEMPLATE_VMID` остаётся переопределением для стенда.
+2. **`umiak-node lv.snapshot`:** origin `base-<любой VMID диапазона>-*` вместо `base-<templateVmid>-*` (префикс `base-` бывает только у дисков template). Имя `vm-<id>-disk-*` запрещено, если у `<id>` есть LV `base-<id>-*`. Параметр `templateVmid` в `/etc/umiak-node.toml` убирается.
 3. **Права и файлы на `local`.**
-   - Роль `SbxTemplateMedia` (`Datastore.AllocateTemplate`, `Datastore.Audit`) на `/storage/local` для `sbx@pve` и токена: загрузка образов и ISO (`upload`), `import-from` и подключение ISO (проверено в `PVE/API2/Storage/Status.pm` и `PVE/Storage.pm`).
-   - Удаление через API (`DELETE …/content/<volid>`) требует `Datastore.Allocate` (проверено в `PVE/API2/Storage/Content.pm`). Это право позволяет менять само хранилище и удалять ISO и бэкапы Ильи, поэтому его не даём. Вместо этого — операции `sbx-node`: `media.list` (только чтение) и `media.remove` — удаление только файлов `/var/lib/vz/template/iso/sbx-seed-*.iso` и `/var/lib/vz/import/sbx-*.{qcow2,img,raw}`, имя проверяется по шаблону, без `..` и symlink-ов.
+   - Роль `UmiakTemplateMedia` (`Datastore.AllocateTemplate`, `Datastore.Audit`) на `/storage/local` для `umiak@pve` и токена: загрузка образов и ISO (`upload`), `import-from` и подключение ISO (проверено в `PVE/API2/Storage/Status.pm` и `PVE/Storage.pm`).
+   - Удаление через API (`DELETE …/content/<volid>`) требует `Datastore.Allocate` (проверено в `PVE/API2/Storage/Content.pm`). Это право позволяет менять само хранилище и удалять ISO и бэкапы Ильи, поэтому его не даём. Вместо этого — операции `umiak-node`: `media.list` (только чтение) и `media.remove` — удаление только файлов `/var/lib/vz/template/iso/umiak-seed-*.iso` и `/var/lib/vz/import/umiak-*.{qcow2,img,raw}`, имя проверяется по шаблону, без `..` и symlink-ов.
    - Content `import` у `local` включён (на `pve` уже есть). Если его нет, включает runbook S1 (изменение `storage.cfg`, шаг с подтверждением), а не сборщик.
-4. **Без cloud-init у sandbox.** Если у шаблона `hw.cloudinit = false`, `create` не добавляет `ide2=…:cloudinit`, `ipconfig0`, `ciuser`. `fork` идёт за источником: `snapshot` пишет в hardware снапшота метку `sbx-cloudinit` (`0`/`1`, есть ли у источника cloud-init-диск), и fork из sandbox такого шаблона cloud-init не получает. Для 599 и снапшотов без метки поведение прежнее.
+4. **Без cloud-init у sandbox.** Если у шаблона `hw.cloudinit = false`, `create` не добавляет `ide2=…:cloudinit`, `ipconfig0`, `ciuser`. `fork` идёт за источником: `snapshot` пишет в hardware снапшота метку `umiak-cloudinit` (`0`/`1`, есть ли у источника cloud-init-диск), и fork из sandbox такого шаблона cloud-init не получает. Для 599 и снапшотов без метки поведение прежнее.
 5. **Белый список железа** + `rng0`.
 6. **`smbios1`:** `create`/`fork` принимают `family` (§14) вместе с `uuid` и `serial`; проверка длины всей строки ≤ 512.
 7. Функция настройки firewall VM (S1 §4.4) экспортируется для сборочной VM.
-8. **Уборка не трогает шаблоны.** `sbx-bench cleanup --all-sandbox-resources` и `preflight` пропускают VM с тегом `sbx-tpl` (сборки и шаблоны), lease с `purpose=template` и не считают их хвостами; вместо «кроме 599» — «кроме `sbx-tpl`». Уборка глобальная, затрагивает sandbox всех запусков и требует явного флага; после `verify` удаляются только VMID и снапшот, перечисленные в его выводе.
+8. **Уборка не трогает шаблоны.** `umiak-bench cleanup --all-sandbox-resources` и `preflight` пропускают VM с тегом `umiak-tpl` (сборки и шаблоны), lease с `purpose=template` и не считают их хвостами; вместо «кроме 599» — «кроме `umiak-tpl`». Уборка глобальная, затрагивает sandbox всех запусков и требует явного флага; после `verify` удаляются только VMID и снапшот, перечисленные в его выводе.
 
 ### 17.2 S2
 
-Формат `family` в `smbios1` (§14) — дополнение к S2 §5.2: `sbxt1:<url>`, необязательное поле.
+Формат `family` в `smbios1` (§14) — дополнение к S2 §5.2: `umiakt1:<url>`, необязательное поле.
 
 ### 17.3 S3 (агент)
 
 1. Чтение `product_family`, приоритет `smbios > agent.toml`, проверка URL (§14).
-2. `doctor --json`: эффективный URL туннеля и его источник; монотонные метки перехода фаз готовности в `ready` (для `sbx-bench s5`, §13.1).
+2. `doctor --json`: эффективный URL туннеля и его источник; монотонные метки перехода фаз готовности в `ready` (для `umiak-bench s5`, §13.1).
 3. Закреплённые публичные ключи обновлений лежат в репозитории файлом, который читает и сборщик (§7.2 п. 1).
-4. `sbx-agent.service` (`Type=notify`) отправляет `READY=1` после открытия `state.db` и восстановления shim, **не дожидаясь** туннеля: без gateway (сборка, verify, обрыв) unit должен быть `active`, а не в цикле перезапусков с откатом.
+4. `umiak-agent.service` (`Type=notify`) отправляет `READY=1` после открытия `state.db` и восстановления shim, **не дожидаясь** туннеля: без gateway (сборка, verify, обрыв) unit должен быть `active`, а не в цикле перезапусков с откатом.
 
 ### 17.4 S6 (control plane)
 
 1. `template_builds`: статусы `building | ready | active | deprecated | retired | failed`; колонки `manifest jsonb`, `build_memory_mb int`, `verified_at`, `deprecated_at`, `retired_at`; уникальность `active` по `(template_slug, node_id)` прежняя.
 2. Admission (§8.1): RAM сборки в `building` на её ноде входит в `reserved` и `powered`.
-3. Worker пишет `family` в `smbios1` (§7.4 шаг 4), если в конфигурации инсталляции задан URL туннеля (`SBX_TUNNEL_URL`); иначе поле не ставится.
+3. Worker пишет `family` в `smbios1` (§7.4 шаг 4), если в конфигурации инсталляции задан URL туннеля (`UMIAK_TUNNEL_URL`); иначе поле не ставится.
 4. `boot_timeout_s` и `hw` (с `cloudinit: false`) берутся из сборки и передаются в S1.
 5. `gc` (§12.4): S6 решает, где он работает (контроллер или CronJob S12).
-6. **Reconcile не трогает шаблоны.** VM с тегом `sbx-tpl` или `template: 1` reconcile не удаляет никогда; если для неё нет строки `template_builds`, он только сообщает (метрика, лог). Lease с `purpose=template` не считаются сиротами.
+6. **Reconcile не трогает шаблоны.** VM с тегом `umiak-tpl` или `template: 1` reconcile не удаляет никогда; если для неё нет строки `template_builds`, он только сообщает (метрика, лог). Lease с `purpose=template` не считаются сиротами.
 
 ## 18. Структура кода
 
 ```
-apps/template-builder/        TS: sbx-tpl CLI (recipe loader, image fetch/verify, seed ISO,
+apps/template-builder/        TS: umiak-tpl CLI (recipe loader, image fetch/verify, seed ISO,
                               build stages, QGA step runner, verify, registry, gc)
 infra/templates/keys/         pinned Ubuntu cloud image signing key
 infra/templates/linux/        recipe: template.yaml, versions.toml, seed/, steps/, files/
@@ -523,26 +523,28 @@ apps/bench/                   + scenario s5 (§13.1)
 packages/pve/                 + changes §17.1 (by s1-impl)
 ```
 
-Библиотеки (проверено 2026-10-29 через `npm view`, при реализации перепроверить): `openpgp` 6.3.2 (подпись `SHA256SUMS.gpg`), `smol-toml` 1.9.1, `yaml` 2.9.1, `zod` 4.6.7 (схемы рецепта и манифеста), `commander` 15.0.0 или то, что уже выбрано в `apps/bench`. Packer (1.16.2, плагин proxmox 1.2.4) рассмотрен и отвергнут: ему нужен SSH до гостя в закрытой `sbx0`, он не ставит наши теги и не знает аллокатор, лицензия BUSL.
+Библиотеки (проверено 2026-10-29 через `npm view`, при реализации перепроверить): `openpgp` 6.3.2 (подпись `SHA256SUMS.gpg`), `smol-toml` 1.9.1, `yaml` 2.9.1, `zod` 4.6.7 (схемы рецепта и манифеста), `commander` 15.0.0 или то, что уже выбрано в `apps/bench`. Packer (1.16.2, плагин proxmox 1.2.4) рассмотрен и отвергнут: ему нужен SSH до гостя в закрытой `umiak0`, он не ставит наши теги и не знает аллокатор, лицензия BUSL.
 
 Тесты (vitest):
 - unit: разбор и проверка рецепта и `versions.toml`, проверка подписи и sha256 (тестовый ключ), сборка `user-data`/`network-config`, порядок вызовов PVE API в `build` и откат при ошибке (фейк `packages/pve`), запуск шага через QGA с дочитыванием лога по offset (фейк QGA), правила `gc` (таблица случаев), формат и длина `smbios1` с `family`;
 - shellcheck для `steps/*.sh`;
-- интеграция — сама сборка и `verify` на `pve`, плюс `sbx-bench s5`.
+- интеграция — сама сборка и `verify` на `pve`, плюс `umiak-bench s5`.
 
 ## 19. Приёмка
 
 На `pve`:
-1. `sbx-tpl preflight` зелёный; `sbx-tpl build linux --refresh --agent-package <tar> --sbx-cli <bin> --api-url <url> --tunnel-url <url>` проходит от официального образа без ручных действий; сборка `ready`, все проверки §10 зелёные.
+1. `umiak-tpl preflight` зелёный; `umiak-tpl build linux --refresh --agent-package <tar> --umiak-cli <bin> --api-url <url> --tunnel-url <url>` проходит от официального образа без ручных действий; сборка `ready`, все проверки §10 зелёные.
 2. Повторная сборка с тем же `versions.toml` и коммитом даёт тот же `packages` и `tools` в манифесте.
 3. `smbios1` с `family` максимальной разрешённой длины (URL 200 байт) принимается Proxmox; агент видит URL; строка длиннее 512 символов отклоняется сборщиком до вызова API.
 4. **GC безопасен:** machine A из сборки X работает, saved snapshot (или S1 snapshot) A есть; `promote` сборки Y; `gc` с принудительным порогом удаляет X; A продолжает работать, перезагружается, fork из снапшота A загружается; LV `base-<X>-*` нет, VMID X освобождён.
 5. `promote` Y → откат `promote` X (до удаления) → пул S6 (если есть) или стенд использует X.
-6. `sbx-bench s5 --baseline 599`: цели §13.2 выполнены; `hard_stop_restart` в пределах; цифры записаны в §20.
+6. `umiak-bench s5 --baseline 599`: цели §13.2 выполнены; `hard_stop_restart` в пределах; цифры записаны в §20.
 7. Неудачная сборка (шаг, который падает намеренно, флаг теста) не оставляет VM, ISO и lease; с `--keep-on-failure` оставляет, `cleanup` убирает.
 8. S1 `inventory` «мир до» и «мир после» сборки и `gc` отличаются только VM и LV новой сборки и удалёнными сборками.
 
 ## 20. Результаты
+
+> Исторический отчёт до R1; действующие имена — `docs/specs/rename-umiak.md`.
 
 Реализация 2026-10-30, ветка `s5-impl`; план `docs/plans/s5-linux-template.md`. Сборки на `pve` (Proxmox VE 9.2.21).
 
@@ -601,7 +603,7 @@ packages/pve/                 + changes §17.1 (by s1-impl)
 - В Ubuntu 26.04 sshd через `ssh.socket` и генератор: проверить, что `ListenAddress` из `sshd_config.d` действительно даёт только loopback (проверка §10 п. 4).
 - Автообновление CLI агентов: какие из них настраиваются системно — проверить при реализации; где нельзя, оставить как есть и записать.
 - Google держит в `dl.google.com` только свежие версии Chrome: повторная сборка со старым `versions.toml` может не найти `.deb`. Тогда сборка падает на шаге `30-toolchains`, и нужен `--refresh`.
-- Размер образа вырастет из-за Chrome, JDK и ffmpeg (оценка +1 GB в thin pool); на время загрузки это не влияет (сервисов они не добавляют), проверка — `sbx-bench s5`.
+- Размер образа вырастет из-за Chrome, JDK и ffmpeg (оценка +1 GB в thin pool); на время загрузки это не влияет (сервисов они не добавляют), проверка — `umiak-bench s5`.
 - `systemd.machine_id=firmware` с пустым `/etc/machine-id`: убедиться, что systemd не считает загрузку first boot и machine-id записывается на диск (`systemd-machine-id-commit`), проверка §10 п. 2 и 13.
 
 ## S10 template slots (решение Ильи 2026-10-31)

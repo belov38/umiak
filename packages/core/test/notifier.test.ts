@@ -1,4 +1,8 @@
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PgNotifier } from "../src/index.ts";
 

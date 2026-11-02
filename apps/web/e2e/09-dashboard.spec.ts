@@ -19,8 +19,8 @@ test("dashboard navigation, appearance, responsive layout and page captures", as
 	const { page } = session;
 	const team = await personalTeam(session);
 	const base = `/app/t/${team}`;
-	const dir = process.env.SBX_VISUAL_DIR
-		? resolve(process.env.SBX_VISUAL_DIR)
+	const dir = process.env.UMIAK_VISUAL_DIR
+		? resolve(process.env.UMIAK_VISUAL_DIR)
 		: testInfo.outputPath("dashboard");
 	await mkdir(dir, { recursive: true });
 	await page.setViewportSize({ width: 1900, height: 907 });

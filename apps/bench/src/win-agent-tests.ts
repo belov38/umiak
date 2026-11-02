@@ -14,7 +14,7 @@ import {
 	type Qga,
 	type Smbios,
 	s2SerialPayload,
-} from "@sbx/pve";
+} from "@umiak/pve";
 import { makeIso } from "../../template-builder/src/seed.ts";
 import { type Ctx, RamGuard } from "./context.ts";
 import { table } from "./report.ts";
@@ -22,14 +22,14 @@ import { deleteWithRetry, machinesFor } from "./s5.ts";
 import { checkHostRules, waitAgentReady } from "./s9.ts";
 import { abortable, withAbortSignals } from "./signals.ts";
 
-// sbx-bench s9 agent-tests (spec S9 section 18.3): the Windows test binaries of the guest agent
+// umiak-bench s9 agent-tests (spec S9 section 18.3): the Windows test binaries of the guest agent
 // (services/guest-agent/test/windows/build-tests.sh) go into an ISO that is attached to a fresh
-// clone of the Windows template; the binaries are copied to C:\sbx-tests and run there as SYSTEM
+// clone of the Windows template; the binaries are copied to C:\umiak-tests and run there as SYSTEM
 // (what qemu-ga exec runs as). An ISO instead of QGA file writes: the binaries are about 100 MB.
 
 /** Guest directory of the binaries (next to them the tests may write files). */
-export const REMOTE_DIR = "C:\\sbx-tests";
-export const ISO_LABEL = "SBXTESTS";
+export const REMOTE_DIR = "C:\\umiak-tests";
+export const ISO_LABEL = "UMIAKTESTS";
 /** Passed to every binary as -test.timeout; the exec timeout is two minutes longer. */
 export const TEST_TIMEOUT = "10m";
 const EXEC_TIMEOUT_MS = 12 * 60_000;
@@ -38,8 +38,8 @@ const COPY_TIMEOUT_MS = 2 * 60_000;
 const SIZE = { cores: 2, memoryMb: 4096 };
 const MEDIA_STORAGE = "local";
 const UPLOAD_TIMEOUT_MS = 30 * 60_000;
-/** Name pattern the sbx-node media.* operations accept. */
-export const ISO_NAME_RE = /^sbx-build-[a-z0-9-]{1,64}\.iso$/;
+/** Name pattern the umiak-node media.* operations accept. */
+export const ISO_NAME_RE = /^umiak-build-[a-z0-9-]{1,64}\.iso$/;
 const BIN_NAME_RE = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*\.test\.exe$/;
 /** Joliet (what Windows reads) keeps at most 64 characters of a name. */
 const JOLIET_NAME_MAX = 64;
@@ -160,7 +160,7 @@ export async function runAgentTests(
 				`${b}: longer than ${JOLIET_NAME_MAX} characters (Joliet)`,
 			);
 	}
-	const isoName = `sbx-build-agenttests-${stamp(now())}.iso`;
+	const isoName = `umiak-build-agenttests-${stamp(now())}.iso`;
 	if (!ISO_NAME_RE.test(isoName)) throw new Error(`bad ISO name ${isoName}`);
 
 	const results: BinaryResult[] = [];
@@ -170,7 +170,7 @@ export async function runAgentTests(
 		uuid: id,
 		serial: s2SerialPayload(id, randomBytes(32)),
 	};
-	const tmp = mkdtempSync(join(tmpdir(), "sbx-agent-tests-"));
+	const tmp = mkdtempSync(join(tmpdir(), "umiak-agent-tests-"));
 	const isoPath = join(tmp, isoName);
 	let isoUploaded = false;
 	let vmid: number | undefined;
@@ -318,7 +318,7 @@ async function fileSha256(path: string): Promise<string> {
 	return h.digest("hex");
 }
 
-/** Proxmox and sbx-node side of the ISO, the same calls as the template builder makes. */
+/** Proxmox and umiak-node side of the ISO, the same calls as the template builder makes. */
 export function realIso(ctx: Ctx): IsoOps {
 	const { api, node, cfg } = ctx;
 	return {

@@ -19,17 +19,17 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shim"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/winproc"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/shim"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/winproc"
 )
 
 // The test binary is also the shim (`<exe> shim --id ...`) and the command
 // (helperEnv in the command's environment). These tests need
 // SeCreatePermanentPrivilege (SYSTEM, Task 27) and skip without it.
-const helperEnv = "SBX_SUP_HELPER"
+const helperEnv = "UMIAK_SUP_HELPER"
 
 func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "shim" {
@@ -79,7 +79,7 @@ func consoleSize() {
 
 func requirePermanentJobs(t *testing.T) {
 	t.Helper()
-	name := fmt.Sprintf("sbx-test-probe-%d-%d", os.Getpid(), time.Now().UnixNano())
+	name := fmt.Sprintf("umiak-test-probe-%d-%d", os.Getpid(), time.Now().UnixNano())
 	j, err := winproc.CreatePermanentJob(name)
 	if errors.Is(err, winproc.ErrNoPermanentPrivilege) {
 		t.Skip("needs SeCreatePermanentPrivilege (run as SYSTEM):", err)
@@ -105,7 +105,7 @@ type winEnv struct {
 func newWinEnv(t *testing.T) *winEnv {
 	t.Helper()
 	requirePermanentJobs(t)
-	root, err := os.MkdirTemp(os.Getenv("SystemDrive")+`\`, "sbxv")
+	root, err := os.MkdirTemp(os.Getenv("SystemDrive")+`\`, "umiakv")
 	if err != nil {
 		t.Fatal(err)
 	}

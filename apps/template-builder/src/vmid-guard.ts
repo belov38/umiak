@@ -1,4 +1,4 @@
-// VMIDs sbx-tpl never creates, stops or deletes, whatever the config or the allocator says:
+// VMIDs umiak-tpl never creates, stops or deletes, whatever the config or the allocator says:
 // everything below 500 (other guests on the node), the PoC template 599, the base templates
 // 9000 and 9001.
 

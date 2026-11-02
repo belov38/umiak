@@ -57,8 +57,8 @@ var (
 )
 
 const (
-	smbSerial = "sbx1:0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b:c2VjcmV0"
-	smbFamily = "sbxt1:wss://sbx.example.test/v1/connect"
+	smbSerial = "umiak1:0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b:c2VjcmV0"
+	smbFamily = "umiakt1:wss://umiak.example.test/v1/connect"
 )
 
 func TestParseSMBIOSType1(t *testing.T) {

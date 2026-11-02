@@ -4,11 +4,11 @@
 #
 # Each implementation thread adds its own service(s) to this file and reuses the
 # x- anchors below (`*service-defaults`, `*db-env`, `*worker-build`, `*logging`)
-# and the `sbx` network.
-name: sbx
+# and the `umiak` network.
+name: umiak
 
 # S4 gateway: gateway-secrets and gateway (see README.gateway.md). It calls
-# the api internal listener (SBX_GATEWAY_API_URL, default http://api:8082).
+# the api internal listener (UMIAK_GATEWAY_API_URL, default http://api:8082).
 include:
   - gateway.yaml
   - turn.yaml
@@ -21,7 +21,7 @@ x-logging: &logging
 
 # Database URL shared by every service that talks to Postgres. Dev-only credentials.
 x-db-env: &db-env
-  DATABASE_URL: postgres://sbx:sbx@postgres:5432/sbx
+  DATABASE_URL: postgres://umiak:umiak@postgres:5432/umiak
 
 # Worker image: used by `migrate` and `worker`.
 x-worker-build: &worker-build
@@ -29,17 +29,17 @@ x-worker-build: &worker-build
   dockerfile: apps/worker/Dockerfile
 
 # Public URLs of the stack (deploy/compose/.env). The defaults are the fixed
-# localhost ports below; the dependent ones follow SBX_KEYCLOAK_URL and
-# SBX_APP_ORIGIN unless set themselves.
-x-keycloak-url: &keycloak-url ${SBX_KEYCLOAK_URL:-http://localhost:8180}
-x-app-origin: &app-origin ${SBX_APP_ORIGIN:-http://localhost:4180}
-x-oidc-issuer: &oidc-issuer ${SBX_OIDC_ISSUER:-${SBX_KEYCLOAK_URL:-http://localhost:8180}/realms/sbx}
-x-oauth2-proxy-redirect-url: &oauth2-proxy-redirect-url ${SBX_OAUTH2_PROXY_REDIRECT_URL:-${SBX_APP_ORIGIN:-http://localhost:4180}/oauth2/callback}
+# localhost ports below; the dependent ones follow UMIAK_KEYCLOAK_URL and
+# UMIAK_APP_ORIGIN unless set themselves.
+x-keycloak-url: &keycloak-url ${UMIAK_KEYCLOAK_URL:-http://localhost:8180}
+x-app-origin: &app-origin ${UMIAK_APP_ORIGIN:-http://localhost:4180}
+x-oidc-issuer: &oidc-issuer ${UMIAK_OIDC_ISSUER:-${UMIAK_KEYCLOAK_URL:-http://localhost:8180}/realms/umiak}
+x-oauth2-proxy-redirect-url: &oauth2-proxy-redirect-url ${UMIAK_OAUTH2_PROXY_REDIRECT_URL:-${UMIAK_APP_ORIGIN:-http://localhost:4180}/oauth2/callback}
 # Keycloak end-session page that web's sign-out link passes to oauth2-proxy
 # (/oauth2/sign_out?rd=...): Keycloak ends the SSO session and returns to
 # <app origin>/app (web has no page at /); the realm allows <app origin>/* as
 # post-logout redirect.
-x-logout-url: &logout-url ${SBX_LOGOUT_URL:-${SBX_KEYCLOAK_URL:-http://localhost:8180}/realms/sbx/protocol/openid-connect/logout?client_id=oauth2-proxy&post_logout_redirect_uri=${SBX_APP_ORIGIN:-http://localhost:4180}/app}
+x-logout-url: &logout-url ${UMIAK_LOGOUT_URL:-${UMIAK_KEYCLOAK_URL:-http://localhost:8180}/realms/umiak/protocol/openid-connect/logout?client_id=oauth2-proxy&post_logout_redirect_uri=${UMIAK_APP_ORIGIN:-http://localhost:4180}/app}
 
 # web image (S8): the Next.js server (`web`) and the Payload migrations
 # (`web-migrate`).
@@ -49,13 +49,13 @@ x-web-build: &web-build
 
 x-service-defaults: &service-defaults
   logging: *logging
-  networks: [sbx]
+  networks: [umiak]
 
-# sbx: every service. web-internal (no outside access): only web,
+# umiak: every service. web-internal (no outside access): only web,
 # oauth2-proxy and postgres, so web:3000 is reachable from oauth2-proxy
 # (and postgres) only; web is on no other network. See README "web (S8)".
 networks:
-  sbx:
+  umiak:
   web-internal:
     internal: true
 
@@ -70,18 +70,18 @@ services:
     # instance; the default 100 is too tight.
     command: ["postgres", "-c", "max_connections=200"]
     # web reaches Postgres on web-internal (it is on no other network).
-    networks: [sbx, web-internal]
+    networks: [umiak, web-internal]
     # Dev-only credentials; the port is published on loopback for psql/debugging.
     environment:
-      POSTGRES_USER: sbx
-      POSTGRES_PASSWORD: sbx
-      POSTGRES_DB: sbx
+      POSTGRES_USER: umiak
+      POSTGRES_PASSWORD: umiak
+      POSTGRES_DB: umiak
     volumes:
       - postgres-data:/var/lib/postgresql
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sbx -d sbx"]
+      test: ["CMD-SHELL", "pg_isready -U umiak -d umiak"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -93,7 +93,7 @@ services:
   # secrets are kept. See secrets-init/init.sh.
   secrets-init:
     logging: *logging
-    image: sbx-secrets-init:dev
+    image: umiak-secrets-init:dev
     build:
       context: ./secrets-init
       dockerfile_inline: |
@@ -114,10 +114,10 @@ services:
     restart: "no"
 
   # One-shot: apply migrations, then load topology and template builds from
-  # config/sbx.yaml. Idempotent, so it is safe to re-run on every `up`.
+  # config/umiak.yaml. Idempotent, so it is safe to re-run on every `up`.
   migrate:
     <<: *service-defaults
-    image: sbx-worker:dev
+    image: umiak-worker:dev
     build: *worker-build
     command:
       - sh
@@ -127,12 +127,12 @@ services:
         && node apps/worker/src/admin/main.ts bootstrap
     environment:
       <<: *db-env
-      SBX_CONFIG_FILE: /etc/sbx/sbx.yaml
-      # Override apiUrl/tlsName of the provider in config/sbx.yaml (deploy/compose/.env).
-      SBX_PVE_URL: ${SBX_PVE_URL:-}
-      SBX_PVE_TLS_NAME: ${SBX_PVE_TLS_NAME:-}
+      UMIAK_CONFIG_FILE: /etc/umiak/umiak.yaml
+      # Override apiUrl/tlsName of the provider in config/umiak.yaml (deploy/compose/.env).
+      UMIAK_PVE_URL: ${UMIAK_PVE_URL:-}
+      UMIAK_PVE_TLS_NAME: ${UMIAK_PVE_TLS_NAME:-}
     volumes:
-      - ./config/sbx.yaml:/etc/sbx/sbx.yaml:ro
+      - ./config/umiak.yaml:/etc/umiak/umiak.yaml:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -144,7 +144,7 @@ services:
   # api, worker and web start only after it.
   web-migrate:
     <<: *service-defaults
-    image: sbx-web:dev
+    image: umiak-web:dev
     build: *web-build
     working_dir: /app/migrate
     # PAYLOAD_SECRET is an environment value; read it from its secret file.
@@ -152,12 +152,12 @@ services:
       - sh
       - -c
       - >-
-        export PAYLOAD_SECRET="$$(cat /run/sbx-secrets/payload-secret)"
+        export PAYLOAD_SECRET="$$(cat /run/umiak-secrets/payload-secret)"
         && exec node packages/payload/src/migrate.ts
     environment:
       <<: *db-env
     volumes:
-      - ./secrets/web:/run/sbx-secrets:ro
+      - ./secrets/web:/run/umiak-secrets:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -172,44 +172,44 @@ services:
 
   worker:
     <<: *service-defaults
-    image: sbx-worker:dev
+    image: umiak-worker:dev
     build: *worker-build
     # PAYLOAD_SECRET is an environment value; read it from its secret file.
     command:
       - sh
       - -c
       - >-
-        export PAYLOAD_SECRET="$$(cat /run/sbx-secrets/payload-secret)"
+        export PAYLOAD_SECRET="$$(cat /run/umiak-secrets/payload-secret)"
         && exec node apps/worker/src/main.ts
     environment:
-      SBX_TURN_SECRET_FILE: ${SBX_TURN_SECRET_FILE:-/turn-secrets/auth-secret}
-      SBX_TURN_URLS: ${SBX_TURN_URLS:-}
+      UMIAK_TURN_SECRET_FILE: ${UMIAK_TURN_SECRET_FILE:-/turn-secrets/auth-secret}
+      UMIAK_TURN_URLS: ${UMIAK_TURN_URLS:-}
       <<: *db-env
-      SBX_DATA_KEYS_FILE: /run/sbx-secrets/data-keys.json
-      SBX_SECRETS_DIR: /run/sbx-pve
-      # The PVE API URL and TLS name are in the database (migrate: config/sbx.yaml
-      # plus SBX_PVE_URL / SBX_PVE_TLS_NAME). These two are read by the PVE/SSH
+      UMIAK_DATA_KEYS_FILE: /run/umiak-secrets/data-keys.json
+      UMIAK_SECRETS_DIR: /run/umiak-pve
+      # The PVE API URL and TLS name are in the database (migrate: config/umiak.yaml
+      # plus UMIAK_PVE_URL / UMIAK_PVE_TLS_NAME). These two are read by the PVE/SSH
       # adapter; set them in deploy/compose/.env (see .env.example).
-      SBX_NODE_SSH_HOST: ${SBX_NODE_SSH_HOST:-pve}
-      SBX_PVE_TOKEN_ID: ${SBX_PVE_TOKEN_ID:-sbx@pve!poc}
+      UMIAK_NODE_SSH_HOST: ${UMIAK_NODE_SSH_HOST:-pve}
+      UMIAK_PVE_TOKEN_ID: ${UMIAK_PVE_TOKEN_ID:-umiak@pve!dev}
       # Reconcile only logs what it would do. Keep it on until the stack is trusted.
-      SBX_RECONCILE_DRY_RUN: ${SBX_RECONCILE_DRY_RUN:-1}
+      UMIAK_RECONCILE_DRY_RUN: ${UMIAK_RECONCILE_DRY_RUN:-1}
       # The migrate service already applied migrations.
-      SBX_MIGRATE_ON_START: "0"
-      SBX_HTTP_PORT: "9090"
+      UMIAK_MIGRATE_ON_START: "0"
+      UMIAK_HTTP_PORT: "9090"
       # ctl-idp-sync (S8 §20.1): deactivates users disabled or deleted in
-      # Keycloak, through the Admin API with the realm client sbx-worker.
-      SBX_IDP_SYNC_KEYCLOAK_URL: http://keycloak:8080
-      SBX_IDP_SYNC_REALM: sbx
-      SBX_IDP_SYNC_CLIENT_ID: sbx-worker
-      SBX_IDP_SYNC_CLIENT_SECRET_FILE: /run/sbx-secrets/idp-sync-client-secret
+      # Keycloak, through the Admin API with the realm client umiak-worker.
+      UMIAK_IDP_SYNC_KEYCLOAK_URL: http://keycloak:8080
+      UMIAK_IDP_SYNC_REALM: umiak
+      UMIAK_IDP_SYNC_CLIENT_ID: umiak-worker
+      UMIAK_IDP_SYNC_CLIENT_SECRET_FILE: /run/umiak-secrets/idp-sync-client-secret
     volumes:
       - ./secrets/turn:/turn-secrets:ro
-      # pve-token, pve-root-ca.pem, sbx-node_ed25519, known_hosts.
-      - ${SBX_PVE_SECRETS_DIR:-${HOME}/.config/sbx}:/run/sbx-pve:ro
+      # pve-token, pve-root-ca.pem, umiak-node_ed25519, known_hosts.
+      - ${UMIAK_PVE_SECRETS_DIR:-${HOME}/.config/umiak}:/run/umiak-pve:ro
       # Written by secrets-init (a directory: its files appear after the
       # container is created).
-      - ./secrets/worker:/run/sbx-secrets:ro
+      - ./secrets/worker:/run/umiak-secrets:ro
     ports:
       - "127.0.0.1:9090:9090"
     depends_on:
@@ -242,9 +242,9 @@ services:
     image: postgres:18.6-alpine
     environment:
       PGHOST: postgres
-      PGUSER: sbx
-      PGPASSWORD: sbx
-      PGDATABASE: sbx
+      PGUSER: umiak
+      PGPASSWORD: umiak
+      PGDATABASE: umiak
     command:
       - sh
       - -c
@@ -256,8 +256,8 @@ services:
         condition: service_healthy
     restart: "no"
 
-  # Keycloak (IdP, realm `sbx`, architecture §10). The realm is imported from
-  # keycloak/realm-sbx.json on the first start only (an existing realm is
+  # Keycloak (IdP, realm `umiak`, architecture §10). The realm is imported from
+  # keycloak/realm-umiak.json on the first start only (an existing realm is
   # kept); the client secrets come from ./secrets/keycloak. A missing secret
   # file stops the start.
   keycloak:
@@ -267,44 +267,44 @@ services:
       - /bin/bash
       - -c
       - >-
-        oauth2_proxy="$$(cat /run/sbx-secrets/oauth2-proxy-client-secret)"
-        && worker="$$(cat /run/sbx-secrets/sbx-worker-client-secret)"
-        && admin="$${SBX_KEYCLOAK_ADMIN_PASSWORD:-$$(cat /run/sbx-secrets/admin-password)}"
-        && export SBX_OAUTH2_PROXY_CLIENT_SECRET="$$oauth2_proxy"
-        SBX_WORKER_CLIENT_SECRET="$$worker" KC_BOOTSTRAP_ADMIN_PASSWORD="$$admin"
-        && { [ -z "$$SBX_KEYCLOAK_PROXY_HEADERS" ] || export KC_PROXY_HEADERS="$$SBX_KEYCLOAK_PROXY_HEADERS"; }
-        && { [ -z "$$SBX_KEYCLOAK_PROXY_TRUSTED_ADDRESSES" ]
-        || export KC_PROXY_TRUSTED_ADDRESSES="$$SBX_KEYCLOAK_PROXY_TRUSTED_ADDRESSES"; }
+        oauth2_proxy="$$(cat /run/umiak-secrets/oauth2-proxy-client-secret)"
+        && worker="$$(cat /run/umiak-secrets/umiak-worker-client-secret)"
+        && admin="$${UMIAK_KEYCLOAK_ADMIN_PASSWORD:-$$(cat /run/umiak-secrets/admin-password)}"
+        && export UMIAK_OAUTH2_PROXY_CLIENT_SECRET="$$oauth2_proxy"
+        UMIAK_WORKER_CLIENT_SECRET="$$worker" KC_BOOTSTRAP_ADMIN_PASSWORD="$$admin"
+        && { [ -z "$$UMIAK_KEYCLOAK_PROXY_HEADERS" ] || export KC_PROXY_HEADERS="$$UMIAK_KEYCLOAK_PROXY_HEADERS"; }
+        && { [ -z "$$UMIAK_KEYCLOAK_PROXY_TRUSTED_ADDRESSES" ]
+        || export KC_PROXY_TRUSTED_ADDRESSES="$$UMIAK_KEYCLOAK_PROXY_TRUSTED_ADDRESSES"; }
         && exec /opt/keycloak/bin/kc.sh start-dev --import-realm
     environment:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
-      KC_DB_USERNAME: sbx
-      KC_DB_PASSWORD: sbx
+      KC_DB_USERNAME: umiak
+      KC_DB_PASSWORD: umiak
       # The browser and the CLI use the public address (it is the token
       # issuer); api and oauth2-proxy call http://keycloak:8080 inside the network.
       # The host ports of the stack are fixed (8080, 8180, 4180, 9091); the
-      # public URLs default to them (SBX_KEYCLOAK_URL, SBX_APP_ORIGIN, ...).
+      # public URLs default to them (UMIAK_KEYCLOAK_URL, UMIAK_APP_ORIGIN, ...).
       KC_HOSTNAME: *keycloak-url
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
       # Behind a TLS proxy: `xforwarded` (or `forwarded`) and the proxy's
       # addresses. The entrypoint sets KC_PROXY_HEADERS and
       # KC_PROXY_TRUSTED_ADDRESSES only when they are not empty (Keycloak
       # refuses empty values). Empty: proxy headers are ignored.
-      SBX_KEYCLOAK_PROXY_HEADERS: ${SBX_KEYCLOAK_PROXY_HEADERS:-}
-      SBX_KEYCLOAK_PROXY_TRUSTED_ADDRESSES: ${SBX_KEYCLOAK_PROXY_TRUSTED_ADDRESSES:-}
+      UMIAK_KEYCLOAK_PROXY_HEADERS: ${UMIAK_KEYCLOAK_PROXY_HEADERS:-}
+      UMIAK_KEYCLOAK_PROXY_TRUSTED_ADDRESSES: ${UMIAK_KEYCLOAK_PROXY_TRUSTED_ADDRESSES:-}
       KC_HEALTH_ENABLED: "true"
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
       # Empty: the password generated by secrets-init (secrets/keycloak/admin-password).
-      SBX_KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-}
+      UMIAK_KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-}
       # Temporary password of dev@example.com (changed at the first login).
-      SBX_DEV_PASSWORD: ${SBX_DEV_PASSWORD:-dev}
+      UMIAK_DEV_PASSWORD: ${UMIAK_DEV_PASSWORD:-dev}
       # The oauth2-proxy client of the realm: redirect URI and web origin.
-      SBX_APP_ORIGIN: *app-origin
-      SBX_OAUTH2_PROXY_REDIRECT_URL: *oauth2-proxy-redirect-url
+      UMIAK_APP_ORIGIN: *app-origin
+      UMIAK_OAUTH2_PROXY_REDIRECT_URL: *oauth2-proxy-redirect-url
     volumes:
-      - ./keycloak/realm-sbx.json:/opt/keycloak/data/import/realm-sbx.json:ro
-      - ./secrets/keycloak:/run/sbx-secrets:ro
+      - ./keycloak/realm-umiak.json:/opt/keycloak/data/import/realm-umiak.json:ro
+      - ./secrets/keycloak:/run/umiak-secrets:ro
     ports:
       - "127.0.0.1:8180:8080"
     depends_on:
@@ -332,12 +332,12 @@ services:
     restart: unless-stopped
 
   # Public API v1 (S7): public :8080 (SDK, CLI), proxied :8081 (for
-  # oauth2-proxy; not published, but any container of the sbx network can
+  # oauth2-proxy; not published, but any container of the umiak network can
   # reach it: accepted for dev, NetworkPolicy in S12), internal :8082
   # (gateway, not published), ops :9090.
   api:
     <<: *service-defaults
-    image: sbx-api:dev
+    image: umiak-api:dev
     build:
       context: ../..
       dockerfile: apps/api/Dockerfile
@@ -347,40 +347,40 @@ services:
       - sh
       - -c
       - >-
-        export SBX_API_CURSOR_KEY="$$(cat /run/sbx-secrets/cursor-key)"
-        PAYLOAD_SECRET="$$(cat /run/sbx-secrets/payload-secret)"
+        export UMIAK_API_CURSOR_KEY="$$(cat /run/umiak-secrets/cursor-key)"
+        PAYLOAD_SECRET="$$(cat /run/umiak-secrets/payload-secret)"
         && exec node apps/api/src/main.ts
     environment:
       <<: *db-env
       # Upserted into Payload at every start (templates, sizes and quotas
-      # come from Payload; config/sbx.yaml is only for `migrate`).
-      SBX_IDENTITY_FILE: /etc/sbx/identity.yaml
-      SBX_DATA_KEYS_FILE: /run/sbx-secrets/data-keys.json
-      SBX_API_SERVICE_TOKENS_FILE: /run/sbx-secrets/service-tokens.json
-      SBX_API_GATEWAY_TOKEN_FILE: /run/sbx-secrets/gateway-token
-      SBX_SSH_LOGIN_CA_KEY_FILE: /run/sbx-secrets/ssh-login-ca
-      SBX_SSH_HOST_KEYS_FILE: /run/sbx-secrets/ssh-host-keys.pub
-      # /v1/meta apiUrl, appUrl, sbxDomain; the proxied listener accepts
+      # come from Payload; config/umiak.yaml is only for `migrate`).
+      UMIAK_IDENTITY_FILE: /etc/umiak/identity.yaml
+      UMIAK_DATA_KEYS_FILE: /run/umiak-secrets/data-keys.json
+      UMIAK_API_SERVICE_TOKENS_FILE: /run/umiak-secrets/service-tokens.json
+      UMIAK_API_GATEWAY_TOKEN_FILE: /run/umiak-secrets/gateway-token
+      UMIAK_SSH_LOGIN_CA_KEY_FILE: /run/umiak-secrets/ssh-login-ca
+      UMIAK_SSH_HOST_KEYS_FILE: /run/umiak-secrets/ssh-host-keys.pub
+      # /v1/meta apiUrl, appUrl, umiakDomain; the proxied listener accepts
       # unsafe methods only from the app origin.
-      SBX_API_URL: ${SBX_API_PUBLIC_URL:-http://localhost:8080}
-      SBX_APP_URL: *app-origin
-      SBX_APP_ORIGIN: *app-origin
-      SBX_SBX_DOMAIN: ${SBX_SBX_DOMAIN:-sbx.localhost}
+      UMIAK_API_URL: ${UMIAK_API_PUBLIC_URL:-http://localhost:8080}
+      UMIAK_APP_URL: *app-origin
+      UMIAK_APP_ORIGIN: *app-origin
+      UMIAK_PREVIEW_DOMAIN: ${UMIAK_PREVIEW_DOMAIN:-umiak.localhost}
       # The gateway SSH name (gateway.yaml: ssh.localhost) and published port.
-      SBX_SSH_HOST: ${SBX_SSH_HOST:-ssh.localhost}
-      SBX_SSH_PORT: ${SBX_SSH_PORT:-${GATEWAY_SSH_PORT:-2222}}
+      UMIAK_SSH_HOST: ${UMIAK_SSH_HOST:-ssh.localhost}
+      UMIAK_SSH_PORT: ${UMIAK_SSH_PORT:-${GATEWAY_SSH_PORT:-2222}}
       # Keycloak: tokens carry the public issuer; keys are fetched inside the network.
-      SBX_OIDC_ISSUER: *oidc-issuer
-      SBX_OIDC_DISCOVERY_URL: http://keycloak:8080/realms/sbx/.well-known/openid-configuration
-      SBX_OIDC_JWKS_URL: http://keycloak:8080/realms/sbx/protocol/openid-connect/certs
-      SBX_OPERATOR_GROUPS: sbx-operators
+      UMIAK_OIDC_ISSUER: *oidc-issuer
+      UMIAK_OIDC_DISCOVERY_URL: http://keycloak:8080/realms/umiak/.well-known/openid-configuration
+      UMIAK_OIDC_JWKS_URL: http://keycloak:8080/realms/umiak/protocol/openid-connect/certs
+      UMIAK_OPERATOR_GROUPS: umiak-operators
       # X-Forwarded-For counts for the logged client address only from these
       # peers (a TLS proxy in front of the published ports). Empty: none.
-      SBX_API_TRUSTED_PROXY_CIDRS: ${SBX_API_TRUSTED_PROXY_CIDRS:-}
-      SBX_LOG_LEVEL: ${SBX_API_LOG_LEVEL:-info}
+      UMIAK_API_TRUSTED_PROXY_CIDRS: ${UMIAK_API_TRUSTED_PROXY_CIDRS:-}
+      UMIAK_LOG_LEVEL: ${UMIAK_API_LOG_LEVEL:-info}
     volumes:
-      - ./config/identity.yaml:/etc/sbx/identity.yaml:ro
-      - ./secrets/api:/run/sbx-secrets:ro
+      - ./config/identity.yaml:/etc/umiak/identity.yaml:ro
+      - ./secrets/api:/run/umiak-secrets:ro
     ports:
       - "127.0.0.1:8080:8080"
       # /healthz, /readyz, /metrics (9090 on the host is the worker's).
@@ -409,16 +409,16 @@ services:
     restart: unless-stopped
 
   # Browser sessions (architecture §10): routes /api/* (without /api) and
-  # /sbx-auth/* to the proxied api listener, everything else to web, with the
+  # /umiak-auth/* to the proxied api listener, everything else to web, with the
   # X-Auth-Request-* headers. Plain http on localhost: the cookie has no
   # Secure flag and no __Host- prefix. Per-deployment settings are
   # OAUTH2_PROXY_* variables (flags would win over an override file);
-  # oauth2-proxy.yaml reads SBX_OIDC_ISSUER.
+  # oauth2-proxy.yaml reads UMIAK_OIDC_ISSUER.
   oauth2-proxy:
     <<: *service-defaults
-    # sbx: api and Keycloak; web-internal: web.
-    networks: [sbx, web-internal]
-    image: sbx-oauth2-proxy:dev
+    # umiak: api and Keycloak; web-internal: web.
+    networks: [umiak, web-internal]
+    image: umiak-oauth2-proxy:dev
     build:
       context: ./oauth2-proxy
       # The upstream image is distroless; busybox wget serves the healthcheck.
@@ -428,27 +428,27 @@ services:
         COPY --from=busybox /bin/busybox /bin/busybox
     command:
       - --alpha-config=/etc/oauth2-proxy/oauth2-proxy.yaml
-      - --cookie-secret-file=/run/sbx-secrets/cookie-secret
+      - --cookie-secret-file=/run/umiak-secrets/cookie-secret
       - --cookie-refresh=5m
       - --cookie-expire=12h
       - --email-domain=*
       - --skip-provider-button=true
       - --silence-ping-logging=true
     environment:
-      SBX_OIDC_ISSUER: *oidc-issuer
+      UMIAK_OIDC_ISSUER: *oidc-issuer
       OAUTH2_PROXY_REDIRECT_URL: *oauth2-proxy-redirect-url
       # Hosts allowed in an absolute redirect (`rd`): host:port of the app
       # origin (after login) and of Keycloak (web's sign-out goes on to the
-      # Keycloak end-session page). Not derived from SBX_APP_ORIGIN and
-      # SBX_KEYCLOAK_URL (compose cannot cut the scheme).
-      OAUTH2_PROXY_WHITELIST_DOMAINS: ${SBX_OAUTH2_PROXY_WHITELIST_DOMAIN:-localhost:4180},${SBX_OAUTH2_PROXY_WHITELIST_KEYCLOAK:-localhost:8180}
-      OAUTH2_PROXY_COOKIE_NAME: ${SBX_OAUTH2_PROXY_COOKIE_NAME:-_sbx_session}
-      OAUTH2_PROXY_COOKIE_SECURE: ${SBX_OAUTH2_PROXY_COOKIE_SECURE:-false}
+      # Keycloak end-session page). Not derived from UMIAK_APP_ORIGIN and
+      # UMIAK_KEYCLOAK_URL (compose cannot cut the scheme).
+      OAUTH2_PROXY_WHITELIST_DOMAINS: ${UMIAK_OAUTH2_PROXY_WHITELIST_DOMAIN:-localhost:4180},${UMIAK_OAUTH2_PROXY_WHITELIST_KEYCLOAK:-localhost:8180}
+      OAUTH2_PROXY_COOKIE_NAME: ${UMIAK_OAUTH2_PROXY_COOKIE_NAME:-_umiak_session}
+      OAUTH2_PROXY_COOKIE_SECURE: ${UMIAK_OAUTH2_PROXY_COOKIE_SECURE:-false}
       # true behind a TLS proxy that sets X-Forwarded-* (Proto, Host, For).
-      OAUTH2_PROXY_REVERSE_PROXY: ${SBX_OAUTH2_PROXY_REVERSE_PROXY:-false}
+      OAUTH2_PROXY_REVERSE_PROXY: ${UMIAK_OAUTH2_PROXY_REVERSE_PROXY:-false}
     volumes:
       - ./oauth2-proxy/oauth2-proxy.yaml:/etc/oauth2-proxy/oauth2-proxy.yaml:ro
-      - ./secrets/oauth2-proxy:/run/sbx-secrets:ro
+      - ./secrets/oauth2-proxy:/run/umiak-secrets:ro
     ports:
       - "127.0.0.1:4180:4180"
     depends_on:
@@ -481,27 +481,27 @@ services:
   web:
     logging: *logging
     networks: [web-internal]
-    image: sbx-web:dev
+    image: umiak-web:dev
     build: *web-build
     # PAYLOAD_SECRET is an environment value; read it from its secret file.
     command:
       - sh
       - -c
       - >-
-        export PAYLOAD_SECRET="$$(cat /run/sbx-secrets/payload-secret)"
+        export PAYLOAD_SECRET="$$(cat /run/umiak-secrets/payload-secret)"
         && exec node server.js
     environment:
       <<: *db-env
       # The only Origin of unsafe requests; the dashboard's public address.
-      SBX_APP_ORIGIN: *app-origin
-      SBX_OPERATOR_GROUPS: sbx-operators
+      UMIAK_APP_ORIGIN: *app-origin
+      UMIAK_OPERATOR_GROUPS: umiak-operators
       # CSP frame-src https://*.<domain> (port previews).
-      SBX_SBX_DOMAIN: ${SBX_SBX_DOMAIN:-sbx.localhost}
+      UMIAK_PREVIEW_DOMAIN: ${UMIAK_PREVIEW_DOMAIN:-umiak.localhost}
       # Shown in CLI and SDK hints.
-      SBX_API_PUBLIC_URL: ${SBX_API_PUBLIC_URL:-http://localhost:8080}
-      SBX_LOGOUT_URL: *logout-url
+      UMIAK_API_PUBLIC_URL: ${UMIAK_API_PUBLIC_URL:-http://localhost:8080}
+      UMIAK_LOGOUT_URL: *logout-url
     volumes:
-      - ./secrets/web:/run/sbx-secrets:ro
+      - ./secrets/web:/run/umiak-secrets:ro
     depends_on:
       web-migrate:
         condition: service_completed_successfully
@@ -519,21 +519,21 @@ services:
   # locally it has its own port.
   mcp:
     <<: *service-defaults
-    image: sbx-mcp:dev
+    image: umiak-mcp:dev
     build:
       context: ../..
       dockerfile: apps/mcp/Dockerfile
     environment:
-      SBX_MCP_API_URL: http://api:8080
+      UMIAK_MCP_API_URL: http://api:8080
       # The URL clients use; its host must match the Host header they send.
-      SBX_MCP_PUBLIC_URL: ${SBX_MCP_PUBLIC_URL:-http://localhost:8090/mcp}
+      UMIAK_MCP_PUBLIC_URL: ${UMIAK_MCP_PUBLIC_URL:-http://localhost:8090/mcp}
       # Authorization server named in the protected resource metadata.
-      SBX_OIDC_ISSUER: *oidc-issuer
+      UMIAK_OIDC_ISSUER: *oidc-issuer
       # MCP clients are not browsers: no browser origin may call /mcp.
-      SBX_MCP_ALLOWED_ORIGINS: ""
-      # Extra Host values besides the host of SBX_MCP_PUBLIC_URL.
-      SBX_MCP_ALLOWED_HOSTS: ${SBX_MCP_ALLOWED_HOSTS:-127.0.0.1:8090}
-      SBX_LOG_LEVEL: ${SBX_MCP_LOG_LEVEL:-info}
+      UMIAK_MCP_ALLOWED_ORIGINS: ""
+      # Extra Host values besides the host of UMIAK_MCP_PUBLIC_URL.
+      UMIAK_MCP_ALLOWED_HOSTS: ${UMIAK_MCP_ALLOWED_HOSTS:-127.0.0.1:8090}
+      UMIAK_LOG_LEVEL: ${UMIAK_MCP_LOG_LEVEL:-info}
     ports:
       - "127.0.0.1:8090:8080"
       # /healthz, /readyz, /metrics (9090 is the worker's, 9091 the api's).

@@ -1,25 +1,25 @@
-// The output contract of `sbx` (S7 §14.3).
-// - JSON when stdout is not a terminal, with --json or SBX_OUTPUT=json;
-//   --human (SBX_OUTPUT=human) turns it off. The flag wins over the env.
+// The output contract of `umiak` (S7 §14.3).
+// - JSON when stdout is not a terminal, with --json or UMIAK_OUTPUT=json;
+//   --human (UMIAK_OUTPUT=human) turns it off. The flag wins over the env.
 // - result(v): one JSON value (the API resource as is) or text.
 // - event(name, v): a JSON Lines record whose discriminator is `event`.
 // - error(err): in JSON mode the last line of stdout is
 //   {"event":"error",code,message,retryable,details,requestId}; the text for a
 //   person goes to stderr. Commands whose stdout is data (`rawData`: exec,
 //   run, logs, cp, push, auth token) print that line to stderr unless the
-//   --json flag was given; a protocol command (`sbx mcp`) always does.
+//   --json flag was given; a protocol command (`umiak mcp`) always does.
 // - Raw-data commands switch to JSON (NDJSON frames) only with the --json
-//   flag, never with SBX_OUTPUT=json (ruling R25): `sbx exec … > file`
+//   flag, never with UMIAK_OUTPUT=json (ruling R25): `umiak exec … > file`
 //   writes bytes whatever the env says.
 // - data()/errData()/event() wait for 'drain' when the stream is full, so
 //   large piped output does not pile up in memory.
-// - A reader that goes away (`sbx exec … | head -1`: EPIPE, 'error' or
+// - A reader that goes away (`umiak exec … | head -1`: EPIPE, 'error' or
 //   'close' on stdout) ends the wait: data() rejects with OutputClosedError,
 //   nothing more is written to stdout, and the runner exits 141 (128 +
 //   SIGPIPE, what a shell reports for a tool killed by a broken pipe) without
 //   an error message. A closed stderr is ignored.
 
-import { SbxError } from "@sbx/sdk";
+import { UmiakError } from "@umiak/sdk";
 
 export interface Writer {
 	/** false: the stream is full; wait for 'drain' (Node streams). */
@@ -99,11 +99,11 @@ export interface OutputOptions {
 	stderr: Writer;
 	/** stdout is a terminal. */
 	isTTY: boolean;
-	/** --json given (or SBX_OUTPUT=json). */
+	/** --json given (or UMIAK_OUTPUT=json). */
 	explicitJson?: boolean;
-	/** --human given (or SBX_OUTPUT=human). */
+	/** --human given (or UMIAK_OUTPUT=human). */
 	explicitHuman?: boolean;
-	/** The --json flag itself was given (not SBX_OUTPUT). */
+	/** The --json flag itself was given (not UMIAK_OUTPUT). */
 	jsonFlag?: boolean;
 }
 
@@ -118,7 +118,7 @@ export interface ErrorPayload {
 export type Human<T> = (v: T) => string;
 
 export function errorPayload(err: unknown): ErrorPayload {
-	if (err instanceof SbxError) {
+	if (err instanceof UmiakError) {
 		return {
 			code: err.code,
 			message: err.message,
@@ -148,7 +148,7 @@ export class Output {
 	readonly jsonFlag: boolean;
 	/** stdout carries data of the command (set by the command runner). */
 	rawData = false;
-	/** stdout carries a protocol (`sbx mcp`): an error never goes there, not even with --json. */
+	/** stdout carries a protocol (`umiak mcp`): an error never goes there, not even with --json. */
 	protocol = false;
 	readonly #stdout: Sink;
 	readonly #stderr: Sink;
@@ -255,7 +255,7 @@ const HINTS: Record<string, string> = {
 function humanError(p: ErrorPayload): string {
 	const extra = [p.code, p.requestId].filter((x) => x !== null).join(", ");
 	const hint = HINTS[p.code];
-	return `sbx: ${p.message} (${extra})${hint === undefined ? "" : `\nhint: ${hint}`}`;
+	return `umiak: ${p.message} (${extra})${hint === undefined ? "" : `\nhint: ${hint}`}`;
 }
 
 /** Plain text of a value: `key: value` lines, nested objects indented. */
@@ -298,8 +298,8 @@ export function outputMode(
 	}
 	const jsonFlag = json && !human;
 	if (!json && !human) {
-		if (env.SBX_OUTPUT === "json") json = true;
-		else if (env.SBX_OUTPUT === "human") human = true;
+		if (env.UMIAK_OUTPUT === "json") json = true;
+		else if (env.UMIAK_OUTPUT === "human") human = true;
 	}
 	return { explicitJson: json && !human, explicitHuman: human, jsonFlag };
 }

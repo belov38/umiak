@@ -1,7 +1,7 @@
-"""Basic flow of sbx-sdk against a real stack (infra/dev-cp/e2e.sh).
+"""Basic flow of umiak-sdk against a real stack (infra/dev-cp/e2e.sh).
 
 Not a unit test: it creates a sandbox on Proxmox. Credentials come from the SDK
-chain (SBX_API_KEY, SBX_ACCESS_TOKEN, or `sbx auth token --json` of the CLI
+chain (UMIAK_API_KEY, UMIAK_ACCESS_TOKEN, or `umiak auth token --json` of the CLI
 profile on PATH).
 
     cd packages/sdk-py && uv run --locked python e2e/devcp.py
@@ -12,7 +12,7 @@ the sandbox in any case.
 
 import sys
 
-from sbx_sdk import Sbx
+from umiak_sdk import Umiak
 
 
 def check(cond: bool, what: str) -> None:
@@ -23,8 +23,8 @@ def check(cond: bool, what: str) -> None:
 
 
 def main() -> None:
-    with Sbx() as sbx:
-        sb = sbx.sandboxes.create(
+    with Umiak() as umiak:
+        sb = umiak.sandboxes.create(
             template="linux", env={"E2E_SDK": "py"}, labels={"e2e": "sdk-py"}, wait=True
         )
         print(f"sandbox {sb.slug} {sb.id}", flush=True)

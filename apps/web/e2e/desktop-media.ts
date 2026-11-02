@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { chromium, type Page } from "@playwright/test";
-import type { Sandbox } from "@sbx/sdk";
+import type { Sandbox } from "@umiak/sdk";
 
 const MIN_PICTURE_BYTES = 30_000;
 const hash = (bytes: Uint8Array) =>
@@ -130,9 +130,9 @@ export async function launchViewerBrowser() {
 		headless: true,
 		args: [
 			"--autoplay-policy=no-user-gesture-required",
-			...(process.env.SBX_DESKTOP_BROWSER_SPKI
+			...(process.env.UMIAK_DESKTOP_BROWSER_SPKI
 				? [
-						`--ignore-certificate-errors-spki-list=${process.env.SBX_DESKTOP_BROWSER_SPKI}`,
+						`--ignore-certificate-errors-spki-list=${process.env.UMIAK_DESKTOP_BROWSER_SPKI}`,
 					]
 				: []),
 		],
@@ -147,7 +147,7 @@ export async function verifyDesktopMedia(
 	/** Collects guest logs before the page closes and EndStreams restarts moonlight-web. */
 	onFailure?: (label: string) => Promise<void>,
 ) {
-	const protocols = (process.env.SBX_DESKTOP_TURN_TRANSPORTS ?? "udp").split(
+	const protocols = (process.env.UMIAK_DESKTOP_TURN_TRANSPORTS ?? "udp").split(
 		",",
 	);
 	if (protocols.some((p) => !["udp", "tcp", "tls"].includes(p)))

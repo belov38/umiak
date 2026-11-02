@@ -1,4 +1,4 @@
-// `sbx extend [<sb>] [--ttl <duration>]` (S7 §8.2): a new deadline, now +
+// `umiak extend [<sb>] [--ttl <duration>]` (S7 §8.2): a new deadline, now +
 // ttl (default: the sandbox's own TTL).
 
 import type { Command } from "commander";
@@ -17,7 +17,7 @@ export function register(program: Command, run: Runner): void {
 				const ref = sandboxRef(ctx, args[0] as string | undefined);
 				const ttl = opts.ttl as string | undefined;
 				const { data } = await ctx
-					.sbx()
+					.umiak()
 					.raw.POST("/v1/sandboxes/{sandbox}/extend", {
 						params: { path: { sandbox: ref.ref } },
 						body:

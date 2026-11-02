@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // EarlyMarker is the content of early.json: the boot whose early step has
@@ -59,7 +59,7 @@ func SecureAgentDirs(l paths.Layout) error {
 	return nil
 }
 
-// Early is the boot step of Windows (sbx-agent early, spec 12.3), run by the
+// Early is the boot step of Windows (umiak-agent early, spec 12.3), run by the
 // computer startup script before any logon, or by the agent service when
 // the script did not run. While Windows Setup runs it does nothing. Under
 // the global identity mutex it applies the identity (ModeEarly), wipes the
@@ -129,7 +129,7 @@ func EarlyIn(ctx context.Context, l paths.Layout, src Source, r WinResetter, mod
 	}
 	if reboot {
 		slog.Info("rebooting to apply the computer name")
-		if err := r.Reboot("sbx identity changed"); err != nil {
+		if err := r.Reboot("umiak identity changed"); err != nil {
 			return fmt.Errorf("ident: reboot: %w", err)
 		}
 		return nil

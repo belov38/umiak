@@ -2,7 +2,7 @@
 // who may log in to a sandbox over SSH, asked on every connection.
 //   - a registered key: the stored key of the fingerprint equals publicKey;
 //   - a login certificate the gateway verified: principal = the sandbox id,
-//     KeyId `sbx:user:<usr_>` or `sbx:key:<key_>`, validBefore not passed.
+//     KeyId `umiak:user:<usr_>` or `umiak:key:<key_>`, validBefore not passed.
 // A person must be active and a member of the sandbox's team (no operator
 // exception, C6); a team key must be live, of that team, with ssh:connect.
 // `recheck` (the gateway re-checks open sessions after its LISTEN came back)
@@ -16,8 +16,8 @@ import {
 	encodeUuid,
 	parseSshPublicKey,
 	type UserRecord,
-} from "@sbx/auth";
-import { isUuid, type SshTarget, sshTarget } from "@sbx/core";
+} from "@umiak/auth";
+import { isUuid, type SshTarget, sshTarget } from "@umiak/core";
 import { z } from "zod";
 import type { ApiApp, ApiDeps } from "../../deps.ts";
 import { validationError } from "../../http/errors.ts";
@@ -160,7 +160,7 @@ async function viaRegisteredKey(
 	return userActor(u);
 }
 
-const KEY_ID_RE = /^sbx:(user|key):([^:]+)$/;
+const KEY_ID_RE = /^umiak:(user|key):([^:]+)$/;
 
 /**
  * A certificate of a team key issued before the key's last rotation (also

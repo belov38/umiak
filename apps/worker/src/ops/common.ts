@@ -1,4 +1,4 @@
-import type { TemplateOs } from "@sbx/config";
+import type { TemplateOs } from "@umiak/config";
 import {
 	insertSandboxEvent,
 	SECRET_FILE_DEFAULT_MODE,
@@ -6,8 +6,8 @@ import {
 	type SecretSets,
 	stepRequestId,
 	tryPoweredStart,
-} from "@sbx/core";
-import type { Tx } from "@sbx/db";
+} from "@umiak/core";
+import type { Tx } from "@umiak/db";
 import type pg from "pg";
 import type { WorkerCtx } from "../context.ts";
 import { loadMachine, type MachineRow } from "../db.ts";

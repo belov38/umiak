@@ -17,7 +17,7 @@ import {
 // encrypts and persists.
 
 /**
- * The part of KeyRing (@sbx/core) the store needs. auth cannot import core
+ * The part of KeyRing (@umiak/core) the store needs. auth cannot import core
  * (core depends on auth); a KeyRing instance satisfies this structurally.
  */
 export interface EnvironmentKeys {

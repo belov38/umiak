@@ -209,7 +209,7 @@ export function registerSnapshotRoutes(app: FakeApp, fake: Fake): void {
 				"snapshot_not_found",
 				`no snapshot named ${name}`,
 			);
-		const confirm = c.req.header("Sbx-Confirm-Delete");
+		const confirm = c.req.header("Umiak-Confirm-Delete");
 		if (
 			confirm === undefined ||
 			(confirm !== snap.id && confirm !== snap.name)
@@ -217,7 +217,7 @@ export function registerSnapshotRoutes(app: FakeApp, fake: Fake): void {
 			throw new FakeApiError(
 				428,
 				"confirmation_required",
-				`deleting needs the header Sbx-Confirm-Delete: ${snap.id}${confirm === undefined ? "" : ` (got ${confirm})`}`,
+				`deleting needs the header Umiak-Confirm-Delete: ${snap.id}${confirm === undefined ? "" : ` (got ${confirm})`}`,
 				{
 					details: { reason: confirm === undefined ? "missing" : "mismatch" },
 				},

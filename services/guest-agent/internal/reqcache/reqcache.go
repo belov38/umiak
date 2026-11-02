@@ -1,5 +1,5 @@
 // Package reqcache makes mutating Connect calls retry-safe: a Connect
-// interceptor that stores the outcome of a call under its Sbx-Request-Id and
+// interceptor that stores the outcome of a call under its Umiak-Request-Id and
 // replays it for a repeat of the same request (spec section 15).
 //
 // A repeat is the same id with the same procedure and request body. The same
@@ -39,12 +39,12 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/dynamicpb"
 
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/proto/umiak/agent/v1/agentv1connect"
+	"github.com/belov38/umiak/libs/tunnel/rpcconv"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
 )
 
 // Defaults of Options.
@@ -76,7 +76,7 @@ type Options struct {
 	// frozen; beyond it the oldest is dropped. Default 10000.
 	MaxPending int
 	// Exempt lists procedures that are never cached, even when the call
-	// carries Sbx-Request-Id.
+	// carries Umiak-Request-Id.
 	Exempt []string
 	// Now is the clock. Default time.Now.
 	Now func() time.Time
@@ -119,7 +119,7 @@ func (o *Options) setDefaults() {
 }
 
 // Interceptors returns the handler options every agent service with mutating
-// calls uses: the Sbx-Request-Id requirement followed by the response cache.
+// calls uses: the Umiak-Request-Id requirement followed by the response cache.
 // It is NewCache(st).Options(); the agent uses NewCache to flush the cache at
 // shutdown.
 func Interceptors(st *store.Store) []connect.HandlerOption {
@@ -135,7 +135,7 @@ type Cache struct {
 	opts []connect.HandlerOption
 }
 
-// NewCache returns the agent's request cache over st: the Sbx-Request-Id
+// NewCache returns the agent's request cache over st: the Umiak-Request-Id
 // requirement followed by the response cache. Process.Start is exempt from
 // both, it is idempotent by its own command id.
 func NewCache(st *store.Store) *Cache {
@@ -170,7 +170,7 @@ func (c *Cache) Flush(ctx context.Context) error {
 }
 
 // New returns the response cache interceptor. It acts on unary handler calls
-// that carry Sbx-Request-Id and are not IDEMPOTENT, NO_SIDE_EFFECTS or listed
+// that carry Umiak-Request-Id and are not IDEMPOTENT, NO_SIDE_EFFECTS or listed
 // in Options.Exempt; every other call passes through. Put it after
 // rpcconv.RequireRequestID, which rejects mutating calls without an id. One
 // interceptor value may be used by any number of services.

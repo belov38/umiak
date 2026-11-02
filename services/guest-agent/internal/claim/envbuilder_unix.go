@@ -7,9 +7,9 @@ import (
 	"slices"
 	"strconv"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
+	"github.com/belov38/umiak/services/guest-agent/internal/process"
 )
 
 // Build returns the sorted KEY=VALUE environment of a command run as u.

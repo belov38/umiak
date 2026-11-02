@@ -21,7 +21,7 @@ CSSOM without toggling it. Do not claim screenshot parity for unobserved states.
 | boat.dev page / element | Our implementation and source | Decision |
 |---|---|---|
 | Sidebar, selected item, organization selector | `AppShell`, team-scoped URLs, existing team switcher | Exists differently: sidebar, keep team vocabulary and permission checks |
-| Product mark | Existing `sbx` wordmark | Keep our name; no boat artwork |
+| Product mark | Existing `Umiak` wordmark | Keep our name; no boat artwork |
 | Sandboxes, search, state filter | `SandboxList`, GET `/v1/sandboxes` | Exists: match frame, filters, table, primary action |
 | Name / Subdomain, ID | Name / slug and public ID in detail | Exists differently: preserve slug semantics |
 | Type | Template + size catalog | Exists differently: keep both genuine API fields |
@@ -52,7 +52,7 @@ CSSOM without toggling it. Do not claim screenshot parity for unobserved states.
 | Webhooks & OTel | No customer endpoint/exporter management API | Omit |
 | Agents & Proxying | No provider credential/proxy API | Omit |
 | CI on Boat VMs | No CI integration API | Omit |
-| boat Docs / Support links | No corresponding sbx public destinations | Omit; do not send customers to boat support |
+| boat Docs / Support links | No corresponding umiak public destinations | Omit; do not send customers to boat support |
 | Operator / Admin | Existing privileged routes | Retain operator-only access; Payload admin styling unchanged |
 
 ## Visual decisions
@@ -217,7 +217,7 @@ of inheriting the centered Dialog's translation utilities.
   success colors use semantic light/dark tokens throughout customer/operator views.
 - Mobile regression checks cover detail, account, keys, environments, team and
   create, plus internal create-dialog width at 1900px and 390px. Test evidence goes
-  to Playwright outputPath by default, optionally SBX_VISUAL_DIR.
+  to Playwright outputPath by default, optionally UMIAK_VISUAL_DIR.
 - Refined brand/divider, list cards/date/actions, detail title/tabs/single frames,
   inline key fields/presets/intro and environment icon actions. S8 sections 9.3,
   9.4 and 9.8 now describe the actual UI. No rename, API or DB changes.

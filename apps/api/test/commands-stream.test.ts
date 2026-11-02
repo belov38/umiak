@@ -2,7 +2,11 @@
 // agent reconnects, `error agent_unavailable` with offsets when the agent
 // is gone, reattach from those offsets, UTF-8 split between agent chunks
 // (Review Focus 3), heartbeats and the max duration.
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { type AgentApi, AgentCallError, type Frame } from "../src/index.ts";
 import {

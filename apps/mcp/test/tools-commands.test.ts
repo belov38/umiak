@@ -1,6 +1,6 @@
 // Command tools (S11 8.3, 9.1-9.3, 10.2) against the fake API, and ByteTail.
 import { createHash } from "node:crypto";
-import { Sbx } from "@sbx/sdk";
+import { Umiak } from "@umiak/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MAX_RESULT_CHARS } from "../src/output/result.ts";
 import { ByteTail } from "../src/output/tail.ts";
@@ -46,7 +46,7 @@ const UUID =
 function fenced(a: Answer, stream: "stdout" | "stderr"): string | undefined {
 	const all = a.texts.join("\n");
 	const m = new RegExp(
-		`<<<sbx-untrusted id=([0-9a-f]+) stream=${stream}>>>\\n([\\s\\S]*?)\\n<<<end id=\\1>>>`,
+		`<<<umiak-untrusted id=([0-9a-f]+) stream=${stream}>>>\\n([\\s\\S]*?)\\n<<<end id=\\1>>>`,
 	).exec(all);
 	return m?.[2];
 }
@@ -903,7 +903,7 @@ describe("output that sanitizing makes longer (9.2: the response stays under the
 		const chars = a.texts.reduce((n, t) => n + t.length, 0);
 		expect(chars).toBeLessThanOrEqual(MAX_RESULT_CHARS);
 		const all = a.texts.join("\n");
-		const opened = all.match(/<<<sbx-untrusted id=/g)?.length ?? 0;
+		const opened = all.match(/<<<umiak-untrusted id=/g)?.length ?? 0;
 		expect(all.match(/\n<<<end id=[0-9a-f]+>>>/g)?.length ?? 0).toBe(opened);
 		expect(all).not.toContain("response cut at");
 		const out = {} as Streams;
@@ -1019,7 +1019,7 @@ describe("a key with only the commands scopes", () => {
 		const hh = await start({
 			api: {
 				tokens: {
-					sbx_fake_commands: {
+					umiak_fake_commands: {
 						kind: "team_key",
 						scopes: ["commands:exec", "commands:read"],
 						teamId: FAKE_TEAM,
@@ -1027,9 +1027,9 @@ describe("a key with only the commands scopes", () => {
 					},
 				},
 			},
-			token: "sbx_fake_commands",
+			token: "umiak_fake_commands",
 		});
-		const admin = new Sbx({
+		const admin = new Umiak({
 			baseUrl: hh.api.url,
 			apiKey: FAKE_TOKENS.full,
 			env: {},
@@ -1072,7 +1072,7 @@ describe("a key with only the commands scopes", () => {
 				(q) =>
 					q.method === "GET" &&
 					/^\/v1\/sandboxes\/[^/]+$/.test(q.path) &&
-					q.headers.get("authorization") === "Bearer sbx_fake_commands",
+					q.headers.get("authorization") === "Bearer umiak_fake_commands",
 			),
 		).toHaveLength(1);
 	});

@@ -8,7 +8,7 @@ import {
 	type SandboxService,
 	type SandboxState,
 	TERMINAL_OPERATION_STATES,
-} from "@sbx/core";
+} from "@umiak/core";
 import { notFoundError } from "./errors.ts";
 
 export const MAX_WAIT_SECONDS = 60;

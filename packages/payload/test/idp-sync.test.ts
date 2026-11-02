@@ -1,8 +1,12 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { encodeUuid } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { encodeUuid } from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import type { Payload } from "payload";
 import {
 	afterAll,
@@ -18,11 +22,11 @@ import {
 	KeycloakAdminClient,
 	KeycloakIdpSync,
 	MAX_USER_PAGES,
-	migrateSbxPayload,
+	migrateUmiakPayload,
 } from "../src/index.ts";
 import { closePayload, Listener, openPayload } from "./helpers.ts";
 
-const REALM = "sbx";
+const REALM = "umiak";
 
 /** xs[i], or a test failure. */
 function at<T>(xs: readonly T[], i: number): T {
@@ -30,7 +34,7 @@ function at<T>(xs: readonly T[], i: number): T {
 	if (x === undefined) throw new Error(`no element ${i}`);
 	return x;
 }
-const CLIENT_ID = "sbx-worker";
+const CLIENT_ID = "umiak-worker";
 const SECRET = "worker-client-secret-do-not-log";
 
 interface FakeUser {
@@ -322,7 +326,7 @@ describe.skipIf(skipPg())("KeycloakIdpSync", () => {
 				createdBy,
 				kind: "team",
 				secretHash: randomBytes(32).toString("hex"),
-				prefix: `sbx_key_${name}`,
+				prefix: `umiak_key_${name}`,
 				last4: "abcd",
 				scopes: ["sandboxes:read"],
 				expiresAt: new Date(Date.now() + 86400_000).toISOString(),
@@ -361,10 +365,10 @@ describe.skipIf(skipPg())("KeycloakIdpSync", () => {
 	beforeAll(async () => {
 		t = await createTestDatabase({ migrated: false, max: 2 });
 		payload = await openPayload(t.url);
-		await migrateSbxPayload(payload, () => {});
+		await migrateUmiakPayload(payload, () => {});
 		url = await kc.start();
 		listener = new Listener(t.url);
-		await listener.start(["sbx_identity", "sbx_ssh_revoke"]);
+		await listener.start(["umiak_identity", "umiak_ssh_revoke"]);
 	});
 	afterAll(async () => {
 		await listener?.stop();
@@ -423,9 +427,9 @@ describe.skipIf(skipPg())("KeycloakIdpSync", () => {
 		const notes = await listener.settle();
 		expect(notes).toEqual(
 			expect.arrayContaining([
-				{ channel: "sbx_identity", payload: `users:${u.id}` },
+				{ channel: "umiak_identity", payload: `users:${u.id}` },
 				{
-					channel: "sbx_ssh_revoke",
+					channel: "umiak_ssh_revoke",
 					payload: `user:${encodeUuid("user", u.id)}`,
 				},
 			]),
@@ -441,7 +445,7 @@ describe.skipIf(skipPg())("KeycloakIdpSync", () => {
 					id: k1,
 					publicId: encodeUuid("apiKey", k1),
 					name: "a",
-					prefix: "sbx_key_a",
+					prefix: "umiak_key_a",
 				},
 			],
 		});
@@ -450,7 +454,7 @@ describe.skipIf(skipPg())("KeycloakIdpSync", () => {
 				id: k3,
 				publicId: encodeUuid("apiKey", k3),
 				name: "c",
-				prefix: "sbx_key_c",
+				prefix: "umiak_key_c",
 			},
 		]);
 		const key = await payload.findByID({

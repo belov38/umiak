@@ -11,10 +11,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi/cpapitest"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/routes"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi/cpapitest"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
+	"github.com/belov38/umiak/services/gateway/internal/routes"
 )
 
 type fakeClock struct {
@@ -38,7 +38,7 @@ func (c *fakeClock) Advance(d time.Duration) {
 
 func label(t *testing.T, raw string) routes.Label {
 	t.Helper()
-	l, ok := routes.ParseHost(raw+".sbx.example.com", "sbx.example.com", routes.DefaultGrammar())
+	l, ok := routes.ParseHost(raw+".umiak.example.com", "umiak.example.com", routes.DefaultGrammar())
 	if !ok {
 		t.Fatalf("label %q does not parse", raw)
 	}
@@ -47,7 +47,7 @@ func label(t *testing.T, raw string) routes.Label {
 
 func readyRoute(l string, slug string, port uint16) cpapi.Route {
 	return cpapi.Route{
-		Label: l, SandboxID: "sbx_1", Slug: slug, Port: port, MachineID: "m1",
+		Label: l, SandboxID: "umiak_1", Slug: slug, Port: port, MachineID: "m1",
 		SandboxState: "ready", Access: "public", HostRewrite: "preserve", AppProtocol: "http1",
 	}
 }
@@ -71,7 +71,7 @@ func TestCacheTTLAndSingleflight(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			r, err := c.Get(context.Background(), l)
-			if err == nil && r.SandboxID != "sbx_1" {
+			if err == nil && r.SandboxID != "umiak_1" {
 				err = errors.New("wrong route")
 			}
 			errs <- err
@@ -154,7 +154,7 @@ func TestCacheStaleIfError(t *testing.T) {
 	f.SetDown(true)
 	clk.Advance(31 * time.Second)
 	r, err := c.Get(context.Background(), l)
-	if err != nil || r.SandboxID != "sbx_1" {
+	if err != nil || r.SandboxID != "umiak_1" {
 		t.Fatalf("stale get = %+v, %v", r, err)
 	}
 	if v := testutil.ToFloat64(m.DependencyUp.WithLabelValues("api")); v != 0 {
@@ -449,7 +449,7 @@ func TestCacheStaleRefreshInBackground(t *testing.T) {
 
 	f.SetLatency(time.Hour)
 	clk.Advance(31 * time.Second)
-	if r, err := c.Get(context.Background(), l); err != nil || r.SandboxID != "sbx_1" {
+	if r, err := c.Get(context.Background(), l); err != nil || r.SandboxID != "umiak_1" {
 		t.Fatalf("first stale get = %+v, %v", r, err)
 	}
 	for i := range 5 {
@@ -457,7 +457,7 @@ func TestCacheStaleRefreshInBackground(t *testing.T) {
 		clk.Advance(2 * time.Second)
 		start := time.Now()
 		r, err := c.Get(context.Background(), l)
-		if err != nil || r.SandboxID != "sbx_1" {
+		if err != nil || r.SandboxID != "umiak_1" {
 			t.Fatalf("stale get %d = %+v, %v", i, r, err)
 		}
 		if el := time.Since(start); el > timeout/2 {

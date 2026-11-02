@@ -6,7 +6,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	v1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	v1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 )
 
 // desktopLoop publishes readiness from the session adapter independently of video.

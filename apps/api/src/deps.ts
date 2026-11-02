@@ -1,10 +1,10 @@
 // Dependencies of the api apps and the Hono context variables. Later tasks
 // add fields (svc, agent, streams, ...); tests build deps with
-// `makeTestDeps(over)` from `@sbx/api/testing`.
+// `makeTestDeps(over)` from `@umiak/api/testing`.
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import type { EnvironmentStore, IdentityStore, SshCa } from "@sbx/auth";
-import type { ConfigReader } from "@sbx/config";
-import type { JobSender, SandboxService } from "@sbx/core";
+import type { EnvironmentStore, IdentityStore, SshCa } from "@umiak/auth";
+import type { ConfigReader } from "@umiak/config";
+import type { JobSender, SandboxService } from "@umiak/core";
 import type pg from "pg";
 import type { Logger } from "pino";
 import type { AgentApi } from "./agent/types.ts";
@@ -29,17 +29,17 @@ export interface ApiDeps {
 	pool: pg.Pool | null;
 	/** Gateway SSH host keys ("<type> <base64>") for `/v1/meta` and `/ssh`. */
 	hostKeys: string[];
-	/** SSH login CA (SBX_SSH_LOGIN_CA_KEY_FILE); null: no certificates. */
+	/** SSH login CA (UMIAK_SSH_LOGIN_CA_KEY_FILE); null: no certificates. */
 	sshCa: SshCa | null;
 	/** Users, teams, keys (PayloadIdentityStore; PgIdentityStore in tests). */
 	identity: IdentityStore;
-	/** LISTEN sbx_identity; its connection is part of `/readyz`. */
+	/** LISTEN umiak_identity; its connection is part of `/readyz`. */
 	identityEvents: IdentityListener;
 	/** Team keys by secret hash (30 s / 5 s, flushed by identityEvents). */
 	keyCache: KeyCache;
 	/** Cached resolveSession for browser sessions and Keycloak tokens. */
 	sessions: SessionResolver;
-	/** Keycloak access tokens; null without SBX_OIDC_ISSUER. */
+	/** Keycloak access tokens; null without UMIAK_OIDC_ISSUER. */
 	oidc: OidcVerifier | null;
 	/** Accepted service tokens of the internal listener. */
 	serviceTokens: ServiceTokens;

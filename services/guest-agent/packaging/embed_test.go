@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/config"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/update"
+	"github.com/belov38/umiak/services/guest-agent/internal/config"
+	"github.com/belov38/umiak/services/guest-agent/internal/update"
 )
 
 const specPath = "../../../docs/specs/s3-guest-agent.md"
@@ -41,10 +41,10 @@ func unit(t *testing.T, name string) string {
 }
 
 func TestUnitsMatchSpec(t *testing.T) {
-	agent := unit(t, "sbx-agent.service")
+	agent := unit(t, "umiak-agent.service")
 	for _, d := range []string{
 		"Type=notify",
-		"ExecStart=/usr/local/lib/sbx-agent/current/sbx-agent run",
+		"ExecStart=/usr/local/lib/umiak-agent/current/umiak-agent run",
 		"OOMScoreAdjust=-900",
 		"MemoryMin=64M",
 		"CPUWeight=500",
@@ -61,39 +61,39 @@ func TestUnitsMatchSpec(t *testing.T) {
 		"TimeoutStopSec=15",
 		"StartLimitIntervalSec=120",
 		"StartLimitBurst=5",
-		"OnFailure=sbx-agent-rollback.service",
+		"OnFailure=umiak-agent-rollback.service",
 		"WantedBy=multi-user.target",
 	} {
 		if !strings.Contains(agent, "\n"+d+"\n") {
-			t.Errorf("sbx-agent.service misses %q", d)
+			t.Errorf("umiak-agent.service misses %q", d)
 		}
 	}
-	if want := specBlock(t, "# sbx-agent.service\n"); agent != want {
-		t.Errorf("sbx-agent.service differs from spec 17.2:\n%s\nwant:\n%s", agent, want)
+	if want := specBlock(t, "# umiak-agent.service\n"); agent != want {
+		t.Errorf("umiak-agent.service differs from spec 17.2:\n%s\nwant:\n%s", agent, want)
 	}
-	const identityHead = "[Unit]\nDescription=sbx machine identity\n"
-	if got, want := unit(t, "sbx-identity.service"), identityHead+specBlock(t, identityHead); got != want {
-		t.Errorf("sbx-identity.service differs from spec 7.2:\n%s\nwant:\n%s", got, want)
+	const identityHead = "[Unit]\nDescription=umiak machine identity\n"
+	if got, want := unit(t, "umiak-identity.service"), identityHead+specBlock(t, identityHead); got != want {
+		t.Errorf("umiak-identity.service differs from spec 7.2:\n%s\nwant:\n%s", got, want)
 	}
 
-	rollback := unit(t, "sbx-agent-rollback.service")
+	rollback := unit(t, "umiak-agent-rollback.service")
 	for _, d := range []string{
 		"Type=oneshot",
-		`ExecStart=/bin/sh -c 'if [ -x /usr/local/lib/sbx-agent/previous/sbx-agent ]; then exec /usr/local/lib/sbx-agent/previous/sbx-agent rollback; else exec /usr/local/lib/sbx-agent/current/sbx-agent rollback; fi'`,
+		`ExecStart=/bin/sh -c 'if [ -x /usr/local/lib/umiak-agent/previous/umiak-agent ]; then exec /usr/local/lib/umiak-agent/previous/umiak-agent rollback; else exec /usr/local/lib/umiak-agent/current/umiak-agent rollback; fi'`,
 	} {
 		if !strings.Contains(rollback, "\n"+d+"\n") {
-			t.Errorf("sbx-agent-rollback.service misses %q", d)
+			t.Errorf("umiak-agent-rollback.service misses %q", d)
 		}
 	}
-	if slice := unit(t, "sbx-cmd.slice"); slice != "[Unit]\nDescription=sbx sandbox commands\n" {
-		t.Errorf("sbx-cmd.slice = %q", slice)
+	if slice := unit(t, "umiak-cmd.slice"); slice != "[Unit]\nDescription=umiak sandbox commands\n" {
+		t.Errorf("umiak-cmd.slice = %q", slice)
 	}
 
 	names, err := fs.Glob(Units, "*")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"sbx-agent-rollback.service", "sbx-agent.service", "sbx-cmd.slice", "sbx-identity.service"}; !reflect.DeepEqual(names, want) {
+	if want := []string{"umiak-agent-rollback.service", "umiak-agent.service", "umiak-cmd.slice", "umiak-identity.service"}; !reflect.DeepEqual(names, want) {
 		t.Errorf("units = %v, want %v", names, want)
 	}
 }

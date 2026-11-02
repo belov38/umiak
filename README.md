@@ -1,4 +1,4 @@
-# boat-dev-clone
+# Umiak
 
 Self-hosted платформа API-управляемых VM-sandbox для AI-агентов на Proxmox VE (аналог boat.dev). Гостевые ОС: Linux, Linux + GUI, Windows 11, Windows Server Core.
 

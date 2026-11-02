@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Unattended install of the build VM (spec S9 sections 6.3, 7 p.4). Rendered by
-  sbx-tpl (src/windows/unattend.ts); placeholders are XML-escaped values or
+  umiak-tpl (src/windows/unattend.ts); placeholders are XML-escaped values or
   generated elements. The build password is only here, never in other files.
 -->
 <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
@@ -102,7 +102,7 @@
           <Order>3</Order>
           <Path>cmd.exe /c "if not exist C:\Windows\Setup\Scripts mkdir C:\Windows\Setup\Scripts"</Path>
         </RunSynchronousCommand>
-        <!-- The build ISO (label SBXBUILD) is the only drive with build\SetupComplete.cmd. -->
+        <!-- The build ISO (label UMIAKBUILD) is the only drive with build\SetupComplete.cmd. -->
         <RunSynchronousCommand wcm:action="add">
           <Order>4</Order>
           <Path>cmd.exe /c "for %d in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do @if exist %d:\build\SetupComplete.cmd copy /y %d:\build\SetupComplete.cmd C:\Windows\Setup\Scripts\SetupComplete.cmd"</Path>

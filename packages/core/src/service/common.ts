@@ -1,5 +1,5 @@
-import type { ConfigReader, TemplateOs } from "@sbx/config";
-import type { Tx } from "@sbx/db";
+import type { ConfigReader, TemplateOs } from "@umiak/config";
+import type { Tx } from "@umiak/db";
 import type pg from "pg";
 import { notFound, sandboxBlocked } from "../errors.ts";
 import { uuidv7 } from "../ids.ts";

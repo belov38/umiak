@@ -13,9 +13,9 @@ import (
 
 	"github.com/google/uuid"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/libs/tunnel/wire"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
 )
 
 // writeSmbios writes a new fake smbios identity (spec 7.1) and returns its
@@ -49,7 +49,7 @@ func hostKeys(t *testing.T) []byte {
 }
 
 // Spec 21 item 12 (container part): a new smbios identity and a restart of
-// sbx-identity and sbx-agent give a new machine-id, new SSH host keys, the
+// umiak-identity and umiak-agent give a new machine-id, new SSH host keys, the
 // default hostname of the new machine and a fresh journal that starts with
 // identity.reset at seq 1. /etc/hostname and /etc/hosts are bind mounts here
 // (run.sh), so their rewrite takes the in-place path. The fork itself, the
@@ -62,8 +62,8 @@ func TestIdentityApply(t *testing.T) {
 
 	id := writeSmbios(t)
 	hexID := strings.ReplaceAll(id, "-", "")
-	// The boot order of a fork: sbx-identity runs before ssh and the agent.
-	sh(t, "systemctl restart sbx-identity.service ssh.service sbx-agent.service")
+	// The boot order of a fork: umiak-identity runs before ssh and the agent.
+	sh(t, "systemctl restart umiak-identity.service ssh.service umiak-agent.service")
 	info := waitAgent(t)
 
 	if info.GetMachineId() != id {
@@ -75,7 +75,7 @@ func TestIdentityApply(t *testing.T) {
 	if bytes.Equal(hostKeys(t), oldKeys) {
 		t.Error("the SSH host keys did not change")
 	}
-	wantHost := "sbx-" + hexID[len(hexID)-12:]
+	wantHost := "umiak-" + hexID[len(hexID)-12:]
 	if got := strings.TrimSpace(sh(t, "hostname")); got != wantHost {
 		t.Errorf("hostname = %q, want %q", got, wantHost)
 	}
@@ -114,11 +114,11 @@ func TestIdentityApply(t *testing.T) {
 
 // assertBindMounts checks that /etc/hostname and /etc/hosts are still the
 // bind mounts run.sh made, so their rewrite took the in-place (EBUSY) path.
-// Outside the container (the pve stand VM: run.sh's /run/sbx-it/hostname is
+// Outside the container (the pve stand VM: run.sh's /run/umiak-it/hostname is
 // absent) they are plain files and the check is skipped.
 func assertBindMounts(t *testing.T) {
 	t.Helper()
-	if _, err := os.Stat("/run/sbx-it/hostname"); err != nil {
+	if _, err := os.Stat("/run/umiak-it/hostname"); err != nil {
 		t.Log("no run.sh bind mounts (not the container): bind mount check skipped")
 		return
 	}

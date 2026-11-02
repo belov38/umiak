@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/portauth"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/routes"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/portauth"
+	"github.com/belov38/umiak/services/gateway/internal/routes"
 )
 
 type fakeDesktopAPI struct{}
@@ -22,7 +22,7 @@ func (fakeDesktopAPI) OpenDesktop(context.Context, string) (cpapi.DesktopOpen, e
 	return cpapi.DesktopOpen{HostID: "only-host", AppID: "only-app"}, nil
 }
 func TestDesktopOpenWhitelistsViewerParameters(t *testing.T) {
-	r := httptest.NewRequestWithContext(t.Context(), "GET", "https://a-desktop.sbx.test/?_ticket=secret&hostId=evil&fps=30&dataTransport=websocket&redirect=https://evil.test", nil)
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "https://a-desktop.umiak.test/?_ticket=secret&hostId=evil&fps=30&dataTransport=websocket&redirect=https://evil.test", nil)
 	w := httptest.NewRecorder()
 	h := &handler{cfg: Config{DesktopAPI: fakeDesktopAPI{}}}
 	x := &exchange{r: r, w: &recorder{rw: w}, label: routes.Label{Raw: "a-desktop"}}
@@ -40,7 +40,7 @@ func TestDesktopOpenWhitelistsViewerParameters(t *testing.T) {
 }
 
 func TestDesktopOpenWithoutControlPlaneFailsClosed(t *testing.T) {
-	r := httptest.NewRequestWithContext(t.Context(), "GET", "https://a-desktop.sbx.test/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "https://a-desktop.umiak.test/", nil)
 	w := httptest.NewRecorder()
 	h := &handler{}
 	x := &exchange{r: r, w: &recorder{rw: w}, label: routes.Label{Raw: "a-desktop"}}
@@ -49,15 +49,15 @@ func TestDesktopOpenWithoutControlPlaneFailsClosed(t *testing.T) {
 	}
 }
 func TestDesktopRewriteStripsSpoofedIdentityAndSecrets(t *testing.T) {
-	r := httptest.NewRequestWithContext(t.Context(), "GET", "https://a-desktop.sbx.test/api?_ticket=secret&x=1", nil)
-	r.Header.Set("X_Sbx_Desktop_User", "attacker")
-	r.Header.Set("Cookie", "__Host-sbx_auth=secret; app=kept")
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "https://a-desktop.umiak.test/api?_ticket=secret&x=1", nil)
+	r.Header.Set("X_Umiak_Desktop_User", "attacker")
+	r.Header.Set("Cookie", "__Host-umiak_auth=secret; app=kept")
 	h := &handler{}
 	x := &exchange{r: r, rid: "rid"}
 	pr := &httputil.ProxyRequest{In: r, Out: r.Clone(t.Context())}
 	rt := cpapi.Route{Kind: cpapi.KindDesktop, Port: 47800, HostRewrite: "localhost"}
 	h.rewrite(x, pr, rt, portauth.Result{}, "target", nil)
-	if pr.Out.Header.Get("X-Sbx-Desktop-User") != "sbx" || pr.Out.Header.Get("X_Sbx_Desktop_User") != "" || strings.Contains(pr.Out.URL.RawQuery, "ticket") || strings.Contains(pr.Out.Header.Get("Cookie"), "secret") || pr.Out.Host != "localhost:47800" {
+	if pr.Out.Header.Get("X-Umiak-Desktop-User") != "umiak" || pr.Out.Header.Get("X_Umiak_Desktop_User") != "" || strings.Contains(pr.Out.URL.RawQuery, "ticket") || strings.Contains(pr.Out.Header.Get("Cookie"), "secret") || pr.Out.Host != "localhost:47800" {
 		t.Fatalf("unsafe forwarded request: %v %v", pr.Out, pr.Out.Header)
 	}
 }

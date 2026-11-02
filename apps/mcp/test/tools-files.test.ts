@@ -1,7 +1,7 @@
 // File tools (S11 8.4, 9.2, 9.3, 11.3) and sniffImage against the fake API.
 import { createHash } from "node:crypto";
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import { Sbx } from "@sbx/sdk";
+import { Umiak } from "@umiak/sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import { createLogger } from "../src/log.ts";
 import { IMAGE_MAX_BYTES, sniffImage } from "../src/output/image.ts";
@@ -62,7 +62,7 @@ function fenced(a: Answer, label: string): string | undefined {
 	const all = a.texts.join("\n");
 	const escaped = label.replace(/[=.]/g, "\\$&");
 	const m = new RegExp(
-		`<<<sbx-untrusted id=([0-9a-f]+) ${escaped}>>>\\n([\\s\\S]*?)\\n<<<end id=\\1>>>`,
+		`<<<umiak-untrusted id=([0-9a-f]+) ${escaped}>>>\\n([\\s\\S]*?)\\n<<<end id=\\1>>>`,
 	).exec(all);
 	return m?.[2];
 }
@@ -74,11 +74,11 @@ function fenced(a: Answer, label: string): string | undefined {
 async function withScopes(hh: Harness, scopes: string[]) {
 	const token = `scoped_${scopes.join("_")}`;
 	hh.api.tokens.set(token, { kind: "team_key", scopes, teamId: FAKE_TEAM });
-	const sbx = new Sbx({ baseUrl: hh.api.url, apiKey: token, env: {} });
+	const umiak = new Umiak({ baseUrl: hh.api.url, apiKey: token, env: {} });
 	const conn = await connectInMemory(
 		createServer({
 			tools: ALL_TOOLS,
-			sbx: () => sbx,
+			umiak: () => umiak,
 			transport: "stdio",
 			log: createLogger({ level: "silent" }),
 		}),
@@ -207,7 +207,7 @@ describe("tool list", () => {
 		for (const s of ["next_offset", "image", "base64"]) {
 			expect(d.files_read).toContain(s);
 		}
-		for (const s of ["sbx cp", "1 MiB", "atomic"]) {
+		for (const s of ["umiak cp", "1 MiB", "atomic"]) {
 			expect(d.files_write).toContain(s);
 		}
 		for (const s of ["exactly once", "replace_all"]) {
@@ -393,7 +393,7 @@ describe("files_read: text", () => {
 			expect(empty.json, as).toMatchObject({ size: 0, eof: true });
 		}
 		// The 416 carries the size in a header only, as the real API's does.
-		const err = await hh.sbx.raw
+		const err = await hh.umiak.raw
 			.GET(
 				`${FILES(sb)}/content` as never,
 				{
@@ -433,7 +433,7 @@ describe("files_read: text", () => {
 		const all = r.texts.join("\n");
 		expect(all).not.toContain("\u001b");
 		expect(all).not.toContain(String.fromCodePoint(0xe0041));
-		expect(all).toMatch(/<<<sbx-untrusted id=[0-9a-f]{6} kind=file>>>/);
+		expect(all).toMatch(/<<<umiak-untrusted id=[0-9a-f]{6} kind=file>>>/);
 		const body = fenced(r, "kind=file") as string;
 		expect(body).toContain("<<<end id=0123456789ab>>>");
 		expect(body).toContain("\\u{E0041}");
@@ -763,7 +763,7 @@ describe("files_write", () => {
 		expect(hh.to("PUT", `${FILES(sb)}/content`)[0]?.query.get("mode")).toBe(
 			"644",
 		);
-		const info = await hh.sbx.sandboxes.handle(sb).files.stat("bin.dat");
+		const info = await hh.umiak.sandboxes.handle(sb).files.stat("bin.dat");
 		expect(info.mode).toBe(420);
 		expect(
 			new Uint8Array(await hh.api.state.fs(sb).read("/home/user/bin.dat")),
@@ -804,7 +804,7 @@ describe("files_write", () => {
 		expect(await hh.api.state.fs(sb).readText("/root/z.txt")).toBe("z");
 	});
 
-	it("1 MiB is written; more is refused before the API with a pointer to sbx cp", async () => {
+	it("1 MiB is written; more is refused before the API with a pointer to umiak cp", async () => {
 		const hh = await start();
 		const sb = await sandbox(hh);
 		expect(WRITE_MAX_BYTES).toBe(1024 * 1024);
@@ -823,7 +823,7 @@ describe("files_write", () => {
 			content: "a".repeat(WRITE_MAX_BYTES + 1),
 		});
 		expect(big.isError).toBe(true);
-		expect(big.texts[0]).toContain("sbx cp");
+		expect(big.texts[0]).toContain("umiak cp");
 		expect(big.texts[0]).toContain("1 MiB");
 		// Counted in bytes: 2-byte characters.
 		const wide = await hh.call("files_write", {
@@ -909,7 +909,7 @@ describe("files_edit", () => {
 		expect(ctx).toContain("line 9");
 		expect(r.json.context_from_line).toBe(8);
 		// The mode is kept.
-		const info = await hh.sbx.sandboxes.handle(sb).files.stat("f.txt");
+		const info = await hh.umiak.sandboxes.handle(sb).files.stat("f.txt");
 		expect(info.mode).toBe(0o640);
 		expect(hh.to("PUT", `${FILES(sb)}/content`)[0]?.query.get("mode")).toBe(
 			"640",
@@ -1014,7 +1014,7 @@ describe("files_edit", () => {
 		const r = await edit(hh, sb, { old_text: "a", new_text: "b" });
 		expect(r.isError).toBe(true);
 		expect(r.texts[0]).toContain("1 MiB");
-		expect(r.texts[0]).toContain("sbx cp");
+		expect(r.texts[0]).toContain("umiak cp");
 		expect(hh.to("GET", `${FILES(sb)}/content`)).toHaveLength(0);
 		expect(hh.to("PUT", `${FILES(sb)}/content`)).toHaveLength(0);
 	});
@@ -1234,7 +1234,9 @@ describe("files_list", () => {
 		expect(body.split("\n")).toHaveLength(3);
 		expect(r.texts[0]).not.toContain("\u202e");
 		// The only text outside the fence is the header and the hint lines.
-		const outside = r.texts.join("\n").replace(/<<<sbx-untrusted[\s\S]*$/, "");
+		const outside = r.texts
+			.join("\n")
+			.replace(/<<<umiak-untrusted[\s\S]*$/, "");
 		expect(outside).not.toContain("cod.exe");
 	});
 

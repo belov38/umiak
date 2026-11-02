@@ -7,9 +7,9 @@
 import {
 	NETWORK_ERROR,
 	newIdempotencyKey,
-	SbxError,
+	UmiakError,
 	UNEXPECTED_RESPONSE,
-} from "@sbx/sdk";
+} from "@umiak/sdk";
 
 export interface IdempotencySlot {
 	key: string;
@@ -60,7 +60,7 @@ export function slotFor(
  * call, or an API error that says so (`details.outcome: "unknown"`).
  */
 export function outcomeUnknown(e: unknown): boolean {
-	if (!(e instanceof SbxError)) return true;
+	if (!(e instanceof UmiakError)) return true;
 	if (e.code === NETWORK_ERROR || e.code === UNEXPECTED_RESPONSE) return true;
 	if (e.code === "server_shutting_down" || e.code === "not_ready") return true;
 	return e.details.outcome === "unknown";

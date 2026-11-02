@@ -1,10 +1,10 @@
 // The current sandbox of a shell (S7 §14.2) and how commands pick their
-// sandbox: `<sb>` (ID or slug), then SBX_SANDBOX, then the current sandbox
-// of this shell, then (inside a VM) SBX_SANDBOX_ID, a core UUID turned into
+// sandbox: `<sb>` (ID or slug), then UMIAK_SANDBOX, then the current sandbox
+// of this shell, then (inside a VM) UMIAK_SANDBOX_ID, a core UUID turned into
 // `sb_…` (S7 §5.3).
 //
-// The shell key is SBX_SESSION, else the parent PID and its start time (a
-// reused PID gets another key). State: $XDG_STATE_HOME/sbx/current/<key>;
+// The shell key is UMIAK_SESSION, else the parent PID and its start time (a
+// reused PID gets another key). State: $XDG_STATE_HOME/umiak/current/<key>;
 // entries older than 7 days are removed when one is written.
 
 import { spawnSync } from "node:child_process";
@@ -16,7 +16,7 @@ import {
 	unlinkSync,
 } from "node:fs";
 import { join } from "node:path";
-import type { Sandbox } from "@sbx/sdk";
+import type { Sandbox } from "@umiak/sdk";
 import { writePrivateFile } from "./config.ts";
 import type { Context } from "./context.ts";
 import { usageError } from "./exit-codes.ts";
@@ -60,8 +60,8 @@ function processStart(pid: number): string {
 
 export function shellKey(env: Record<string, string | undefined>): string {
 	const raw =
-		env.SBX_SESSION !== undefined && env.SBX_SESSION !== ""
-			? `session-${env.SBX_SESSION}`
+		env.UMIAK_SESSION !== undefined && env.UMIAK_SESSION !== ""
+			? `session-${env.UMIAK_SESSION}`
 			: `ppid-${process.ppid}-${processStart(process.ppid)}`;
 	return raw.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 200);
 }
@@ -118,15 +118,15 @@ export interface SandboxRef {
 /** Which sandbox a command means (see the header); usage error (exit 2) if none. */
 export function sandboxRef(ctx: Context, arg: string | undefined): SandboxRef {
 	if (arg !== undefined && arg !== "") return { ref: arg, explicit: true };
-	const env = ctx.env.SBX_SANDBOX;
+	const env = ctx.env.UMIAK_SANDBOX;
 	if (env !== undefined && env !== "") return { ref: env, explicit: false };
 	const current = readCurrent(ctx);
 	if (current !== null) return { ref: current, explicit: false };
-	const inVm = ctx.env.SBX_SANDBOX_ID;
+	const inVm = ctx.env.UMIAK_SANDBOX_ID;
 	const fromVm = inVm === undefined ? null : sandboxIdOfUuid(inVm);
 	if (fromVm !== null) return { ref: fromVm, explicit: false };
 	throw usageError(
-		"no sandbox: pass <sb> (ID or slug), set SBX_SANDBOX, or pick one with: sbx current <sb>",
+		"no sandbox: pass <sb> (ID or slug), set UMIAK_SANDBOX, or pick one with: umiak current <sb>",
 	);
 }
 
@@ -139,7 +139,7 @@ export async function useSandbox(
 	arg: string | undefined,
 ): Promise<Sandbox> {
 	const r = sandboxRef(ctx, arg);
-	const sb = await ctx.sbx().sandboxes.get(r.ref);
+	const sb = await ctx.umiak().sandboxes.get(r.ref);
 	if (r.explicit) writeCurrent(ctx, sb.id);
 	return sb;
 }
@@ -155,6 +155,6 @@ export async function rememberExplicit(
 	if (!r.explicit) return;
 	const id = r.ref.startsWith("sb_")
 		? r.ref
-		: (await ctx.sbx().sandboxes.get(r.ref)).id;
+		: (await ctx.umiak().sandboxes.get(r.ref)).id;
 	writeCurrent(ctx, id);
 }

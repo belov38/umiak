@@ -3,7 +3,7 @@ import {
 	AgentOutdatedError,
 	AgentUnavailableError,
 	isConnectionError,
-} from "@sbx/agent-client";
+} from "@umiak/agent-client";
 import {
 	ApiError,
 	type ApiErrorOptions,
@@ -54,7 +54,7 @@ const SAME_CODE: Record<string, number> = {
 };
 
 // Connect codes (connectrpc Code) that mean the transport, not the agent,
-// failed; the classifyByCode semantics of @sbx/agent-client.
+// failed; the classifyByCode semantics of @umiak/agent-client.
 const CONNECT_CANCELED = 1;
 const CONNECT_DEADLINE_EXCEEDED = 4;
 const CONNECT_UNAVAILABLE = 14;
@@ -83,7 +83,7 @@ function connectCode(e: unknown): unknown {
  * without a caller abort (a listener reset), or an AgentCallError with an
  * Unavailable-only detail code. Application codes (InvalidArgument,
  * NotFound, FailedPrecondition, DeadlineExceeded, ...) are answers, not
- * outages. Mirrors `classifyByCode` of @sbx/agent-client (not exported).
+ * outages. Mirrors `classifyByCode` of @umiak/agent-client (not exported).
  */
 export function isAgentUnreachable(e: unknown, signal?: AbortSignal): boolean {
 	if (signal?.aborted) return false;
@@ -214,7 +214,7 @@ export function agentErrorToHttp(e: unknown): ApiError {
 			e.code === "upload_offset_mismatch" &&
 			typeof e.details.offset === "number"
 		) {
-			opts.headers = { "Sbx-Upload-Offset": String(e.details.offset) };
+			opts.headers = { "Umiak-Upload-Offset": String(e.details.offset) };
 		}
 		return new ApiError(status, e.code, e.message, opts);
 	}

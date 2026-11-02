@@ -1,4 +1,4 @@
-import type { Tx } from "@sbx/db";
+import type { Tx } from "@umiak/db";
 import type { ValidationIssue } from "../errors.ts";
 import {
 	type EncryptedBlob,

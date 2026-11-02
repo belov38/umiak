@@ -6,11 +6,11 @@
 // sandbox is forked with `forceStop: true` after the user confirms the stop
 // and restart (S9 §24.8): asked up front when the catalog says Windows,
 // otherwise on the API's 409 `snapshot_requires_stop`. Render `dialog`.
-import type { SandboxData } from "@sbx/sdk";
+import type { SandboxData } from "@umiak/sdk";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useRef } from "react";
 import { toast } from "sonner";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import { attempt } from "@/lib/client-call";
 import { describeError, isSnapshotRequiresStop } from "@/lib/errors";
 import { type IdempotencySlot, slotAfter, slotFor } from "@/lib/idempotency";
@@ -22,7 +22,7 @@ export function useFork(
 	sandbox: SandboxData,
 	refresh: () => Promise<void>,
 ): { fork: () => Promise<void>; dialog: ReactNode } {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const router = useRouter();
 	const forkKey = useRef<IdempotencySlot | null>(null);
 	const windows = useNeedsForceStop(teamId, sandbox);
@@ -35,7 +35,7 @@ export function useFork(
 		const body = forceStop ? { forceStop: true } : {};
 		const slot = slotFor(forkKey.current, { sandbox: sandbox.id, body });
 		try {
-			const { data } = await sbx.raw.POST("/v1/sandboxes/{sandbox}/fork", {
+			const { data } = await umiak.raw.POST("/v1/sandboxes/{sandbox}/fork", {
 				params: { path: { sandbox: sandbox.id } },
 				body,
 				idempotencyKey: slot.key,

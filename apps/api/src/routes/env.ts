@@ -5,14 +5,14 @@
 // Secret values are never returned and never logged.
 import { randomUUID } from "node:crypto";
 import { createRoute } from "@hono/zod-openapi";
-import { AgentUnavailableError } from "@sbx/agent-client";
+import { AgentUnavailableError } from "@umiak/agent-client";
 import {
 	type EnvReplaceInput,
 	type Sandbox,
 	SECRET_FILE_DEFAULT_MODE,
 	type SecretPatch,
 	type SecretSets,
-} from "@sbx/core";
+} from "@umiak/core";
 import type { Context } from "hono";
 import type { AgentSecrets } from "../agent/types.ts";
 import { authOf } from "../auth/principal.ts";

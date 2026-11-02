@@ -1,6 +1,6 @@
-// `sbx version`: versions of the CLI, the SDK and the runtime.
+// `umiak version`: versions of the CLI, the SDK and the runtime.
 
-import { SDK_VERSION } from "@sbx/sdk";
+import { SDK_VERSION } from "@umiak/sdk";
 import type { Command } from "commander";
 import type { Runner } from "../program.ts";
 
@@ -29,12 +29,13 @@ export function versionInfo(): VersionInfo {
 export function register(program: Command, run: Runner): void {
 	program
 		.command("version")
-		.description("print the versions of sbx, the SDK and the runtime")
+		.description("print the versions of umiak, the SDK and the runtime")
 		.action(
 			run(async (ctx) => {
 				ctx.out.result(
 					versionInfo(),
-					(v) => `sbx ${v.version} (sdk ${v.sdk}, ${v.runtime}, ${v.platform})`,
+					(v) =>
+						`umiak ${v.version} (sdk ${v.sdk}, ${v.runtime}, ${v.platform})`,
 				);
 			}),
 		);

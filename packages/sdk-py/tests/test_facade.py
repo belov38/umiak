@@ -6,7 +6,7 @@ command once) -> run with a failed agent attach and a cut client stream ->
 idle stream -> start + follow -> files (write/read, a 20 MiB resumable upload,
 resumed and restarted downloads) -> ports -> list -> snapshots -> delete.
 
-Every test runs twice: with Sbx and with AsyncSbx (conftest.Client).
+Every test runs twice: with Umiak and with AsyncUmiak (conftest.Client).
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from support import Client, TestApi, until
 
-from sbx_sdk import ExitEvent, OutputEvent, SandboxFailedError, SbxError
+from umiak_sdk import ExitEvent, OutputEvent, SandboxFailedError, UmiakError
 
 MiB = 1024 * 1024
 
@@ -82,7 +82,7 @@ def test_create_wait_returns_once_ready(
 
     marked = client.in_thread(worker)
     n0 = api.request_count()
-    sb = client.sbx.sandboxes.create(labels={"suite": suite}, wait=True)
+    sb = client.umiak.sandboxes.create(labels={"suite": suite}, wait=True)
     slug = marked()
     assert sb.slug == slug
     assert sb.state == "ready"
@@ -91,7 +91,7 @@ def test_create_wait_returns_once_ready(
     assert 1 <= len(polls) < 5
     created = [r for r in api.requests(n0) if r["method"] == "POST"]
     assert created[0]["headers"]["idempotency-key"]
-    assert created[0]["headers"]["user-agent"].startswith("sbx-sdk-py/")
+    assert created[0]["headers"]["user-agent"].startswith("umiak-sdk-py/")
     state["sb"] = sb
 
 
@@ -216,12 +216,12 @@ def test_command_wait_and_follow_accept_a_timeout(state: dict[str, Any]) -> None
     sb = sandbox(state)
     c = sb.start("sleep 30")
     t0 = time.monotonic()
-    with pytest.raises(SbxError) as e:
+    with pytest.raises(UmiakError) as e:
         c.wait(timeout=0.5)
     assert e.value.code == "wait_timeout"
     # Not at the command's end (30 s); room for a loaded machine.
     assert time.monotonic() - t0 < 15
-    with pytest.raises(SbxError) as e2:
+    with pytest.raises(UmiakError) as e2:
         for _ in c.follow(timeout=0.5):
             pass
     assert e2.value.code == "wait_timeout"
@@ -281,7 +281,7 @@ def test_files_write_read_stat_list_mkdir_move_chmod_remove(state: dict[str, Any
     assert f.chmod("notes/sub/hi.txt", mode=0o644).mode == 0o644
     assert f.remove("notes/bin.dat").existed is True
     assert f.remove("notes/bin.dat").existed is False
-    with pytest.raises(SbxError) as e:
+    with pytest.raises(UmiakError) as e:
         f.read_text("notes/bin.dat")
     assert (e.value.status, e.value.code) == (404, "path_not_found")
     assert e.value.request_id
@@ -342,7 +342,7 @@ def test_download_to_a_path_keeps_dest_when_it_fails(
     sb = sandbox(state)
     dest = tmp_path / "keep.txt"
     dest.write_text("old content\n")
-    with pytest.raises(SbxError) as e:
+    with pytest.raises(UmiakError) as e:
         sb.files.download("no/such/file.txt", dest)
     assert e.value.code == "path_not_found"
     assert dest.read_text() == "old content\n"
@@ -385,7 +385,7 @@ def test_ports_host_with_a_token_list_rotate_unhost(state: dict[str, Any]) -> No
     sb = sandbox(state)
     p = sb.ports.host(8000, access="token")
     assert (p.port, p.access) == (8000, "token")
-    assert p.token.startswith("sbxp_")
+    assert p.token.startswith("umiakp_")
     assert p.token in p.url_with_token
     assert [h.port for h in sb.ports.list().hosted] == [8000]
     assert sb.ports.rotate_token(8000).token != p.token
@@ -394,10 +394,10 @@ def test_ports_host_with_a_token_list_rotate_unhost(state: dict[str, Any]) -> No
 
 
 def test_wait_until_ready_ends_with_wait_timeout(client: Client, suite: str) -> None:
-    other = client.sbx.sandboxes.create(labels={"suite": suite})
+    other = client.umiak.sandboxes.create(labels={"suite": suite})
     assert other.state == "creating"
     t0 = time.monotonic()
-    with pytest.raises(SbxError) as e:
+    with pytest.raises(UmiakError) as e:
         other.wait_until_ready(timeout=1)
     assert e.value.code == "wait_timeout"
     assert not isinstance(e.value, SandboxFailedError)
@@ -410,14 +410,14 @@ def test_list_iterates_every_page_and_get_by_slug(
 ) -> None:
     sb = sandbox(state)
     n0 = api.request_count()
-    found = [s.slug for s in client.sbx.sandboxes.list(label={"suite": suite}, limit=1)]
+    found = [s.slug for s in client.umiak.sandboxes.list(label={"suite": suite}, limit=1)]
     assert len(found) == 2 and sb.slug in found
     pages = [r for r in api.requests(n0) if r["path"].startswith("/v1/sandboxes?")]
     assert len(pages) >= 2
     assert all(query(r["path"])["label"] == [f"suite={suite}"] for r in pages)
-    assert client.sbx.sandboxes.get(sb.slug).id == sb.id
-    assert client.sbx.me().team.id.startswith("team_")
-    assert len(client.sbx.templates()) > 0
+    assert client.umiak.sandboxes.get(sb.slug).id == sb.id
+    assert client.umiak.me().team.id.startswith("team_")
+    assert len(client.umiak.templates()) > 0
 
 
 def test_snapshot_create_wait_raises_the_operation_error(
@@ -432,8 +432,8 @@ def test_snapshot_create_wait_raises_the_operation_error(
         )
 
     failed = client.in_thread(lambda: (time.sleep(0.3), fail())[1])
-    with pytest.raises(SbxError) as e:
-        client.sbx.snapshots.create(
+    with pytest.raises(UmiakError) as e:
+        client.umiak.snapshots.create(
             sandbox=sb.slug, name=f"snap-{os.getpid()}-{client.kind}", wait=True
         )
     failed()
@@ -453,4 +453,4 @@ def test_delete_sends_the_confirm_header(api: TestApi, state: dict[str, Any]) ->
     assert op is not None and op.kind == "delete"
     assert sb.state == "deleting"
     dels = [r for r in api.requests(n0) if r["method"] == "DELETE"]
-    assert dels[-1]["headers"]["sbx-confirm-delete"] == sb.id
+    assert dels[-1]["headers"]["umiak-confirm-delete"] == sb.id

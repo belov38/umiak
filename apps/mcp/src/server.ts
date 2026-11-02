@@ -7,7 +7,7 @@ import {
 	McpServer,
 	type ServerContext,
 } from "@modelcontextprotocol/server";
-import { type Sbx, SbxError } from "@sbx/sdk";
+import { type Umiak, UmiakError } from "@umiak/sdk";
 import { type ClientInfo, createToolContext } from "./context.ts";
 import { Deadline } from "./deadline.ts";
 import { type ErrorResultExtra, errorResult, ToolError } from "./errors.ts";
@@ -39,11 +39,11 @@ export interface ServerOptions {
 	/** Sandbox id or slug every call is pinned to. */
 	pinnedSandbox?: string;
 	/** May throw ToolError not_logged_in. */
-	sbx: () => Sbx;
+	umiak: () => Umiak;
 	transport: "stdio" | "http";
 	log: Logger;
 	wasCancelledByClient?: (requestId: string | number) => boolean;
-	/** stdio: the hint of an API 401 (default: run `sbx login`). */
+	/** stdio: the hint of an API 401 (default: run `umiak login`). */
 	unauthorizedHint?: string;
 	/** HTTP: the API answered 401 during a call. */
 	onAuthFailure?: () => void;
@@ -124,9 +124,9 @@ function toCallError(
 	deadline: Deadline,
 	o: ServerOptions,
 	fields: Record<string, unknown>,
-): ToolError | SbxError {
+): ToolError | UmiakError {
 	if (err instanceof ToolError) return err;
-	if (err instanceof SbxError && err.status === 401) {
+	if (err instanceof UmiakError && err.status === 401) {
 		if (o.transport === "stdio") {
 			// The SDK already asked the CLI for a new token once: only a new
 			// login helps, so the model must not loop on it.
@@ -134,7 +134,7 @@ function toCallError(
 				code: "unauthorized",
 				message: "the API rejected the credentials",
 				hint:
-					o.unauthorizedHint ?? "run `sbx login` in a terminal, then retry.",
+					o.unauthorizedHint ?? "run `umiak login` in a terminal, then retry.",
 			});
 		}
 		o.onAuthFailure?.();
@@ -144,7 +144,7 @@ function toCallError(
 			retryable: true,
 		});
 	}
-	if (err instanceof SbxError) return err;
+	if (err instanceof UmiakError) return err;
 	// The client dropped the request: the answer is not read, keep it sane.
 	if (deadline.cancelled()) {
 		return new ToolError({

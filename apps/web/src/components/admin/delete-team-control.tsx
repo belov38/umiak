@@ -1,7 +1,7 @@
 // "Delete team" on the team edit view of /admin (S8 §6.4, plan decision 12):
 // rendered for saved shared teams only; the button gets the team's public
 // id for the api checks and its UUID for the Payload delete.
-import { encodeUuid } from "@sbx/auth";
+import { encodeUuid } from "@umiak/auth";
 import type { Payload } from "payload";
 import { DeleteTeamButton } from "./delete-team-button";
 

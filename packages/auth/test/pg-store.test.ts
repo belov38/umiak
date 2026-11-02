@@ -1,5 +1,9 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import Pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { encodeUuid } from "../src/ids.ts";
@@ -34,7 +38,7 @@ describe.skipIf(skipPg())("PgIdentityStore", () => {
 		expect(r.rowCount).toBe(0);
 	});
 
-	describe("NOTIFY sbx_identity", () => {
+	describe("NOTIFY umiak_identity", () => {
 		let listener: Pg.Client;
 		const got: string[] = [];
 		const waiters: { payload: string; resolve: () => void }[] = [];
@@ -43,13 +47,13 @@ describe.skipIf(skipPg())("PgIdentityStore", () => {
 			listener = new Pg.Client({ connectionString: t.url });
 			await listener.connect();
 			listener.on("notification", (n) => {
-				if (n.channel !== "sbx_identity" || n.payload === undefined) return;
+				if (n.channel !== "umiak_identity" || n.payload === undefined) return;
 				got.push(n.payload);
 				for (const w of waiters.filter((w) => w.payload === n.payload)) {
 					w.resolve();
 				}
 			});
-			await listener.query("LISTEN sbx_identity");
+			await listener.query("LISTEN umiak_identity");
 		});
 		afterAll(async () => {
 			await listener?.end();
@@ -76,7 +80,7 @@ describe.skipIf(skipPg())("PgIdentityStore", () => {
 		// marker sent afterwards arrives, every earlier one has arrived too.
 		async function flush(): Promise<void> {
 			const marker = `marker:${randomUUID()}`;
-			await t.pool.query("SELECT pg_notify('sbx_identity', $1)", [marker]);
+			await t.pool.query("SELECT pg_notify('umiak_identity', $1)", [marker]);
 			await received(marker);
 		}
 
@@ -166,7 +170,7 @@ describe.skipIf(skipPg())("PgIdentityStore", () => {
 
 	// S4 §9.5: the gateway closes open SSH sessions on these payloads and
 	// compares their ids with the public ids of ssh/authorize answers.
-	describe("NOTIFY sbx_ssh_revoke", () => {
+	describe("NOTIFY umiak_ssh_revoke", () => {
 		let listener: Pg.Client;
 		const got: string[] = [];
 		const waiters: { payload: string; resolve: () => void }[] = [];
@@ -175,13 +179,13 @@ describe.skipIf(skipPg())("PgIdentityStore", () => {
 			listener = new Pg.Client({ connectionString: t.url });
 			await listener.connect();
 			listener.on("notification", (n) => {
-				if (n.channel !== "sbx_ssh_revoke" || n.payload === undefined) return;
+				if (n.channel !== "umiak_ssh_revoke" || n.payload === undefined) return;
 				got.push(n.payload);
 				for (const w of waiters.filter((w) => w.payload === n.payload)) {
 					w.resolve();
 				}
 			});
-			await listener.query("LISTEN sbx_ssh_revoke");
+			await listener.query("LISTEN umiak_ssh_revoke");
 		});
 		afterAll(async () => {
 			await listener?.end();
@@ -206,7 +210,7 @@ describe.skipIf(skipPg())("PgIdentityStore", () => {
 
 		async function flush(): Promise<void> {
 			const marker = `marker:${randomUUID()}`;
-			await t.pool.query("SELECT pg_notify('sbx_ssh_revoke', $1)", [marker]);
+			await t.pool.query("SELECT pg_notify('umiak_ssh_revoke', $1)", [marker]);
 			await received(marker);
 		}
 

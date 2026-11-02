@@ -36,7 +36,7 @@ COPY apps/worker/package.json apps/worker/
 
 # ---- build: next build (standalone)
 FROM base AS build
-RUN pnpm install --frozen-lockfile --filter "@sbx/web..." --filter "."
+RUN pnpm install --frozen-lockfile --filter "@umiak/web..." --filter "."
 COPY packages/auth/src packages/auth/src
 COPY packages/config/src packages/config/src
 COPY packages/payload/src packages/payload/src
@@ -44,12 +44,12 @@ COPY packages/sdk-ts/src packages/sdk-ts/src
 COPY apps/web/tsconfig.json apps/web/next.config.ts apps/web/postcss.config.mjs apps/web/components.json apps/web/check-image.ts apps/web/
 COPY apps/web/src apps/web/src
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN pnpm --filter "@sbx/web" run build \
+RUN pnpm --filter "@umiak/web" run build \
 	&& node apps/web/check-image.ts
 
-# ---- migrate: production dependencies of @sbx/payload (plain Node, type stripping)
+# ---- migrate: production dependencies of @umiak/payload (plain Node, type stripping)
 FROM base AS migrate
-RUN pnpm install --frozen-lockfile --prod --filter "@sbx/payload..."
+RUN pnpm install --frozen-lockfile --prod --filter "@umiak/payload..."
 
 # ---- runtime
 FROM ${NODE_IMAGE}

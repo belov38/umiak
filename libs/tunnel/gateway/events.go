@@ -17,7 +17,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
 )
 
 // EventSink receives agent events and connection events (spec 9.6). The

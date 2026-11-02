@@ -1,5 +1,5 @@
 import { createRoute, z } from "@hono/zod-openapi";
-import { SbxError } from "@sbx/core";
+import { UmiakError } from "@umiak/core";
 import { HTTPException } from "hono/http-exception";
 import { describe, expect, it } from "vitest";
 import {
@@ -103,7 +103,7 @@ describe("toHttpError: core codes (S7 §5.5)", () => {
 	for (const [code, status, retryable, http] of TABLE) {
 		it(`${code} -> ${status} ${http}${retryable ? " retryable" : ""}`, () => {
 			const e = toHttpError(
-				new SbxError(code as never, `core says ${code}`, {
+				new UmiakError(code as never, `core says ${code}`, {
 					details: { x: 1 },
 				}),
 			);
@@ -117,7 +117,7 @@ describe("toHttpError: core codes (S7 §5.5)", () => {
 	}
 
 	it("pool_exhausted is not part of the contract: 500 internal", () => {
-		const e = toHttpError(new SbxError("pool_exhausted", "no warm machine"));
+		const e = toHttpError(new UmiakError("pool_exhausted", "no warm machine"));
 		expect(e.status).toBe(500);
 		expect(e.code).toBe("internal");
 		expect(e.retryable).toBe(false);
@@ -126,7 +126,7 @@ describe("toHttpError: core codes (S7 §5.5)", () => {
 	});
 
 	it("retries_exhausted and unknown errors: 500 internal", () => {
-		expect(toHttpError(new SbxError("retries_exhausted", "x")).code).toBe(
+		expect(toHttpError(new UmiakError("retries_exhausted", "x")).code).toBe(
 			"internal",
 		);
 		expect(toHttpError(new Error("boom")).code).toBe("internal");
@@ -235,7 +235,7 @@ describe("error envelope on every response", () => {
 	it("core error through a route: status, code, details", async () => {
 		const h = throwing(
 			() =>
-				new SbxError("operation_in_progress", "busy", {
+				new UmiakError("operation_in_progress", "busy", {
 					details: { operationId: "op_x", kind: "resume" },
 				}),
 		);
@@ -252,7 +252,7 @@ describe("error envelope on every response", () => {
 	it("503 out_of_capacity: Retry-After and details.retryAfterSeconds", async () => {
 		const h = throwing(
 			() =>
-				new SbxError("out_of_capacity", "full", {
+				new UmiakError("out_of_capacity", "full", {
 					details: { retryAfterSeconds: 15 },
 				}),
 		);
@@ -265,7 +265,7 @@ describe("error envelope on every response", () => {
 	});
 
 	it("429/503 without a hint get a default Retry-After", async () => {
-		const h = throwing(() => new SbxError("agent_unavailable", "gone"));
+		const h = throwing(() => new UmiakError("agent_unavailable", "gone"));
 		const r = await h.request("GET", "/v1/__test/throw");
 		expect(r.status).toBe(503);
 		const after = Number(r.headers.get("retry-after"));
@@ -280,12 +280,12 @@ describe("error envelope on every response", () => {
 			() =>
 				new ApiError(409, "upload_offset_mismatch", "offset", {
 					details: { offset: 5 },
-					headers: { "Sbx-Upload-Offset": "5" },
+					headers: { "Umiak-Upload-Offset": "5" },
 				}),
 		);
 		const r = await h.request("GET", "/v1/__test/throw");
 		expect(r.status).toBe(409);
-		expect(r.headers.get("sbx-upload-offset")).toBe("5");
+		expect(r.headers.get("umiak-upload-offset")).toBe("5");
 	});
 
 	it("body over the default 1 MiB: 413 payload_too_large", async () => {
@@ -341,7 +341,10 @@ describe("error envelope on every response", () => {
 	}
 
 	it("internal listener: envelope plus top-level code (gateway reads it)", async () => {
-		const h = throwing(() => new SbxError("not_found", "no route"), "internal");
+		const h = throwing(
+			() => new UmiakError("not_found", "no route"),
+			"internal",
+		);
 		const r = await h.request("GET", "/internal/v1/nope");
 		expect(r.status).toBe(404);
 		expect(expectEnvelope(r.body, r.headers).code).toBe("not_found");

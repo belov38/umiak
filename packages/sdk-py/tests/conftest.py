@@ -1,8 +1,8 @@
-"""Fixtures of the sbx-sdk tests.
+"""Fixtures of the umiak-sdk tests.
 
 ``api``: tests/api_server.ts run with ``node`` (apps/api in process with a
 FakeAgent and Postgres, behind a fault proxy) for the whole session.
-``client``: the facade under test, once as ``Sbx`` and once as ``AsyncSbx``
+``client``: the facade under test, once as ``Umiak`` and once as ``AsyncUmiak``
 (support.Client).
 """
 
@@ -24,8 +24,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 @pytest.fixture(scope="session")
 def api() -> Iterator[TestApi]:
-    if os.environ.get("SBX_TEST_SKIP_PG") == "1" and not os.environ.get("SBX_TEST_DATABASE_URL"):
-        pytest.skip("SBX_TEST_SKIP_PG=1: no Postgres for apps/api")
+    if os.environ.get("UMIAK_TEST_SKIP_PG") == "1" and not os.environ.get(
+        "UMIAK_TEST_DATABASE_URL"
+    ):
+        pytest.skip("UMIAK_TEST_SKIP_PG=1: no Postgres for apps/api")
     node = shutil.which("node")
     if node is None:
         pytest.fail("node is not in PATH (run through mise: `mise exec -- pnpm test`)")

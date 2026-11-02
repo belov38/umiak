@@ -4,8 +4,12 @@
 // owners), `sandbox_blocked` / `port_blocked` on the forbidden actions, reads,
 // stop and delete still working, and the gateway's route answer.
 import { randomUUID } from "node:crypto";
-import { encodeUuid, PgIdentityStore } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { encodeUuid, PgIdentityStore } from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type ApiDeps, ServiceTokens } from "../src/index.ts";
 import {
@@ -28,7 +32,7 @@ import {
 import { testSshCa } from "./helpers/ssh.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
 
-const OPERATORS = "sbx-operators";
+const OPERATORS = "umiak-operators";
 const GW = "gw-token-operator-0123456789abcdef";
 const UNKNOWN_SANDBOX = "sb_01jbx2v7d3m6c8q9w0e4r5t6y7";
 
@@ -84,10 +88,10 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 				operatorGroups: [OPERATORS],
 			}),
 			settings: testSettings({
-				SBX_API_RATE_BURST: "100000",
-				SBX_API_RATE_STARTS_PER_MIN: "100000",
-				SBX_OIDC_ISSUER: oidc.issuer,
-				SBX_OPERATOR_GROUPS: OPERATORS,
+				UMIAK_API_RATE_BURST: "100000",
+				UMIAK_API_RATE_STARTS_PER_MIN: "100000",
+				UMIAK_OIDC_ISSUER: oidc.issuer,
+				UMIAK_OPERATOR_GROUPS: OPERATORS,
 			}),
 		};
 		teamB = await newTeam(db.pool);
@@ -98,7 +102,7 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 		key = caller(keyHarness);
 		ownerB = await personOf(w, teamB, "owner", opDeps);
 		owner = caller(ownerB.h, ownerB.headers);
-		// An operator who is a member of yet another team: no Sbx-Team needed.
+		// An operator who is a member of yet another team: no Umiak-Team needed.
 		const o = await personOf(w, await newTeam(db.pool), "member", opDeps);
 		operator = {
 			...o,
@@ -462,8 +466,8 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 			expect(r.body).toMatchObject({ blocked: true, blockReason: "abuse" });
 		});
 
-		it("an operator with Sbx-Team still acts; unblock lifts everything at once", async () => {
-			const team = { "sbx-team": encodeUuid("team", teamB) };
+		it("an operator with Umiak-Team still acts; unblock lifts everything at once", async () => {
+			const team = { "umiak-team": encodeUuid("team", teamB) };
 			const ext = await op("POST", `${sb}/extend`, {
 				headers: team,
 				json: { ttlSeconds: 600 },
@@ -513,7 +517,7 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 				"resume",
 			);
 			const del = await key("DELETE", path, {
-				headers: { "sbx-confirm-delete": fx.sandbox },
+				headers: { "umiak-confirm-delete": fx.sandbox },
 			});
 			expect(del.status, del.text).toBe(202);
 		});

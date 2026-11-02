@@ -1,4 +1,4 @@
-import type { Tx } from "@sbx/db";
+import type { Tx } from "@umiak/db";
 import { admit } from "../capacity.ts";
 import { outOfCapacity, snapshotNotFound } from "../errors.ts";
 import { uuidv7 } from "../ids.ts";

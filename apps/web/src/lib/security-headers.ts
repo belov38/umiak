@@ -1,11 +1,11 @@
 // Response headers of web (S8 §5.6). The CSP keeps everything on the own
 // origin; the only foreign frames are sandbox ports and desktops
-// (`https://*.<sbxDomain>`, S10). Next.js and the Payload admin render inline
+// (`https://*.<umiakDomain>`, S10). Next.js and the Payload admin render inline
 // scripts and styles, hence 'unsafe-inline' (README: CSP). The dev server
 // also needs 'unsafe-eval' (React dev tooling and HMR).
 
 export interface SecurityHeaderOptions {
-	sbxDomain: string;
+	umiakDomain: string;
 	/** `next dev`: adds 'unsafe-eval' to script-src. */
 	dev?: boolean;
 }
@@ -21,7 +21,7 @@ export function contentSecurityPolicy(o: SecurityHeaderOptions): string {
 		["frame-ancestors", ["'self'"]],
 		// Same origin only; 'self' also matches wss:// of the own host.
 		["connect-src", ["'self'"]],
-		["frame-src", [`https://*.${o.sbxDomain}`]],
+		["frame-src", [`https://*.${o.umiakDomain}`]],
 		["img-src", ["'self'", "data:", "blob:"]],
 		["font-src", ["'self'", "data:"]],
 		["style-src", ["'self'", "'unsafe-inline'"]],

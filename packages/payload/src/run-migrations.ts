@@ -61,7 +61,7 @@ export async function assertPayloadMigrated(payload: Payload): Promise<void> {
 }
 
 /** Applies the pending migrations; returns their names. */
-export async function migrateSbxPayload(
+export async function migrateUmiakPayload(
 	payload: Payload,
 	log: (msg: string) => void = (m) => payload.logger.info(m),
 ): Promise<string[]> {
@@ -69,7 +69,9 @@ export async function migrateSbxPayload(
 	// One client is held by the adapter for good, one holds the lock and one
 	// runs the migration transaction: a smaller pool would wait forever.
 	if ((pool.options.max ?? 10) < 3) {
-		throw new Error("migrateSbxPayload needs a pool of at least 3 connections");
+		throw new Error(
+			"migrateUmiakPayload needs a pool of at least 3 connections",
+		);
 	}
 	const client = await pool.connect();
 	let broken: Error | undefined;

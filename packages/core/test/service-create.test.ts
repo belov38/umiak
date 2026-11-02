@@ -1,4 +1,8 @@
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DELETE_RETRY_LIMIT, type SecretSets } from "../src/index.ts";
 import {
@@ -346,7 +350,7 @@ describe.skipIf(skipPg())("SandboxService.create (S6 §7.3)", () => {
 		);
 		await expectCode(env.svc.create(env.p, { slug: "Bad_Slug" }), "validation");
 		await expectCode(
-			env.svc.create(env.p, { env: { SBX_SECRET: "x" } }),
+			env.svc.create(env.p, { env: { UMIAK_SECRET: "x" } }),
 			"validation",
 		);
 		const ok = await env.svc.create(env.p, {

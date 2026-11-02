@@ -1,4 +1,5 @@
 "use client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 // Header of the sandbox page (S8 §9.6): name, slug with rename, state,
 // health, activity, template, size, origin, labels, TTL, idle timeout; the
 // actions Stop/Resume/Fork/Recover/Extend/Save snapshot/Delete; the bar of
@@ -6,8 +7,7 @@
 // lock and its reason; forbidden actions are disabled (S8 §17.1 C3). Fork
 // and Save snapshot of a running Windows sandbox ask before they stop and
 // restart it (S9 §24.8).
-import type { SandboxData } from "@sbx/sdk";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { SandboxData } from "@umiak/sdk";
 import {
 	ArchiveIcon,
 	ChevronLeftIcon,
@@ -32,7 +32,7 @@ import { CopyButton } from "@/components/app/copy-button";
 import { Field, FormDialog } from "@/components/app/form-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import { attempt } from "@/lib/client-call";
 import { slugProblem } from "@/lib/create-form";
 import { describeError, isSnapshotRequiresStop } from "@/lib/errors";
@@ -69,7 +69,7 @@ export function SandboxHeader({
 	desktop?: boolean;
 	track: (operationId: string) => void;
 }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const router = useRouter();
 	const refreshAll = useRefreshSandboxes(teamId);
 	const [busy, setBusy] = useState(false);
@@ -159,7 +159,7 @@ export function SandboxHeader({
 							disabled={busy || !a.resume}
 							onClick={() =>
 								act(`Resuming ${s.slug}`, () =>
-									sbx.raw.POST("/v1/sandboxes/{sandbox}/resume", {
+									umiak.raw.POST("/v1/sandboxes/{sandbox}/resume", {
 										...path,
 										body: {},
 									}),
@@ -176,7 +176,7 @@ export function SandboxHeader({
 							disabled={busy || !a.stop}
 							onClick={() =>
 								act(`Stopping ${s.slug}`, () =>
-									sbx.raw.POST("/v1/sandboxes/{sandbox}/stop", path),
+									umiak.raw.POST("/v1/sandboxes/{sandbox}/stop", path),
 								)
 							}
 						>
@@ -209,7 +209,7 @@ export function SandboxHeader({
 						disabled={busy || !a.recover}
 						onConfirm={() =>
 							act(`Recovering ${s.slug}`, () =>
-								sbx.raw.POST("/v1/sandboxes/{sandbox}/recover", path),
+								umiak.raw.POST("/v1/sandboxes/{sandbox}/recover", path),
 							)
 						}
 					>
@@ -270,7 +270,7 @@ export function SandboxHeader({
 				busy={busy}
 				onRecover={() =>
 					act(`Recovering ${s.slug}`, () =>
-						sbx.raw.POST("/v1/sandboxes/{sandbox}/recover", path),
+						umiak.raw.POST("/v1/sandboxes/{sandbox}/recover", path),
 					)
 				}
 			/>
@@ -480,7 +480,7 @@ function RenameDialog({
 	open: boolean;
 	onOpenChange: (o: boolean) => void;
 }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const router = useRouter();
 	const params = useSearchParams();
 	const queryClient = useQueryClient();
@@ -499,7 +499,7 @@ function RenameDialog({
 			submitDisabled={problem !== null || slug.trim() === s.slug}
 			onSubmit={async () => {
 				const r = await attempt(() =>
-					sbx.raw.PATCH("/v1/sandboxes/{sandbox}", {
+					umiak.raw.PATCH("/v1/sandboxes/{sandbox}", {
 						params: { path: { sandbox: s.id } },
 						body: { slug: slug.trim() },
 					}),
@@ -552,7 +552,7 @@ function ExtendDialog({
 	open: boolean;
 	onOpenChange: (o: boolean) => void;
 }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const queryClient = useQueryClient();
 	const [choice, setChoice] = useState(0);
 	const seconds = EXTEND_CHOICES[choice]?.seconds ?? null;
@@ -565,7 +565,7 @@ function ExtendDialog({
 			submitLabel="Extend"
 			onSubmit={async () => {
 				const r = await attempt(() =>
-					sbx.raw.POST("/v1/sandboxes/{sandbox}/extend", {
+					umiak.raw.POST("/v1/sandboxes/{sandbox}/extend", {
 						params: { path: { sandbox: s.id } },
 						body: seconds === null ? {} : { ttlSeconds: seconds },
 					}),
@@ -615,7 +615,7 @@ function SnapshotDialog({
 	open: boolean;
 	onOpenChange: (o: boolean) => void;
 }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const queryClient = useQueryClient();
 	const [name, setName] = useState("");
 	const key = useRef<IdempotencySlot | null>(null);
@@ -627,7 +627,7 @@ function SnapshotDialog({
 	const snapshots = useQuery({
 		queryKey: ["snapshots", teamId],
 		queryFn: async ({ signal }) => {
-			const { data } = await sbx.raw.GET("/v1/snapshots", { signal });
+			const { data } = await umiak.raw.GET("/v1/snapshots", { signal });
 			return data.data;
 		},
 		enabled: open,
@@ -668,7 +668,7 @@ function SnapshotDialog({
 				};
 				const slot = slotFor(key.current, body);
 				try {
-					const { data } = await sbx.raw.POST("/v1/snapshots", {
+					const { data } = await umiak.raw.POST("/v1/snapshots", {
 						body,
 						idempotencyKey: slot.key,
 					});

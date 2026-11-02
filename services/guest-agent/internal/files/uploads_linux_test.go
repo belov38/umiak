@@ -12,9 +12,9 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
 )
 
 // otherDevice returns a fresh directory on another filesystem than base
@@ -28,7 +28,7 @@ func otherDevice(t *testing.T, base string) string {
 	if err := syscall.Stat("/dev/shm", &b); err != nil || a.Dev == b.Dev {
 		t.Skip("no second filesystem at /dev/shm")
 	}
-	dir, err := os.MkdirTemp("/dev/shm", "sbx-files-test")
+	dir, err := os.MkdirTemp("/dev/shm", "umiak-files-test")
 	if err != nil {
 		t.Skip(err)
 	}
@@ -49,7 +49,7 @@ func TestUploadCrossDevice(t *testing.T) {
 	dst1 := filepath.Join(other, "hinted.bin")
 	res := h.do(http.MethodPut, "/files/uploads/hinted", q("offset", "0", "path", dst1), strings.NewReader("hinted"), nil)
 	wantStatus(t, res, http.StatusOK)
-	if _, err := os.Stat(filepath.Join(other, ".sbx-upload-hinted")); err != nil {
+	if _, err := os.Stat(filepath.Join(other, ".umiak-upload-hinted")); err != nil {
 		t.Fatalf("temp file not next to the target: %v", err)
 	}
 	wantStatus(t, commit("hinted", dst1), http.StatusOK)
@@ -70,7 +70,7 @@ func TestUploadCrossDevice(t *testing.T) {
 	}
 	entries, _ := os.ReadDir(other)
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".sbx-") {
+		if strings.HasPrefix(e.Name(), ".umiak-") {
 			t.Fatalf("temporary file left: %s", e.Name())
 		}
 	}

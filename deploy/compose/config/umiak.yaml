@@ -1,0 +1,205 @@
+# PoC configuration for the local compose stack, matching the real host `pve`.
+# Read only by `umiak-admin bootstrap` in `migrate` (topology and template
+# builds). api and worker take templates, sizes, quotas and pool targets from
+# Payload (S8, edited in /admin); its migrations seed the same templates, sizes
+# and default quota as below. The templates, sizes, pools and
+# quotas sections here are not read by api or worker.
+# After editing: docker compose -f deploy/compose/compose.yaml up -d --force-recreate migrate
+templates:
+  - slug: linux
+    os: linux
+    enabled: true
+    defaultSize: 2gb
+    allowedSizes: [2gb]
+  # S9: Windows 11 Pro 26H2 (template build below). 4 GB is the Windows 11 minimum.
+  # Like the rest of this section, api and worker read it from Payload. Migration
+  # 20261101_000000_windows_template inserts missing catalog entries there;
+  # existing operator settings are preserved. The build below is separate.
+  - slug: windows
+    os: windows
+    enabled: true
+    defaultSize: 4gb
+    allowedSizes: [4gb]
+
+  # S10: desktop templates. Migration 20261101_010000_desktop_defaults inserts
+  # them, 8gb and 4 vCPU for 4gb (S10 section 15.1) into Payload.
+  - slug: linux-desktop
+    os: linux
+    enabled: true
+    defaultSize: 4gb
+    allowedSizes: [4gb, 8gb]
+    capabilities: [exec, files, ssh, desktop]
+  - slug: windows-desktop
+    os: windows
+    enabled: true
+    defaultSize: 4gb
+    allowedSizes: [4gb, 8gb]
+    capabilities: [exec, files, ssh, desktop]
+
+sizes:
+  - slug: 2gb
+    vcpu: 2
+    memoryMb: 2048
+  - slug: 4gb
+    vcpu: 4
+    memoryMb: 4096
+  - slug: 8gb
+    vcpu: 8
+    memoryMb: 8192
+
+# Decision 17: warm pools are off. The worker must not create VMs on pve by
+# itself. Pool targets live in Payload (/admin, collection pool-targets; none
+# seeded); one there plus UMIAK_RECONCILE_DRY_RUN=0 enables a pool.
+pools: []
+
+quotas:
+  default:
+    maxActiveSandboxes: 3
+    maxRamMb: 8192
+    maxSavedSnapshots: 10
+
+topology:
+  providers:
+    - name: pve
+      clusterMacId: 1
+      vmidMin: 500
+      vmidMax: 589
+      # Overridden by UMIAK_PVE_URL / UMIAK_PVE_TLS_NAME in deploy/compose/.env
+      # (umiak-admin bootstrap in `migrate`).
+      apiUrl: https://pve:8006
+      tlsName: pve
+      secretRef: pve
+      nodes:
+        - name: pve
+          ramCapMb: 8192
+          cloneConcurrency: 4
+          nodeAgentRef: pve
+          storages:
+            - name: local-lvm
+              driver: lvmthin
+              dataMaxPct: 80
+              metaMaxPct: 70
+  # Verified Umiak builds; catalog remains disabled on the stand until all four are ready.
+  templateBuilds:
+    - templateSlug: linux
+      version: "20261101.1"
+      os: linux
+      node: pve
+      storage: local-lvm
+      pveVmid: 597
+      bootTimeoutS: 300
+      agentVersion: 0.1.0+20261101.087b3f3a
+      diskLayout:
+        scsi0:
+          size: 64G
+          discard: on
+          iothread: "1"
+          ssd: "1"
+      hw:
+        machine: q35
+        cpu: host
+        bios: seabios
+        ostype: l26
+        scsihw: virtio-scsi-single
+        agent: enabled=1
+        serial0: socket
+        vga: std
+        tablet: "0"
+        rng0: source=/dev/urandom
+        cloudinit: false
+    - templateSlug: linux-desktop
+      version: "20261101.3"
+      os: linux
+      node: pve
+      storage: local-lvm
+      pveVmid: 596
+      bootTimeoutS: 300
+      agentVersion: 0.1.0+20261101.087b3f3a
+      diskLayout:
+        scsi0:
+          size: 64G
+          discard: on
+          iothread: "1"
+          ssd: "1"
+      hw:
+        machine: q35
+        cpu: host
+        bios: seabios
+        ostype: l26
+        scsihw: virtio-scsi-single
+        agent: enabled=1
+        serial0: socket
+        vga: std
+        tablet: "0"
+        rng0: source=/dev/urandom
+        cloudinit: false
+    - templateSlug: windows-desktop
+      version: "20261101.7"
+      os: windows
+      node: pve
+      storage: local-lvm
+      pveVmid: 595
+      bootTimeoutS: 1200
+      agentVersion: 0.1.0+20261101.087b3f3a
+      diskLayout:
+        efidisk0:
+          index: "0"
+          efitype: 4m
+          pre-enrolled-keys: "1"
+          ms-cert: 2023k
+        scsi0:
+          index: "1"
+          size: 96G
+          discard: on
+          iothread: "1"
+          ssd: "1"
+        tpmstate0:
+          index: "2"
+          version: v2.0
+      hw:
+        machine: pc-q35-11.0+pve2
+        cpu: host
+        bios: ovmf
+        ostype: win11
+        scsihw: virtio-scsi-single
+        agent: enabled=1
+        vga: std
+        tablet: "1"
+        localtime: "0"
+        rng0: source=/dev/urandom
+        cloudinit: false
+    - templateSlug: windows
+      version: "20261101.2"
+      os: windows
+      node: pve
+      storage: local-lvm
+      pveVmid: 598
+      bootTimeoutS: 1200
+      agentVersion: 0.1.0+20261101.087b3f3a
+      diskLayout:
+        efidisk0:
+          index: "0"
+          efitype: 4m
+          pre-enrolled-keys: "1"
+          ms-cert: 2023k
+        scsi0:
+          index: "1"
+          size: 96G
+          discard: on
+          iothread: "1"
+          ssd: "1"
+        tpmstate0:
+          index: "2"
+          version: v2.0
+      hw:
+        machine: pc-q35-11.0+pve2
+        cpu: host
+        bios: ovmf
+        ostype: win11
+        scsihw: virtio-scsi-single
+        agent: enabled=1
+        vga: std
+        tablet: "1"
+        localtime: "0"
+        rng0: source=/dev/urandom
+        cloudinit: false

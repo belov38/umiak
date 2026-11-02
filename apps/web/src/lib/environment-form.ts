@@ -4,7 +4,7 @@
 // typed, and a removed secret or file is sent as null. Repositories are
 // checked like the API does (no credentials, query or fragment in the URL)
 // and replace the stored list whole.
-import type { components } from "@sbx/sdk";
+import type { components } from "@umiak/sdk";
 import {
 	envSet,
 	type FormErrors,

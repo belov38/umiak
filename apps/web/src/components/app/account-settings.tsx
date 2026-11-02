@@ -1,9 +1,9 @@
 "use client";
-import { SbxError } from "@sbx/sdk";
 // /app/account (S8 §9.9): profile (read-only, from the IdP), default team
 // (server action), SSH keys (GET/POST/DELETE /v1/ssh-keys through the SDK)
 // and sign-out.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { UmiakError } from "@umiak/sdk";
 import { useRouter } from "next/navigation";
 import { type FormEvent, type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -28,7 +28,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import { attempt } from "@/lib/client-call";
 import { formatTime } from "@/lib/format";
 
@@ -67,7 +67,7 @@ export function AccountSettings({ signOutHref }: { signOutHref: string }) {
 					<Button asChild variant="ghost">
 						<a
 							href={signOutHref}
-							title="Ends the single sign-on session too; the CLI will ask for sbx login again."
+							title="Ends the single sign-on session too; the CLI will ask for umiak login again."
 						>
 							Sign out
 						</a>
@@ -123,7 +123,7 @@ function DefaultTeam() {
 			description={
 				<>
 					Used by the CLI, SDK and API when no team is given (
-					<code>Sbx-Team</code>) and when you open the dashboard.
+					<code>Umiak-Team</code>) and when you open the dashboard.
 				</>
 			}
 		>
@@ -160,7 +160,7 @@ function DefaultTeam() {
 
 /** The text of an SSH key error (S8 §9.9: in_use and type as text). */
 function sshKeyError(e: unknown): string {
-	if (e instanceof SbxError) {
+	if (e instanceof UmiakError) {
 		if (e.code === "ssh_key_in_use") {
 			return "This key is already registered on the platform, on your account or someone else's. Use another key.";
 		}
@@ -175,12 +175,12 @@ function sshKeyError(e: unknown): string {
 function SshKeys() {
 	const s = useAppSession();
 	// SSH keys belong to the person, not a team.
-	const sbx = useSbx(s.defaultTeamId);
+	const umiak = useUmiak(s.defaultTeamId);
 	const queryClient = useQueryClient();
 	const keys = useQuery({
 		queryKey: ["ssh-keys"],
 		queryFn: async () => {
-			const { data } = await sbx.raw.GET("/v1/ssh-keys");
+			const { data } = await umiak.raw.GET("/v1/ssh-keys");
 			return data.data;
 		},
 	});
@@ -189,7 +189,7 @@ function SshKeys() {
 	const [error, setError] = useState<string | null>(null);
 	const add = useMutation({
 		mutationFn: async () => {
-			const { data } = await sbx.raw.POST("/v1/ssh-keys", {
+			const { data } = await umiak.raw.POST("/v1/ssh-keys", {
 				body: { name: name.trim(), publicKey: publicKey.trim() },
 			});
 			return data;
@@ -210,7 +210,7 @@ function SshKeys() {
 	};
 	const remove = async (id: string): Promise<boolean> => {
 		try {
-			await sbx.raw.DELETE("/v1/ssh-keys/{key}", {
+			await umiak.raw.DELETE("/v1/ssh-keys/{key}", {
 				params: { path: { key: id } },
 			});
 			await queryClient.invalidateQueries({ queryKey: ["ssh-keys"] });

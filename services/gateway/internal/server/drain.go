@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
+	"github.com/belov38/umiak/libs/tunnel/gateway"
+	"github.com/belov38/umiak/services/gateway/internal/config"
 )
 
 // defaultEndpointWait is the gateway.Timing default (zero Timing fields
@@ -20,7 +20,7 @@ const (
 	// sessions to end.
 	drainPoll = 50 * time.Millisecond
 	// drainGaugeEvery is the update period of
-	// sbx_gateway_drain_open_streams.
+	// umiak_gateway_drain_open_streams.
 	drainGaugeEvery = time.Second
 	// sshCloseGrace is how long after the SSH drain deadline the drain
 	// waits for the sessions before closing the SSH server.
@@ -107,7 +107,7 @@ func (i *Instance) drain(ctx context.Context) error {
 	}
 
 	// The servers' Shutdown closes the plain listener and the dispatcher's
-	// sbx and tunnel listeners; closing the dispatcher closes the TLS port.
+	// umiak and tunnel listeners; closing the dispatcher closes the TLS port.
 	httpCtx, cancelHTTP := context.WithDeadline(ctx, t0.Add(i.cfg.HTTPDrainDeadline))
 	defer cancelHTTP()
 	httpDone := make(chan struct{})
@@ -218,7 +218,7 @@ func (i *Instance) forceStop(ctx context.Context, tunnelDone <-chan error) error
 	return ctx.Err()
 }
 
-// drainGauge keeps sbx_gateway_drain_open_streams current during the
+// drainGauge keeps umiak_gateway_drain_open_streams current during the
 // drain; stop sets the final values.
 func (i *Instance) drainGauge() (stop func()) {
 	update := func() {

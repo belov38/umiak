@@ -1,12 +1,12 @@
 import { register as registerDesktop } from "./commands/desktop.ts";
-// The `sbx` program: commander tree, global options, and the runner that
+// The `umiak` program: commander tree, global options, and the runner that
 // turns a command's result or error into output and an exit code.
 //
 // A command module exports `register(program, run)` and wraps its handler
 // with `run(handler, meta)`:
 //
 //   program.command("whoami").description("…").action(
-//     run(async (ctx) => { ctx.out.result(await ctx.sbx().me()); }),
+//     run(async (ctx) => { ctx.out.result(await ctx.umiak().me()); }),
 //   );
 //
 // A handler returns an exit code, or anything else for 0; a thrown error is
@@ -66,7 +66,7 @@ import type { GlobalOptions } from "./profile.ts";
 export interface CommandMeta {
 	/** stdout carries the command's data (errors go to stderr without --json). */
 	rawData?: boolean;
-	/** stdout carries a protocol (`sbx mcp`: JSON-RPC): errors go to stderr even with --json. */
+	/** stdout carries a protocol (`umiak mcp`: JSON-RPC): errors go to stderr even with --json. */
 	protocol?: boolean;
 }
 
@@ -104,14 +104,14 @@ const protocolActions = new WeakSet<object>();
 /**
  * A command that knows whether its stdout is data (`rawData` of its
  * action): decided before its options are parsed, so even a usage error
- * of `sbx exec --bogus > f` keeps the data stream clean.
+ * of `umiak exec --bogus > f` keeps the data stream clean.
  */
-class SbxCommand extends Command {
+class UmiakCommand extends Command {
 	rawData = false;
 	protocol = false;
 
 	override createCommand(name?: string): Command {
-		return new SbxCommand(name);
+		return new UmiakCommand(name);
 	}
 
 	override action(fn: Parameters<Command["action"]>[0]): this {
@@ -123,24 +123,24 @@ class SbxCommand extends Command {
 
 /** Builds the command tree; `run` wraps the handlers. */
 export function buildProgram(io: CliIo, run: Runner): Command {
-	const program = new SbxCommand("sbx")
-		.description("sbx: VM sandboxes for AI agents")
+	const program = new UmiakCommand("umiak")
+		.description("umiak: VM sandboxes for AI agents")
 		.version(CLI_VERSION, "-V, --version", "print the CLI version")
 		.option("--json", "print JSON (the default when stdout is not a terminal)")
 		.option(
 			"--human",
 			"print text for a person, even when stdout is not a terminal",
 		)
-		.option("--profile <name>", "profile of config.json (env SBX_PROFILE)")
-		.option("--api-url <url>", "API URL (env SBX_API_URL)")
-		.option("--team <team>", "team (team_…) to act in (env SBX_TEAM)")
+		.option("--profile <name>", "profile of config.json (env UMIAK_PROFILE)")
+		.option("--api-url <url>", "API URL (env UMIAK_API_URL)")
+		.option("--team <team>", "team (team_…) to act in (env UMIAK_TEAM)")
 		.option(
 			"--cacert <file>",
-			"PEM file of a private CA for HTTPS; trusted: Node's bundled roots plus this file, not the OS store (env SBX_CA_FILE)",
+			"PEM file of a private CA for HTTPS; trusted: Node's bundled roots plus this file, not the OS store (env UMIAK_CA_FILE)",
 		)
 		.option(
 			"--credential-store <store>",
-			"keychain, file or auto (env SBX_CREDENTIAL_STORE)",
+			"keychain, file or auto (env UMIAK_CREDENTIAL_STORE)",
 		)
 		.showSuggestionAfterError(true)
 		.configureHelp({ showGlobalOptions: true })
@@ -194,7 +194,7 @@ export function allCommands(c: Command): Command[] {
 	return [c, ...c.commands.flatMap(allCommands)];
 }
 
-/** Runs `sbx` with these arguments; resolves to the exit code. */
+/** Runs `umiak` with these arguments; resolves to the exit code. */
 export async function runCli(io: CliIo): Promise<number> {
 	const mode = outputMode(io.argv, io.env);
 	const out = new Output({
@@ -240,8 +240,8 @@ export async function runCli(io: CliIo): Promise<number> {
 	// Before a subcommand parses its options (a usage error comes from there).
 	for (const c of allCommands(program)) {
 		c.hook("preSubcommand", (_parent, sub) => {
-			out.rawData = sub instanceof SbxCommand && sub.rawData;
-			out.protocol = sub instanceof SbxCommand && sub.protocol;
+			out.rawData = sub instanceof UmiakCommand && sub.rawData;
+			out.protocol = sub instanceof UmiakCommand && sub.protocol;
 		});
 	}
 	try {

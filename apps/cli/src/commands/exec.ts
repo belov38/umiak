@@ -1,9 +1,9 @@
-// `sbx exec [<sb>] [flags] -- <cmd...>` (S7 §9, §14.2, §14.3).
+// `umiak exec [<sb>] [flags] -- <cmd...>` (S7 §9, §14.2, §14.3).
 // - The remote command follows `--`: one word is a shell line (`bash -lc`),
 //   several are argv (no shell).
 // - Default: the output streams live, stdout to stdout and stderr to stderr
 //   as raw bytes (encoding base64 on the wire), with the SDK's automatic
-//   reattach; `sbx` exits with the command's code (128+n for a signal, 124
+//   reattach; `umiak` exits with the command's code (128+n for a signal, 124
 //   timed out, 125 lost or failed to start).
 // - `--json` (explicit): the API frames as NDJSON with `event` instead of
 //   `type` (`started`, `stdout`, `stderr`, `truncated`, `exit`).
@@ -14,9 +14,9 @@
 // - Ctrl-C sends SIGINT to the remote command; a second Ctrl-C leaves it
 //   running and exits 130. SIGTERM/SIGHUP leave it running too and exit
 //   143/129.
-// - When the reader of stdout goes away (`sbx exec … | head -1`), the remote
+// - When the reader of stdout goes away (`umiak exec … | head -1`), the remote
 //   command is killed (SIGTERM, then SIGKILL after the api's grace), as a
-//   local pipeline's writer dies of SIGPIPE, and sbx exits 141 quietly.
+//   local pipeline's writer dies of SIGPIPE, and umiak exits 141 quietly.
 
 import { randomUUID } from "node:crypto";
 import {
@@ -24,8 +24,8 @@ import {
 	newIdempotencyKey,
 	type RunEvent,
 	type Sandbox,
-	type Command as SbxCommand,
-} from "@sbx/sdk";
+	type Command as UmiakCommand,
+} from "@umiak/sdk";
 import type { Command } from "commander";
 import { collect, parseDuration, parsePairs, splitDashDash } from "../args.ts";
 import type { Context } from "../context.ts";
@@ -37,7 +37,7 @@ import type { Runner } from "../program.ts";
 /** Exit code after a second Ctrl-C (the remote command keeps running). */
 export const EXIT_INTERRUPTED = 130;
 
-/** Signals that stop sbx itself (the terminal closed, a kill): 128 + n. */
+/** Signals that stop umiak itself (the terminal closed, a kill): 128 + n. */
 export const STOP_SIGNALS = ["SIGTERM", "SIGHUP"] as const;
 type StopSignal = (typeof STOP_SIGNALS)[number] | "SIGINT";
 const STOP_EXIT: Record<StopSignal, number> = {
@@ -46,7 +46,7 @@ const STOP_EXIT: Record<StopSignal, number> = {
 	SIGHUP: 128 + 1,
 };
 
-/** Exit code of sbx stopped by `sig` (130 when unknown: Ctrl-C). */
+/** Exit code of umiak stopped by `sig` (130 when unknown: Ctrl-C). */
 export function stopExitCode(sig: NodeJS.Signals | undefined): number {
 	return sig !== undefined && sig in STOP_EXIT
 		? STOP_EXIT[sig as StopSignal]
@@ -103,7 +103,9 @@ export function remoteCommand(
 ): { before: string[]; cmd: string | string[] } {
 	const { before, after } = splitDashDash(ctx.argv, operands);
 	if (after === null || after.length === 0) {
-		throw usageError("put the command after --, e.g. sbx exec <sb> -- ls -la");
+		throw usageError(
+			"put the command after --, e.g. umiak exec <sb> -- ls -la",
+		);
 	}
 	if (before.length > maxBefore) {
 		throw usageError(
@@ -158,7 +160,7 @@ export async function printEvents(
  */
 export function forwardInterrupts(
 	ctx: Context,
-	current: () => SbxCommand | undefined,
+	current: () => UmiakCommand | undefined,
 ): {
 	signal: AbortSignal;
 	interrupted: () => boolean;
@@ -173,7 +175,7 @@ export function forwardInterrupts(
 		const cmd = current();
 		if (count === 1 && cmd !== undefined) {
 			ctx.out.info(
-				"sbx: sending SIGINT to the command (Ctrl-C again to detach)",
+				"umiak: sending SIGINT to the command (Ctrl-C again to detach)",
 			);
 			cmd.signal("SIGINT").catch((err: unknown) => {
 				ctx.out.warn(
@@ -202,7 +204,7 @@ export function forwardInterrupts(
 }
 
 /**
- * Runs `cmd` in `sb`, printing its output; returns sbx's exit code.
+ * Runs `cmd` in `sb`, printing its output; returns umiak's exit code.
  * `detachHint`: after a second Ctrl-C, tell how to find the command again
  * (false when the sandbox is about to be deleted, `run`).
  */
@@ -216,8 +218,8 @@ export async function execIn(
 	const json = ctx.out.jsonFlag;
 	const encoding = json ? "utf8" : "base64";
 	const spec = commandSpec(f);
-	let command: SbxCommand | undefined;
-	const onStart = (c: SbxCommand) => {
+	let command: UmiakCommand | undefined;
+	const onStart = (c: UmiakCommand) => {
 		command = c;
 		if (json) void ctx.out.event("started", { commandId: c.id });
 	};
@@ -282,7 +284,7 @@ export async function execIn(
 		if (fwd.interrupted()) {
 			if (command !== undefined && o.detachHint !== false) {
 				ctx.out.info(
-					`sbx: ${command.id} keeps running; see: sbx logs ${command.id}`,
+					`umiak: ${command.id} keeps running; see: umiak logs ${command.id}`,
 				);
 			}
 			return fwd.exitCode();
@@ -298,7 +300,7 @@ export async function execIn(
 /** Sends this process's stdin to the command, then closes its stdin. */
 async function pumpStdin(
 	ctx: Context,
-	c: SbxCommand,
+	c: UmiakCommand,
 	signal: AbortSignal,
 ): Promise<void> {
 	const sessionId = randomUUID();
@@ -323,7 +325,7 @@ export function register(program: Command, run: Runner): void {
 		program
 			.command("exec")
 			.description(
-				"run a command in a sandbox: sbx exec [<sb>] [flags] -- <cmd...>",
+				"run a command in a sandbox: umiak exec [<sb>] [flags] -- <cmd...>",
 			)
 			.argument("[args...]", "sandbox ID or slug, then -- and the command")
 			.addHelpText(
@@ -331,9 +333,9 @@ export function register(program: Command, run: Runner): void {
 				[
 					"",
 					"The command after --:",
-					"  one word runs as a shell line (bash -lc):  sbx exec sb -- 'npm test && ls'",
-					"  several words run as argv, without a shell: sbx exec sb -- ls -la /tmp",
-					"stdout and stderr are the command's own bytes; sbx exits with its code",
+					"  one word runs as a shell line (bash -lc):  umiak exec sb -- 'npm test && ls'",
+					"  several words run as argv, without a shell: umiak exec sb -- ls -la /tmp",
+					"stdout and stderr are the command's own bytes; umiak exits with its code",
 					"(128+n for a signal, 124 timed out, 125 lost). --json prints NDJSON frames.",
 				].join("\n"),
 			),

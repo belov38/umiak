@@ -2,15 +2,15 @@ import {
 	DELETE_RETRY_LIMIT,
 	loadOperation,
 	TERMINAL_OPERATION_STATES,
-} from "@sbx/core";
-import { withTx } from "@sbx/db";
+} from "@umiak/core";
+import { withTx } from "@umiak/db";
 import type { WorkerCtx } from "../context.ts";
 import { Fenced, FencedOut, type OperationError } from "../steps.ts";
 import { SANDBOX_OPS, type SandboxOpData } from "./sandbox-op.ts";
 
 // sandbox-op-dlq (decision 8, S6 §15.1): a job whose retries ran out. Delete
 // never gives up: it is enqueued again after 60 s and counted in
-// `sbx_delete_dead_letter_total` (the `sbx_delete_stuck` gauge of deletes
+// `umiak_delete_dead_letter_total` (the `umiak_delete_stuck` gauge of deletes
 // active > 30 min is the health controller's, §7.9). Any other operation is
 // compensated and fails with `retries_exhausted`.
 
@@ -43,7 +43,7 @@ export async function handleSandboxOpDeadLetter(
 			{ operationId: op.id, sandboxId: op.sandboxId, step: op.step },
 			"delete exhausted its retries; enqueued again",
 		);
-		ctx.metrics.inc("sbx_delete_dead_letter_total", {
+		ctx.metrics.inc("umiak_delete_dead_letter_total", {
 			step: op.step ?? "none",
 		});
 		return "requeued";
@@ -68,6 +68,6 @@ export async function handleSandboxOpDeadLetter(
 		{ operationId: op.id, kind: op.kind, step: fenced.op.step },
 		"operation exhausted its retries; compensated",
 	);
-	ctx.metrics.inc("sbx_operation_retries_exhausted_total", { kind: op.kind });
+	ctx.metrics.inc("umiak_operation_retries_exhausted_total", { kind: op.kind });
 	return "failed";
 }

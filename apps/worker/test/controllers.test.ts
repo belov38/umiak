@@ -56,7 +56,7 @@ describe("CONTROLLERS (§15.1)", () => {
 		await runIdpSync(ok, { run: async () => {} });
 		const m = ok.metrics as RecordingMetrics;
 		expect(
-			m.calls.find((x) => x.name === "sbx_idp_sync_total")?.labels,
+			m.calls.find((x) => x.name === "umiak_idp_sync_total")?.labels,
 		).toEqual({ result: "ok" });
 
 		const bad = ctx();
@@ -69,7 +69,7 @@ describe("CONTROLLERS (§15.1)", () => {
 		).rejects.toThrow("idp down");
 		expect(
 			(bad.metrics as RecordingMetrics).calls.find(
-				(x) => x.name === "sbx_idp_sync_total",
+				(x) => x.name === "umiak_idp_sync_total",
 			)?.labels,
 		).toEqual({ result: "failed" });
 	});

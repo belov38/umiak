@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/routes"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/routes"
 )
 
 func (h *harness) serve(r *http.Request, l routes.Label, rt *cpapi.Route) *httptest.ResponseRecorder {
@@ -53,7 +53,7 @@ func callbackWith(l routes.Label, code, state string, cs ...*http.Cookie) *http.
 }
 
 func callbackRequest(l routes.Label, code, state string, c *http.Cookie) *http.Request {
-	r := navRequest(http.MethodGet, "https://"+l.Raw+"."+testDomain+"/__sbx/auth/callback?code="+url.QueryEscape(code)+"&state="+url.QueryEscape(state))
+	r := navRequest(http.MethodGet, "https://"+l.Raw+"."+testDomain+"/__umiak/auth/callback?code="+url.QueryEscape(code)+"&state="+url.QueryEscape(state))
 	if c != nil {
 		r.AddCookie(c)
 	}
@@ -308,8 +308,8 @@ func TestLogout(t *testing.T) {
 	for _, crossSite := range []bool{false, true} {
 		h := newHarness(t, func(c *Config) { c.CrossSite = crossSite })
 		l := label("quiet-otter-3000")
-		r := navRequest(http.MethodGet, "https://x/__sbx/auth/logout")
-		r.Header.Set("Cookie", "app=1; "+AuthCookie+"=x; __Host-sbx_state_aaaaaaaa=1; __Host-sbx_state_bbbbbbbb=2; __Host-sbx_state_aaaaaaaa=3")
+		r := navRequest(http.MethodGet, "https://x/__umiak/auth/logout")
+		r.Header.Set("Cookie", "app=1; "+AuthCookie+"=x; __Host-umiak_state_aaaaaaaa=1; __Host-umiak_state_bbbbbbbb=2; __Host-umiak_state_aaaaaaaa=3")
 		w := h.serve(r, l, nil)
 		if w.Code != http.StatusFound || w.Header().Get("Location") != "/" {
 			t.Fatalf("got %d Location %q", w.Code, w.Header().Get("Location"))
@@ -318,7 +318,7 @@ func TestLogout(t *testing.T) {
 		if n := len(w.Result().Header.Values("Set-Cookie")); n != 3 {
 			t.Errorf("%d Set-Cookie lines, want 3: %q", n, w.Result().Header.Values("Set-Cookie"))
 		}
-		for _, name := range []string{AuthCookie, "__Host-sbx_state_aaaaaaaa", "__Host-sbx_state_bbbbbbbb"} {
+		for _, name := range []string{AuthCookie, "__Host-umiak_state_aaaaaaaa", "__Host-umiak_state_bbbbbbbb"} {
 			line := cookieHeader(t, w, name)
 			if !strings.HasPrefix(line, name+"=;") {
 				t.Errorf("%s not cleared: %q", name, line)
@@ -327,7 +327,7 @@ func TestLogout(t *testing.T) {
 		}
 
 		// Without cookies, logout still clears the auth cookie.
-		w = h.serve(navRequest(http.MethodGet, "https://x/__sbx/auth/logout"), l, nil)
+		w = h.serve(navRequest(http.MethodGet, "https://x/__umiak/auth/logout"), l, nil)
 		if got := w.Result().Header.Values("Set-Cookie"); len(got) != 1 || !strings.HasPrefix(got[0], AuthCookie+"=;") {
 			t.Errorf("Set-Cookie = %q", got)
 		}
@@ -337,7 +337,7 @@ func TestLogout(t *testing.T) {
 func TestReservedUnknown(t *testing.T) {
 	h := newHarness(t, nil)
 	l := label("quiet-otter-3000")
-	for _, p := range []string{"/__sbx/", "/__sbx/auth", "/__sbx/auth/callback/", "/__sbx/other"} {
+	for _, p := range []string{"/__umiak/", "/__umiak/auth", "/__umiak/auth/callback/", "/__umiak/other"} {
 		w := h.serve(fetchRequest(http.MethodGet, "https://x"+p), l, nil)
 		assertDenied(t, w, http.StatusNotFound, "route_not_found")
 	}
@@ -345,7 +345,7 @@ func TestReservedUnknown(t *testing.T) {
 
 func TestStripRequest(t *testing.T) {
 	h := http.Header{}
-	h.Add("Cookie", `a=1; __Host-sbx_auth=v1.x; b="q v"; __host-SBX_STATE=s; __Host-sbx_state_abcdefgh=t; __Host-sbx_statex=u`)
+	h.Add("Cookie", `a=1; __Host-umiak_auth=v1.x; b="q v"; __host-UMIAK_STATE=s; __Host-umiak_state_abcdefgh=t; __Host-umiak_statex=u`)
 	h.Add("Cookie", `_oauth2_proxy_csrf=z;c=3;__Secure-oauth2_proxy=y; d`)
 	h.Set(TokenHeader, "t")
 	h.Set("Authorization", "Bearer app")
@@ -366,7 +366,7 @@ func TestStripRequest(t *testing.T) {
 	}
 
 	// Only gateway cookies: the header goes away; no token: query untouched.
-	h = http.Header{"Cookie": {"__Host-sbx_auth=x"}}
+	h = http.Header{"Cookie": {"__Host-umiak_auth=x"}}
 	u, _ = url.Parse("https://x/p?a=%2F&b")
 	StripRequest(h, u, nil)
 	if _, ok := h["Cookie"]; ok {

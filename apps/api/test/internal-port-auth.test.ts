@@ -1,9 +1,13 @@
 // SSO for ports (S7 §7.7, §12.1, S4 §8.4, S8 C7): the browser endpoint
-// /sbx-auth/authorize on the proxied listener issues a one-time code, the
+// /umiak-auth/authorize on the proxied listener issues a one-time code, the
 // gateway exchanges it once on the internal listener.
 import { createHash, randomUUID } from "node:crypto";
-import { encodeUuid } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { encodeUuid } from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RateLimits, ServiceTokens } from "../src/index.ts";
 import { testIdentityStore } from "../src/testing/index.ts";
@@ -24,7 +28,7 @@ const STATE = "AbCdEfGhIjKlMnOpQrStUv";
 const sha256 = (s: string) => createHash("sha256").update(s, "utf8").digest();
 
 describe.skipIf(skipPg())(
-	"port SSO: /sbx-auth/authorize and port-auth/exchange",
+	"port SSO: /umiak-auth/authorize and port-auth/exchange",
 	() => {
 		let db: TestDatabase;
 		let w: ApiWorld;
@@ -104,7 +108,7 @@ describe.skipIf(skipPg())(
 			query: string,
 			headers: Record<string, string> = {},
 		) =>
-			b.h.request("GET", `/sbx-auth/authorize?${query}`, {
+			b.h.request("GET", `/umiak-auth/authorize?${query}`, {
 				headers: { ...b.headers, ...headers },
 			});
 
@@ -130,7 +134,7 @@ describe.skipIf(skipPg())(
 			expect(r.status, r.text).toBe(302);
 			const loc = new URL(r.headers.get("location") ?? "");
 			expect(`${loc.origin}${loc.pathname}`).toBe(
-				`https://${label}.${gw.deps.settings.sbxDomain}/__sbx/auth/callback`,
+				`https://${label}.${gw.deps.settings.umiakDomain}/__umiak/auth/callback`,
 			);
 			expect(loc.searchParams.get("state")).toBe(STATE);
 			const code = loc.searchParams.get("code") ?? "";
@@ -147,7 +151,7 @@ describe.skipIf(skipPg())(
 			expect(r.text).not.toMatch(/<script|<link|<img|src=|https?:\/\//i);
 		}
 
-		describe("/sbx-auth/authorize", () => {
+		describe("/umiak-auth/authorize", () => {
 			it("redirects to the callback of the label's host, not the request's Host; stores only the hash", async () => {
 				const r0 = await hosted("sso");
 				defaults.set({ ssoPolicyEpoch: 3 });
@@ -283,7 +287,7 @@ describe.skipIf(skipPg())(
 				const b = await browser();
 				const r = await b.h.request(
 					"GET",
-					`/sbx-auth/authorize?label=${r0.label}&state=${STATE}`,
+					`/umiak-auth/authorize?label=${r0.label}&state=${STATE}`,
 				);
 				expectErrorPage(r, 401);
 				const off = await browser({ active: false });
@@ -310,7 +314,7 @@ describe.skipIf(skipPg())(
 					.harness()
 					.request(
 						"GET",
-						`/sbx-auth/authorize?label=${r0.label}&state=${STATE}`,
+						`/umiak-auth/authorize?label=${r0.label}&state=${STATE}`,
 					);
 				expect(r.status).toBe(404);
 			});

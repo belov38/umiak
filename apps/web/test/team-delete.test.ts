@@ -1,6 +1,6 @@
 // The "Delete team" button of /admin (S8 §6.4, plan decision 12) without the
 // DOM: the checks against the api, the refusal text and the Payload delete.
-import { DELETE_TEAM_HEADER as PAYLOAD_HEADER } from "@sbx/payload";
+import { DELETE_TEAM_HEADER as PAYLOAD_HEADER } from "@umiak/payload";
 import { describe, expect, it } from "vitest";
 import {
 	DELETE_TEAM_HEADER,
@@ -29,12 +29,12 @@ function fakeFetch(
 
 const TEAM = "team_01jbx2v7d3m6c8q9w0e4r5t6y7";
 
-it("the header is the one teams access of @sbx/payload checks", () => {
+it("the header is the one teams access of @umiak/payload checks", () => {
 	expect(DELETE_TEAM_HEADER).toBe(PAYLOAD_HEADER);
 });
 
 describe("teamContents", () => {
-	it("asks the api with Sbx-Team of the team, same origin with cookies", async () => {
+	it("asks the api with Umiak-Team of the team, same origin with cookies", async () => {
 		const { f, calls } = fakeFetch({
 			"/api/v1/sandboxes": {
 				status: 200,
@@ -56,7 +56,7 @@ describe("teamContents", () => {
 			].sort(),
 		);
 		for (const c of calls) {
-			expect(new Headers(c.init.headers).get("sbx-team")).toBe(TEAM);
+			expect(new Headers(c.init.headers).get("umiak-team")).toBe(TEAM);
 			expect(c.init.credentials).toBe("same-origin");
 			expect(c.init.method ?? "GET").toBe("GET");
 		}

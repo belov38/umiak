@@ -1,5 +1,5 @@
 // What the sandbox page offers (S8 §9.6) and the C3 block (S8 §17.1).
-import type { SandboxData } from "@sbx/sdk";
+import type { SandboxData } from "@umiak/sdk";
 import { describe, expect, it } from "vitest";
 import {
 	canConfigure,

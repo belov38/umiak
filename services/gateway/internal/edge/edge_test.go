@@ -18,12 +18,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"golang.org/x/net/http2"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/edge"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/server"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/libs/tunnel/wire"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/edge"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
+	"github.com/belov38/umiak/services/gateway/internal/server"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
 )
 
 func tlsDial(t *testing.T, env *testenv.Env, inst *testenv.Inst, sni string, alpn ...string) *tls.Conn {
@@ -46,7 +46,7 @@ func TestSNIDispatch(t *testing.T) {
 	env := testenv.New(t, testenv.Options{})
 	inst := env.StartInstance(nil)
 
-	// sbx SNI → the proxy.
+	// umiak SNI → the proxy.
 	m := env.NewMachine()
 	m.ServeHTTP(3000, hostApp("app"))
 	rt := env.Route(m, 3000, nil)
@@ -75,7 +75,7 @@ func TestSNIDispatch(t *testing.T) {
 
 	// Unknown and empty SNI → alert unrecognized_name.
 	before := testutil.ToFloat64(inst.Metrics().TLSHandshakeErrors.WithLabelValues("unknown"))
-	for _, sni := range []string{"", "example.com", "sbx.test", "tunnel.test.example", "xtunnel.test"} {
+	for _, sni := range []string{"", "example.com", "umiak.test", "tunnel.test.example", "xtunnel.test"} {
 		if a := handshakeAlert(t, inst.HTTPSAddr, sni); a != alertUnrecognizedName {
 			t.Errorf("SNI %q: alert %d, want %d (unrecognized_name)", sni, a, alertUnrecognizedName)
 		}
@@ -85,7 +85,7 @@ func TestSNIDispatch(t *testing.T) {
 		t.Errorf("TLS 1.2, unknown SNI: alert %d, want %d", a, alertUnrecognizedName)
 	}
 	if c, err := dialTLS(inst.HTTPSAddr, &tls.Config{ServerName: host, RootCAs: env.PKI.Roots, MinVersion: tls.VersionTLS12, MaxVersion: tls.VersionTLS12}); err != nil {
-		t.Errorf("TLS 1.2 to an sbx host: %v", err)
+		t.Errorf("TLS 1.2 to an umiak host: %v", err)
 	} else {
 		_ = c.Close()
 	}
@@ -101,7 +101,7 @@ func TestSNIDispatch(t *testing.T) {
 	// Upper-case SNI is matched case-insensitively.
 	c := tlsDial(t, env, inst, strings.ToUpper(host), "h2")
 	if c.ConnectionState().NegotiatedProtocol != "h2" {
-		t.Fatalf("upper-case sbx SNI ALPN = %q", c.ConnectionState().NegotiatedProtocol)
+		t.Fatalf("upper-case umiak SNI ALPN = %q", c.ConnectionState().NegotiatedProtocol)
 	}
 }
 
@@ -152,8 +152,8 @@ func TestCoalescedHost(t *testing.T) {
 	if code, _, b := rt(hostB); code != http.StatusOK || b != "b "+hostB {
 		t.Fatalf("authority b on an a conn: %d %q", code, b)
 	}
-	if code, h, _ := rt(testenv.TunnelHost); code != http.StatusNotFound || h.Get("Sbx-Error") != "route_not_found" {
-		t.Fatalf("authority tunnel on an sbx conn: %d %q", code, h.Get("Sbx-Error"))
+	if code, h, _ := rt(testenv.TunnelHost); code != http.StatusNotFound || h.Get("Umiak-Error") != "route_not_found" {
+		t.Fatalf("authority tunnel on an umiak conn: %d %q", code, h.Get("Umiak-Error"))
 	}
 
 	// HTTP/1.1 on a tunnel conn never reaches the proxy, whatever the Host.
@@ -161,7 +161,7 @@ func TestCoalescedHost(t *testing.T) {
 		{testenv.TunnelHost, "/"},
 		{testenv.TunnelHost, "/v1/connect/x"},
 		{hostB, "/"},
-		{"x-80." + testenv.SbxDomain, "/"},
+		{"x-80." + testenv.UmiakDomain, "/"},
 	} {
 		conn := tlsDial(t, env, inst, testenv.TunnelHost, "http/1.1")
 		_ = conn.SetDeadline(time.Now().Add(reqTimeout))
@@ -190,29 +190,29 @@ func TestALPN(t *testing.T) {
 	}{
 		{testenv.TunnelHost, []string{"h2", "http/1.1"}, "http/1.1"},
 		{testenv.TunnelHost, nil, ""},
-		{"a-80." + testenv.SbxDomain, []string{"h2", "http/1.1"}, "h2"},
-		{"a-80." + testenv.SbxDomain, []string{"http/1.1"}, "http/1.1"},
+		{"a-80." + testenv.UmiakDomain, []string{"h2", "http/1.1"}, "h2"},
+		{"a-80." + testenv.UmiakDomain, []string{"http/1.1"}, "http/1.1"},
 	} {
 		got := tlsDial(t, env, inst, c.sni, c.alpn...).ConnectionState().NegotiatedProtocol
 		if got != c.want {
 			t.Errorf("SNI %s ALPN %v: negotiated %q, want %q", c.sni, c.alpn, got, c.want)
 		}
 	}
-	// Nested labels are sbx conns too (the proxy answers 404); the wildcard
+	// Nested labels are umiak conns too (the proxy answers 404); the wildcard
 	// does not cover them, so skip verification.
 	nested, err := dialTLS(inst.HTTPSAddr, &tls.Config{
-		ServerName: "x.y." + testenv.SbxDomain, NextProtos: []string{"h2"},
+		ServerName: "x.y." + testenv.UmiakDomain, NextProtos: []string{"h2"},
 		InsecureSkipVerify: true, MinVersion: tls.VersionTLS12, //nolint:gosec // only the ALPN is checked
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if p := nested.ConnectionState().NegotiatedProtocol; p != "h2" {
-		t.Errorf("nested sbx SNI: negotiated %q", p)
+		t.Errorf("nested umiak SNI: negotiated %q", p)
 	}
 	_ = nested.Close()
-	// Session tickets: sbx conns resume, tunnel conns never do.
-	for sni, wantResume := range map[string]bool{"a-80." + testenv.SbxDomain: true, testenv.TunnelHost: false} {
+	// Session tickets: umiak conns resume, tunnel conns never do.
+	for sni, wantResume := range map[string]bool{"a-80." + testenv.UmiakDomain: true, testenv.TunnelHost: false} {
 		cache := tls.NewLRUClientSessionCache(4)
 		cfg := &tls.Config{ServerName: sni, RootCAs: env.PKI.Roots, ClientSessionCache: cache, NextProtos: []string{"http/1.1"}, MinVersion: tls.VersionTLS12}
 		c1, err := dialTLS(inst.HTTPSAddr, cfg)
@@ -265,7 +265,7 @@ func TestHandshakeTimeout(t *testing.T) {
 	tlsDial(t, env, inst, testenv.TunnelHost)
 }
 
-// TestHandshakesPerIPWiring: SBX_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP reaches
+// TestHandshakesPerIPWiring: UMIAK_GATEWAY_TLS_MAX_HANDSHAKES_PER_IP reaches
 // the dispatcher of an instance.
 func TestHandshakesPerIPWiring(t *testing.T) {
 	env := testenv.New(t, testenv.Options{})
@@ -375,7 +375,7 @@ func TestProxyProtoV2(t *testing.T) {
 func TestCertReload(t *testing.T) {
 	env := testenv.New(t, testenv.Options{})
 	inst := env.StartInstance(nil)
-	sni := "a-80." + testenv.SbxDomain
+	sni := "a-80." + testenv.UmiakDomain
 	peer := func() *x509.Certificate {
 		c, err := env.TLSDial(inst, sni)
 		if err != nil {
@@ -385,15 +385,15 @@ func TestCertReload(t *testing.T) {
 		return c.ConnectionState().PeerCertificates[0]
 	}
 	first := peer()
-	if got := testutil.ToFloat64(inst.Metrics().CertExpiry.WithLabelValues("sbx")); got != float64(first.NotAfter.Unix()) {
-		t.Fatalf("sbx expiry gauge = %v, want %d", got, first.NotAfter.Unix())
+	if got := testutil.ToFloat64(inst.Metrics().CertExpiry.WithLabelValues("umiak")); got != float64(first.NotAfter.Unix()) {
+		t.Fatalf("umiak expiry gauge = %v, want %d", got, first.NotAfter.Unix())
 	}
 	if got := testutil.ToFloat64(inst.Metrics().CertExpiry.WithLabelValues("tunnel")); got == 0 {
 		t.Fatal("tunnel expiry gauge not set")
 	}
 	time.Sleep(100 * time.Millisecond) // let the watch start
 
-	writePair(t, env.PKI.Issue, env.PKI.SbxCertFile, env.PKI.SbxKeyFile, 72*time.Hour, "*."+testenv.SbxDomain)
+	writePair(t, env.PKI.Issue, env.PKI.UmiakCertFile, env.PKI.UmiakKeyFile, 72*time.Hour, "*."+testenv.UmiakDomain)
 	start := time.Now()
 	var cur *x509.Certificate
 	for {
@@ -406,8 +406,8 @@ func TestCertReload(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if got := testutil.ToFloat64(inst.Metrics().CertExpiry.WithLabelValues("sbx")); got != float64(cur.NotAfter.Unix()) {
-		t.Fatalf("sbx expiry gauge = %v after reload, want %d", got, cur.NotAfter.Unix())
+	if got := testutil.ToFloat64(inst.Metrics().CertExpiry.WithLabelValues("umiak")); got != float64(cur.NotAfter.Unix()) {
+		t.Fatalf("umiak expiry gauge = %v after reload, want %d", got, cur.NotAfter.Unix())
 	}
 }
 
@@ -446,8 +446,8 @@ func TestTunnelReadHeaderTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := edge.NewDispatcher(raw, edge.DispatchConfig{
-		SbxDomain: "sbx.test", TunnelHost: "tunnel.test",
-		Sbx: certSource(t, pki, dir, "sbx", "*.sbx.test", m), Tunnel: certSource(t, pki, dir, "tunnel", "tunnel.test", m),
+		UmiakDomain: "umiak.test", TunnelHost: "tunnel.test",
+		Umiak: certSource(t, pki, dir, "umiak", "*.umiak.test", m), Tunnel: certSource(t, pki, dir, "tunnel", "tunnel.test", m),
 		HandshakeTimeout: 2 * time.Second, Metrics: m,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -530,7 +530,7 @@ func TestPlainMode(t *testing.T) {
 		t.Fatalf("plain tunnel GET / = %d X-Request-Id %q", resp.StatusCode, resp.Header.Get("X-Request-Id"))
 	}
 
-	// *.sbx → the proxy; XFF only from trusted proxies.
+	// *.umiak → the proxy; XFF only from trusted proxies.
 	for _, c := range []struct {
 		inst *testenv.Inst
 		want string
@@ -567,7 +567,7 @@ func TestPlainMode(t *testing.T) {
 func TestNoEnableConnectProtocol(t *testing.T) {
 	env := testenv.New(t, testenv.Options{})
 	inst := env.StartInstance(nil)
-	c := tlsDial(t, env, inst, "a-80."+testenv.SbxDomain, "h2")
+	c := tlsDial(t, env, inst, "a-80."+testenv.UmiakDomain, "h2")
 	if p := c.ConnectionState().NegotiatedProtocol; p != "h2" {
 		t.Fatalf("ALPN = %q", p)
 	}

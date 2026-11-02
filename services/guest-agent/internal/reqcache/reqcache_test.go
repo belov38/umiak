@@ -15,14 +15,14 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/agent/v1/agentv1connect"
+	"github.com/belov38/umiak/libs/tunnel/rpcconv"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/reqcache"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/reqcache"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
 )
 
 const (

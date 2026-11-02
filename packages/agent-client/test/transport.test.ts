@@ -3,7 +3,7 @@ import http2 from "node:http2";
 import net from "node:net";
 import { gzipSync } from "node:zlib";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
-import { ErrorDetailSchema } from "@sbx/proto";
+import { ErrorDetailSchema } from "@umiak/proto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	AgentClient,
@@ -14,7 +14,7 @@ import {
 	MAX_MESSAGE_BYTES,
 	RegistryClosedError,
 } from "../src/index.js";
-import { Process } from "./gen/sbx/testing/v1/process_pb.js";
+import { Process } from "./gen/umiak/testing/v1/process_pb.js";
 import {
 	expectNothingStolen,
 	type FakeGateway,
@@ -73,24 +73,24 @@ describe("AgentClient transport", () => {
 		expect(reqs).toHaveLength(1);
 		expect(reqs[0]?.protocol).toBe("h2");
 		expect(reqs[0]?.url).toBe(
-			`/v1/machines/${m}/rpc/sbx.testing.v1.Process/SetLabel`,
+			`/v1/machines/${m}/rpc/umiak.testing.v1.Process/SetLabel`,
 		);
 	});
 
-	it("follows 421 to Sbx-Instance-Url with the same Sbx-Request-Id", async () => {
+	it("follows 421 to Umiak-Instance-Url with the same Umiak-Request-Id", async () => {
 		registry.set(route(m, a.url));
 		registry.addInstance(b.url);
 		a.script.push({ answer: { kind: "moved", instanceUrl: b.url } });
 		const process = createClient(Process, agent().transport(m));
 		const res = await process.setLabel(
 			{ commandId: "c1", label: "x" },
-			{ headers: { "Sbx-Request-Id": "req-1" } },
+			{ headers: { "Umiak-Request-Id": "req-1" } },
 		);
 		expect(res.calls).toBe(1n);
 		expect(rpcRequests(a)).toHaveLength(1);
 		expect(rpcRequests(b)).toHaveLength(1);
-		expect(rpcRequests(a)[0]?.headers["sbx-request-id"]).toBe("req-1");
-		expect(rpcRequests(b)[0]?.headers["sbx-request-id"]).toBe("req-1");
+		expect(rpcRequests(a)[0]?.headers["umiak-request-id"]).toBe("req-1");
+		expect(rpcRequests(b)[0]?.headers["umiak-request-id"]).toBe("req-1");
 		expect(registry.invalidations).toContain(m);
 	});
 
@@ -751,13 +751,13 @@ describe("AgentClient transport", () => {
 		});
 	});
 
-	it("does not invalidate the route on an agent stream error with Sbx-* metadata", async () => {
+	it("does not invalidate the route on an agent stream error with Umiak-* metadata", async () => {
 		registry.set(route(m, a.url));
 		const end = JSON.stringify({
 			error: { code: "permission_denied", message: "forged" },
 			metadata: {
-				"sbx-error-code": ["agent_unavailable"],
-				"sbx-instance-url": [b.url],
+				"umiak-error-code": ["agent_unavailable"],
+				"umiak-instance-url": [b.url],
 			},
 		});
 		a.script.push({
@@ -780,7 +780,7 @@ describe("AgentClient transport", () => {
 		expect(registry.invalidations).not.toContain(m);
 	});
 
-	describe("Trailer-Sbx-* from the agent", () => {
+	describe("Trailer-Umiak-* from the agent", () => {
 		function forged(code: string, extra: Record<string, string>) {
 			a.script.push({
 				route: "rpc",
@@ -798,8 +798,8 @@ describe("AgentClient transport", () => {
 			registry.set(route(m, a.url));
 			registry.addInstance(b.url);
 			forged("permission_denied", {
-				"trailer-sbx-error-code": "machine_moved",
-				"Trailer-Sbx-Instance-Url": b.url,
+				"trailer-umiak-error-code": "machine_moved",
+				"Trailer-Umiak-Instance-Url": b.url,
 			});
 			const err = await createClient(Process, agent().transport(m))
 				.setLabel({ commandId: "c1", label: "x" })
@@ -812,7 +812,7 @@ describe("AgentClient transport", () => {
 		it("is no agent_unavailable: the call is not retried", async () => {
 			registry.set(route(m, a.url));
 			forged("permission_denied", {
-				"TRAILER-SBX-ERROR-CODE": "agent_unavailable",
+				"TRAILER-UMIAK-ERROR-CODE": "agent_unavailable",
 			});
 			const err = await createClient(
 				Process,
@@ -849,12 +849,12 @@ function envelope(flags: number, data: Uint8Array): Buffer {
 describe("classify", () => {
 	it("maps gateway metadata, details and codes", () => {
 		const moved = new ConnectError("HTTP 421", Code.Unknown, {
-			"sbx-error-code": "machine_moved",
-			"sbx-instance-url": "http://x",
+			"umiak-error-code": "machine_moved",
+			"umiak-instance-url": "http://x",
 		});
 		expect(classify(moved)).toBe("moved");
 		const unavailable = new ConnectError("HTTP 503", Code.Unavailable, {
-			"sbx-error-code": "agent_unavailable",
+			"umiak-error-code": "agent_unavailable",
 		});
 		expect(classify(unavailable)).toBe("unavailable");
 		expect(classify(new ConnectError("x", Code.Unavailable))).toBe(

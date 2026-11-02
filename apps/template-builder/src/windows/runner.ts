@@ -1,4 +1,4 @@
-import { type PveClient, Qga } from "@sbx/pve";
+import { type PveClient, Qga } from "@umiak/pve";
 import {
 	DEFAULT_POLL_MS,
 	DEFAULT_REBOOT_TIMEOUT_MS,
@@ -19,8 +19,8 @@ import {
 // Windows build steps through the QEMU guest agent (spec S9 section 7 p.5): a SYSTEM scheduled
 // task runs run-step.ps1, the builder follows its log and exit file by byte offset.
 
-const BUILD_VOLUME_LABEL = "SBXBUILD";
-const LOG_DIR = "C:\\sbx-build\\logs";
+const BUILD_VOLUME_LABEL = "UMIAKBUILD";
+const LOG_DIR = "C:\\umiak-build\\logs";
 /** The step name is also a file name and a task name; same pattern as run-step.ps1. */
 const STEP_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const DRIVE_LETTER_RE = /^[A-Za-z]$/;
@@ -39,13 +39,13 @@ const POWERSHELL = [
 
 const driveLetters = new WeakMap<GuestIo, string>();
 
-const taskName = (step: string) => `sbx-build-${step}`;
+const taskName = (step: string) => `umiak-build-${step}`;
 
 function checkStepName(step: string): void {
 	if (!STEP_NAME_RE.test(step)) throw new Error(`invalid step name "${step}"`);
 }
 
-/** Drive letter of the build ISO (volume label SBXBUILD), resolved once per guest. */
+/** Drive letter of the build ISO (volume label UMIAKBUILD), resolved once per guest. */
 async function buildDrive(
 	io: GuestIo,
 	deadline: number,
@@ -92,7 +92,7 @@ async function taskStatus(
 	]);
 	if (r.exitCode !== 0) return undefined;
 	const first = r.stdout.trim().split(/\r?\n/)[0] ?? "";
-	// "\sbx-build-x","N/A","Running"
+	// "\umiak-build-x","N/A","Running"
 	return [...first.matchAll(/"([^"]*)"/g)][2]?.[1];
 }
 

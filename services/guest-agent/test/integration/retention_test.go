@@ -13,8 +13,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/supervisor"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/services/guest-agent/internal/supervisor"
 )
 
 // Retention limits of TestRetention (the spec's 128 MiB / 1 GiB scaled down

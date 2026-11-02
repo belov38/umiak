@@ -17,17 +17,17 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv/sshdtest"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/pgtest"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/services/gateway/internal/testenv/sshdtest"
 )
 
 func TestMain(m *testing.M) { pgtest.Main(m) }
 
 // loginUser is the OS user of every test sandbox.
-const loginUser = "sbx"
+const loginUser = "umiak"
 
 // fixture is one gateway instance with one machine that runs the sshd
 // double on port 22.
@@ -160,7 +160,7 @@ func loginCert(t *testing.T, ca, key ssh.Signer, mod func(*ssh.Certificate)) ssh
 		Key:             key.PublicKey(),
 		Serial:          12345,
 		CertType:        ssh.UserCert,
-		KeyId:           "sbx:key:key_1",
+		KeyId:           "umiak:key:key_1",
 		ValidPrincipals: []string{"sb_x"},
 		ValidAfter:      uint64(now.Add(-time.Minute).Unix()),
 		ValidBefore:     uint64(now.Add(10 * time.Minute).Unix()),

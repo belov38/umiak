@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/belov38/boat-dev-clone/services/node-agent/internal/lvm"
+	"github.com/belov38/umiak/services/node-agent/internal/lvm"
 )
 
 func TestCountPatternsAcrossChunksAndZeros(t *testing.T) {

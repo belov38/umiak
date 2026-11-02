@@ -1,10 +1,10 @@
-// Test helpers of @sbx/payload (export "./testing"). Imports vitest through
-// @sbx/auth/testing: never import this from production code.
+// Test helpers of @umiak/payload (export "./testing"). Imports vitest through
+// @umiak/auth/testing: never import this from production code.
 import {
 	CONTRACT_OPERATOR_GROUP,
 	type IdentityContractSeeding,
 	type IdentityContractSubject,
-} from "@sbx/auth/testing";
+} from "@umiak/auth/testing";
 import type { Payload } from "payload";
 import { rows, sql, tbl } from "./identity/db.ts";
 import { PayloadIdentityStore } from "./identity/store.ts";

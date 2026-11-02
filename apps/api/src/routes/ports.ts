@@ -9,7 +9,7 @@ import {
 	type PortMode,
 	portLabel,
 	type Sandbox,
-} from "@sbx/core";
+} from "@umiak/core";
 import { authOf } from "../auth/principal.ts";
 import { requireOperator, requireScope } from "../auth/scopes.ts";
 import type { ApiApp, ApiDeps } from "../deps.ts";
@@ -73,7 +73,7 @@ const hostPort = createRoute({
 	operationId: "ports.put",
 	summary: "Publish a port or change its access",
 	description:
-		"Publishes the guest port at `https://<slug>-<port>.<sbxDomain>` with the given settings " +
+		"Publishes the guest port at `https://<slug>-<port>.<umiakDomain>` with the given settings " +
 		"(PUT: omitted fields take their defaults: access token, hostRewrite preserve, " +
 		"appProtocol http1). 201 for a new port, 200 for a change or the same settings. A new " +
 		"token port or a switch to token returns `token` and `urlWithToken` once; keep them. " +
@@ -147,7 +147,7 @@ const unhostPort = createRoute({
 const OPERATOR_ONLY =
 	"Only a platform operator's browser session (the dashboard); API keys and Keycloak " +
 	"tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found " +
-	"in any team, no Sbx-Team needed.";
+	"in any team, no Umiak-Team needed.";
 
 const blockPortRoute = createRoute({
 	method: "post",
@@ -200,19 +200,19 @@ const unblockPortRoute = createRoute({
 	},
 });
 
-function portUrl(label: string, sbxDomain: string): string {
-	return `https://${label}.${sbxDomain}`;
+function portUrl(label: string, umiakDomain: string): string {
+	return `https://${label}.${umiakDomain}`;
 }
 
 function withToken(url: string, token: string): string {
 	return `${url}/?_token=${token}`;
 }
 
-function toHostedPort(p: HostedPort, sbxDomain: string) {
+function toHostedPort(p: HostedPort, umiakDomain: string) {
 	return {
 		port: p.port,
 		label: p.label,
-		url: portUrl(p.label, sbxDomain),
+		url: portUrl(p.label, umiakDomain),
 		access: p.mode,
 		hostRewrite: p.hostRewrite,
 		appProtocol: p.appProtocol,
@@ -298,7 +298,7 @@ function publicDisabled(): ApiError {
 
 export function registerPortRoutes(app: ApiApp, deps: ApiDeps): void {
 	const svc = deps.svc;
-	const domain = () => deps.settings.sbxDomain;
+	const domain = () => deps.settings.umiakDomain;
 
 	app.openapi(listPorts, async (c) => {
 		const p = authOf(c).principal;

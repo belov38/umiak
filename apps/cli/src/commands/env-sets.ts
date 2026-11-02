@@ -1,10 +1,10 @@
-// `sbx env-sets list|show|create|set|unset|rm` (S8 §10.2): environments of
+// `umiak env-sets list|show|create|set|unset|rm` (S8 §10.2): environments of
 // the team, named sets of env, secrets and secret files applied at create
-// (`sbx create --environment <name>`; the default one applies without it).
+// (`umiak create --environment <name>`; the default one applies without it).
 // Writes need an owner (or a key with environments:write). Secret values
 // are never printed.
 
-import type { components } from "@sbx/sdk";
+import type { components } from "@umiak/sdk";
 import type { Command } from "commander";
 import { collect, envSet, parsePairs } from "../args.ts";
 import type { Context } from "../context.ts";
@@ -52,10 +52,12 @@ function envText(v: Environment): string {
 }
 
 async function patch(ctx: Context, ref: string, body: UpdateRequest) {
-	const { data } = await ctx.sbx().raw.PATCH("/v1/environments/{environment}", {
-		params: { path: { environment: ref } },
-		body,
-	});
+	const { data } = await ctx
+		.umiak()
+		.raw.PATCH("/v1/environments/{environment}", {
+			params: { path: { environment: ref } },
+			body,
+		});
 	ctx.out.result(data, envText);
 }
 
@@ -69,7 +71,7 @@ export function register(program: Command, run: Runner): void {
 		.description("list the environments of the team")
 		.action(
 			run(async (ctx) => {
-				const { data } = await ctx.sbx().raw.GET("/v1/environments");
+				const { data } = await ctx.umiak().raw.GET("/v1/environments");
 				ctx.out.result(data, (v) =>
 					v.data.length === 0
 						? "No environments."
@@ -94,7 +96,7 @@ export function register(program: Command, run: Runner): void {
 		.action(
 			run(async (ctx, args) => {
 				const { data } = await ctx
-					.sbx()
+					.umiak()
 					.raw.GET("/v1/environments/{environment}", {
 						params: { path: { environment: args[0] as string } },
 					});
@@ -120,7 +122,7 @@ export function register(program: Command, run: Runner): void {
 			};
 			if (opts.default === true) body.isDefault = true;
 			if (opts.excludeOwnerSecrets === true) body.excludeOwnerSecrets = true;
-			const { data } = await ctx.sbx().raw.POST("/v1/environments", {
+			const { data } = await ctx.umiak().raw.POST("/v1/environments", {
 				body,
 			});
 			ctx.out.result(data, envText);
@@ -162,7 +164,7 @@ export function register(program: Command, run: Runner): void {
 		.action(
 			run(async (ctx, args) => {
 				for (const ref of args[0] as string[]) {
-					await ctx.sbx().raw.DELETE("/v1/environments/{environment}", {
+					await ctx.umiak().raw.DELETE("/v1/environments/{environment}", {
 						params: { path: { environment: ref } },
 					});
 					ctx.out.result(

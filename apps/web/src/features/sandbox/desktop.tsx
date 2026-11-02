@@ -1,6 +1,6 @@
 "use client";
-import type { Sandbox, SandboxData } from "@sbx/sdk";
 import { useQuery } from "@tanstack/react-query";
+import type { Sandbox, SandboxData } from "@umiak/sdk";
 import { useEffect, useRef, useState } from "react";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { QueryError } from "@/components/app/query-error";

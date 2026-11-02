@@ -1,5 +1,5 @@
-import type { SecretFile } from "@sbx/core";
-import type { DiskSlot, QuiesceHook } from "@sbx/pve";
+import type { SecretFile } from "@umiak/core";
+import type { DiskSlot, QuiesceHook } from "@umiak/pve";
 
 // Infrastructure ports of the worker. Handlers reach Proxmox, the guest agent
 // and the gateway only through these interfaces; tests use the fakes in

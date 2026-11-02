@@ -53,7 +53,7 @@ func (s *systemd) Launch(ctx context.Context, id string, shimPath string, extraA
 	}
 	name := UnitName(id)
 	props := []sddbus.Property{
-		sddbus.PropDescription("sbx command " + id),
+		sddbus.PropDescription("umiak command " + id),
 		sddbus.PropExecStart(shimArgv(id, shimPath, extraArgs), false),
 		sddbus.PropType("notify"),
 		{Name: "NotifyAccess", Value: dbus.MakeVariant("main")},
@@ -75,7 +75,7 @@ func (s *systemd) StartWatchdog(ctx context.Context, leaseID string, argv []stri
 		return errors.New("supervisor: empty watchdog argv")
 	}
 	props := []sddbus.Property{
-		sddbus.PropDescription("sbx quiesce watchdog " + leaseID),
+		sddbus.PropDescription("umiak quiesce watchdog " + leaseID),
 		sddbus.PropExecStart(argv, false),
 		sddbus.PropType("simple"),
 		{Name: "CollectMode", Value: dbus.MakeVariant("inactive-or-failed")},

@@ -1,6 +1,6 @@
 // Signed list cursors (S7 §5.6, decision 5): the opaque cursor of core is
 // wrapped as base64url(JSON {c: <core cursor>}) + "." + base64url of the
-// HMAC-SHA256 (SBX_API_CURSOR_KEY) of that payload, truncated to 16 bytes.
+// HMAC-SHA256 (UMIAK_API_CURSOR_KEY) of that payload, truncated to 16 bytes.
 // A cursor the api did not sign is 400 invalid_cursor.
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { ApiError } from "./errors.ts";

@@ -1,4 +1,4 @@
-import { type Tx, withTx } from "@sbx/db";
+import { type Tx, withTx } from "@umiak/db";
 import { invalidState, notFound } from "../errors.ts";
 import { uuidv7 } from "../ids.ts";
 import type { JobSender } from "../jobs.ts";

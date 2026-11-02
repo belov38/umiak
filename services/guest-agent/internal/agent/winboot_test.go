@@ -19,17 +19,17 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/agent/v1/agentv1connect"
+	"github.com/belov38/umiak/libs/tunnel/rpcconv"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/readiness"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/ident"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/readiness"
 )
 
 // winHarness is a harness with the Windows start: early.json and the local
@@ -47,7 +47,7 @@ func newWinHarness(t *testing.T) *winHarness {
 	h := &winHarness{harness: newHarness(t)}
 	h.l.EarlyFile = filepath.Join(h.l.RunDir, "early.json")
 	// macOS limits socket paths to 104 bytes: keep them out of TempDir.
-	dir, err := os.MkdirTemp("", "sbxw")
+	dir, err := os.MkdirTemp("", "umiakw")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestWinBootRebootPendingGates(t *testing.T) {
 	if _, err := proc.Start(ctx, connect.NewRequest(start)); detail(err) != errs.IdentityNotReady {
 		t.Errorf("Process/Start as a user over the admin socket = %v, want identity_not_ready", err)
 	}
-	creq := connect.NewRequest(&agentv1.ClaimRequest{SandboxId: "sbx_1", Hostname: "box"})
+	creq := connect.NewRequest(&agentv1.ClaimRequest{SandboxId: "umiak_1", Hostname: "box"})
 	creq.Header().Set(wire.HeaderRequestID, uuid.NewString())
 	if _, err := agentv1connect.NewSystemClient(admin, "http://agent").Claim(ctx, creq); detail(err) != errs.IdentityNotReady {
 		t.Errorf("Claim = %v, want identity_not_ready", err)
@@ -257,7 +257,7 @@ func TestWinBootGateRefusesStartOutsideAdmin(t *testing.T) {
 	h := newWinHarness(t)
 	h.r.Active = "WIN-TEMPLATE"
 	h.identityRetry = time.Minute
-	dir, err := os.MkdirTemp("", "sbxd")
+	dir, err := os.MkdirTemp("", "umiakd")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestEnvSocketServesSessionEnv(t *testing.T) {
 	h.waitReady()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	req := &agentv1.ClaimRequest{SandboxId: "sbx_1", Hostname: "box", Env: map[string]string{"FOO": "bar"}, SecretEnv: map[string]string{"TOKEN": "s3"}}
+	req := &agentv1.ClaimRequest{SandboxId: "umiak_1", Hostname: "box", Env: map[string]string{"FOO": "bar"}, SecretEnv: map[string]string{"TOKEN": "s3"}}
 	creq := connect.NewRequest(req)
 	creq.Header().Set(wire.HeaderRequestID, uuid.NewString())
 	if _, err := agentv1connect.NewSystemClient(unixHTTP(h.l.AdminSocket), "http://agent").Claim(ctx, creq); err != nil {
@@ -323,7 +323,7 @@ func TestEnvSocketServesSessionEnv(t *testing.T) {
 	if err := decodeJSON(res, &env); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"SBX_SANDBOX_ID=sbx_1", "FOO=bar", "TOKEN=s3", "SBX_ENV_APPLIED=1"} {
+	for _, want := range []string{"UMIAK_SANDBOX_ID=umiak_1", "FOO=bar", "TOKEN=s3", "UMIAK_ENV_APPLIED=1"} {
 		if !slices.Contains(env.Env, want) {
 			t.Errorf("env %q has no %q", env.Env, want)
 		}
@@ -417,7 +417,7 @@ func firstBootLayout(t *testing.T, installed bool) paths.Layout {
 	t.Helper()
 	l := paths.ForRoot(t.TempDir())
 	l.SetupCompleteScript = filepath.Join(filepath.Dir(l.StateDir), "Windows", "Setup", "Scripts", "SetupComplete.cmd")
-	l.FirstBootDone = filepath.Join(filepath.Dir(l.StateDir), "sbx-template", "firstboot.done")
+	l.FirstBootDone = filepath.Join(filepath.Dir(l.StateDir), "umiak-template", "firstboot.done")
 	if installed {
 		writeFile(t, l.SetupCompleteScript, "@echo off\r\n")
 	}

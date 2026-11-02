@@ -11,8 +11,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // copyBufSize is the read size of the streaming proxy; every read is
@@ -50,10 +50,12 @@ func copyHeader(dst, src http.Header) {
 	}
 }
 
-// isSbxHeader reports whether a header name is in the Sbx- namespace
+// isUmiakHeader reports whether a header name is in the Umiak- namespace
 // (case-insensitive). Towards callers only the gateway produces those: they
-// are routing signals (Sbx-Error-Code, Sbx-Instance-Url) a caller acts on.
-func isSbxHeader(k string) bool { return len(k) >= 4 && strings.EqualFold(k[:4], "sbx-") }
+// are routing signals (Umiak-Error-Code, Umiak-Instance-Url) a caller acts on.
+func isUmiakHeader(k string) bool {
+	return len(k) >= len("Umiak-") && strings.EqualFold(k[:len("Umiak-")], "Umiak-")
+}
 
 // isRedirectHeader reports whether a header points the caller at another
 // URL or endpoint (Location, Content-Location, Refresh, Alt-Svc): an agent
@@ -66,27 +68,27 @@ func isRedirectHeader(k string) bool {
 	return false
 }
 
-// agentSbxHeaders are the agent-defined Sbx-* response headers passed to
-// callers (canonical names). Additions need review: Sbx-* are gateway
+// agentUmiakHeaders are the agent-defined Umiak-* response headers passed to
+// callers (canonical names). Additions need review: Umiak-* are gateway
 // routing signals. The values are agent-controlled and passed as is:
-// consumers must parse them strictly (Sbx-Upload-Offset: 1 to 20 decimal
-// digits, at most 2^63-1; parseUploadOffset in @sbx/agent-client).
-var agentSbxHeaders = map[string]bool{wire.HeaderUploadOffset: true}
+// consumers must parse them strictly (Umiak-Upload-Offset: 1 to 20 decimal
+// digits, at most 2^63-1; parseUploadOffset in @umiak/agent-client).
+var agentUmiakHeaders = map[string]bool{wire.HeaderUploadOffset: true}
 
 // connectTrailerPrefix prefixes Connect unary trailers sent as headers;
 // Connect clients merge them, without the prefix, into the call metadata.
 const connectTrailerPrefix = "trailer-"
 
 // blockedAgentHeader reports whether an agent response header or trailer is
-// never passed to callers: Sbx-* and Trailer-Sbx-* except agentSbxHeaders
+// never passed to callers: Umiak-* and Trailer-Umiak-* except agentUmiakHeaders
 // (after the Trailer- prefix), and redirect headers.
 func blockedAgentHeader(k string) bool {
 	name := k
 	if len(name) > len(connectTrailerPrefix) && strings.EqualFold(name[:len(connectTrailerPrefix)], connectTrailerPrefix) {
 		name = name[len(connectTrailerPrefix):]
 	}
-	if isSbxHeader(name) {
-		return !agentSbxHeaders[textproto.CanonicalMIMEHeaderKey(name)]
+	if isUmiakHeader(name) {
+		return !agentUmiakHeaders[textproto.CanonicalMIMEHeaderKey(name)]
 	}
 	return isRedirectHeader(k)
 }
@@ -228,7 +230,7 @@ func wantsTrailers(h http.Header) bool {
 
 // upstreamHeader builds the headers sent to the agent: the client's
 // headers without hop-by-hop ones, Authorization, Expect and any
-// client-sent Sbx-Caller; Sbx-Caller is set to the authenticated caller.
+// client-sent Umiak-Caller; Umiak-Caller is set to the authenticated caller.
 func upstreamHeader(r *http.Request) http.Header {
 	h := make(http.Header, len(r.Header)+1)
 	copyHeader(h, r.Header)
@@ -311,9 +313,9 @@ func (h *internalHandler) proxy(w http.ResponseWriter, r *http.Request, id, path
 		h.writeBadAgent(w, r, f, fmt.Sprintf("agent answered with redirect status %d, which the gateway does not pass on", resp.StatusCode))
 		return
 	}
-	// The agent's Sbx-* (but agentSbxHeaders) and redirect headers and
+	// The agent's Umiak-* (but agentUmiakHeaders) and redirect headers and
 	// trailers are dropped: a compromised agent must not be able to forge a
-	// gateway answer such as 421 machine_moved with an Sbx-Instance-Url of
+	// gateway answer such as 421 machine_moved with an Umiak-Instance-Url of
 	// its choosing, nor point the caller elsewhere (spec §16 item 1).
 	fwd, declared, ok := forwardHeader(resp)
 	hdr := w.Header()

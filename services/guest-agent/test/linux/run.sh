@@ -4,11 +4,11 @@
 #
 #   services/guest-agent/test/linux/run.sh [go test flags] [./pkg]
 #
-# Builds sbx-agent for linux/$(go env GOARCH) (CGO_ENABLED=0) as four
+# Builds umiak-agent for linux/$(go env GOARCH) (CGO_ENABLED=0) as four
 # versions signed with a dev key generated for this run (never the PoC key
-# in ~/.config/sbx), starts the container, installs v1 with
-# `sbx-agent install-package --write-config`, points agent.toml at a fake
-# smbios directory, starts sbx-identity and sbx-agent (with the debug socket)
+# in ~/.config/umiak), starts the container, installs v1 with
+# `umiak-agent install-package --write-config`, points agent.toml at a fake
+# smbios directory, starts umiak-identity and umiak-agent (with the debug socket)
 # and runs the integration test binary as root inside the container.
 #
 # Test binary flags (-run, -v, -count, -timeout, -failfast, ...) are passed to
@@ -59,15 +59,15 @@ if [ "$has_timeout" = 0 ]; then
 fi
 
 arch="${GOARCH_IT:-$(cd "$module" && "${GO[@]}" env GOARCH)}"
-image=sbx-guest-systemd:dev
-name="sbx-it-$$"
-work="$(mktemp -d "${TMPDIR:-/tmp}/sbx-it.XXXXXX")"
+image=umiak-guest-systemd:dev
+name="umiak-it-$$"
+work="$(mktemp -d "${TMPDIR:-/tmp}/umiak-it.XXXXXX")"
 
 cleanup() {
 	status=$?
 	if [ "$status" != 0 ] && docker inspect "$name" >/dev/null 2>&1; then
-		echo "--- sbx-agent journal (last 150 lines) ---" >&2
-		docker exec "$name" journalctl -m -u sbx-agent -u sbx-identity -u sbx-agent-rollback --no-pager -n 150 >&2 || true
+		echo "--- umiak-agent journal (last 150 lines) ---" >&2
+		docker exec "$name" journalctl -m -u umiak-agent -u umiak-identity -u umiak-agent-rollback --no-pager -n 150 >&2 || true
 	fi
 	if [ -n "${BUILD_ONLY:-}" ]; then
 		:
@@ -91,9 +91,9 @@ v4=0.0.4-it-badsig
 
 cd "$module"
 log "dev signing keys"
-release=("${GO[@]}" run ./cmd/sbx-release)
-"${release[@]}" keygen --out "$work/key" --comment sbx-it-dev >"$work/update-keys.pub"
-"${release[@]}" keygen --out "$work/key-other" --comment sbx-it-other >/dev/null
+release=("${GO[@]}" run ./cmd/umiak-release)
+"${release[@]}" keygen --out "$work/key" --comment umiak-it-dev >"$work/update-keys.pub"
+"${release[@]}" keygen --out "$work/key-other" --comment umiak-it-other >/dev/null
 devkey="$(awk '{print $2}' "$work/update-keys.pub")"
 
 log "tunnel CA"
@@ -104,12 +104,12 @@ else
 	# Go's x509 rejects).
 	openssl ecparam -name prime256v1 -genkey -noout -out "$work/tunnel-ca.key"
 	openssl req -new -x509 -key "$work/tunnel-ca.key" -out "$work/tunnel-ca.pem" -days 1 \
-		-subj /CN=sbx-it-tunnel-ca >/dev/null 2>&1
+		-subj /CN=umiak-it-tunnel-ca >/dev/null 2>&1
 fi
 
 build() { # version out [extra ldflags]
 	CGO_ENABLED=0 GOOS=linux GOARCH="$arch" "${GO[@]}" build -trimpath \
-		-ldflags "-X main.version=$1 -X main.devUpdateKey=$devkey ${3:-}" -o "$2" ./cmd/sbx-agent
+		-ldflags "-X main.version=$1 -X main.devUpdateKey=$devkey ${3:-}" -o "$2" ./cmd/umiak-agent
 }
 pack() { # version binary key out [flags]
 	"${release[@]}" pack --version "$1" --os linux --arch "$arch" --binary "$2" \
@@ -117,16 +117,16 @@ pack() { # version binary key out [flags]
 		--key "$3" --out "$4" --skip-version-check --allow-test-build "${@:5}" >/dev/null
 }
 
-log "build sbx-agent $v1 $v2 $v3 $v4 (linux/$arch)"
+log "build umiak-agent $v1 $v2 $v3 $v4 (linux/$arch)"
 mkdir -p "$work/it/pkg" "$work/bin"
-build "$v1" "$work/bin/sbx-agent-1"
-build "$v2" "$work/bin/sbx-agent-2"
-build "$v3" "$work/bin/sbx-agent-3" "-X main.failRun=1"
-build "$v4" "$work/bin/sbx-agent-4"
-pack "$v1" "$work/bin/sbx-agent-1" "$work/key/ed25519.key" "$work/it/pkg/v1.tar"
-pack "$v2" "$work/bin/sbx-agent-2" "$work/key/ed25519.key" "$work/it/pkg/v2.tar"
-pack "$v3" "$work/bin/sbx-agent-3" "$work/key/ed25519.key" "$work/it/pkg/v3-failrun.tar"
-pack "$v4" "$work/bin/sbx-agent-4" "$work/key-other/ed25519.key" "$work/it/pkg/v4-badsig.tar" --allow-foreign-signer
+build "$v1" "$work/bin/umiak-agent-1"
+build "$v2" "$work/bin/umiak-agent-2"
+build "$v3" "$work/bin/umiak-agent-3" "-X main.failRun=1"
+build "$v4" "$work/bin/umiak-agent-4"
+pack "$v1" "$work/bin/umiak-agent-1" "$work/key/ed25519.key" "$work/it/pkg/v1.tar"
+pack "$v2" "$work/bin/umiak-agent-2" "$work/key/ed25519.key" "$work/it/pkg/v2.tar"
+pack "$v3" "$work/bin/umiak-agent-3" "$work/key/ed25519.key" "$work/it/pkg/v3-failrun.tar"
+pack "$v4" "$work/bin/umiak-agent-4" "$work/key-other/ed25519.key" "$work/it/pkg/v4-badsig.tar" --allow-foreign-signer
 printf '%s\n%s\n%s\n%s\n' "$v1" "$v2" "$v3" "$v4" >"$work/it/pkg/versions"
 
 log "build the test binary of $pkg"
@@ -143,7 +143,7 @@ fi
 
 log "build the image and start the container"
 docker build -q -t "$image" "$here" >/dev/null
-docker run -d --name "$name" --hostname sbx-it --privileged --cgroupns=host \
+docker run -d --name "$name" --hostname umiak-it --privileged --cgroupns=host \
 	-v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock \
 	"$image" >/dev/null
 booted=0
@@ -165,37 +165,37 @@ docker exec -i "$name" bash -euo pipefail -s <<'SETUP'
 # visible rw ext4 mount), so replace them: resolv.conf by a plain file,
 # hostname and hosts by bind mounts from tmpfs. Those still refuse a rename
 # over them (EBUSY), like Docker's, which the identity code must handle.
-mkdir -p /run/sbx-it
+mkdir -p /run/umiak-it
 for f in hostname hosts resolv.conf; do
-	cp "/etc/$f" "/run/sbx-it/$f"
+	cp "/etc/$f" "/run/umiak-it/$f"
 	umount "/etc/$f"
 done
-cp /run/sbx-it/resolv.conf /etc/resolv.conf
+cp /run/umiak-it/resolv.conf /etc/resolv.conf
 for f in hostname hosts; do
-	cp "/run/sbx-it/$f" "/etc/$f"
-	mount --bind "/run/sbx-it/$f" "/etc/$f"
+	cp "/run/umiak-it/$f" "/etc/$f"
+	mount --bind "/run/umiak-it/$f" "/etc/$f"
 done
 
-# Fake smbios (spec 7.1): sbx1:<machineId>:<base64url(BS)>, uuid = machine id.
-mkdir -p /var/lib/sbx-it/dmi
+# Fake smbios (spec 7.1): umiak1:<machineId>:<base64url(BS)>, uuid = machine id.
+mkdir -p /var/lib/umiak-it/dmi
 python3 - <<'PY'
 import base64, os, uuid
 mid = str(uuid.uuid4())
 bs = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode()
-open("/var/lib/sbx-it/dmi/product_serial", "w").write("sbx1:%s:%s\n" % (mid, bs))
-open("/var/lib/sbx-it/dmi/product_uuid", "w").write(mid + "\n")
+open("/var/lib/umiak-it/dmi/product_serial", "w").write("umiak1:%s:%s\n" % (mid, bs))
+open("/var/lib/umiak-it/dmi/product_uuid", "w").write(mid + "\n")
 PY
 
 # The first install runs the binary of the package itself (S5 does the same).
-tar -xOf /it/pkg/v1.tar sbx-agent >/tmp/sbx-agent-installer
-chmod 0755 /tmp/sbx-agent-installer
-/tmp/sbx-agent-installer install-package --write-config /it/pkg/v1.tar
-rm -f /tmp/sbx-agent-installer
+tar -xOf /it/pkg/v1.tar umiak-agent >/tmp/umiak-agent-installer
+chmod 0755 /tmp/umiak-agent-installer
+/tmp/umiak-agent-installer install-package --write-config /it/pkg/v1.tar
+rm -f /tmp/umiak-agent-installer
 
 # The test configuration: no Docker, a tunnel URL that points nowhere (the
 # agent must still be ready: READY=1 comes before the tunnel), the fake
 # smbios directory. Tests extend it and restart the agent.
-cat >/var/lib/sbx-it/agent.toml <<'TOML'
+cat >/var/lib/umiak-it/agent.toml <<'TOML'
 [tunnel]
 url = "wss://127.0.0.1:9/v1/connect"
 
@@ -209,29 +209,29 @@ required = ["identity", "claim", "secrets"]
 enabled = false
 
 [identity]
-sysfs_dir = "/var/lib/sbx-it/dmi"
+sysfs_dir = "/var/lib/umiak-it/dmi"
 TOML
-cp /var/lib/sbx-it/agent.toml /etc/sbx-agent/agent.toml
+cp /var/lib/umiak-it/agent.toml /etc/umiak-agent/agent.toml
 
-mkdir -p /etc/systemd/system/sbx-agent.service.d
-cat >/etc/systemd/system/sbx-agent.service.d/50-debug.conf <<'UNIT'
+mkdir -p /etc/systemd/system/umiak-agent.service.d
+cat >/etc/systemd/system/umiak-agent.service.d/50-debug.conf <<'UNIT'
 [Service]
 ExecStart=
-ExecStart=/usr/local/lib/sbx-agent/current/sbx-agent run --debug-listen unix:/run/sbx-agent/debug.sock --debug-confirm
+ExecStart=/usr/local/lib/umiak-agent/current/umiak-agent run --debug-listen unix:/run/umiak-agent/debug.sock --debug-confirm
 UNIT
 systemctl daemon-reload
-systemctl start sbx-identity.service
+systemctl start umiak-identity.service
 # The container booted before the agent was installed, so ssh.service found
-# no host keys and failed; on a template sbx-identity runs before it.
+# no host keys and failed; on a template umiak-identity runs before it.
 systemctl reset-failed ssh.service || true
 systemctl restart ssh.service
-systemctl start sbx-agent.service
+systemctl start umiak-agent.service
 for _ in $(seq 1 60); do
-	[ -S /run/sbx-agent/debug.sock ] && exit 0
+	[ -S /run/umiak-agent/debug.sock ] && exit 0
 	sleep 1
 done
 echo "the agent did not open its debug socket" >&2
-systemctl status sbx-agent --no-pager >&2 || true
+systemctl status umiak-agent --no-pager >&2 || true
 exit 1
 SETUP
 

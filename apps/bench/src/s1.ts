@@ -9,7 +9,7 @@ import {
 	type Smbios,
 	type SnapshotRef,
 	s2SerialPayload,
-} from "@sbx/pve";
+} from "@umiak/pve";
 import {
 	type Check,
 	check,
@@ -141,8 +141,8 @@ export async function runS1(ctx: Ctx, o: S1Options): Promise<number> {
 	const targets: NetTargets = {
 		...DEFAULT_TARGETS,
 		hostAddresses: hostAddresses(process.env, DEFAULT_HOST_ADDRESS),
-		hostLinkLocal: pf.inventory?.sbx0.linkLocal ?? "",
-		denyPublic: (process.env.SBX_DENY_PUBLIC_IPS ?? "")
+		hostLinkLocal: pf.inventory?.umiak0.linkLocal ?? "",
+		denyPublic: (process.env.UMIAK_DENY_PUBLIC_IPS ?? "")
 			.split(/\s+/)
 			.filter(Boolean),
 	};
@@ -346,7 +346,7 @@ export async function runS1(ctx: Ctx, o: S1Options): Promise<number> {
 			gitCommit: gitCommit(),
 			proxmox: version.version,
 			kernel: nodeVersion.kernel,
-			sbxNode: nodeVersion.version,
+			umiakNode: nodeVersion.version,
 			storage: `${cfg.storage} (VG pve, thin pool data, Crucial P310 QLC)`,
 			templateVmid: cfg.templateVmid,
 			size: o.size,

@@ -1,9 +1,9 @@
-// Placeholder AgentPort until S3 (decision 12): proto/sbx/agent/v1 and
-// @sbx/agent-client do not exist yet. S3's Connect RPC adapter (calls through
+// Placeholder AgentPort until S3 (decision 12): proto/umiak/agent/v1 and
+// @umiak/agent-client do not exist yet. S3's Connect RPC adapter (calls through
 // the gateway, S2 §8.4) replaces this class; the worker wiring only swaps the
 // constructor.
-import type { SecretFile } from "@sbx/core";
-import type { QuiesceHook } from "@sbx/pve";
+import type { SecretFile } from "@umiak/core";
+import type { QuiesceHook } from "@umiak/pve";
 import {
 	type AgentActivity,
 	type AgentPort,

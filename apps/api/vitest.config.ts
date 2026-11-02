@@ -1,6 +1,6 @@
 import { defineConfig } from "vitest/config";
 
-// Workspace packages with a build step (@sbx/agent-client, @sbx/proto) are
+// Workspace packages with a build step (@umiak/agent-client, @umiak/proto) are
 // resolved from their TypeScript sources ("source" export condition), as in
 // agent-client's own tests; no build is needed to run these tests.
 const source = "source";
@@ -17,7 +17,7 @@ export default defineConfig({
 	test: {
 		include: ["test/**/*.test.ts"],
 		globalSetup: [
-			"@sbx/db/testing/global-setup",
+			"@umiak/db/testing/global-setup",
 			"./test/helpers/conformance-global.ts",
 			"./test/helpers/agent-harness-global.ts",
 		],

@@ -16,7 +16,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	v1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	v1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 )
 
 var user32 = windows.NewLazySystemDLL("user32.dll")
@@ -58,7 +58,7 @@ func newWin32Desktop(ctx context.Context) (*win32Desktop, error) {
 		binary.LittleEndian.PutUint32(mode[176:], 1080)
 		_, _, _ = user32.NewProc("ChangeDisplaySettingsExW").Call(0, uintptr(unsafe.Pointer(&mode[0])), 0, 0, 0)
 		class, _ := windows.UTF16PtrFromString("STATIC")
-		name, _ := windows.UTF16PtrFromString("sbx-session clipboard")
+		name, _ := windows.UTF16PtrFromString("umiak-session clipboard")
 		window, e := call(user32, "CreateWindowExW", 0, uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(name)), 0, 0, 0, 0, 0, ^uintptr(2), 0, 0, 0)
 		if e != nil {
 			ready <- e

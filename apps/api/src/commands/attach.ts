@@ -1,5 +1,5 @@
 // Output of a command from the agent to the client (S7 §9.4, §9.5, §9.7):
-// `resumableAttach` of @sbx/agent-client over `agent.attach` splices the
+// `resumableAttach` of @umiak/agent-client over `agent.attach` splices the
 // agent leg across reconnects (the client sees a pause); this module turns
 // its events into NDJSON frames with offsets, decodes UTF-8 per stream on
 // character boundaries, sends heartbeats after silence, ends the stream
@@ -11,8 +11,8 @@ import {
 	type AttachOutput,
 	type AttachView,
 	resumableAttach,
-} from "@sbx/agent-client";
-import { type CommandResult, storableOutputTruncated } from "@sbx/core";
+} from "@umiak/agent-client";
+import { type CommandResult, storableOutputTruncated } from "@umiak/core";
 import { agentErrorToHttp, isAgentUnreachable } from "../agent/errors.ts";
 import {
 	type AgentAttachEvent,

@@ -7,7 +7,7 @@ const HASH = "ab".repeat(32);
 function setup(answer = "") {
 	const calls: { args: string[]; sql: string }[] = [];
 	const reg = devCpRegistrar({
-		ctSsh: "sbx@192.168.68.90",
+		ctSsh: "umiak@192.168.68.90",
 		exec: async (args, sql) => {
 			calls.push({ args, sql });
 			return answer;
@@ -23,8 +23,8 @@ describe("devCpRegistrar", () => {
 		expect(calls[0]?.args).toEqual([
 			"-o",
 			"BatchMode=yes",
-			"sbx@192.168.68.90",
-			"cd boat-dev-clone/deploy/compose && docker compose exec -T postgres psql -U sbx -d sbx -v ON_ERROR_STOP=1 -Atq",
+			"umiak@192.168.68.90",
+			"cd umiak/deploy/compose && docker compose exec -T postgres psql -U umiak -d umiak -v ON_ERROR_STOP=1 -Atq",
 		]);
 		expect(calls[0]?.sql).toBe(
 			`INSERT INTO tunnel.tunnel_credentials (machine_id, bs_hash) VALUES ('${MID}', '\\x${HASH}');\n`,

@@ -1,4 +1,4 @@
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { recheckDesktopAccess } from "../src/desktop/revocation.ts";
 import { ticketHash } from "../src/desktop/service.ts";
@@ -47,7 +47,7 @@ it("desktop contract: status, image metadata, actions and clipboard through real
 	);
 	expect(image.status).toBe(200);
 	expect(image.headers.get("content-type")).toBe("image/png");
-	expect(image.headers.get("sbx-screen-width")).toBe("1920");
+	expect(image.headers.get("umiak-screen-width")).toBe("1920");
 	expect(image.bytes.length).toBeGreaterThan(0);
 	const actions = await h.request("POST", `${root}/actions`, {
 		json: {
@@ -99,7 +99,7 @@ it("desktop contract: status, image metadata, actions and clipboard through real
 	const resource = await h.request("GET", `/v1/sandboxes/${s.slug}`);
 	expect(resource.body).toMatchObject({
 		endpoints: {
-			desktop: `https://${s.slug}-desktop.${h.deps.settings.sbxDomain}/`,
+			desktop: `https://${s.slug}-desktop.${h.deps.settings.umiakDomain}/`,
 		},
 	});
 });
@@ -240,7 +240,7 @@ it("a ticket written while a block is applied stays invalid after unblock", asyn
 	]);
 	await recheckDesktopAccess(h.deps);
 	// A link request that passed the block check before the block reads the new epoch.
-	const ticket = `sbxd_${"r".repeat(43)}`;
+	const ticket = `umiakd_${"r".repeat(43)}`;
 	await db.pool.query(
 		`INSERT INTO runtime.desktop_tickets(ticket_hash,sandbox_id,label,api_key_id,auth_epoch,expires_at)
 		 SELECT $1,$2,$3,$4,auth_epoch,now()+interval '10 minutes' FROM runtime.sandbox_desktops WHERE sandbox_id=$2`,
@@ -292,7 +292,7 @@ it("between unblock and the access monitor a block-epoch ticket is refused and t
 		s.sandboxId,
 	]);
 	await recheckDesktopAccess(h.deps);
-	const ticket = `sbxd_${"w".repeat(43)}`;
+	const ticket = `umiakd_${"w".repeat(43)}`;
 	await db.pool.query(
 		`INSERT INTO runtime.desktop_tickets(ticket_hash,sandbox_id,label,api_key_id,auth_epoch,expires_at)
 		 SELECT $1,$2,$3,$4,auth_epoch,now()+interval '10 minutes' FROM runtime.sandbox_desktops WHERE sandbox_id=$2`,

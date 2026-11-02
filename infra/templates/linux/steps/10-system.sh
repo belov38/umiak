@@ -54,8 +54,8 @@ others=$(awk -F: '$3 >= 1000 && $3 != 65534 && $1 != "user" { print $1 }' /etc/p
 [ -z "$others" ] || die "unexpected users with uid >= 1000: $others"
 rm -f /root/.ssh/authorized_keys /root/.ssh/authorized_keys2 \
 	/home/user/.ssh/authorized_keys /home/user/.ssh/authorized_keys2
-install_file etc/sudoers.d/90-sbx-user 0440
-visudo -c -f /etc/sudoers.d/90-sbx-user
+install_file etc/sudoers.d/90-umiak-user 0440
+visudo -c -f /etc/sudoers.d/90-umiak-user
 visudo -c
 loginctl enable-linger user
 [ -e /var/lib/systemd/linger/user ] || die "linger for user is not enabled"
@@ -67,15 +67,15 @@ echo Etc/UTC >/etc/timezone
 
 # sshd and PAM (spec 8.3, S3 8.2). Ubuntu's ssh.socket stays; its generator
 # takes ListenAddress from the config.
-install_file etc/ssh/sshd_config.d/10-sbx.conf
-install -d -m 0755 /etc/sbx /etc/sbx-agent
-: >/etc/sbx/env
-chmod 0644 /etc/sbx/env
-install -m 0644 "$SBX_BUILD_DIR/ssh-user-ca.pub" /etc/sbx-agent/ssh-user-ca.pub
-install -m 0644 /etc/sbx-agent/ssh-user-ca.pub /etc/ssh/sbx_user_ca.pub
+install_file etc/ssh/sshd_config.d/10-umiak.conf
+install -d -m 0755 /etc/umiak /etc/umiak-agent
+: >/etc/umiak/env
+chmod 0644 /etc/umiak/env
+install -m 0644 "$UMIAK_BUILD_DIR/ssh-user-ca.pub" /etc/umiak-agent/ssh-user-ca.pub
+install -m 0644 /etc/umiak-agent/ssh-user-ca.pub /etc/ssh/umiak_user_ca.pub
 for line in \
-	'session required pam_env.so readenv=1 envfile=/etc/sbx/env' \
-	'session required pam_env.so readenv=1 envfile=/run/sbx/secrets/env'; do
+	'session required pam_env.so readenv=1 envfile=/etc/umiak/env' \
+	'session required pam_env.so readenv=1 envfile=/run/umiak/secrets/env'; do
 	grep -qxF "$line" /etc/pam.d/sshd || echo "$line" >>/etc/pam.d/sshd
 done
 install -d -m 0755 /run/sshd
@@ -83,22 +83,22 @@ sshd -t
 systemctl enable ssh.socket
 
 # Network (spec 8.4).
-install_file etc/netplan/10-sbx.yaml 0600
+install_file etc/netplan/10-umiak.yaml 0600
 rm -f /etc/netplan/50-cloud-init.yaml
 netplan generate
-install_file etc/systemd/system/systemd-networkd-wait-online.service.d/10-sbx.conf
-install_file etc/systemd/resolved.conf.d/10-sbx.conf
+install_file etc/systemd/system/systemd-networkd-wait-online.service.d/10-umiak.conf
+install_file etc/systemd/resolved.conf.d/10-umiak.conf
 
 # Kernel and limits (spec 8.6), journald (8.7).
-install_file etc/sysctl.d/90-sbx.conf
-install_file etc/systemd/system.conf.d/90-sbx.conf
-install_file etc/systemd/journald.conf.d/90-sbx.conf
-sysctl -q -p /etc/sysctl.d/90-sbx.conf
+install_file etc/sysctl.d/90-umiak.conf
+install_file etc/systemd/system.conf.d/90-umiak.conf
+install_file etc/systemd/journald.conf.d/90-umiak.conf
+sysctl -q -p /etc/sysctl.d/90-umiak.conf
 systemctl daemon-reload
 
 # GRUB (spec 8.5): no menu wait, no recordfail wait, always through initrd.
-install_file etc/default/grub.d/90-sbx.cfg
-rm -f /etc/default/grub.d/40-force-partuuid.cfg /etc/default/grub.d/99-sbx-build-kernel.cfg
+install_file etc/default/grub.d/90-umiak.cfg
+rm -f /etc/default/grub.d/40-force-partuuid.cfg /etc/default/grub.d/99-umiak-build-kernel.cfg
 update-grub
 grep -q 'systemd.machine_id=firmware' /boot/grub/grub.cfg || die "grub.cfg has no systemd.machine_id=firmware"
 # The 00_header of Ubuntu always defines the initrdfail function; what must

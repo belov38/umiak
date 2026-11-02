@@ -10,7 +10,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/node-agent/internal/lvm"
+	"github.com/belov38/umiak/services/node-agent/internal/lvm"
 )
 
 type fakeLVM struct {
@@ -60,9 +60,9 @@ func newHarness(files fstest.MapFS) *harness {
 	h := &harness{
 		lvm: &fakeLVM{lvs: []lvm.LV{
 			{Name: "data", Tags: []string{}, SizeBytes: 1000, DataPercent: 6.5, MetadataPercent: 0.7},
-			{Name: "base-599-disk-0", Tags: []string{"sbx-tpl"}, PoolLV: "data"},
+			{Name: "base-599-disk-0", Tags: []string{"umiak-tpl"}, PoolLV: "data"},
 			{Name: "vm-108-disk-1", Tags: []string{}, PoolLV: "data"},
-			{Name: "vm-500-disk-0", Tags: []string{"sbx", "sbx-vm-500"}, SizeBytes: 100, DataPercent: 50, PoolLV: "data"},
+			{Name: "vm-500-disk-0", Tags: []string{"umiak", "umiak-vm-500"}, SizeBytes: 100, DataPercent: 50, PoolLV: "data"},
 		}},
 		run: &fakeRun{out: map[string]string{}},
 	}
@@ -124,8 +124,8 @@ func TestSnapshotBatchRollsBackOnFailure(t *testing.T) {
 	h := newHarness(nil)
 	h.lvm.failName = "vm-501-disk-0"
 	r := h.call(t, "lv.snapshot", map[string]any{"items": []SnapshotItem{
-		{Origin: "base-599-disk-0", Name: "vm-500-disk-1", Tags: []string{"sbx", "sbx-vm-500"}},
-		{Origin: "base-599-disk-0", Name: "vm-501-disk-0", Tags: []string{"sbx", "sbx-vm-501"}},
+		{Origin: "base-599-disk-0", Name: "vm-500-disk-1", Tags: []string{"umiak", "umiak-vm-500"}},
+		{Origin: "base-599-disk-0", Name: "vm-501-disk-0", Tags: []string{"umiak", "umiak-vm-501"}},
 	}})
 	if r.OK || r.Error.Code != "exec_failed" {
 		t.Fatalf("want exec_failed, got %+v", r)
@@ -138,8 +138,8 @@ func TestSnapshotBatchRollsBackOnFailure(t *testing.T) {
 func TestSnapshotValidatesAllBeforeCreating(t *testing.T) {
 	h := newHarness(nil)
 	r := h.call(t, "lv.snapshot", map[string]any{"items": []SnapshotItem{
-		{Origin: "base-599-disk-0", Name: "vm-500-disk-1", Tags: []string{"sbx", "sbx-vm-500"}},
-		{Origin: "base-9000-disk-0", Name: "vm-501-disk-0", Tags: []string{"sbx", "sbx-vm-501"}},
+		{Origin: "base-599-disk-0", Name: "vm-500-disk-1", Tags: []string{"umiak", "umiak-vm-500"}},
+		{Origin: "base-9000-disk-0", Name: "vm-501-disk-0", Tags: []string{"umiak", "umiak-vm-501"}},
 	}})
 	if r.OK || r.Error.Code != "forbidden" || len(h.lvm.created) != 0 {
 		t.Errorf("got %+v, created %v", r, h.lvm.created)
@@ -149,9 +149,9 @@ func TestSnapshotValidatesAllBeforeCreating(t *testing.T) {
 func TestSnapshotSuccess(t *testing.T) {
 	h := newHarness(nil)
 	m := resultMap(t, h.call(t, "lv.snapshot", map[string]any{"items": []SnapshotItem{
-		{Origin: "vm-500-disk-0", Name: "sbx-snap-abc-scsi0", Tags: []string{"sbx", "sbx-snap-abc", "sbx-src-500"}, ActivationSkip: true},
+		{Origin: "vm-500-disk-0", Name: "umiak-snap-abc-scsi0", Tags: []string{"umiak", "umiak-snap-abc", "umiak-src-500"}, ActivationSkip: true},
 	}}))
-	if c := m["created"].([]any); len(c) != 1 || c[0] != "sbx-snap-abc-scsi0" {
+	if c := m["created"].([]any); len(c) != 1 || c[0] != "umiak-snap-abc-scsi0" {
 		t.Errorf("created = %v", m["created"])
 	}
 }
@@ -160,25 +160,25 @@ func TestSnapshotRefusesToOverwriteTemplateDisk(t *testing.T) {
 	h := newHarness(nil)
 	h.srv.Cfg.TemplateVMID = 0
 	h.lvm.lvs = append(h.lvm.lvs,
-		lvm.LV{Name: "base-598-disk-0", Tags: []string{"sbx-tpl"}, PoolLV: "data"},
-		lvm.LV{Name: "base-598-cloudinit", Tags: []string{"sbx-tpl"}, PoolLV: "data"})
+		lvm.LV{Name: "base-598-disk-0", Tags: []string{"umiak-tpl"}, PoolLV: "data"},
+		lvm.LV{Name: "base-598-cloudinit", Tags: []string{"umiak-tpl"}, PoolLV: "data"})
 	r := h.call(t, "lv.snapshot", map[string]any{"items": []SnapshotItem{
-		{Origin: "base-598-disk-0", Name: "vm-501-disk-0", Tags: []string{"sbx", "sbx-vm-501"}},
-		{Origin: "base-598-disk-0", Name: "vm-598-disk-0", Tags: []string{"sbx", "sbx-vm-598"}},
+		{Origin: "base-598-disk-0", Name: "vm-501-disk-0", Tags: []string{"umiak", "umiak-vm-501"}},
+		{Origin: "base-598-disk-0", Name: "vm-598-disk-0", Tags: []string{"umiak", "umiak-vm-598"}},
 	}})
 	if r.OK || r.Error.Code != "forbidden" || len(h.lvm.created) != 0 {
 		t.Fatalf("got %+v, created %v", r, h.lvm.created)
 	}
 	// A leading zero must not dodge the template check.
 	r = h.call(t, "lv.snapshot", map[string]any{"items": []SnapshotItem{
-		{Origin: "base-598-disk-0", Name: "vm-0598-disk-0", Tags: []string{"sbx", "sbx-vm-0598"}},
+		{Origin: "base-598-disk-0", Name: "vm-0598-disk-0", Tags: []string{"umiak", "umiak-vm-0598"}},
 	}})
 	if r.OK || r.Error.Code != "forbidden" || len(h.lvm.created) != 0 {
 		t.Fatalf("leading zero: got %+v, created %v", r, h.lvm.created)
 	}
 	// A clone from the same template into a free VMID still works.
 	m := resultMap(t, h.call(t, "lv.snapshot", map[string]any{"items": []SnapshotItem{
-		{Origin: "base-598-disk-0", Name: "vm-501-disk-0", Tags: []string{"sbx", "sbx-vm-501"}},
+		{Origin: "base-598-disk-0", Name: "vm-501-disk-0", Tags: []string{"umiak", "umiak-vm-501"}},
 	}}))
 	if c := m["created"].([]any); len(c) != 1 || c[0] != "vm-501-disk-0" {
 		t.Errorf("created = %v", m["created"])
@@ -205,7 +205,7 @@ func TestRemoveReportsMissing(t *testing.T) {
 
 func TestListFiltersByAllTags(t *testing.T) {
 	h := newHarness(nil)
-	m := resultMap(t, h.call(t, "lv.list", map[string]any{"tags": []string{"sbx", "sbx-vm-500"}}))
+	m := resultMap(t, h.call(t, "lv.list", map[string]any{"tags": []string{"umiak", "umiak-vm-500"}}))
 	if l := m["lvs"].([]any); len(l) != 1 {
 		t.Errorf("lvs = %v", l)
 	}
@@ -222,17 +222,17 @@ func TestPoolUsage(t *testing.T) {
 	}
 }
 
-const leases = "1793300000 02:01:00:00:01:f4 10.88.0.100 sbx-500 01:02:01:00:00:01:f4\n1793300100 bc:24:11:00:00:01 10.88.0.101 * *\n"
+const leases = "1793300000 02:01:00:00:01:f4 10.88.0.100 umiak-500 01:02:01:00:00:01:f4\n1793300100 bc:24:11:00:00:01 10.88.0.101 * *\n"
 
 func TestDHCPLeasesAndRelease(t *testing.T) {
-	h := newHarness(fstest.MapFS{"var/lib/misc/dnsmasq.sbx.leases": {Data: []byte(leases)}})
+	h := newHarness(fstest.MapFS{"var/lib/misc/dnsmasq.umiak.leases": {Data: []byte(leases)}})
 	m := resultMap(t, h.call(t, "dhcp.leases", nil))
 	l := m["leases"].([]any)
 	if len(l) != 2 || l[0].(map[string]any)["ip"] != "10.88.0.100" || l[0].(map[string]any)["mac"] != "02:01:00:00:01:f4" {
 		t.Fatalf("leases = %v", l)
 	}
 	m = resultMap(t, h.call(t, "dhcp.release", map[string]any{"mac": "02:01:00:00:01:F4"}))
-	if m["released"] != true || strings.Join(h.run.calls[0], " ") != "dhcp_release sbx0 10.88.0.100 02:01:00:00:01:f4" {
+	if m["released"] != true || strings.Join(h.run.calls[0], " ") != "dhcp_release umiak0 10.88.0.100 02:01:00:00:01:f4" {
 		t.Errorf("release = %v, calls %v", m, h.run.calls)
 	}
 	if r := h.call(t, "dhcp.release", map[string]any{"mac": "BC:24:11:00:00:01"}); r.OK || r.Error.Code != "forbidden" {
@@ -259,8 +259,8 @@ func TestLogRedactsSearchString(t *testing.T) {
 			t.Errorf("log leaks search string: %s", l)
 		}
 	}
-	h.call(t, "lv.list", map[string]any{"tags": []string{"sbx-vm-500"}})
-	if last := h.logs[len(h.logs)-1]; !strings.Contains(last, "sbx-vm-500") || !strings.Contains(last, "r1") {
+	h.call(t, "lv.list", map[string]any{"tags": []string{"umiak-vm-500"}})
+	if last := h.logs[len(h.logs)-1]; !strings.Contains(last, "umiak-vm-500") || !strings.Contains(last, "r1") {
 		t.Errorf("normal op args not logged: %s", last)
 	}
 }
@@ -282,21 +282,21 @@ const ethers = "02:01:00:00:02:57,10.88.0.100\n02:01:00:00:01:f4,10.88.0.101\n"
 
 func TestDHCPReleaseRemovesStaleEthersLine(t *testing.T) {
 	h := newHarness(fstest.MapFS{
-		"var/lib/misc/dnsmasq.sbx.leases": {Data: []byte(leases)},
-		"etc/pve/sdn/mac-cache.json":      {Data: []byte(`{"macs":{"02:01:00:00:02:57":{"ip4":"10.88.0.100"}}}`)},
-		"etc/dnsmasq.d/sbx/ethers":        {Data: []byte(ethers)},
+		"var/lib/misc/dnsmasq.umiak.leases": {Data: []byte(leases)},
+		"etc/pve/sdn/mac-cache.json":        {Data: []byte(`{"macs":{"02:01:00:00:02:57":{"ip4":"10.88.0.100"}}}`)},
+		"etc/dnsmasq.d/umiak/ethers":        {Data: []byte(ethers)},
 	})
-	files := &fakeFiles{files: map[string][]byte{"/etc/dnsmasq.d/sbx/ethers": []byte(ethers)}}
+	files := &fakeFiles{files: map[string][]byte{"/etc/dnsmasq.d/umiak/ethers": []byte(ethers)}}
 	h.srv.Host.Replace = files.replace
 	m := resultMap(t, h.call(t, "dhcp.release", map[string]any{"mac": "02:01:00:00:01:F4"}))
 	if m["released"] != true || m["ethersRemoved"] != true {
 		t.Fatalf("result = %v", m)
 	}
-	if got := string(files.files["/etc/dnsmasq.d/sbx/ethers"]); got != "02:01:00:00:02:57,10.88.0.100\n" {
+	if got := string(files.files["/etc/dnsmasq.d/umiak/ethers"]); got != "02:01:00:00:02:57,10.88.0.100\n" {
 		t.Errorf("ethers = %q", got)
 	}
 	last := strings.Join(h.run.calls[len(h.run.calls)-1], " ")
-	if last != "systemctl reload dnsmasq@sbx" {
+	if last != "systemctl reload dnsmasq@umiak" {
 		t.Errorf("last call = %q", last)
 	}
 }
@@ -305,19 +305,19 @@ func TestDHCPReleaseKeepsEthersWhileMACIsInIPAM(t *testing.T) {
 	h := newHarness(fstest.MapFS{
 		"etc/pve/sdn/mac-cache.json": {Data: []byte(`{"macs":{"02:01:00:00:01:f4":{"ip4":"10.88.0.101"}}}`)},
 	})
-	files := &fakeFiles{files: map[string][]byte{"/etc/dnsmasq.d/sbx/ethers": []byte(ethers)}}
+	files := &fakeFiles{files: map[string][]byte{"/etc/dnsmasq.d/umiak/ethers": []byte(ethers)}}
 	h.srv.Host.Replace = files.replace
 	m := resultMap(t, h.call(t, "dhcp.release", map[string]any{"mac": "02:01:00:00:01:f4"}))
 	if m["ethersRemoved"] != false || m["inMacCache"] != true {
 		t.Errorf("result = %v", m)
 	}
-	if string(files.files["/etc/dnsmasq.d/sbx/ethers"]) != ethers {
+	if string(files.files["/etc/dnsmasq.d/umiak/ethers"]) != ethers {
 		t.Error("ethers must not change while the MAC is still in the IPAM mac cache")
 	}
 }
 
 func TestDHCPLeasesIncludesEthers(t *testing.T) {
-	h := newHarness(fstest.MapFS{"etc/dnsmasq.d/sbx/ethers": {Data: []byte(ethers)}})
+	h := newHarness(fstest.MapFS{"etc/dnsmasq.d/umiak/ethers": {Data: []byte(ethers)}})
 	m := resultMap(t, h.call(t, "dhcp.leases", nil))
 	e := m["ethers"].([]any)
 	if len(e) != 2 || e[1].(map[string]any)["mac"] != "02:01:00:00:01:f4" || e[1].(map[string]any)["ip"] != "10.88.0.101" {
@@ -327,13 +327,13 @@ func TestDHCPLeasesIncludesEthers(t *testing.T) {
 
 // Fake serial payload in the S2 shape, not a credential.
 const (
-	testSerial    = "sbx1:11111111-2222-3333-4444-555555555555:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" //nolint:gosec // fake test value
-	testSerialB64 = "c2J4MToxMTExMTExMS0yMjIyLTMzMzMtNDQ0NC01NTU1NTU1NTU1NTU6QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQQ=="
+	testSerial    = "umiak1:11111111-2222-3333-4444-555555555555:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" //nolint:gosec // fake test value
+	testSerialB64 = "dW1pYWsxOjExMTExMTExLTIyMjItMzMzMy00NDQ0LTU1NTU1NTU1NTU1NTpBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB"
 )
 
 func TestSearchAcceptsOnlySerialShapedNeedles(t *testing.T) {
 	h := newHarness(nil)
-	for _, bad := range []string{"password=", "a", "sbx1:short", "sbx1:11111111-2222-3333-4444-555555555555:" + "A"} {
+	for _, bad := range []string{"password=", "a", "umiak1:short", "umiak1:11111111-2222-3333-4444-555555555555:" + "A"} {
 		r := h.call(t, "inventory", map[string]any{"sections": []string{"search"}, "search": bad})
 		if r.OK || r.Error.Code != "forbidden" {
 			t.Errorf("search %q: got %+v", bad, r)
@@ -351,7 +351,7 @@ func TestSnapshotRefusesUntaggedVMOrigin(t *testing.T) {
 	h.lvm.lvs = append(h.lvm.lvs, lvm.LV{Name: "vm-501-disk-0", Tags: []string{}})
 	for _, origin := range []string{"vm-501-disk-0", "vm-502-disk-0"} {
 		r := h.call(t, "lv.snapshot", map[string]any{"items": []SnapshotItem{
-			{Origin: origin, Name: "sbx-snap-abc-scsi0", Tags: []string{"sbx", "sbx-snap-abc"}},
+			{Origin: origin, Name: "umiak-snap-abc-scsi0", Tags: []string{"umiak", "umiak-snap-abc"}},
 		}})
 		if r.OK || r.Error.Code != "forbidden" || len(h.lvm.created) != 0 {
 			t.Errorf("origin %s: got %+v", origin, r)
@@ -372,20 +372,20 @@ func TestLogRedactsSearchKeyCaseInsensitively(t *testing.T) {
 func TestSnapshotRefusesUntaggedSnapshotOrigin(t *testing.T) {
 	h := newHarness(nil)
 	h.lvm.lvs = append(h.lvm.lvs,
-		lvm.LV{Name: "sbx-snap-foreign-scsi0", Tags: []string{}},
-		lvm.LV{Name: "sbx-snap-other-scsi0", Tags: []string{"sbx", "sbx-snap-abc"}},
-		lvm.LV{Name: "sbx-snap-good-scsi0", Tags: []string{"sbx", "sbx-snap-good", "sbx-src-500"}},
+		lvm.LV{Name: "umiak-snap-foreign-scsi0", Tags: []string{}},
+		lvm.LV{Name: "umiak-snap-other-scsi0", Tags: []string{"umiak", "umiak-snap-abc"}},
+		lvm.LV{Name: "umiak-snap-good-scsi0", Tags: []string{"umiak", "umiak-snap-good", "umiak-src-500"}},
 	)
-	for _, origin := range []string{"sbx-snap-foreign-scsi0", "sbx-snap-other-scsi0", "sbx-snap-missing-scsi0"} {
+	for _, origin := range []string{"umiak-snap-foreign-scsi0", "umiak-snap-other-scsi0", "umiak-snap-missing-scsi0"} {
 		r := h.call(t, "lv.snapshot", map[string]any{"items": []SnapshotItem{
-			{Origin: origin, Name: "vm-501-disk-0", Tags: []string{"sbx", "sbx-vm-501"}},
+			{Origin: origin, Name: "vm-501-disk-0", Tags: []string{"umiak", "umiak-vm-501"}},
 		}})
 		if r.OK || r.Error.Code != "forbidden" || len(h.lvm.created) != 0 {
 			t.Errorf("origin %s: got %+v", origin, r)
 		}
 	}
 	r := h.call(t, "lv.snapshot", map[string]any{"items": []SnapshotItem{
-		{Origin: "sbx-snap-good-scsi0", Name: "vm-501-disk-0", Tags: []string{"sbx", "sbx-vm-501"}},
+		{Origin: "umiak-snap-good-scsi0", Name: "vm-501-disk-0", Tags: []string{"umiak", "umiak-vm-501"}},
 	}})
 	if !r.OK {
 		t.Fatalf("tagged snapshot origin refused: %+v", r.Error)

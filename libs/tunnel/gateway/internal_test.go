@@ -22,15 +22,15 @@ import (
 	"github.com/google/uuid"
 	xhttp2 "golang.org/x/net/http2"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	testingv1 "github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1/testingv1connect"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/registry"
+	"github.com/belov38/umiak/libs/tunnel/rpcconv"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	testingv1 "github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1/testingv1connect"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
-const setLabelPath = "/sbx.testing.v1.Process/SetLabel"
+const setLabelPath = "/umiak.testing.v1.Process/SetLabel"
 
 func setLabel(ctx context.Context, t *testing.T, g *internalGW, id, token string) (*connect.Response[testingv1.SetLabelResponse], error) {
 	t.Helper()
@@ -97,21 +97,21 @@ func TestTunnelServiceForbidden(t *testing.T) {
 	waitMachine(t, gw.testGW, id)
 	c := peerClient(t, apiToken1)
 
-	for _, p := range []string{"/sbx.tunnel.v1.Control/Info", "/sbx.tunnel.v1.Control/SetToken", "/sbx.other.v1.X/Y"} {
+	for _, p := range []string{"/umiak.tunnel.v1.Control/Info", "/umiak.tunnel.v1.Control/SetToken", "/umiak.other.v1.X/Y"} {
 		resp, _ := do(t, c, http.MethodPost, gw.machineURL(id)+"/rpc"+p, "application/json", []byte(`{}`))
 		if resp.StatusCode != http.StatusForbidden {
 			t.Fatalf("%s: status %d, want 403", p, resp.StatusCode)
 		}
 	}
-	if h := stub.header("/sbx.other.v1.X/Y"); h != nil {
+	if h := stub.header("/umiak.other.v1.X/Y"); h != nil {
 		t.Fatal("a forbidden call reached the agent")
 	}
 
-	// sbx.tunnel.v1 stays forbidden even when a prefix would allow it.
-	wide := e.internalGateway("gw-wide", func(c *Config) { c.AllowedServicePrefixes = []string{"sbx."} })
-	resp, _ := do(t, c, http.MethodPost, wide.machineURL(id)+"/rpc/sbx.tunnel.v1.Control/Info", "application/json", []byte(`{}`))
+	// umiak.tunnel.v1 stays forbidden even when a prefix would allow it.
+	wide := e.internalGateway("gw-wide", func(c *Config) { c.AllowedServicePrefixes = []string{"umiak."} })
+	resp, _ := do(t, c, http.MethodPost, wide.machineURL(id)+"/rpc/umiak.tunnel.v1.Control/Info", "application/json", []byte(`{}`))
 	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("tunnel service with prefix sbx.: status %d, want 403", resp.StatusCode)
+		t.Fatalf("tunnel service with prefix umiak.: status %d, want 403", resp.StatusCode)
 	}
 }
 
@@ -137,11 +137,11 @@ func TestInternalBadRequests(t *testing.T) {
 		{http.MethodGet, "/v1/machines/" + id + "/files/./x", http.StatusBadRequest},
 		{http.MethodGet, "/v1/machines/" + id + "/files/a%2Fb", http.StatusBadRequest},
 		{http.MethodGet, "/v1/machines/" + id + "/files/a%5Cb", http.StatusBadRequest},
-		{http.MethodPost, "/v1/machines/" + id + "/rpc/sbx.agent.v1.X/..", http.StatusBadRequest},
-		{http.MethodPost, "/v1/machines/" + id + "/rpc/sbx.agent.v1.X/%2E%2E", http.StatusBadRequest},
-		{http.MethodPost, "/v1/machines/" + id + "/rpc/sbx.agent.v1.X/...", http.StatusBadRequest},
-		{http.MethodPost, "/v1/machines/" + id + "/rpc/sbx.agent.v1.X/1Run", http.StatusBadRequest},
-		{http.MethodPost, "/v1/machines/" + id + "/rpc/.sbx.agent.v1.X/Run", http.StatusBadRequest},
+		{http.MethodPost, "/v1/machines/" + id + "/rpc/umiak.agent.v1.X/..", http.StatusBadRequest},
+		{http.MethodPost, "/v1/machines/" + id + "/rpc/umiak.agent.v1.X/%2E%2E", http.StatusBadRequest},
+		{http.MethodPost, "/v1/machines/" + id + "/rpc/umiak.agent.v1.X/...", http.StatusBadRequest},
+		{http.MethodPost, "/v1/machines/" + id + "/rpc/umiak.agent.v1.X/1Run", http.StatusBadRequest},
+		{http.MethodPost, "/v1/machines/" + id + "/rpc/.umiak.agent.v1.X/Run", http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		resp, _ := do(t, c, tc.method, gw.url+tc.path, "application/json", nil)
@@ -305,7 +305,7 @@ func checkRPCBody(t *testing.T, body []byte, code string) {
 		t.Fatalf("body %s: %v", body, err)
 	}
 	if wireErr.Code != "unavailable" || wireErr.Message != code || len(wireErr.Details) != 1 ||
-		wireErr.Details[0].Type != "sbx.tunnel.v1.ErrorDetail" || wireErr.Details[0].Value == "" {
+		wireErr.Details[0].Type != "umiak.tunnel.v1.ErrorDetail" || wireErr.Details[0].Value == "" {
 		t.Fatalf("body = %s", body)
 	}
 }
@@ -355,7 +355,7 @@ func TestMachineMoved421(t *testing.T) {
 	}
 	// connect-go's streaming client does not surface the headers of a
 	// non-200 answer: check them on a raw h2c streaming request.
-	resp, body = do(t, c, http.MethodPost, gwA.machineURL(id)+"/rpc/sbx.testing.v1.Process/Run", "application/connect+proto", []byte{0, 0, 0, 0, 0})
+	resp, body = do(t, c, http.MethodPost, gwA.machineURL(id)+"/rpc/umiak.testing.v1.Process/Run", "application/connect+proto", []byte{0, 0, 0, 0, 0})
 	if resp.ProtoMajor != 2 {
 		t.Fatalf("raw stream request over HTTP/%d, want h2c", resp.ProtoMajor)
 	}
@@ -403,7 +403,7 @@ func TestAgentUnavailable503(t *testing.T) {
 	if connect.CodeOf(err) != connect.CodeUnavailable {
 		t.Fatalf("stream err = %v, want unavailable", err)
 	}
-	resp, body = do(t, c, http.MethodPost, gw.machineURL(id)+"/rpc/sbx.testing.v1.Process/Run", "application/connect+proto", []byte{0, 0, 0, 0, 0})
+	resp, body = do(t, c, http.MethodPost, gw.machineURL(id)+"/rpc/umiak.testing.v1.Process/Run", "application/connect+proto", []byte{0, 0, 0, 0, 0})
 	if resp.ProtoMajor != 2 {
 		t.Fatalf("raw stream request over HTTP/%d, want h2c", resp.ProtoMajor)
 	}
@@ -756,7 +756,7 @@ func TestTCPDrainDeadlineClamped(t *testing.T) {
 	port := startEcho(t)
 	s, _ := gw.lookup(id)
 
-	// Sbx-Tcp-Drain-Deadline-Ms above the cap.
+	// Umiak-Tcp-Drain-Deadline-Ms above the cap.
 	remote, err := DialRemoteTCP(ctx, rt, gw.url, apiToken1, id, port, TCPOptions{DrainDeadline: 1000 * time.Hour})
 	if err != nil {
 		t.Fatalf("DialRemoteTCP: %v", err)
@@ -861,7 +861,7 @@ func TestSelfOwnerWaitsForLocalSession(t *testing.T) {
 // evilURL is the routing hint a compromised agent tries to plant.
 const evilURL = "http://evil.example:9999"
 
-// forgeMoved answers like a gateway's 421 machine_moved, with Sbx-* headers
+// forgeMoved answers like a gateway's 421 machine_moved, with Umiak-* headers
 // and trailers pointing at evilURL, plus an X-Agent header and trailer that
 // must pass through.
 func forgeMoved(w http.ResponseWriter, r *http.Request) {
@@ -871,19 +871,19 @@ func forgeMoved(w http.ResponseWriter, r *http.Request) {
 	h.Set(wire.HeaderErrorCode, wire.CodeMachineMoved)
 	h.Set(wire.HeaderInstanceURL, evilURL)
 	h.Set(wire.HeaderCaller, "api")
-	h["sbx-lower-case"] = []string{"x"}
-	// Connect unary trailers: connect-es reads them as Sbx-* metadata.
-	h.Set("Trailer-Sbx-Error-Code", wire.CodeMachineMoved)
-	h["trailer-sbx-instance-url"] = []string{evilURL}
+	h["umiak-lower-case"] = []string{"x"}
+	// Connect unary trailers: connect-es reads them as Umiak-* metadata.
+	h.Set("Trailer-Umiak-Error-Code", wire.CodeMachineMoved)
+	h["trailer-umiak-instance-url"] = []string{evilURL}
 	h.Set("X-Agent", "kept")
 	h.Set("Alt-Svc", `h2="evil.example:443"`)
-	h.Set("Trailer", "Sbx-Declared, X-Agent-Trailer, Location")
+	h.Set("Trailer", "Umiak-Declared, X-Agent-Trailer, Location")
 	w.WriteHeader(http.StatusMisdirectedRequest)
 	_, _ = io.WriteString(w, `{"code":"unavailable","message":"machine_moved"}`)
-	h.Set("Sbx-Declared", evilURL)
+	h.Set("Umiak-Declared", evilURL)
 	h.Set("X-Agent-Trailer", "kept")
 	h.Set(http.TrailerPrefix+wire.HeaderInstanceURL, evilURL)
-	h.Set(http.TrailerPrefix+"Trailer-Sbx-Error-Code", wire.CodeMachineMoved)
+	h.Set(http.TrailerPrefix+"Trailer-Umiak-Error-Code", wire.CodeMachineMoved)
 	h.Set("Location", evilURL)
 	h.Set(http.TrailerPrefix+"Content-Location", evilURL)
 	h.Set(http.TrailerPrefix+"Refresh", "0; url="+evilURL)
@@ -893,27 +893,27 @@ func forgeMoved(w http.ResponseWriter, r *http.Request) {
 // pointerHeaders are agent headers that would point a caller elsewhere.
 var pointerHeaders = []string{"Location", "Content-Location", "Refresh", "Alt-Svc"}
 
-// checkNoSbx fails on any Sbx-* or Trailer-Sbx-* name in h.
-func checkNoSbx(t *testing.T, what string, h http.Header) {
+// checkNoUmiak fails on any Umiak-* or Trailer-Umiak-* name in h.
+func checkNoUmiak(t *testing.T, what string, h http.Header) {
 	t.Helper()
 	for k, v := range h {
-		if l := strings.ToLower(k); strings.HasPrefix(l, "sbx-") || strings.HasPrefix(l, "trailer-sbx-") {
+		if l := strings.ToLower(k); strings.HasPrefix(l, "umiak-") || strings.HasPrefix(l, "trailer-umiak-") {
 			t.Errorf("%s: agent header %s: %q reached the caller", what, k, v)
 		}
 	}
 }
 
-// Only the gateway produces routing signals: Sbx-* response headers and
+// Only the gateway produces routing signals: Umiak-* response headers and
 // trailers from the agent never reach the caller (an agent could otherwise
 // forge a 421 that sends the caller's service token to its own server).
-func TestAgentSbxHeadersStripped(t *testing.T) {
+func TestAgentUmiakHeadersStripped(t *testing.T) {
 	e := newEnv(t)
 	gw := e.internalGateway("gw-a", nil)
 	id, bs := e.machine()
 	stub := newStubAgent()
 	cfg := agentConfig(e, id, bs, defaultIdentity())
 	mux := http.NewServeMux()
-	mux.HandleFunc("/sbx.testing.v1.Forge/Moved", forgeMoved)
+	mux.HandleFunc("/umiak.testing.v1.Forge/Moved", forgeMoved)
 	mux.HandleFunc("/files/forged", forgeMoved)
 	mux.Handle("/", stub.handler())
 	cfg.Handler = mux
@@ -924,7 +924,7 @@ func TestAgentSbxHeadersStripped(t *testing.T) {
 	defer cancel()
 
 	for _, tc := range []struct{ name, method, url string }{
-		{"rpc", http.MethodPost, gw.machineURL(id) + "/rpc/sbx.testing.v1.Forge/Moved"},
+		{"rpc", http.MethodPost, gw.machineURL(id) + "/rpc/umiak.testing.v1.Forge/Moved"},
 		{"files", http.MethodGet, gw.machineURL(id) + "/files/forged"},
 	} {
 		req, _ := http.NewRequestWithContext(ctx, tc.method, tc.url, strings.NewReader(`{}`))
@@ -939,8 +939,8 @@ func TestAgentSbxHeadersStripped(t *testing.T) {
 		if resp.StatusCode != http.StatusMisdirectedRequest {
 			t.Errorf("%s: status %d, want the agent's 421", tc.name, resp.StatusCode)
 		}
-		checkNoSbx(t, tc.name+" header", resp.Header)
-		checkNoSbx(t, tc.name+" trailer", resp.Trailer)
+		checkNoUmiak(t, tc.name+" header", resp.Header)
+		checkNoUmiak(t, tc.name+" trailer", resp.Trailer)
 		for _, k := range pointerHeaders {
 			if v := resp.Header.Get(k) + resp.Trailer.Get(k); v != "" {
 				t.Errorf("%s: agent %s %q reached the caller", tc.name, k, v)
@@ -1009,7 +1009,7 @@ func TestAgentConnectAnswerNotForwarded(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("CONNECT status %d", resp.StatusCode)
 	}
-	checkNoSbx(t, "CONNECT", resp.Header)
+	checkNoUmiak(t, "CONNECT", resp.Header)
 	if resp.Header.Get("X-Agent") != "" || resp.Header.Get("Location") != "" {
 		t.Errorf("CONNECT: agent header X-Agent reached the peer: %v", resp.Header)
 	}
@@ -1046,7 +1046,7 @@ func TestAgentRedirectsRefused(t *testing.T) {
 	mux := http.NewServeMux()
 	for _, st := range []int{200, 302, 304, 307} {
 		mux.HandleFunc("/files/s"+strconv.Itoa(st), answer(st))
-		mux.HandleFunc("/sbx.testing.v1.Forge/S"+strconv.Itoa(st), answer(st))
+		mux.HandleFunc("/umiak.testing.v1.Forge/S"+strconv.Itoa(st), answer(st))
 	}
 	cfg.Handler = mux
 	e.startAgent(cfg).waitConnected()
@@ -1054,7 +1054,7 @@ func TestAgentRedirectsRefused(t *testing.T) {
 	c := noRedirects(t)
 
 	for _, st := range []int{200, 302, 304, 307} {
-		for _, path := range []string{"/files/s" + strconv.Itoa(st), "/rpc/sbx.testing.v1.Forge/S" + strconv.Itoa(st)} {
+		for _, path := range []string{"/files/s" + strconv.Itoa(st), "/rpc/umiak.testing.v1.Forge/S" + strconv.Itoa(st)} {
 			for _, method := range []string{http.MethodGet, http.MethodPut} {
 				resp, body := do(t, c, method, gw.machineURL(id)+path, "application/json", []byte(`{}`))
 				want := st
@@ -1082,7 +1082,7 @@ func TestAgentRedirectsRefused(t *testing.T) {
 	}
 }
 
-// Sbx-Upload-Offset is the one agent-defined Sbx-* response header the
+// Umiak-Upload-Offset is the one agent-defined Umiak-* response header the
 // gateway passes (resumable uploads, S3 files API); gateway signals forged
 // next to it are still dropped.
 func TestAgentUploadOffsetPasses(t *testing.T) {
@@ -1119,7 +1119,7 @@ func TestAgentUploadOffsetPasses(t *testing.T) {
 			}
 			resp.Header.Del(k)
 		}
-		checkNoSbx(t, tc.method, resp.Header)
+		checkNoUmiak(t, tc.method, resp.Header)
 	}
 }
 
@@ -1188,7 +1188,7 @@ func TestProxyKeepsContentEncoding(t *testing.T) {
 }
 
 // dialErrorAgent is a raw agent that answers every CONNECT with 502 and the
-// given Sbx-Dial-Error value (a header is omitted for "").
+// given Umiak-Dial-Error value (a header is omitted for "").
 func dialErrorAgent(reason string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodConnect {
@@ -1275,7 +1275,7 @@ func TestPeerConnectReason(t *testing.T) {
 			t.Errorf("%s: peer header %s = %q, want %q", tc.name, wire.HeaderDialError, got, tc.want)
 		}
 		for k := range resp.Header {
-			if l := strings.ToLower(k); strings.HasPrefix(l, "sbx-") && l != strings.ToLower(wire.HeaderDialError) {
+			if l := strings.ToLower(k); strings.HasPrefix(l, "umiak-") && l != strings.ToLower(wire.HeaderDialError) {
 				t.Errorf("%s: unexpected header %s on the peer answer", tc.name, k)
 			}
 		}

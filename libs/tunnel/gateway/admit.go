@@ -10,10 +10,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/h2"
+	"github.com/belov38/umiak/libs/tunnel/registry"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // dbRetryAfter is the Retry-After of a 503 caused by a registry failure.

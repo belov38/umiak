@@ -1,5 +1,5 @@
-import type { TemplateOs } from "@sbx/config";
-import { withTx } from "@sbx/db";
+import type { TemplateOs } from "@umiak/config";
+import { withTx } from "@umiak/db";
 import { requestHash } from "../canonical.ts";
 import { checkQuota } from "../capacity.ts";
 import { operationDeadline } from "../deadlines.ts";
@@ -7,8 +7,8 @@ import {
 	idempotencyKeyReused,
 	notFound,
 	operationInProgress,
-	SbxError,
 	snapshotNotFound,
+	UmiakError,
 	validation,
 	windowsSnapshotRequiresStop,
 } from "../errors.ts";
@@ -211,7 +211,7 @@ export async function deleteSavedSnapshot(
 		const id = r.rows[0]?.id;
 		if (id === undefined) throw snapshotNotFound(name);
 		if (expectedId !== undefined && id !== expectedId) {
-			throw new SbxError(
+			throw new UmiakError(
 				"snapshot_not_found",
 				`snapshot ${name} is another snapshot now; nothing was deleted`,
 				{ details: { reason: "id_mismatch" } },

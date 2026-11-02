@@ -2,7 +2,11 @@
 // §23.3): the Command resource prefers the agent's live values and falls
 // back to the stored ones when the agent is unavailable or the command was
 // ended by the platform (lost).
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { resolveCommandRef } from "../src/map/command.ts";
 import {

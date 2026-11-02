@@ -132,10 +132,10 @@ export function setup(project: TestProject): void {
 	root = project.config.root;
 	filtered =
 		project.config.testNamePattern !== undefined ||
-		(process.env.SBX_TEST_SKIP_PG === "1" &&
-			!process.env.SBX_TEST_DATABASE_URL);
-	dir = mkdtempSync(join(tmpdir(), "sbx-conformance-"));
-	project.provide("sbxConformanceDir", dir);
+		(process.env.UMIAK_TEST_SKIP_PG === "1" &&
+			!process.env.UMIAK_TEST_DATABASE_URL);
+	dir = mkdtempSync(join(tmpdir(), "umiak-conformance-"));
+	project.provide("umiakConformanceDir", dir);
 }
 
 export function teardown(): void {

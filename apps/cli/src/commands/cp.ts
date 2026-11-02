@@ -1,4 +1,4 @@
-// `sbx cp [-r] <src> <dst>` (S7 §11.1, §14.2): copies between this machine
+// `umiak cp [-r] <src> <dst>` (S7 §11.1, §14.2): copies between this machine
 // and a sandbox; `<sb>:<path>` names the sandbox side (exactly one side).
 // - `<sb>` is an ID or slug; an empty one (`:path`) is the current sandbox.
 //   A word before `:` that holds `/`, `\` or `.`, or is one letter (a
@@ -18,7 +18,7 @@ import { statSync } from "node:fs";
 import { chmod, readFile } from "node:fs/promises";
 import { basename, join, posix } from "node:path";
 import { Readable } from "node:stream";
-import { type Sandbox, SbxError } from "@sbx/sdk";
+import { type Sandbox, UmiakError } from "@umiak/sdk";
 import type { Command } from "commander";
 import type { Context } from "../context.ts";
 import { useSandbox } from "../current.ts";
@@ -52,7 +52,7 @@ export async function remoteStat(sb: Sandbox, path: string) {
 	try {
 		return await sb.files.stat(path);
 	} catch (err) {
-		if (err instanceof SbxError && err.status === 404) return null;
+		if (err instanceof UmiakError && err.status === 404) return null;
 		throw err;
 	}
 }
@@ -162,7 +162,7 @@ export function register(program: Command, run: Runner): void {
 	program
 		.command("cp")
 		.description(
-			"copy files between this machine and a sandbox: sbx cp [-r] <src> <dst>, one side <sb>:<path>",
+			"copy files between this machine and a sandbox: umiak cp [-r] <src> <dst>, one side <sb>:<path>",
 		)
 		.argument("<src>", "local path, - (stdin) or <sb>:<path>")
 		.argument("<dst>", "local path, - (stdout) or <sb>:<path>")
@@ -173,8 +173,8 @@ export function register(program: Command, run: Runner): void {
 				"",
 				"<sb> is a sandbox ID or slug; :<path> is the current sandbox.",
 				"Remote paths are absolute or relative to the user's home.",
-				"  sbx cp ./build.tgz my-sb:/tmp/        sbx cp my-sb:out.log -",
-				"  sbx cp -r ./src my-sb:project/src     sbx cp -r my-sb:results ./",
+				"  umiak cp ./build.tgz my-sb:/tmp/        umiak cp my-sb:out.log -",
+				"  umiak cp -r ./src my-sb:project/src     umiak cp -r my-sb:results ./",
 			].join("\n"),
 		)
 		.action(

@@ -17,12 +17,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/server"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv/sshdtest"
+	"github.com/belov38/umiak/libs/tunnel/gateway"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/server"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/services/gateway/internal/testenv/sshdtest"
 )
 
 func TestGraceArithmetic(t *testing.T) {
@@ -60,7 +60,7 @@ const drainSlug = "quiet-otter-lamp"
 // interactive shell; it returns the client and the shell's stderr.
 func sshShell(t *testing.T, env *testenv.Env, inst *testenv.Inst, m *testenv.Machine) (*ssh.Client, io.Reader) {
 	t.Helper()
-	sshd := sshdtest.New(t, env.Keys.UserCA.PublicKey(), "sbx")
+	sshd := sshdtest.New(t, env.Keys.UserCA.PublicKey(), "umiak")
 	m.ServeSSHD(sshd)
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -74,7 +74,7 @@ func sshShell(t *testing.T, env *testenv.Env, inst *testenv.Inst, m *testenv.Mac
 	env.API.SetSSH(func(r cpapi.SSHAuthorizeRequest) bool { return r.Sandbox == drainSlug && r.PublicKey == line },
 		cpapi.SSHAuthorization{
 			Allowed: true, Actor: cpapi.SSHActor{Kind: "user", UserID: "usr_1"}, UserID: "usr_1",
-			SandboxID: "sb_x", MachineID: m.ID, SandboxState: "ready", LoginUser: "sbx", TeamID: "team_1",
+			SandboxID: "sb_x", MachineID: m.ID, SandboxState: "ready", LoginUser: "umiak", TeamID: "team_1",
 		})
 	c, err := ssh.Dial("tcp", inst.SSHAddr, &ssh.ClientConfig{
 		User:            drainSlug,
@@ -250,7 +250,7 @@ func TestInstanceDrainOrder(t *testing.T) {
 	}
 
 	// SSH: the warning goes out at once (2 s left: "1 min").
-	want := "sbx: gateway restarting, this SSH session will close in 1 min; reconnect to continue\r\n"
+	want := "umiak: gateway restarting, this SSH session will close in 1 min; reconnect to continue\r\n"
 	warned := make(chan string, 1)
 	go func() {
 		wb := make([]byte, len(want))

@@ -1,5 +1,7 @@
 # S3 Guest Agent (Linux) Implementation Plan
 
+> Исторический план до R1. Действующие имена и контракты — `docs/specs/rename-umiak.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `services/guest-agent` (`sbx-agent`), the only platform process inside a Linux VM: commands under a systemd shim with resumable output, PTY, files, ports and CONNECT, claim and identity, quiesce, signed self-update, events, installation artifacts.

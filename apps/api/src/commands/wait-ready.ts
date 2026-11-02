@@ -3,7 +3,7 @@
 // other states are `409 sandbox_not_ready` with `details.state`; a deleted
 // sandbox is 404. The sandbox is read with the principal first (the wait of
 // core has no access check).
-import type { Principal, Sandbox, SandboxState } from "@sbx/core";
+import type { Principal, Sandbox, SandboxState } from "@umiak/core";
 import type { ApiDeps } from "../deps.ts";
 import { ApiError, notFoundError } from "../http/errors.ts";
 

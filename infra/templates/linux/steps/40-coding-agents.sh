@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 40-coding-agents (spec S5 section 8.9): global npm CLIs with the exact
-# versions of versions.toml [npm], their auto-update switches, the `sbx` CLI.
+# versions of versions.toml [npm], their auto-update switches, the `umiak` CLI.
 set -euo pipefail
 # shellcheck source=SCRIPTDIR/../lib.sh
 . "$(dirname "$0")/../lib.sh"
@@ -23,18 +23,18 @@ install_file etc/gemini-cli/settings.json
 install_file etc/opencode/opencode.json
 install_file etc/codex/config.toml
 
-# `sbx` CLI (S7) and its API URL, when the build was given them.
-if [ -f "$SBX_BUILD_DIR/sbx" ]; then
-	if toml_has sbx; then
-		sha=$(toml_get sbx.cli.sha256)
-		echo "$sha  $SBX_BUILD_DIR/sbx" | sha256sum -c --status || die "build/sbx does not match versions.toml sbx.cli.sha256"
+# `umiak` CLI (S7) and its API URL, when the build was given them.
+if [ -f "$UMIAK_BUILD_DIR/umiak" ]; then
+	if toml_has umiak; then
+		sha=$(toml_get umiak.cli.sha256)
+		echo "$sha  $UMIAK_BUILD_DIR/umiak" | sha256sum -c --status || die "build/umiak does not match versions.toml umiak.cli.sha256"
 	else
-		log "versions.toml has no [sbx]: build/sbx is not checked"
+		log "versions.toml has no [umiak]: build/umiak is not checked"
 	fi
-	install -m 0755 "$SBX_BUILD_DIR/sbx" /usr/local/bin/sbx
+	install -m 0755 "$UMIAK_BUILD_DIR/umiak" /usr/local/bin/umiak
 fi
-if [ -f "$SBX_BUILD_DIR/sbx-config.json" ]; then
-	install -D -m 0644 "$SBX_BUILD_DIR/sbx-config.json" /etc/sbx/config.json
+if [ -f "$UMIAK_BUILD_DIR/umiak-config.json" ]; then
+	install -D -m 0644 "$UMIAK_BUILD_DIR/umiak-config.json" /etc/umiak/config.json
 fi
 
 for t in claude codex opencode gemini pnpm; do

@@ -24,11 +24,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"golang.org/x/time/rate"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/edge"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/edge"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
 )
 
 // writePair issues a certificate for names and writes it to dir.
@@ -65,7 +65,7 @@ func TestCertSourceLoadErrors(t *testing.T) {
 	pki := newTestPKI(t)
 	dir := t.TempDir()
 	m := obs.NewMetrics(prometheus.NewRegistry())
-	if _, err := edge.NewCertSource("sbx", filepath.Join(dir, "missing.crt"), filepath.Join(dir, "missing.key"), m); err == nil {
+	if _, err := edge.NewCertSource("umiak", filepath.Join(dir, "missing.crt"), filepath.Join(dir, "missing.key"), m); err == nil {
 		t.Fatal("NewCertSource with missing files: no error")
 	}
 	cf, kf := filepath.Join(dir, "a.crt"), filepath.Join(dir, "a.key")
@@ -73,7 +73,7 @@ func TestCertSourceLoadErrors(t *testing.T) {
 	if err := os.WriteFile(kf, []byte("garbage"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := edge.NewCertSource("sbx", cf, kf, m); err == nil {
+	if _, err := edge.NewCertSource("umiak", cf, kf, m); err == nil {
 		t.Fatal("NewCertSource with a broken key: no error")
 	}
 }
@@ -143,7 +143,7 @@ func TestCertSourceSymlinkSwap(t *testing.T) {
 		}
 	}
 	m := obs.NewMetrics(prometheus.NewRegistry())
-	cs, err := edge.NewCertSource("sbx", filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key"), m)
+	cs, err := edge.NewCertSource("umiak", filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key"), m)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,15 +315,15 @@ func TestPlainHandlerDispatch(t *testing.T) {
 	tag := func(name string) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, name) })
 	}
-	h := edge.PlainHandler(tag("sbx"), tag("tunnel"), "tunnel.test")
+	h := edge.PlainHandler(tag("umiak"), tag("tunnel"), "tunnel.test")
 	for host, want := range map[string]string{
 		"tunnel.test":      "tunnel",
 		"TUNNEL.Test:8080": "tunnel",
 		"tunnel.test.":     "tunnel",
 		"TUNNEL.TEST.:80":  "tunnel",
-		"a-80.sbx.test":    "sbx",
-		"x.tunnel.test":    "sbx",
-		"":                 "sbx",
+		"a-80.umiak.test":  "umiak",
+		"x.tunnel.test":    "umiak",
+		"":                 "umiak",
 	} {
 		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
 		req.Host = host
@@ -336,12 +336,12 @@ func TestPlainHandlerDispatch(t *testing.T) {
 }
 
 func TestServerSettings(t *testing.T) {
-	s := edge.NewSbxServer(http.NotFoundHandler(), config.Timeouts{ReadHeader: 3 * time.Second})
+	s := edge.NewUmiakServer(http.NotFoundHandler(), config.Timeouts{ReadHeader: 3 * time.Second})
 	if s.ReadHeaderTimeout != 3*time.Second || s.IdleTimeout != 120*time.Second || s.MaxHeaderBytes != 64<<10 {
-		t.Errorf("sbx server: ReadHeader %s Idle %s MaxHeaderBytes %d", s.ReadHeaderTimeout, s.IdleTimeout, s.MaxHeaderBytes)
+		t.Errorf("umiak server: ReadHeader %s Idle %s MaxHeaderBytes %d", s.ReadHeaderTimeout, s.IdleTimeout, s.MaxHeaderBytes)
 	}
 	if s.Protocols == nil || !s.Protocols.HTTP1() || !s.Protocols.HTTP2() || s.Protocols.UnencryptedHTTP2() {
-		t.Errorf("sbx server protocols = %v", s.Protocols)
+		t.Errorf("umiak server protocols = %v", s.Protocols)
 	}
 	tn := edge.NewTunnelServer(http.NotFoundHandler(), config.Timeouts{})
 	if tn.ReadHeaderTimeout != 5*time.Second || tn.IdleTimeout != 5*time.Second || tn.MaxHeaderBytes != 16<<10 {
@@ -363,13 +363,13 @@ func TestServerSettings(t *testing.T) {
 	}
 }
 
-// TestDispatcherConnLimit checks that the per-IP limit applies to sbx conns
+// TestDispatcherConnLimit checks that the per-IP limit applies to umiak conns
 // only and that closing a conn releases its slot exactly once.
 func TestDispatcherConnLimit(t *testing.T) {
 	pki := newTestPKI(t)
 	dir := t.TempDir()
 	m := obs.NewMetrics(prometheus.NewRegistry())
-	sbx := certSource(t, pki, dir, "sbx", "*.sbx.test", m)
+	umiak := certSource(t, pki, dir, "umiak", "*.umiak.test", m)
 	tun := certSource(t, pki, dir, "tunnel", "tunnel.test", m)
 
 	var mu sync.Mutex
@@ -397,7 +397,7 @@ func TestDispatcherConnLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := edge.NewDispatcher(raw, edge.DispatchConfig{
-		SbxDomain: "sbx.test", TunnelHost: "tunnel.test", Sbx: sbx, Tunnel: tun,
+		UmiakDomain: "umiak.test", TunnelHost: "tunnel.test", Umiak: umiak, Tunnel: tun,
 		HandshakeTimeout: 2 * time.Second, ConnLimit: limit, Metrics: m,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -410,7 +410,7 @@ func TestDispatcherConnLimit(t *testing.T) {
 		}
 	})
 	accepted := make(chan net.Conn, 10)
-	for _, ln := range []net.Listener{d.Sbx(), d.Tunnel()} {
+	for _, ln := range []net.Listener{d.Umiak(), d.Tunnel()} {
 		go func() {
 			for {
 				c, err := ln.Accept()
@@ -435,19 +435,19 @@ func TestDispatcherConnLimit(t *testing.T) {
 		}
 	}
 
-	c1, err := dial("a-80.sbx.test")
+	c1, err := dial("a-80.umiak.test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	s1 := next()
-	// A second sbx conn from the same IP is refused during the handshake,
+	// A second umiak conn from the same IP is refused during the handshake,
 	// and that is no TLS handshake error.
-	if c2, err := dial("b-80.sbx.test"); err == nil {
+	if c2, err := dial("b-80.umiak.test"); err == nil {
 		_ = c2.Close()
-		t.Fatal("second sbx conn completed its handshake")
+		t.Fatal("second umiak conn completed its handshake")
 	}
-	if got := testutil.ToFloat64(m.TLSHandshakeErrors.WithLabelValues("sbx")); got != 0 {
-		t.Errorf("tls_handshake_errors_total{sbx} = %v after a conn-limit refusal", got)
+	if got := testutil.ToFloat64(m.TLSHandshakeErrors.WithLabelValues("umiak")); got != 0 {
+		t.Errorf("tls_handshake_errors_total{umiak} = %v after a conn-limit refusal", got)
 	}
 	// Tunnel conns are not limited.
 	for range 3 {
@@ -467,7 +467,7 @@ func TestDispatcherConnLimit(t *testing.T) {
 	}
 	mu.Unlock()
 	// The slot is free again.
-	c3, err := dial("c-80.sbx.test")
+	c3, err := dial("c-80.umiak.test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -512,8 +512,8 @@ func newDispatcher(t *testing.T, ln net.Listener, mod func(*edge.DispatchConfig)
 	dir := t.TempDir()
 	m := obs.NewMetrics(prometheus.NewRegistry())
 	cfg := edge.DispatchConfig{
-		SbxDomain: "sbx.test", TunnelHost: "tunnel.test",
-		Sbx: certSource(t, pki, dir, "sbx", "*.sbx.test", m), Tunnel: certSource(t, pki, dir, "tunnel", "tunnel.test", m),
+		UmiakDomain: "umiak.test", TunnelHost: "tunnel.test",
+		Umiak: certSource(t, pki, dir, "umiak", "*.umiak.test", m), Tunnel: certSource(t, pki, dir, "tunnel", "tunnel.test", m),
 		HandshakeTimeout: 5 * time.Second, Metrics: m, Logger: testenv.Logger(),
 	}
 	if mod != nil {

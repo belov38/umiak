@@ -1,5 +1,5 @@
 import { Code, ConnectError } from "@connectrpc/connect";
-import { ErrorDetailSchema } from "@sbx/proto";
+import { ErrorDetailSchema } from "@umiak/proto";
 import { describe, expect, it } from "vitest";
 import {
 	type AttachOutput,
@@ -199,12 +199,12 @@ describe("resumableAttach", () => {
 		expect(s.opens).toHaveLength(1);
 	});
 
-	it("ignores agent Sbx-* metadata and details on a stream error", async () => {
+	it("ignores agent Umiak-* metadata and details on a stream error", async () => {
 		// End-stream metadata and details come from the agent's body: only
 		// the Connect code decides.
 		for (const meta of [
-			{ "sbx-error-code": "agent_unavailable" },
-			{ "sbx-error-code": "machine_moved", "sbx-instance-url": "http://x" },
+			{ "umiak-error-code": "agent_unavailable" },
+			{ "umiak-error-code": "machine_moved", "umiak-instance-url": "http://x" },
 		]) {
 			const s = scripted([
 				[

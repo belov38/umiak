@@ -28,7 +28,7 @@ import {
 	SYSPREP_DEFERRED_SERVICES,
 } from "../src/windows/media.ts";
 import {
-	SBX_UNATTEND,
+	UMIAK_UNATTEND,
 	unattendPassword,
 	WINDOWS_FILES_DIR,
 } from "../src/windows/unattend.ts";
@@ -90,7 +90,7 @@ describe("repo files", () => {
 		const r = loadRecipe(repoTemplates, "windows", "windows");
 		for (const f of [
 			"autounattend.xml.tmpl",
-			"sbx-unattend.xml",
+			"umiak-unattend.xml",
 			"offline-autounattend.xml",
 			"offline.cmd",
 			"SetupComplete.cmd",
@@ -132,9 +132,9 @@ describe("offline.cmd", () => {
 
 	it("loads vioscsi, logs to the Windows volume and powers off", () => {
 		expect(cmd).toContain(
-			'drvload "%VIRTIO%\\vioscsi\\%SBX_DRIVERS%\\amd64\\vioscsi.inf"',
+			'drvload "%VIRTIO%\\vioscsi\\%UMIAK_DRIVERS%\\amd64\\vioscsi.inf"',
 		);
-		expect(cmd).toContain("\\Windows\\Setup\\Scripts\\sbx-offline.log");
+		expect(cmd).toContain("\\Windows\\Setup\\Scripts\\umiak-offline.log");
 		expect(cmd).toContain("wpeutil shutdown");
 		// The WinPE system volume X: is never taken for the installed Windows.
 		const find = section(cmd, "find_windows").join("\n");
@@ -160,7 +160,7 @@ describe("offline.cmd", () => {
 		const finish = section(cmd, "finish").join("\n");
 		expect(finish).toContain("call :log DONE errors %ERRORS%");
 		expect(finish).toContain(
-			'copy /y "%LOG%" "%WIN%\\Windows\\Setup\\Scripts\\sbx-offline.log"',
+			'copy /y "%LOG%" "%WIN%\\Windows\\Setup\\Scripts\\umiak-offline.log"',
 		);
 		// No path skips the log line or the shutdown: finish falls through to shutdown.
 		expect(finish).not.toMatch(/exit \/b/);
@@ -169,8 +169,8 @@ describe("offline.cmd", () => {
 
 	it("the diskpart fallback brings disk 0 online and writable", () => {
 		const dp = section(cmd, "assign_letter")
-			.filter((l) => l.includes("sbx-diskpart.txt echo"))
-			.map((l) => l.replace(/^.*sbx-diskpart\.txt echo /, ""));
+			.filter((l) => l.includes("umiak-diskpart.txt echo"))
+			.map((l) => l.replace(/^.*umiak-diskpart\.txt echo /, ""));
 		expect(dp).toEqual([
 			"select disk 0",
 			"rescan",
@@ -198,7 +198,7 @@ describe("offlineIsoFiles", () => {
 		expect(xml).toContain("<AcceptEula>true</AcceptEula>");
 		const cfg = text(files, "offline-config.cmd");
 		expect(cfg).toBe(
-			"set SBX_DRIVERS=w11\r\nset SBX_SERVICES=WinDefend WdNisSvc Sense WdBoot WdFilter WdNisDrv WaaSMedicSvc\r\n",
+			"set UMIAK_DRIVERS=w11\r\nset UMIAK_SERVICES=WinDefend WdNisSvc Sense WdBoot WdFilter WdNisDrv WaaSMedicSvc\r\n",
 		);
 	});
 
@@ -226,7 +226,7 @@ describe("offlineIsoFiles", () => {
 			"offline-config.cmd",
 		);
 		expect(cfg).toBe(
-			"set SBX_DRIVERS=2k25\r\nset SBX_SERVICES=WaaSMedicSvc\r\n",
+			"set UMIAK_DRIVERS=2k25\r\nset UMIAK_SERVICES=WaaSMedicSvc\r\n",
 		);
 	});
 
@@ -238,8 +238,8 @@ describe("offlineIsoFiles", () => {
 	});
 
 	it("volume labels", () => {
-		expect(BUILD_ISO_LABEL).toBe("SBXBUILD");
-		expect(OFFLINE_ISO_LABEL).toBe("SBXOFFL");
+		expect(BUILD_ISO_LABEL).toBe("UMIAKBUILD");
+		expect(OFFLINE_ISO_LABEL).toBe("UMIAKOFFL");
 	});
 });
 
@@ -258,15 +258,15 @@ describe("buildIsoFiles", () => {
 				"build/versions.toml",
 				"build/versions.json",
 				"build/agent.toml",
-				"build/sbx-agent-0.4.0+20261031.abc1234-windows-amd64.tar",
+				"build/umiak-agent-0.4.0+20261031.abc1234-windows-amd64.tar",
 				"build/ssh-user-ca.pub",
-				"build/sbx-unattend.xml",
+				"build/umiak-unattend.xml",
 				// lib.ps1 and files/ of the shared _windows directory.
 				"build/lib.ps1",
 				"build/files/appx-remove.txt",
 				"build/files/gpt.ini",
 				"build/files/profile.ps1",
-				"build/files/sbx-early.cmd",
+				"build/files/umiak-early.cmd",
 				"build/files/scripts.ini",
 				"build/files/sshd_config",
 				"build/files/firstboot.ps1",
@@ -276,13 +276,13 @@ describe("buildIsoFiles", () => {
 		expect(
 			(
 				files.get(
-					"build/sbx-agent-0.4.0+20261031.abc1234-windows-amd64.tar",
+					"build/umiak-agent-0.4.0+20261031.abc1234-windows-amd64.tar",
 				) as Buffer
 			).equals(AGENT),
 		).toBe(true);
 		expect(text(files, "build/agent.toml")).toBe(i.agentToml);
 		expect(text(files, "build/ssh-user-ca.pub")).toBe("");
-		expect(text(files, "build/sbx-unattend.xml")).toBe(SBX_UNATTEND);
+		expect(text(files, "build/umiak-unattend.xml")).toBe(UMIAK_UNATTEND);
 		// Child recipe over the shared directory.
 		expect(text(files, "build/steps/10-system.ps1")).toContain(
 			"recipe 10-system",
@@ -336,7 +336,7 @@ describe("buildIsoFiles", () => {
 		expect(v.buildId).toBe(BUILD_ID);
 		expect(v.agent).toEqual({
 			version: "0.4.0+20261031.abc1234",
-			package: "sbx-agent-0.4.0+20261031.abc1234-windows-amd64.tar",
+			package: "umiak-agent-0.4.0+20261031.abc1234-windows-amd64.tar",
 		});
 		expect(v.tools.pwsh).toEqual(i.versions.tools.pwsh);
 		expect(v.tools.gh.url).toMatch(/^https:\/\//);
@@ -380,7 +380,7 @@ describe("buildIsoFiles", () => {
 	it("rejects step and files/ names Joliet would truncate", () => {
 		const r = recipe();
 		const long = "a".repeat(62);
-		const dir = mkdtempSync(join(tmpdir(), "sbx-media-test-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-media-test-"));
 		try {
 			mkdirSync(join(dir, "steps"));
 			writeFileSync(join(dir, "steps", `${long}.ps1`), "Write-Output 1\n");
@@ -431,7 +431,7 @@ describe("buildIsoFiles", () => {
 				"autounattend.xml",
 				"build/SetupComplete.cmd",
 				"build/run-step.ps1",
-				"build/sbx-unattend.xml",
+				"build/umiak-unattend.xml",
 			].map((n) => [n, files.get(n)] as const),
 			...off,
 		]) {
@@ -456,7 +456,7 @@ describe("SetupComplete.cmd", () => {
 		);
 		expect(cmd).toContain("/qn");
 		expect(cmd).toContain("/norestart");
-		expect(cmd).toContain("C:\\sbx-build\\logs");
+		expect(cmd).toContain("C:\\umiak-build\\logs");
 	});
 });
 
@@ -467,8 +467,8 @@ describe("run-step.ps1", () => {
 		expect(ps).toMatch(
 			/param\s*\(\s*\[Parameter\(Mandatory\s*=\s*\$true\)\][^)]*\)\]\s*\[string\]\s*\$Step\s*\)/i,
 		);
-		expect(ps).toContain("Get-Volume -FileSystemLabel SBXBUILD");
-		expect(ps).toContain("C:\\sbx-build\\logs");
+		expect(ps).toContain("Get-Volume -FileSystemLabel UMIAKBUILD");
+		expect(ps).toContain("C:\\umiak-build\\logs");
 		expect(ps).toContain("#requires -Version 7");
 		expect(ps).toContain("PowerShell\\7\\pwsh.exe");
 		// UTF-8 without BOM: never Out-File/Set-Content -Encoding utf8 for the log.
@@ -487,8 +487,12 @@ describe("run-step.ps1", () => {
 describe("makeIso volume label", () => {
 	beforeEach(() => execFileSync.mockReset());
 
-	it("makeIso passes -V SBXBUILD", () => {
-		makeIso(new Map([["a", "b"]]), "/tmp/sbx-test-build.iso", BUILD_ISO_LABEL);
+	it("makeIso passes -V UMIAKBUILD", () => {
+		makeIso(
+			new Map([["a", "b"]]),
+			"/tmp/umiak-test-build.iso",
+			BUILD_ISO_LABEL,
+		);
 		expect(execFileSync).toHaveBeenCalledTimes(1);
 		const [tool, args] = execFileSync.mock.calls[0] as [string, string[]];
 		expect(tool).toBe("xorriso");
@@ -496,20 +500,20 @@ describe("makeIso volume label", () => {
 			"-as",
 			"mkisofs",
 			"-V",
-			"SBXBUILD",
+			"UMIAKBUILD",
 			"-J",
 		]);
 	});
 
 	it("defaults to cidata (linux seed unchanged)", () => {
-		makeIso(new Map([["a", "b"]]), "/tmp/sbx-test-seed.iso");
+		makeIso(new Map([["a", "b"]]), "/tmp/umiak-test-seed.iso");
 		const [, args] = execFileSync.mock.calls[0] as [string, string[]];
 		expect(args[3]).toBe("cidata");
 	});
 
 	it("rejects a label ISO 9660 cannot hold", () => {
 		expect(() =>
-			makeIso(new Map(), "/tmp/sbx-test-bad.iso", "bad label!"),
+			makeIso(new Map(), "/tmp/umiak-test-bad.iso", "bad label!"),
 		).toThrow(/label/);
 		expect(execFileSync).not.toHaveBeenCalled();
 	});

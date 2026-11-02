@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -421,7 +425,7 @@ describe.skipIf(skipPg())("S7 additions to SandboxService", () => {
 				hostRewrite: "localhost",
 			});
 			expect(first.created).toBe(true);
-			expect(first.token).toMatch(/^sbxp_/);
+			expect(first.token).toMatch(/^umiakp_/);
 			expect(first.hostedPort).toMatchObject({
 				mode: "token",
 				hostRewrite: "localhost",
@@ -515,9 +519,9 @@ describe.skipIf(skipPg())("S7 additions to SandboxService", () => {
 			await listener.connect();
 			const notes: string[] = [];
 			listener.on("notification", (n) => {
-				if (n.channel === "sbx_routes" && n.payload) notes.push(n.payload);
+				if (n.channel === "umiak_routes" && n.payload) notes.push(n.payload);
 			});
-			await listener.query("LISTEN sbx_routes");
+			await listener.query("LISTEN umiak_routes");
 			try {
 				const renamed = await env.svc.rename(env.p, s.sandboxId, newSlug);
 				expect(renamed.slug).toBe(newSlug);
@@ -685,7 +689,7 @@ describe.skipIf(skipPg())("S7 additions to SandboxService", () => {
 			expect(await readSecrets(t.pool, env.keys, s.sandboxId)).toEqual(want);
 
 			await expectCode(
-				env.svc.patchEnv(env.p, s.sandboxId, { env: { SBX_TOKEN: "x" } }),
+				env.svc.patchEnv(env.p, s.sandboxId, { env: { UMIAK_TOKEN: "x" } }),
 				"validation",
 			);
 		});

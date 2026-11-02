@@ -1,4 +1,4 @@
-import type { Tx } from "@sbx/db";
+import type { Tx } from "@umiak/db";
 
 // Transaction-scoped advisory locks (S6 §8.1, §8.5). Lock order is always
 // team, then node; taking them in the other order risks a deadlock.

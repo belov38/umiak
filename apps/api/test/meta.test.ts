@@ -8,10 +8,10 @@ const HOST_KEY =
 describe("GET /v1/meta (S7 §13)", () => {
 	it("answers without auth with every field", async () => {
 		const settings = testSettings({
-			SBX_OIDC_ISSUER: "https://auth.example.test/realms/sbx",
-			SBX_BUILD: "1.2.3+abc",
-			SBX_MIN_CLI_VERSION: "0.4.0",
-			SBX_LATEST_CLI_VERSION: "0.5.1",
+			UMIAK_OIDC_ISSUER: "https://auth.example.test/realms/umiak",
+			UMIAK_BUILD: "1.2.3+abc",
+			UMIAK_MIN_CLI_VERSION: "0.4.0",
+			UMIAK_LATEST_CLI_VERSION: "0.5.1",
 		});
 		const h = createHarness({ deps: { settings, hostKeys: [HOST_KEY] } });
 		const r = await h.request("GET", "/v1/meta");
@@ -21,14 +21,14 @@ describe("GET /v1/meta (S7 §13)", () => {
 			build: "1.2.3+abc",
 			appUrl: settings.appUrl,
 			apiUrl: settings.apiUrl,
-			sbxDomain: settings.sbxDomain,
+			umiakDomain: settings.umiakDomain,
 			oidc: {
-				issuer: "https://auth.example.test/realms/sbx",
-				clientId: "sbx-cli",
-				audience: "sbx-api",
+				issuer: "https://auth.example.test/realms/umiak",
+				clientId: "umiak-cli",
+				audience: "umiak-api",
 			},
 			ssh: {
-				host: `ssh.${settings.sbxDomain}`,
+				host: `ssh.${settings.umiakDomain}`,
 				port: 22,
 				hostKeys: [HOST_KEY],
 			},
@@ -37,7 +37,7 @@ describe("GET /v1/meta (S7 §13)", () => {
 		});
 	});
 
-	it("oidc is null without SBX_OIDC_ISSUER", async () => {
+	it("oidc is null without UMIAK_OIDC_ISSUER", async () => {
 		const h = createHarness();
 		const r = await h.request("GET", "/v1/meta");
 		expect(r.status).toBe(200);
@@ -103,7 +103,7 @@ describe("GET /v1/meta (S7 §13)", () => {
 
 	it("the served document points keycloak at the configured issuer", async () => {
 		const settings = testSettings({
-			SBX_OIDC_ISSUER: "https://auth.example.test/realms/sbx",
+			UMIAK_OIDC_ISSUER: "https://auth.example.test/realms/umiak",
 		});
 		const h = createHarness({ deps: { settings } });
 		const r = await h.request("GET", "/v1/openapi.json");
@@ -114,7 +114,7 @@ describe("GET /v1/meta (S7 §13)", () => {
 			servers: { url: string }[];
 		};
 		expect(doc.components.securitySchemes.keycloak.openIdConnectUrl).toBe(
-			"https://auth.example.test/realms/sbx/.well-known/openid-configuration",
+			"https://auth.example.test/realms/umiak/.well-known/openid-configuration",
 		);
 		expect(doc.servers).toEqual([{ url: settings.apiUrl }]);
 	});

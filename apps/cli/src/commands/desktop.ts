@@ -1,5 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
-import type { DesktopActions } from "@sbx/sdk";
+import type { DesktopActions } from "@umiak/sdk";
 import type { Command } from "commander";
 import type { Context } from "../context.ts";
 import { useSandbox } from "../current.ts";
@@ -9,7 +9,7 @@ import { openBrowser } from "./login.ts";
 
 type DesktopAction = DesktopActions["actions"][number];
 
-// `sbx desktop ...` (S10 section 14.2). The top-level `screenshot`, `input`
+// `umiak desktop ...` (S10 section 14.2). The top-level `screenshot`, `input`
 // and `clipboard` of the first S10 pass stay as hidden aliases.
 
 const ACCESS = ["token", "sso", "public"] as const;
@@ -33,7 +33,7 @@ async function readStdin(ctx: Context): Promise<string> {
 	return Buffer.concat(parts).toString("utf8");
 }
 
-/** The short forms of `sbx desktop act`: click X Y, type TEXT, key ctrl+c, scroll DY. */
+/** The short forms of `umiak desktop act`: click X Y, type TEXT, key ctrl+c, scroll DY. */
 export function shortAction(words: string[]): DesktopAction {
 	const [kind, ...rest] = words;
 	switch (kind) {

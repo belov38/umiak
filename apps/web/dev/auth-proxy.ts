@@ -4,18 +4,18 @@
 //
 //   - listens on 127.0.0.1 only and refuses any other address;
 //   - drops every X-Auth-Request-* header the client sent and sets them from
-//     the dev cookie `sbx_dev_identity` (none without the cookie);
+//     the dev cookie `umiak_dev_identity` (none without the cookie);
 //   - /__dev/login picks an identity ("user", "second user", "operator" or
 //     a custom one; POST only with Origin = the proxy's own origin; no
 //     control characters, no comma in email or sub), /__dev/logout and
 //     /oauth2/sign_out drop it;
 //   - routes as oauth2-proxy does (deploy/compose/oauth2-proxy): /api/* to
-//     the api's proxied listener without /api, /sbx-auth/* to it unchanged,
+//     the api's proxied listener without /api, /umiak-auth/* to it unchanged,
 //     everything else to `next dev`; WebSocket upgrades too.
 import http from "node:http";
 import net from "node:net";
 
-export const DEV_IDENTITY_COOKIE = "sbx_dev_identity";
+export const DEV_IDENTITY_COOKIE = "umiak_dev_identity";
 export const LOOPBACK = "127.0.0.1";
 
 export interface Upstream {
@@ -40,7 +40,7 @@ export interface AuthProxyOptions {
 	api?: Upstream;
 	/** `next dev`; default 127.0.0.1:3001. */
 	web?: Upstream;
-	/** Group of the "operator" preset; default sbx-operators. */
+	/** Group of the "operator" preset; default umiak-operators. */
 	operatorGroup?: string;
 	/**
 	 * The only Origin accepted on POST /__dev/login; default the proxy's
@@ -182,7 +182,7 @@ export function route(
 			path: rest === "" || rest.startsWith("?") ? `/${rest}` : rest,
 		};
 	}
-	if (path.startsWith("/sbx-auth/")) return { upstream: o.api, path };
+	if (path.startsWith("/umiak-auth/")) return { upstream: o.api, path };
 	return { upstream: o.web, path };
 }
 
@@ -207,10 +207,10 @@ function loginPage(
 				`<button name="preset" value="${key}">${escapeHtml(i.name)} <small>${escapeHtml(i.email)}${i.groups.length ? ` [${escapeHtml(i.groups.join(","))}]` : ""}</small></button>`,
 		)
 		.join("\n");
-	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>sbx dev login</title>
+	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>umiak dev login</title>
 <style>body{font-family:system-ui,sans-serif;max-width:36rem;margin:3rem auto;padding:0 1rem}button{display:block;width:100%;margin:.4rem 0;padding:.6rem;text-align:left;cursor:pointer}label{display:block;margin:.4rem 0}input{width:100%;padding:.3rem}</style>
 </head><body>
-<h1>sbx dev login</h1>
+<h1>umiak dev login</h1>
 <p>Dev stand-in for oauth2-proxy. Current identity: <b>${current ? escapeHtml(`${current.email} (${current.user})`) : "none"}</b>${current ? ' — <a href="/__dev/logout">log out</a>' : ""}</p>
 <form method="post" action="/__dev/login">
 <input type="hidden" name="rd" value="${escapeHtml(rd)}">
@@ -405,7 +405,7 @@ export function startAuthProxy(o: AuthProxyOptions = {}): Promise<AuthProxy> {
 		api: o.api ?? { host: LOOPBACK, port: 8081 },
 		web: o.web ?? { host: LOOPBACK, port: 3001 },
 	};
-	const all = presets(o.operatorGroup ?? "sbx-operators");
+	const all = presets(o.operatorGroup ?? "umiak-operators");
 	const log = o.log ?? ((l: string) => console.error(`[auth-proxy] ${l}`));
 	let ownOrigin = o.origin ?? "";
 	const server = http.createServer((req, res) => {

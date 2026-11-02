@@ -4,9 +4,9 @@ import {
 	insertSandboxEvent,
 	operationDeadline,
 	type Placement,
-	SbxError,
-} from "@sbx/core";
-import type { Tx } from "@sbx/db";
+	UmiakError,
+} from "@umiak/core";
+import type { Tx } from "@umiak/db";
 import type { WorkerCtx } from "../context.ts";
 import { loadMachine } from "../db.ts";
 import { AgentRejected } from "../ports.ts";
@@ -56,7 +56,7 @@ async function newPlacement(
 			s.memory_mb,
 		);
 	} catch (e) {
-		if (e instanceof SbxError && e.code === "out_of_capacity") return null;
+		if (e instanceof UmiakError && e.code === "out_of_capacity") return null;
 		throw e;
 	}
 }
@@ -191,7 +191,7 @@ export async function retryClaim(
 		},
 		"claim not completed; retrying on another machine",
 	);
-	ctx.metrics.inc("sbx_claim_retried_total", {
+	ctx.metrics.inc("umiak_claim_retried_total", {
 		code,
 		path: next.fromPool ? "warm" : "cold",
 	});

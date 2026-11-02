@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/wincmd"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/wincmd"
 )
 
 func TestWinSignalAction(t *testing.T) {

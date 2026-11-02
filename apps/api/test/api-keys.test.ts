@@ -10,8 +10,12 @@ import {
 	PgIdentityStore,
 	PRESETS,
 	SCOPES,
-} from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+} from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { IdentityListener } from "../src/index.ts";
 import {
@@ -30,7 +34,7 @@ type Body = any;
 const body = (r: HarnessResponse): Body => r.body as Body;
 
 const DAY = 86_400;
-const OPERATORS = "sbx-operators";
+const OPERATORS = "umiak-operators";
 
 describe.skipIf(skipPg())("team API keys (S7 §7.2, §13)", () => {
 	let db: TestDatabase;
@@ -115,7 +119,7 @@ describe.skipIf(skipPg())("team API keys (S7 §7.2, §13)", () => {
 				sandboxId: null,
 				teamId: encodeUuid("team", w.teamId),
 				name: "ci-main",
-				prefix: secret.slice(4, 12),
+				prefix: secret.slice(6, 14),
 				last4: secret.slice(-4),
 				scopes: [...PRESETS.ci],
 				createdBy: {
@@ -213,10 +217,10 @@ describe.skipIf(skipPg())("team API keys (S7 §7.2, §13)", () => {
 			expect(body(k).error.details.reason).toBe("user_required");
 		});
 
-		it("Keycloak JWT: createdVia cli with a sbx-cli/ User-Agent, else api", async () => {
+		it("Keycloak JWT: createdVia cli with a umiak-cli/ User-Agent, else api", async () => {
 			const settings = testSettings({
-				SBX_OIDC_ISSUER: oidc.issuer,
-				SBX_API_RATE_BURST: "100000",
+				UMIAK_OIDC_ISSUER: oidc.issuer,
+				UMIAK_API_RATE_BURST: "100000",
 			});
 			const token = await oidc.token({
 				sub: randomUUID(),
@@ -224,7 +228,7 @@ describe.skipIf(skipPg())("team API keys (S7 §7.2, §13)", () => {
 			});
 			const h = w.harness({ bearer: token, deps: { settings } });
 			const cli = await h.request("POST", "/v1/api-keys", {
-				headers: { "user-agent": "sbx-cli/0.1.0 (darwin; arm64)" },
+				headers: { "user-agent": "umiak-cli/0.1.0 (darwin; arm64)" },
 				json: { name: "cli", preset: "read-only" },
 			});
 			expect(cli.status, cli.text).toBe(201);
@@ -304,7 +308,7 @@ describe.skipIf(skipPg())("team API keys (S7 §7.2, §13)", () => {
 				id: apiKey.id,
 				scopes: apiKey.scopes,
 				expiresAt: apiKey.expiresAt,
-				prefix: next.secret.slice(4, 12),
+				prefix: next.secret.slice(6, 14),
 				last4: next.secret.slice(-4),
 			});
 			// Another pod that had the old key cached drops it on NOTIFY.
@@ -450,7 +454,7 @@ describe.skipIf(skipPg())("team API keys (S7 §7.2, §13)", () => {
 				deps: { identity: opIdentity },
 				headers: {
 					"x-auth-request-groups": OPERATORS,
-					"sbx-team": encodeUuid("team", other.teamId),
+					"umiak-team": encodeUuid("team", other.teamId),
 				},
 			});
 			const r = await op.req(

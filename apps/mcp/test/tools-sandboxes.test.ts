@@ -1,6 +1,6 @@
 // Catalog and sandbox lifecycle tools (S11 8.1, 8.2) against the fake API.
 
-import { Sbx } from "@sbx/sdk";
+import { Umiak } from "@umiak/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "../src/context.ts";
 import { Deadline, RESPONSE_MARGIN_MS } from "../src/deadline.ts";
@@ -492,12 +492,12 @@ describe("sandbox_create", () => {
 
 /** A context with its own short deadline, to test what the 50 s budget does. */
 function shortContext(
-	sbx: Sbx,
+	umiak: Umiak,
 	budgetMs: number,
 ): { ctx: ToolContext; deadline: Deadline } {
 	const deadline = new Deadline(new AbortController().signal, budgetMs);
 	const ctx: ToolContext = {
-		sbx: () => sbx,
+		umiak: () => umiak,
 		deadline,
 		get call() {
 			return {
@@ -518,7 +518,7 @@ function shortContext(
 
 describe("deadline", () => {
 	it("a create that gets no answer is deadline_exceeded with the model key", async () => {
-		const hang = new Sbx({
+		const hang = new Umiak({
 			baseUrl: "http://127.0.0.1:9",
 			apiKey: "k",
 			env: {},
@@ -548,9 +548,9 @@ describe("deadline", () => {
 	});
 
 	it("waitSandbox returns the latest data when the time is up and never throws for it", async () => {
-		const { sbx, api, call } = await start({ api: { readyAfterMs: 60_000 } });
+		const { umiak, api, call } = await start({ api: { readyAfterMs: 60_000 } });
 		const created = await call("sandbox_create", { wait: false });
-		const { ctx, deadline } = shortContext(sbx, 5000);
+		const { ctx, deadline } = shortContext(umiak, 5000);
 		const t0 = Date.now();
 		const data = await waitSandbox(ctx, created.json.id, "ready", 1500);
 		deadline.dispose();
@@ -560,9 +560,9 @@ describe("deadline", () => {
 	});
 
 	it("waitSandbox with no time still reads the sandbox once", async () => {
-		const { sbx, call, to } = await start({ api: { readyAfterMs: 60_000 } });
+		const { umiak, call, to } = await start({ api: { readyAfterMs: 60_000 } });
 		const created = await call("sandbox_create", { wait: false });
-		const { ctx, deadline } = shortContext(sbx, 5000);
+		const { ctx, deadline } = shortContext(umiak, 5000);
 		const data = await waitSandbox(ctx, created.json.id, "ready", 0);
 		deadline.dispose();
 		expect(data.id).toBe(created.json.id);
@@ -570,11 +570,11 @@ describe("deadline", () => {
 	});
 
 	it("waitSandbox keeps the data of the action when the deadline cuts the first poll", async () => {
-		const { sbx, call, api } = await start({ api: { readyAfterMs: 60_000 } });
+		const { umiak, call, api } = await start({ api: { readyAfterMs: 60_000 } });
 		const created = await call("sandbox_create", { wait: false });
 		api.script.silent = true;
-		const { ctx, deadline } = shortContext(sbx, 600);
-		const action = await sbx.raw.GET("/v1/sandboxes/{sandbox}", {
+		const { ctx, deadline } = shortContext(umiak, 600);
+		const action = await umiak.raw.GET("/v1/sandboxes/{sandbox}", {
 			params: { path: { sandbox: created.json.id } },
 		});
 		const data = await waitSandbox(
@@ -1140,7 +1140,7 @@ describe("sandbox_delete", () => {
 		expect(api.state.sandboxes.get(c.json.id)?.state).toBe("ready");
 		expect(
 			to("DELETE", `/v1/sandboxes/${c.json.id}`)[0]?.headers.get(
-				"Sbx-Confirm-Delete",
+				"Umiak-Confirm-Delete",
 			),
 		).toBe(other.json.id);
 	});
@@ -1220,10 +1220,10 @@ describe("sandbox_delete", () => {
 
 describe("pinned mode", () => {
 	it("tools take the pinned sandbox and have no sandbox argument", async () => {
-		const { call, conn, sbx } = await start({
+		const { call, conn, umiak } = await start({
 			server: { pinnedSandbox: "pinned-box" },
 		});
-		const { data } = await sbx.raw.POST("/v1/sandboxes", {
+		const { data } = await umiak.raw.POST("/v1/sandboxes", {
 			body: { slug: "pinned-box" },
 		});
 		const listed = await conn.client.listTools();
@@ -1243,9 +1243,9 @@ describe("pinned mode", () => {
 
 describe("sandboxView", () => {
 	it("keeps the fields of 8.2 and nothing else", async () => {
-		const { sbx, call } = await start();
+		const { umiak, call } = await start();
 		const c = await call("sandbox_create", { labels: { a: "b" } });
-		const { data } = await sbx.raw.GET("/v1/sandboxes/{sandbox}", {
+		const { data } = await umiak.raw.GET("/v1/sandboxes/{sandbox}", {
 			params: { path: { sandbox: c.json.id } },
 		});
 		const view = sandboxView(data);

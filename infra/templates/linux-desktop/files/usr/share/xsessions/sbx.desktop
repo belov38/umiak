@@ -1,6 +1,0 @@
-[Desktop Entry]
-Name=Sandbox
-Comment=Sandbox desktop session
-Exec=/usr/local/lib/sbx-desktop/session
-Type=Application
-DesktopNames=Openbox

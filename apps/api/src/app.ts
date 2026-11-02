@@ -41,10 +41,10 @@ import { registerOperationRoutes } from "./routes/operations.ts";
 import { registerPortRoutes } from "./routes/ports.ts";
 import { registerPtyRoutes } from "./routes/ptys.ts";
 import { registerSandboxRoutes } from "./routes/sandboxes.ts";
-import { registerSbxAuthRoutes } from "./routes/sbx-auth.ts";
 import { registerSnapshotRoutes } from "./routes/snapshots.ts";
 import { registerSshRoutes } from "./routes/ssh.ts";
 import { registerSshKeyRoutes } from "./routes/ssh-keys.ts";
+import { registerUmiakAuthRoutes } from "./routes/umiak-auth.ts";
 import { refuseWhileShuttingDown } from "./shutdown.ts";
 
 /** Common middleware and error handling of the listener apps. */
@@ -119,7 +119,7 @@ export function createProxiedApp(deps: ApiDeps): ApiApp {
 	app.use("/v1/*", proxiedAuth(deps), rateLimit(deps));
 	// No /v1/docs: a third-party script must not run on the cookie origin.
 	mountV1(app, deps, { docs: false });
-	registerSbxAuthRoutes(app, deps);
+	registerUmiakAuthRoutes(app, deps);
 	return app;
 }
 
@@ -151,7 +151,7 @@ async function passes(check: () => Promise<void>): Promise<boolean> {
 
 /**
  * `/healthz` (liveness), `/readyz` (not shutting down, Postgres, the
- * LISTEN sbx_identity connection and the Payload migrations), `/metrics`
+ * LISTEN umiak_identity connection and the Payload migrations), `/metrics`
  * (Prometheus).
  */
 export function createOpsApp(deps: ApiDeps): ApiApp {

@@ -1,7 +1,7 @@
 # Shared helpers of the Windows build steps (spec S9 section 8). Dot-sourced
 # by every step:  . (Join-Path $PSScriptRoot '..\lib.ps1')
 # Steps run as SYSTEM from a scheduled task through run-step.ps1, which sets
-# SBX_BUILD_DIR (<SBXBUILD drive>:\build). HKCU there is SYSTEM's: per-user
+# UMIAK_BUILD_DIR (<UMIAKBUILD drive>:\build). HKCU there is SYSTEM's: per-user
 # defaults go to the Default User hive (Invoke-WithDefaultUserHive).
 # Loaded by Windows PowerShell 5.1 and pwsh 7: keep this file ASCII.
 
@@ -9,11 +9,11 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 Set-StrictMode -Version 3.0
 
-$SbxBuildDir = if ($env:SBX_BUILD_DIR) { $env:SBX_BUILD_DIR } else { $PSScriptRoot }
-$SbxFilesDir = Join-Path $SbxBuildDir 'files'
-$SbxLogDir = 'C:\sbx-build\logs'
-# Downloads and unpacked archives; 90-cleanup empties it, the builder removes C:\sbx-build.
-$SbxWorkDir = 'C:\sbx-build\work'
+$UmiakBuildDir = if ($env:UMIAK_BUILD_DIR) { $env:UMIAK_BUILD_DIR } else { $PSScriptRoot }
+$UmiakFilesDir = Join-Path $UmiakBuildDir 'files'
+$UmiakLogDir = 'C:\umiak-build\logs'
+# Downloads and unpacked archives; 90-cleanup empties it, the builder removes C:\umiak-build.
+$UmiakWorkDir = 'C:\umiak-build\work'
 
 # Services of spec section 8.1 that end up Disabled. 00-base disables all but
 # the update services: the OpenSSH FoD in 10-system comes from Windows Update
@@ -23,16 +23,16 @@ $SbxWorkDir = 'C:\sbx-build\work'
 # disables it (SYSPREP_DEFERRED_SERVICES in apps/template-builder/src/windows/media.ts).
 # CDPSvc listens on TCP 5040. Sysprep resets some of these on the clone:
 # files\firstboot.ps1 disables the same list again (a test keeps them equal).
-$SbxDisabledServices = @(
+$UmiakDisabledServices = @(
     'wuauserv', 'UsoSvc', 'DoSvc', 'WSearch', 'SysMain', 'DiagTrack',
     'MapsBroker', 'lfsvc', 'WerSvc', 'RemoteRegistry',
     'Spooler', 'SSDPSRV', 'FDResPub', 'LanmanServer', 'TermService', 'WinRM',
     'CDPSvc'
 )
-$SbxUpdateServices = @('wuauserv', 'UsoSvc', 'DoSvc')
+$UmiakUpdateServices = @('wuauserv', 'UsoSvc', 'DoSvc')
 
-$SbxPwshExe = 'C:\Program Files\PowerShell\7\pwsh.exe'
-$SbxAgentExe = 'C:\Program Files\sbx-agent\current\sbx-agent.exe'
+$UmiakPwshExe = 'C:\Program Files\PowerShell\7\pwsh.exe'
+$UmiakAgentExe = 'C:\Program Files\umiak-agent\current\umiak-agent.exe'
 
 # Windows 11 .NET Framework defaults to the OS TLS settings; make TLS 1.2 explicit for 5.1.
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
@@ -174,17 +174,17 @@ function Invoke-Msi {
         [Parameter(Mandatory = $true)][string]$Path,
         [string[]]$Properties = @()
     )
-    $log = Join-Path $SbxLogDir ((Split-Path -Leaf $Path) + '.log')
+    $log = Join-Path $UmiakLogDir ((Split-Path -Leaf $Path) + '.log')
     $msiArgs = "/i `"$Path`" /qn /norestart /l*v `"$log`" $($Properties -join ' ')"
     Invoke-Installer -FilePath (Join-Path $env:SystemRoot 'System32\msiexec.exe') -Arguments $msiArgs.Trim()
 }
 
 function Get-BuildVersionInfo {
-    if (-not (Test-Path variable:script:SbxVersions)) {
-        $path = Join-Path $SbxBuildDir 'versions.json'
-        $script:SbxVersions = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8) | ConvertFrom-Json
+    if (-not (Test-Path variable:script:UmiakVersions)) {
+        $path = Join-Path $UmiakBuildDir 'versions.json'
+        $script:UmiakVersions = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8) | ConvertFrom-Json
     }
-    return $script:SbxVersions
+    return $script:UmiakVersions
 }
 
 function Assert-Sha256 {
@@ -207,7 +207,7 @@ function Save-VerifiedFile {
         [Parameter(Mandatory = $true)][string]$Url,
         [Parameter(Mandatory = $true)][string]$Sha256
     )
-    $dir = Join-Path $SbxWorkDir 'downloads'
+    $dir = Join-Path $UmiakWorkDir 'downloads'
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
     $dest = Join-Path $dir ([IO.Path]::GetFileName(([Uri]$Url).AbsolutePath))
     if ((Test-Path -LiteralPath $dest) -and (Get-FileHash -Algorithm SHA256 -LiteralPath $dest).Hash -eq $Sha256) {
@@ -270,7 +270,7 @@ function Get-ServiceStart([string]$Name) {
 
 # Start=4. Set-Service is refused for some protected services; the registry
 # value is the same setting. A missing service is not an error (editions differ).
-function Disable-SbxService {
+function Disable-UmiakService {
     param([Parameter(Mandatory = $true)][string]$Name, [switch]$StopNow)
     $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
     if ($null -eq $svc) { Write-BuildLog "service ${Name}: not installed"; return }
@@ -285,7 +285,7 @@ function Disable-SbxService {
     Write-BuildLog "service ${Name}: Disabled"
 }
 
-function Set-SbxServiceStartup {
+function Set-UmiakServiceStartup {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
         [Parameter(Mandatory = $true)][ValidateSet('Automatic', 'Manual')][string]$StartupType
@@ -328,7 +328,7 @@ function Assert-Command([string]$Name) {
 
 function Copy-BuildFile {
     param([Parameter(Mandatory = $true)][string]$Name, [Parameter(Mandatory = $true)][string]$Destination)
-    $src = Join-Path $SbxFilesDir $Name
+    $src = Join-Path $UmiakFilesDir $Name
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Destination) | Out-Null
     Copy-Item -LiteralPath $src -Destination $Destination -Force
     Write-BuildLog "$Destination <- files\$Name"
@@ -336,7 +336,7 @@ function Copy-BuildFile {
 
 # Unpacks a zip into a fresh dir under the work dir and returns its path.
 function Expand-ToWorkDir([string]$Zip, [string]$Name) {
-    $dir = Join-Path $SbxWorkDir $Name
+    $dir = Join-Path $UmiakWorkDir $Name
     if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
     Expand-Archive -LiteralPath $Zip -DestinationPath $dir
     return $dir
@@ -356,8 +356,8 @@ function Get-BitLockerStatus {
 # Loads C:\Users\Default\NTUSER.DAT (the template of every new profile) and
 # runs $Script with the registry root of the hive as its argument.
 function Invoke-WithDefaultUserHive([scriptblock]$Script) {
-    $hive = 'HKU\SbxDefaultUser'
-    $root = 'Registry::HKEY_USERS\SbxDefaultUser'
+    $hive = 'HKU\UmiakDefaultUser'
+    $root = 'Registry::HKEY_USERS\UmiakDefaultUser'
     # Left loaded by an interrupted run.
     if (Test-Path -LiteralPath $root) { Invoke-Native -FilePath reg.exe -ArgumentList @('unload', $hive) }
     Invoke-Native -FilePath reg.exe -ArgumentList @('load', $hive, 'C:\Users\Default\NTUSER.DAT')

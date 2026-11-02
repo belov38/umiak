@@ -11,17 +11,17 @@ import {
 import { Command } from "../src/commands.ts";
 import { resolveCredentials } from "../src/credentials.ts";
 import { PTY_SUBPROTOCOL, Pty } from "../src/pty.ts";
-import { Sbx } from "../src/sbx.ts";
+import { Umiak } from "../src/umiak.ts";
 
 const APP = "https://app.example.test/api";
 
 describe("session mode", () => {
-	it("needs only a baseUrl; never runs `sbx` or reads tokens from env", async () => {
+	it("needs only a baseUrl; never runs `umiak` or reads tokens from env", async () => {
 		const c = await resolveCredentials({
 			baseUrl: "/api",
 			session: true,
 			team: "team_1",
-			env: { SBX_API_KEY: "sbx_env" },
+			env: { UMIAK_API_KEY: "umiak_env" },
 			authCommand: ["/nonexistent"],
 		});
 		expect(c).toMatchObject({ baseUrl: "/api", team: "team_1", session: true });
@@ -30,9 +30,9 @@ describe("session mode", () => {
 		).rejects.toMatchObject({ code: "no_api_url" });
 	});
 
-	it("requests carry Sbx-Team and no Authorization", async () => {
+	it("requests carry Umiak-Team and no Authorization", async () => {
 		const seen: Request[] = [];
-		const sbx = new Sbx({
+		const umiak = new Umiak({
 			baseUrl: APP,
 			session: true,
 			team: "team_1",
@@ -45,7 +45,7 @@ describe("session mode", () => {
 				});
 			}) as typeof fetch,
 		});
-		for await (const _ of sbx.sandboxes.list()) {
+		for await (const _ of umiak.sandboxes.list()) {
 			// empty
 		}
 		expect(seen).toHaveLength(1);
@@ -53,7 +53,7 @@ describe("session mode", () => {
 			/^https:\/\/app\.example\.test\/api\/v1\/sandboxes/,
 		);
 		expect(seen[0]?.headers.get("authorization")).toBe(null);
-		expect(seen[0]?.headers.get("sbx-team")).toBe("team_1");
+		expect(seen[0]?.headers.get("umiak-team")).toBe("team_1");
 	});
 
 	it("PTY: team in the query (browsers set no WebSocket headers), no Authorization", async () => {
@@ -88,7 +88,7 @@ describe("session mode", () => {
 
 	it("sandboxes.handle builds a handle from data without a request", async () => {
 		const seen: Request[] = [];
-		const sbx = new Sbx({
+		const umiak = new Umiak({
 			baseUrl: APP,
 			session: true,
 			team: "team_1",
@@ -101,7 +101,7 @@ describe("session mode", () => {
 				});
 			}) as typeof fetch,
 		});
-		const sb = sbx.sandboxes.handle({
+		const sb = umiak.sandboxes.handle({
 			id: "sb_1",
 			slug: "quiet-otter-lamp",
 			state: "stopped",
@@ -112,6 +112,6 @@ describe("session mode", () => {
 			// empty
 		}
 		expect(seen[0]?.url).toMatch(/\/api\/v1\/sandboxes\/sb_1\/files\/list/);
-		expect(seen[0]?.headers.get("sbx-team")).toBe("team_1");
+		expect(seen[0]?.headers.get("umiak-team")).toBe("team_1");
 	});
 });

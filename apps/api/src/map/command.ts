@@ -4,12 +4,12 @@
 // `stderr_bytes`, a PTY command keeps its one stream in `stdout_bytes`;
 // `reason`, `output_truncated`). An ended row's stored reason wins over the
 // agent's.
-import { decodeUlid, encodeUlid, encodeUuid } from "@sbx/auth";
+import { decodeUlid, encodeUlid, encodeUuid } from "@umiak/auth";
 import {
 	type Command,
 	type CommandStatus,
 	storableOutputTruncated,
-} from "@sbx/core";
+} from "@umiak/core";
 import {
 	type AgentCommandInfo,
 	type AgentStreamInfo,

@@ -1,7 +1,7 @@
 // The sandbox as the model sees it (S11 8.2 "Форма ответа") and the wait for
 // a sandbox state by long-poll (S7 5.10, S11 7.5).
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import { type OperationData, type SandboxData, SbxError } from "@sbx/sdk";
+import { type OperationData, type SandboxData, UmiakError } from "@umiak/sdk";
 import type { ToolContext } from "../context.ts";
 import { toolText } from "../output/result.ts";
 import { errorView } from "./view.ts";
@@ -94,7 +94,7 @@ export async function waitSandbox(
 			Math.min(POLL_SECONDS, Math.floor((end - Date.now()) / 1000)),
 		);
 		try {
-			const r = await ctx.sbx().raw.GET(SANDBOX_PATH, {
+			const r = await ctx.umiak().raw.GET(SANDBOX_PATH, {
 				params: {
 					path: { sandbox: id },
 					query: {
@@ -123,7 +123,7 @@ export async function getSandbox(
 	ctx: ToolContext,
 	id: string,
 ): Promise<SandboxData> {
-	const { data } = await ctx.sbx().raw.GET(SANDBOX_PATH, {
+	const { data } = await ctx.umiak().raw.GET(SANDBOX_PATH, {
 		params: { path: { sandbox: id } },
 		...ctx.call,
 	});
@@ -143,7 +143,10 @@ export async function resolveSandboxId(
 	try {
 		return (await getSandbox(ctx, ref)).id;
 	} catch (err) {
-		if (err instanceof SbxError && (err.status === 403 || err.status === 404)) {
+		if (
+			err instanceof UmiakError &&
+			(err.status === 403 || err.status === 404)
+		) {
 			return ref;
 		}
 		throw err;

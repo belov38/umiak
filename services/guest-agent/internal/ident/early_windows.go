@@ -10,15 +10,15 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/winapi"
+	"github.com/belov38/umiak/services/guest-agent/internal/winapi"
 )
 
 const (
 	// identityMutex serializes identity apply between the specialize pass,
 	// the startup script and the agent service (spec 11.2).
-	identityMutex = `Global\sbx-identity`
+	identityMutex = `Global\umiak-identity`
 	// identityMutexSDDL lets SYSTEM and elevated administrators (a manual
-	// `sbx-agent identity apply`) open the mutex.
+	// `umiak-agent identity apply`) open the mutex.
 	identityMutexSDDL = "D:P(A;;GA;;;SY)(A;;GA;;;BA)"
 	// lockPoll is how often a wait for the mutex checks the context.
 	lockPoll = 1000 // ms

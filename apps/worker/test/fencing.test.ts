@@ -1,5 +1,5 @@
-import { DELETE_RETRY_LIMIT } from "@sbx/core";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { DELETE_RETRY_LIMIT } from "@umiak/core";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleMachineOp } from "../src/handlers/machine-op.ts";
 import {
@@ -62,7 +62,7 @@ describe("machine-op fencing", () => {
 
 		blocked.release();
 		expect(await a).toBe("fenced_out");
-		expect(w.metrics.count("sbx_fenced_out_total")).toBe(1);
+		expect(w.metrics.count("umiak_fenced_out_total")).toBe(1);
 
 		// Only B started a VM; A's VM was thrown away by B through the lease.
 		expect(w.infra.callsOf("start").map((c) => c.args[0])).toEqual([
@@ -114,7 +114,7 @@ describe("machine-op fencing before S1 create allocates", () => {
 		const m = await machine(w, id);
 		expect(m.state).toBe("warm");
 		expect(m.error_code).toBeNull();
-		expect(w.metrics.count("sbx_machine_provision_failed_total")).toBe(0);
+		expect(w.metrics.count("umiak_machine_provision_failed_total")).toBe(0);
 	});
 });
 

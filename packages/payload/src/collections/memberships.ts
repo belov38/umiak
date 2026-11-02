@@ -10,7 +10,7 @@ import {
 import { membershipsRevokeAfterDelete } from "../hooks/ssh-revoke.ts";
 
 // user and team never change: a membership is replaced by delete + create,
-// so the delete sends sbx_ssh_revoke for the old (team, user).
+// so the delete sends umiak_ssh_revoke for the old (team, user).
 const fixed = { update: () => false };
 
 export const Memberships: CollectionConfig = {

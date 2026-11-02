@@ -21,7 +21,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { formatBytes } from "@/features/sandbox/rules";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import { attempt } from "@/lib/client-call";
 import type { EnvironmentSummary } from "@/lib/environment-form";
 import { formatAgo, formatTime } from "@/lib/format";
@@ -36,7 +36,7 @@ export function EnvironmentsPage({
 	/** `usr_...` → name of the team's members. */
 	people: Record<string, string>;
 }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const queryClient = useQueryClient();
 	const { session, team } = useTeamPermission(teamId);
 	const canManage = can(session, team, "manageEnvironments");
@@ -46,14 +46,14 @@ export function EnvironmentsPage({
 	const list = useQuery({
 		queryKey: ["environments", teamId],
 		queryFn: async ({ signal }) => {
-			const { data } = await sbx.raw.GET("/v1/environments", { signal });
+			const { data } = await umiak.raw.GET("/v1/environments", { signal });
 			return data.data;
 		},
 	});
 
 	const remove = async (e: EnvironmentSummary): Promise<boolean> => {
 		const r = await attempt(() =>
-			sbx.raw.DELETE("/v1/environments/{environment}", {
+			umiak.raw.DELETE("/v1/environments/{environment}", {
 				params: { path: { environment: e.id } },
 			}),
 		);

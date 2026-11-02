@@ -3,7 +3,7 @@
 // backend) → `active: false`, the owners see a notice with the team keys
 // they created, the keys keep working; enabled again → active again. An
 // empty Keycloak answer (the backend's switch) → the pass aborts
-// (`sbx_idp_sync_aborted` 1) and nobody is deactivated.
+// (`umiak_idp_sync_aborted` 1) and nobody is deactivated.
 import {
 	attachedPty,
 	control,

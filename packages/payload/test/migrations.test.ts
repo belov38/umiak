@@ -1,12 +1,16 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import type { Payload } from "payload";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	assertPayloadMigrated,
-	migrateSbxPayload,
+	migrateUmiakPayload,
 	payloadMigrations,
 	pendingPayloadMigrations,
 } from "../src/index.ts";
@@ -35,13 +39,13 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 	});
 
 	it("applies every migration once; a second run changes nothing", async () => {
-		await migrateSbxPayload(payload);
+		await migrateUmiakPayload(payload);
 		expect(await pendingPayloadMigrations(payload)).toEqual([]);
 		await assertPayloadMigrated(payload);
 		const before = await t.pool.query(
 			"SELECT name, batch FROM payload.payload_migrations ORDER BY name",
 		);
-		await migrateSbxPayload(payload);
+		await migrateUmiakPayload(payload);
 		const after = await t.pool.query(
 			"SELECT name, batch FROM payload.payload_migrations ORDER BY name",
 		);
@@ -222,7 +226,7 @@ describe.skipIf(skipPg())("Windows catalog upgrade", () => {
 	beforeAll(async () => {
 		t = await createTestDatabase({ migrated: false, max: 2 });
 		payload = await openPayload(t.url);
-		await migrateSbxPayload(payload);
+		await migrateUmiakPayload(payload);
 	});
 	afterAll(async () => {
 		if (t) await closePayload(t.url);
@@ -275,8 +279,8 @@ describe.skipIf(skipPg())("Windows catalog upgrade", () => {
 			UNION ALL SELECT row_to_json(d) FROM payload.platform_defaults d
 			UNION ALL SELECT row_to_json(p) FROM payload.pool_targets p
 		`);
-			expect(await migrateSbxPayload(payload)).toEqual([migration]);
-			expect(await migrateSbxPayload(payload)).toEqual([]);
+			expect(await migrateUmiakPayload(payload)).toEqual([migration]);
+			expect(await migrateUmiakPayload(payload)).toEqual([]);
 			const templates = await payload.find({
 				collection: "templates",
 				where: { slug: { equals: "windows" } },
@@ -348,7 +352,7 @@ describe.skipIf(skipPg())(
 				`INSERT INTO identity.api_keys (id, team_id, name, secret_hash, prefix, last4, scopes,
 			   created_by, created_via, created_at, expires_at, last_used_at, revoked_at,
 			   revoked_by, revoked_by_key, rotated_at)
-			 VALUES ($1, $2, 'ci', $3, 'sbx_key_abc', 'wxyz', ARRAY['sandboxes:read','sandboxes:write'],
+			 VALUES ($1, $2, 'ci', $3, 'umiak_key_abc', 'wxyz', ARRAY['sandboxes:read','sandboxes:write'],
 			   $4, 'cli', $5, $6, $5, $7, $4, $1, $8)`,
 				[
 					ids.key,
@@ -367,7 +371,7 @@ describe.skipIf(skipPg())(
 				[ids.ssh, ids.alice, created],
 			);
 			payload = await openPayload(t.url);
-			await migrateSbxPayload(payload);
+			await migrateUmiakPayload(payload);
 		});
 		afterAll(async () => {
 			if (t) await closePayload(t.url);
@@ -444,7 +448,7 @@ describe.skipIf(skipPg())(
 				team: ids.shared,
 				kind: "team",
 				secretHash: hash,
-				prefix: "sbx_key_abc",
+				prefix: "umiak_key_abc",
 				last4: "wxyz",
 				scopes: ["sandboxes:read", "sandboxes:write"],
 				createdBy: ids.alice,

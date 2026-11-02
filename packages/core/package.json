@@ -1,5 +1,5 @@
 {
-	"name": "@sbx/core",
+	"name": "@umiak/core",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
@@ -13,9 +13,9 @@
 		"typecheck": "tsc --noEmit -p ."
 	},
 	"dependencies": {
-		"@sbx/auth": "workspace:*",
-		"@sbx/config": "workspace:*",
-		"@sbx/db": "workspace:*",
+		"@umiak/auth": "workspace:*",
+		"@umiak/config": "workspace:*",
+		"@umiak/db": "workspace:*",
 		"pg": "8.23.1",
 		"pg-boss": "12.38.0",
 		"ulid": "3.0.2"

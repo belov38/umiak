@@ -401,12 +401,12 @@ export function registerCommandRoutes(app: FakeApp, fake: Fake): void {
 						},
 						signal,
 					),
-				{ "Sbx-Command-Id": live.id, ...replayHeader },
+				{ "Umiak-Command-Id": live.id, ...replayHeader },
 			);
 		}
 		if (mode === "detached") {
 			return c.json(commandResource(live, true), replayed ? 200 : 201, {
-				"Sbx-Command-Id": live.id,
+				"Umiak-Command-Id": live.id,
 				...replayHeader,
 			});
 		}
@@ -438,7 +438,7 @@ export function registerCommandRoutes(app: FakeApp, fake: Fake): void {
 				stderrFrom: err.from,
 			},
 			200,
-			{ "Sbx-Command-Id": live.id, ...replayHeader },
+			{ "Umiak-Command-Id": live.id, ...replayHeader },
 		);
 	});
 
@@ -478,12 +478,12 @@ export function registerCommandRoutes(app: FakeApp, fake: Fake): void {
 		const headers: Record<string, string> = {
 			"Content-Type": "application/octet-stream",
 			"Cache-Control": "no-store",
-			"Sbx-Offset": String(start),
-			"Sbx-Next-Offset": String(start + bytes.length),
-			"Sbx-Available-From": String(available),
+			"Umiak-Offset": String(start),
+			"Umiak-Next-Offset": String(start + bytes.length),
+			"Umiak-Available-From": String(available),
 		};
-		if (cmd.ended) headers["Sbx-Stream-End"] = String(log.size);
-		if (offset < available) headers["Sbx-Truncated"] = "true";
+		if (cmd.ended) headers["Umiak-Stream-End"] = String(log.size);
+		if (offset < available) headers["Umiak-Truncated"] = "true";
 		return new Response(new Uint8Array(bytes), { status: 200, headers });
 	});
 
@@ -537,7 +537,7 @@ export function registerCommandRoutes(app: FakeApp, fake: Fake): void {
 					{ offsets, follow, encoding, head: [head] },
 					signal,
 				),
-			{ "Sbx-Command-Id": cmd.id },
+			{ "Umiak-Command-Id": cmd.id },
 		);
 	});
 

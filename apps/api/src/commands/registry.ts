@@ -1,18 +1,18 @@
 // Registry of the open long connections of this process: NDJSON command
 // streams, sync commands and (Task 10) PTY WebSockets (S7 §5.8, §7.10,
 // S8 C9). It caps the open connections per principal and closes them:
-// - when the principal stops passing its checks after NOTIFY sbx_identity
+// - when the principal stops passing its checks after NOTIFY umiak_identity
 //   (key revoked, rotated or expired, member removed, user deactivated):
 //   `error {code: unauthorized, retryable: false}`;
 // - when an operator blocks the sandbox of an exec stream, a sync command or
-//   a PTY socket (NOTIFY sbx_identity 'sandboxes:<id>', S8 C3, §11):
+//   a PTY socket (NOTIFY umiak_identity 'sandboxes:<id>', S8 C3, §11):
 //   `error {code: forbidden, details.reason: sandbox_blocked}`, unless an
 //   operator opened it; '*' checks the blocks again;
 // - on shutdown (`closeAll`): `reconnect {reason: server_shutdown}`.
 // A connection receives the close as a CloseFrame and writes its own final
 // frame (with offsets) or WebSocket close.
-import type { IdentityStore } from "@sbx/auth";
-import { hasOperatorRights } from "@sbx/core";
+import type { IdentityStore } from "@umiak/auth";
+import { hasOperatorRights } from "@umiak/core";
 import type { Logger } from "pino";
 import type {
 	IdentityChange,
@@ -58,9 +58,9 @@ export type StreamHandle = (() => void) & {
 
 export interface StreamRegistryOptions {
 	identity: Pick<IdentityStore, "findApiKeyByHash" | "user" | "membership">;
-	/** NOTIFY sbx_identity of this process. */
+	/** NOTIFY umiak_identity of this process. */
 	events: Pick<IdentityListener, "subscribe">;
-	/** Open connections per principal (SBX_API_MAX_STREAMS, default 100). */
+	/** Open connections per principal (UMIAK_API_MAX_STREAMS, default 100). */
 	maxPerPrincipal: number;
 	/**
 	 * The blocked ones of these sandboxes (runtime.sandboxes). Without it a

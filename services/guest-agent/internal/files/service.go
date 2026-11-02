@@ -1,5 +1,5 @@
 // Package files is the file API of the agent (spec section 11): the
-// sbx.agent.v1.Filesystem Connect service for small operations and the plain
+// umiak.agent.v1.Filesystem Connect service for small operations and the plain
 // HTTP /files endpoints for file bodies, resumable uploads and directory
 // archives.
 //
@@ -26,14 +26,14 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/agent/v1/agentv1connect"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/config"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/config"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/process"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
 )
 
 // Defaults of Options.
@@ -145,7 +145,7 @@ func New(opts Options) (*Service, error) {
 }
 
 // ConnectHandler returns the path and the handler of the
-// sbx.agent.v1.Filesystem service: Options.HandlerOptions plus 16 MiB
+// umiak.agent.v1.Filesystem service: Options.HandlerOptions plus 16 MiB
 // message limits and no gzip, so responses are never compressed.
 func (s *Service) ConnectHandler() (string, http.Handler) {
 	opts := slices.Concat(s.opts.HandlerOptions, []connect.HandlerOption{
@@ -547,7 +547,7 @@ func copyAcross(src, dst string, sfi fs.FileInfo, overwrite bool) error {
 		if err != nil {
 			return fsError(err)
 		}
-		tmp := filepath.Join(dir, ".sbx-tmp-"+randomSuffix())
+		tmp := filepath.Join(dir, ".umiak-tmp-"+randomSuffix())
 		if err := os.Symlink(target, tmp); err != nil {
 			return fsError(err)
 		}

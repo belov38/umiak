@@ -4,8 +4,8 @@ import (
 	"errors"
 	"path/filepath"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/wincmd"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/wincmd"
 )
 
 // Rules of the Windows shim that need no Windows API, so they are tested on

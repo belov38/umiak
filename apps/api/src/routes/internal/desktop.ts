@@ -36,7 +36,7 @@ export function registerDesktopInternalRoutes(app: ApiApp, deps: ApiDeps) {
 					"invalid_code",
 					"desktop ticket is invalid or expired",
 				);
-			if (!/^sbxd_[A-Za-z0-9_-]{43}$/.test(ticket)) throw invalid();
+			if (!/^umiakd_[A-Za-z0-9_-]{43}$/.test(ticket)) throw invalid();
 			const rt = await lookupDesktopRoute(deps, label);
 			if (!rt || rt.blocked || rt.sandboxState !== "ready") throw invalid();
 			const record = await poolOf(deps).query<{

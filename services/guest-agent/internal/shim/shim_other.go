@@ -17,6 +17,6 @@ func Main(args []string) int {
 
 // Run is Main with an explicit log writer.
 func Run(_ []string, stderr io.Writer) int {
-	_, _ = fmt.Fprintf(stderr, "sbx-agent shim: unsupported on %s\n", runtime.GOOS)
+	_, _ = fmt.Fprintf(stderr, "umiak-agent shim: unsupported on %s\n", runtime.GOOS)
 	return 1
 }

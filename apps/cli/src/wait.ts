@@ -9,9 +9,9 @@ import {
 	type OperationData,
 	type SandboxData,
 	SandboxFailedError,
-	SbxError,
+	UmiakError,
 	WAIT_TIMEOUT,
-} from "@sbx/sdk";
+} from "@umiak/sdk";
 import type { Context } from "./context.ts";
 
 /** Default limit of a wait (S7 §15.4). */
@@ -65,7 +65,7 @@ export async function waitForState(
 		}
 		const left = deadline - Date.now();
 		if (left <= 0) {
-			throw new SbxError({
+			throw new UmiakError({
 				status: 0,
 				code: WAIT_TIMEOUT,
 				message: `sandbox ${sb.slug} is still ${sb.state} (not ${target})`,
@@ -91,7 +91,7 @@ async function poll(
 	);
 	const timeout = AbortSignal.timeout(waitSeconds * 1000 + POLL_MARGIN_MS);
 	try {
-		const { data } = await ctx.sbx().raw.GET("/v1/sandboxes/{sandbox}", {
+		const { data } = await ctx.umiak().raw.GET("/v1/sandboxes/{sandbox}", {
 			params: {
 				path: { sandbox: sb.id },
 				query: {
@@ -164,6 +164,6 @@ export function warnForceStop(ctx: Context, op: OperationData): void {
 			? ""
 			: `: ${f.restartError.message} (${f.restartError.code})`;
 	ctx.out.warn(
-		`the source sandbox was stopped for the snapshot but failed to start again${why}; resume it: sbx resume ${op.sandboxId}`,
+		`the source sandbox was stopped for the snapshot but failed to start again${why}; resume it: umiak resume ${op.sandboxId}`,
 	);
 }

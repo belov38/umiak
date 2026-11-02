@@ -1,7 +1,7 @@
 // Team API keys of the dashboard (S8 §9.8, S7 §7.2, §7.3) without the DOM:
 // presets, the create body, live vs revoked/expired, the usage examples.
-import { PRESETS, SCOPES, type Scope } from "@sbx/auth/scopes";
-import type { components } from "@sbx/sdk";
+import { PRESETS, SCOPES, type Scope } from "@umiak/auth/scopes";
+import type { components } from "@umiak/sdk";
 
 export type ApiKey = components["schemas"]["ApiKey"];
 export type CreateApiKeyInput = components["schemas"]["CreateApiKeyRequest"];
@@ -95,9 +95,9 @@ export function partitionKeys(
 	return { live, inactive };
 }
 
-/** `sbx_a1B2c3D4…9xYz` */
+/** `umiak_a1B2c3D4…9xYz` */
 export function maskedKey(k: Pick<ApiKey, "prefix" | "last4">): string {
-	return `sbx_${k.prefix}…${k.last4}`;
+	return `umiak_${k.prefix}…${k.last4}`;
 }
 
 /** Why the key needs attention, from `createdBy` (S8 §9.8, §20.1). */
@@ -112,7 +112,7 @@ export function creatorNote(k: ApiKey): string | null {
 /** Shell lines shown with a new secret (S8 §9.8). */
 export function keyExamples(secret: string): string[] {
 	return [
-		`export SBX_API_KEY=${secret}`,
-		`printf '%s' "$SBX_API_KEY" | sbx login --key-stdin`,
+		`export UMIAK_API_KEY=${secret}`,
+		`printf '%s' "$UMIAK_API_KEY" | umiak login --key-stdin`,
 	];
 }

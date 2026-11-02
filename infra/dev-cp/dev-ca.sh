@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# boat-dev-clone dev control plane: the dev CA, on the operator's Mac. deploy.sh runs it; it is
+# umiak dev control plane: the dev CA, on the operator's Mac. deploy.sh runs it; it is
 # idempotent. Dev only.
 #
 #   infra/dev-cp/dev-ca.sh
 #
-# Creates ca.pem and ca.key (ECDSA P-256, 10 years) in $CA_DIR (~/.config/sbx/dev-ca, mode 0700,
-# files 0600) once. The gateway's dev-secrets on the CT issues the tunnel and the *.sbx.
+# Creates ca.pem and ca.key (ECDSA P-256, 10 years) in $CA_DIR (~/.config/umiak/dev-ca, mode 0700,
+# files 0600) once. The gateway's dev-secrets on the CT issues the tunnel and the *.umiak.
 # certificates with it (deploy.sh puts it into secrets/gateway); agents pin it as their tunnel
 # CA. Name constraints limit it to the tunnel host and the port domain (names.sh), so trusting
 # it on the Mac for previews vouches for nothing else, even if ca.key leaks.
@@ -49,8 +49,8 @@ distinguished_name = dn
 prompt = no
 x509_extensions = ca
 [dn]
-CN = sbx dev-cp CA $(openssl rand -hex 4)
-O = sbx local development
+CN = umiak dev-cp CA $(openssl rand -hex 4)
+O = umiak local development
 [ca]
 basicConstraints = critical, CA:TRUE, pathlen:0
 keyUsage = critical, keyCertSign, cRLSign

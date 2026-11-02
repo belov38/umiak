@@ -3,8 +3,8 @@ import {
 	lockNode,
 	lockTeam,
 	requestSystemResume,
-} from "@sbx/core";
-import { type Tx, withTx } from "@sbx/db";
+} from "@umiak/core";
+import { type Tx, withTx } from "@umiak/db";
 import type pg from "pg";
 import type { WorkerCtx } from "../context.ts";
 import { lockSandboxRow } from "../db.ts";
@@ -20,13 +20,13 @@ import {
 import type { InfraLv, InfraVm, NodeInfra } from "../ports.ts";
 
 // Controller `reconcile` (S6 §11.2, §11.3; every 60 s). Compares Proxmox
-// (VMs of pool `sandbox`, LVs tagged `sbx`) with the database and repairs the
+// (VMs of pool `umiak`, LVs tagged `umiak`) with the database and repairs the
 // drift. Each run is planned per provider and node, then applied action by
 // action; every action re-checks its condition right before it acts.
 //
-// Anti-goal (§2): nothing outside pool `sandbox`, without the `sbx` tag,
+// Anti-goal (§2): nothing outside pool `umiak`, without the `umiak` tag,
 // outside the VMID range (provider row and the node's S1 range, both), or a
-// template VMID is ever deleted. LVs are only ever touched with the `sbx` tag.
+// template VMID is ever deleted. LVs are only ever touched with the `umiak` tag.
 //
 // Grace: S1 lists carry no creation time, so `runtime.reconcile_seen` keeps
 // the first sighting of every VM and LV as an orphan CANDIDATE (guarded and
@@ -44,15 +44,15 @@ import type { InfraLv, InfraVm, NodeInfra } from "../ports.ts";
 // confirm the VM status with a fresh `status()` call and update the machine
 // conditionally on the version they saw.
 //
-// Dry run (`SBX_RECONCILE_DRY_RUN=1`, `WorkerCtx.reconcileDryRun`, default
+// Dry run (`UMIAK_RECONCILE_DRY_RUN=1`, `WorkerCtx.reconcileDryRun`, default
 // true): the same plan, nothing applied, every action logged and returned
 // with `applied: false`.
 //
-// Metrics: `sbx_reconcile_actions_total{kind, mode}` with mode
+// Metrics: `umiak_reconcile_actions_total{kind, mode}` with mode
 // applied | skipped | failed | dry_run (kinds include the §11.2 names
-// orphan_vm, orphan_lv, power_drift); `sbx_reconcile_failed_total{part}`;
-// `sbx_reconcile_skipped_total{reason}` when a guard refused a VM
-// (not_in_pool | no_sbx_tag | template).
+// orphan_vm, orphan_lv, power_drift); `umiak_reconcile_failed_total{part}`;
+// `umiak_reconcile_skipped_total{reason}` when a guard refused a VM
+// (not_in_pool | no_umiak_tag | template).
 
 /** Age before an orphan VM or LV may be removed, and a releasing lease retried (§11.2). */
 export const RECONCILE_GRACE_S = 600;
@@ -66,8 +66,8 @@ export const RECONCILE_DELETE_STALE_S = 300;
 export const RETIRE_AGAIN_AFTER_S = 60;
 /** §11.3: a second unexpected stop within this window stops the sandbox. */
 export const UNEXPECTED_STOP_WINDOW_S = 3600;
-export const SANDBOX_POOL = "sandbox";
-export const SBX_TAG = "sbx";
+export const SANDBOX_POOL = "umiak";
+export const UMIAK_TAG = "umiak";
 const SHUTDOWN_TIMEOUT_S = 60;
 
 export const RECONCILE_ACTION_KINDS = [
@@ -185,7 +185,7 @@ export async function runReconcile(
 		try {
 			plans = await plan();
 		} catch (err) {
-			ctx.metrics.inc("sbx_reconcile_failed_total", { part });
+			ctx.metrics.inc("umiak_reconcile_failed_total", { part });
 			ctx.log.error({ part, err: errText(err) }, "reconcile part failed");
 			continue;
 		}
@@ -201,7 +201,7 @@ async function execute(
 ): Promise<ReconcileAction> {
 	const a = plan.action;
 	if (dryRun) {
-		ctx.metrics.inc("sbx_reconcile_actions_total", {
+		ctx.metrics.inc("umiak_reconcile_actions_total", {
 			kind: a.kind,
 			mode: "dry_run",
 		});
@@ -211,14 +211,14 @@ async function execute(
 	try {
 		if (await plan.apply()) {
 			a.applied = true;
-			ctx.metrics.inc("sbx_reconcile_actions_total", {
+			ctx.metrics.inc("umiak_reconcile_actions_total", {
 				kind: a.kind,
 				mode: "applied",
 			});
 			ctx.log.warn({ ...a }, "reconcile action applied");
 		} else {
 			a.error = "skipped: condition no longer holds";
-			ctx.metrics.inc("sbx_reconcile_actions_total", {
+			ctx.metrics.inc("umiak_reconcile_actions_total", {
 				kind: a.kind,
 				mode: "skipped",
 			});
@@ -226,7 +226,7 @@ async function execute(
 		}
 	} catch (err) {
 		a.error = errText(err);
-		ctx.metrics.inc("sbx_reconcile_actions_total", {
+		ctx.metrics.inc("umiak_reconcile_actions_total", {
 			kind: a.kind,
 			mode: "failed",
 		});
@@ -368,7 +368,7 @@ function vmEligible(
 ): boolean {
 	return (
 		vm.pool === SANDBOX_POOL &&
-		vm.tags.includes(SBX_TAG) &&
+		vm.tags.includes(UMIAK_TAG) &&
 		vm.vmid >= range.min &&
 		vm.vmid <= range.max &&
 		!templates.has(vm.vmid)
@@ -393,12 +393,12 @@ type LvClass =
 function classifyLv(lv: InfraLv): LvClass {
 	const vm = /^vm-(\d+)-/.exec(lv.name);
 	if (vm) return { kind: "vm", vmid: Number(vm[1]) };
-	const snap = /^sbx-snap-([0-9a-f]{1,32})-/.exec(lv.name);
+	const snap = /^umiak-snap-([0-9a-f]{1,32})-/.exec(lv.name);
 	if (snap?.[1]) return { kind: "snap", lvId: snap[1] };
 	for (const t of lv.tags) {
-		const tv = /^sbx-vm-(\d+)$/.exec(t);
+		const tv = /^umiak-vm-(\d+)$/.exec(t);
 		if (tv) return { kind: "vm", vmid: Number(tv[1]) };
-		const ts = /^sbx-snap-([0-9a-f]{1,32})$/.exec(t);
+		const ts = /^umiak-snap-([0-9a-f]{1,32})$/.exec(t);
 		if (ts?.[1]) return { kind: "snap", lvId: ts[1] };
 	}
 	return null;
@@ -416,7 +416,7 @@ async function lvOrphanReason(
 	vmids: Set<number>,
 	range: { min: number; max: number },
 ): Promise<string | null> {
-	if (!lv.tags.includes(SBX_TAG)) return null;
+	if (!lv.tags.includes(UMIAK_TAG)) return null;
 	const c = classifyLv(lv);
 	if (c === null) return null;
 	if (c.kind === "vm") {
@@ -589,7 +589,7 @@ async function planNode(
 		});
 	}
 
-	// Orphan LVs: `sbx` tag, an orphan reason now, and the grace as a candidate.
+	// Orphan LVs: `umiak` tag, an orphan reason now, and the grace as a candidate.
 	const vmids = new Set(vms.map((v) => v.vmid));
 	const lvCandidates: { lv: InfraLv; reason: string }[] = [];
 	for (const lv of lvs) {
@@ -852,7 +852,7 @@ async function applyPowerDrift(
 /**
  * Why a VM must not be touched by a lease retry, or null. No VM is fine (the
  * S1 delete then only frees the lease and removes the LVs tagged
- * `sbx-vm-N`); a present VM must pass the §2 guards like an orphan.
+ * `umiak-vm-N`); a present VM must pass the §2 guards like an orphan.
  */
 function leaseVmUnsafe(
 	vms: InfraVm[],
@@ -863,7 +863,7 @@ function leaseVmUnsafe(
 	const vm = vms.find((v) => v.vmid === vmid);
 	if (vm === undefined) return null;
 	if (vm.pool !== SANDBOX_POOL) return "not_in_pool";
-	if (!vm.tags.includes(SBX_TAG)) return "no_sbx_tag";
+	if (!vm.tags.includes(UMIAK_TAG)) return "no_umiak_tag";
 	return null;
 }
 
@@ -896,7 +896,7 @@ function countSkip(
 	reason: string,
 	fields: Record<string, unknown>,
 ): void {
-	ctx.metrics.inc("sbx_reconcile_skipped_total", { reason });
+	ctx.metrics.inc("umiak_reconcile_skipped_total", { reason });
 	ctx.log.warn({ ...fields, reason }, "reconcile: refusing to touch a VM");
 }
 
@@ -908,7 +908,7 @@ function countSkip(
  * listing has the VMID; when no node lists it, any node only verifies and
  * frees the lease; when a node's listing fails, the lease waits. S1
  * delete stops and purges whatever VM has the VMID, so the VM (if any) must
- * be in pool `sandbox`, tagged `sbx` and not a template, at planning and
+ * be in pool `umiak`, tagged `umiak` and not a template, at planning and
  * again right before the delete.
  */
 async function planLeases(

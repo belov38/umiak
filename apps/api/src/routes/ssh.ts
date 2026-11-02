@@ -10,8 +10,8 @@ import {
 	SshKeyError,
 	type SshPublicKey,
 	signUserCertificate,
-} from "@sbx/auth";
-import type { Sandbox } from "@sbx/core";
+} from "@umiak/auth";
+import type { Sandbox } from "@umiak/core";
 import { authOf } from "../auth/principal.ts";
 import { requireScope } from "../auth/scopes.ts";
 import type { ApiApp, ApiDeps } from "../deps.ts";
@@ -169,8 +169,8 @@ export function registerSshRoutes(app: ApiApp, deps: ApiDeps): void {
 		}
 		const keyId =
 			p.kind === "team_key"
-				? `sbx:key:${encodeUuid("apiKey", p.apiKeyId as string)}`
-				: `sbx:user:${encodeUuid("user", p.userId as string)}`;
+				? `umiak:key:${encodeUuid("apiKey", p.apiKeyId as string)}`
+				: `umiak:user:${encodeUuid("user", p.userId as string)}`;
 		const principal = encodeUuid("sandbox", s.id);
 		const now = Date.now();
 		const validAfter = floorSeconds(now - CERT_BACKDATE_MS);

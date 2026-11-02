@@ -1,13 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	type AgentEventBatch,
 	ingestAgentEvents,
 	normalizeAgentEvent,
 	RecordingJobSender,
-	SbxError,
 	type SyntheticEventType,
+	UmiakError,
 } from "../src/index.ts";
 
 const T0 = "2026-10-29T10:00:00.000Z";
@@ -216,8 +220,8 @@ describe.skipIf(skipPg())("ingestAgentEvents (S6 §10.1)", () => {
 			const err = await ingestAgentEvents(t.pool, jobs, batch).catch(
 				(e: unknown) => e,
 			);
-			expect(err).toBeInstanceOf(SbxError);
-			expect((err as SbxError).code).toBe("validation");
+			expect(err).toBeInstanceOf(UmiakError);
+			expect((err as UmiakError).code).toBe("validation");
 		}
 		expect(jobs.sent).toEqual([]);
 	});
@@ -282,7 +286,7 @@ describe("normalizeAgentEvent (decision 13)", () => {
 	it("maps the S3 CommandExited reason like attach: TIMEOUT → timed_out, START_FAILED → failed_to_start; a PTY end is the stdout bytes", () => {
 		const exited = (payload: object) =>
 			normalizeAgentEvent({ type: "command.exited", payload });
-		// protojson of sbx.agent.v1.CommandExited with implicit fields emitted.
+		// protojson of umiak.agent.v1.CommandExited with implicit fields emitted.
 		const base = {
 			commandId: "01T",
 			code: 0,

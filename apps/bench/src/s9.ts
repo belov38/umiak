@@ -10,7 +10,7 @@ import {
 	type SnapshotRef,
 	s2SerialPayload,
 	VM_LOCK_AFTER_RESTART_MS,
-} from "@sbx/pve";
+} from "@umiak/pve";
 import { devCpRegistrar } from "../../template-builder/src/devcp.ts";
 import { type Ctx, RamGuard } from "./context.ts";
 import { redact } from "./report.ts";
@@ -18,7 +18,7 @@ import { deleteWithRetry, machinesFor } from "./s5.ts";
 import { withAbortSignals } from "./signals.ts";
 import { type Summary, summarize } from "./stats.ts";
 
-// sbx-bench s9 (spec S9 section 16): create and fork timings of the Windows template.
+// umiak-bench s9 (spec S9 section 16): create and fork timings of the Windows template.
 // One Windows VM at a time (4 GB each, RAM guard 8 GB): create A (S1) -> start -> agent ready
 // -> hard stop and start -> crash-consistent snapshot without QGA/VSS -> shut A down -> fork B with a
 // new identity -> start -> agent ready under the new computer name -> delete everything.
@@ -28,9 +28,10 @@ const BOOT_TIMEOUT_MS = 10 * 60_000;
 const SHUTDOWN_TIMEOUT_S = 120;
 const INFO_TIMEOUT_MS = 60_000;
 const TUNNEL_TIMEOUT_MS = 2 * 60_000;
-/** Same path as the Windows verify profile of sbx-tpl. */
-export const AGENT_EXE = "C:\\Program Files\\sbx-agent\\current\\sbx-agent.exe";
-export const INFO_CMD = [AGENT_EXE, "call", "sbx.agent.v1.System/Info", "-"];
+/** Same path as the Windows verify profile of umiak-tpl. */
+export const AGENT_EXE =
+	"C:\\Program Files\\umiak-agent\\current\\umiak-agent.exe";
+export const INFO_CMD = [AGENT_EXE, "call", "umiak.agent.v1.System/Info", "-"];
 
 export interface S9Options {
 	template: number;
@@ -160,9 +161,9 @@ export function s9Markdown(
 
 const uuidHex = (s: string) => s.replaceAll("-", "").toLowerCase();
 
-/** Computer name of a machine (spec S9 11.2): SBX + the last 12 hex digits of its id, upper case. */
+/** Computer name of a machine (spec S9 11.2): UMI + the last 12 hex digits of its id, upper case. */
 export function computerNameFor(machineId: string): string {
-	return `SBX${uuidHex(machineId).slice(-12).toUpperCase()}`;
+	return `UMI${uuidHex(machineId).slice(-12).toUpperCase()}`;
 }
 
 /** Field of a protojson object under its proto name or its lowerCamel JSON name. */
@@ -260,7 +261,7 @@ export function checkHostRules(
 		throw new Error(`--template ${template} is a sandbox VMID`);
 }
 
-/** Tunnel registration on the dev control plane (the registrar of sbx-tpl verify --connect-url). */
+/** Tunnel registration on the dev control plane (the registrar of umiak-tpl verify --connect-url). */
 export interface TunnelRegistrar {
 	register(machineId: string, bsHashHex: string): Promise<void>;
 	sessionState(machineId: string): Promise<string | null>;

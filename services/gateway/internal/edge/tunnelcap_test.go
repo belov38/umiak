@@ -14,11 +14,11 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/edge"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/ratelimit"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/edge"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
+	"github.com/belov38/umiak/services/gateway/internal/ratelimit"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
 )
 
 // tunnelCap is a dispatcher on a loopback listener (PROXY v2 trusting

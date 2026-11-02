@@ -1,8 +1,8 @@
 "use client";
+import { useQuery } from "@tanstack/react-query";
 // Overview tab (S8 §9.6): properties, endpoints (port URL template, SSH
 // command), the last 10 commands and the published ports.
-import type { Sandbox, SandboxData } from "@sbx/sdk";
-import { useQuery } from "@tanstack/react-query";
+import type { Sandbox, SandboxData } from "@umiak/sdk";
 import { CopyLine } from "@/components/app/copy-button";
 import { QueryError } from "@/components/app/query-error";
 import { formatAgo, formatTime } from "@/lib/format";

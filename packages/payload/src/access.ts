@@ -36,7 +36,7 @@ export const operatorAccess = {
  * snapshots or environments (web cannot see the runtime), then deletes
  * with this header.
  */
-export const DELETE_TEAM_HEADER = "x-sbx-delete-team";
+export const DELETE_TEAM_HEADER = "x-umiak-delete-team";
 
 /**
  * Delete of a team: one team by id, operators only, and only with the

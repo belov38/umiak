@@ -1,6 +1,10 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { IdentityError, type IdentityErrorCode } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { IdentityError, type IdentityErrorCode } from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import {
 	createLocalReq,
 	initTransaction,
@@ -19,15 +23,15 @@ import {
 import {
 	AUTH_DENIED_HEADER,
 	authenticateHeaders,
-	getSbxPayload,
-	migrateSbxPayload,
+	getUmiakPayload,
+	migrateUmiakPayload,
 	oauth2ProxyStrategy,
 	parseAuthHeaders,
 	resolveSession,
 } from "../src/index.ts";
 import { closePayload, Listener, testOptions } from "./helpers.ts";
 
-const OPS = "sbx-operators";
+const OPS = "umiak-operators";
 const opts = { operatorGroups: [OPS] };
 
 function email(tag = "u"): string {
@@ -65,10 +69,10 @@ describe.skipIf(skipPg())("resolveSession (S8 §5.3)", () => {
 
 	beforeAll(async () => {
 		t = await createTestDatabase({ migrated: false, max: 4 });
-		payload = await getSbxPayload({ ...testOptions(t.url), poolMax: 14 });
-		await migrateSbxPayload(payload);
+		payload = await getUmiakPayload({ ...testOptions(t.url), poolMax: 14 });
+		await migrateUmiakPayload(payload);
 		listener = new Listener(t.url);
-		await listener.start(["sbx_identity", "sbx_ssh_revoke"]);
+		await listener.start(["umiak_identity", "umiak_ssh_revoke"]);
 	});
 	afterAll(async () => {
 		await listener?.stop();
@@ -272,7 +276,7 @@ describe.skipIf(skipPg())("resolveSession (S8 §5.3)", () => {
 			"x-auth-request-email": e,
 			"x-auth-request-user": sub,
 			"x-auth-request-groups":
-				"role:offline_access,devs,role:uma_authorization,role:sbx-api:read",
+				"role:offline_access,devs,role:uma_authorization,role:umiak-api:read",
 			"x-auth-request-preferred-username": "bob",
 		});
 		if (header === null) throw new Error("no claims");
@@ -288,7 +292,7 @@ describe.skipIf(skipPg())("resolveSession (S8 §5.3)", () => {
 		expect(await listener.settle()).toEqual([]);
 
 		// groups and preferredUsername that do differ are written, still
-		// without sbx_identity (not part of SessionIdentity).
+		// without umiak_identity (not part of SessionIdentity).
 		await resolveSession(
 			payload,
 			{ ...token, groups: ["devs", "qa"], preferredUsername: "robert" },
@@ -335,7 +339,7 @@ describe.skipIf(skipPg())("resolveSession (S8 §5.3)", () => {
 			[r.user.id],
 		);
 		expect(row?.last_login_at.getTime()).toBeGreaterThan(old.getTime() + 1000);
-		// lastLoginAt alone is bookkeeping: no sbx_identity.
+		// lastLoginAt alone is bookkeeping: no umiak_identity.
 		expect(await listener.settle()).toEqual([]);
 	});
 

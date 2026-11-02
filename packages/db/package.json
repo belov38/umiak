@@ -1,5 +1,5 @@
 {
-	"name": "@sbx/db",
+	"name": "@umiak/db",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
@@ -16,7 +16,7 @@
 		"typecheck": "tsc --noEmit -p ."
 	},
 	"dependencies": {
-		"@sbx/pve": "workspace:*",
+		"@umiak/pve": "workspace:*",
 		"drizzle-orm": "0.45.4",
 		"pg": "8.23.1"
 	},

@@ -1,8 +1,8 @@
-// `sbx list [--state s,s] [--label k=v]... [--template] [--q] [--limit n]`
+// `umiak list [--state s,s] [--label k=v]... [--template] [--q] [--limit n]`
 // (S7 §8.2): every matching sandbox of the team, newest first, as
 // `{data, nextCursor}` (all pages; with --limit the cursor of the rest).
 
-import type { SandboxData } from "@sbx/sdk";
+import type { SandboxData } from "@umiak/sdk";
 import type { Command } from "commander";
 import { collect, parseCount } from "../args.ts";
 import { table } from "../format.ts";
@@ -47,7 +47,7 @@ export function register(program: Command, run: Runner): void {
 					query.limit =
 						limit === undefined ? 200 : Math.min(limit - data.length, 200);
 					if (cursor !== undefined) query.cursor = cursor;
-					const { data: page } = await ctx.sbx().raw.GET("/v1/sandboxes", {
+					const { data: page } = await ctx.umiak().raw.GET("/v1/sandboxes", {
 						params: { query },
 					});
 					data.push(...page.data);

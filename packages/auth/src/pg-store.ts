@@ -15,16 +15,16 @@ import { FK_VIOLATION, inTx, pgCode, UNIQUE_VIOLATION } from "./pg-util.ts";
 import type { Scope } from "./scopes.ts";
 
 // Postgres stand-in for IdentityStore until S8 (S7 plan decision 2): schema
-// `identity` of migration 0300. Its triggers send NOTIFY sbx_identity
+// `identity` of migration 0300. Its triggers send NOTIFY umiak_identity
 // '<collection>:<id>' (users, memberships, api-keys, ssh-keys) on every
 // change, so this class never notifies itself. Migration 0302 adds NOTIFY
-// sbx_ssh_revoke (S4 §9.5) with public ids, in the same transaction:
+// umiak_ssh_revoke (S4 §9.5) with public ids, in the same transaction:
 // `user:<usr_>` (deactivated), `member:<team_>:<usr_>` (membership removed),
 // `key:<key_>` (revoked), `team:<team_>` (deleted).
 
 export interface PgIdentityStoreOptions {
 	pool: pg.Pool;
-	/** IdP groups that make a user an operator (SBX_OPERATOR_GROUPS). */
+	/** IdP groups that make a user an operator (UMIAK_OPERATOR_GROUPS). */
 	operatorGroups: string[];
 }
 

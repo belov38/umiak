@@ -1,6 +1,6 @@
 // Rate limits per principal and per team for starts (S7 §5.8).
 import { randomUUID } from "node:crypto";
-import { generateApiKeySecret } from "@sbx/auth";
+import { generateApiKeySecret } from "@umiak/auth";
 import { describe, expect, it } from "vitest";
 import { limitStarts } from "../src/index.ts";
 import { testIdentityStore, testSettings } from "../src/testing/index.ts";
@@ -67,7 +67,7 @@ describe("request rate limit (20/s, burst 100)", () => {
 	});
 
 	it("each principal has its own bucket", async () => {
-		const h = harness({ SBX_API_RATE_BURST: "2", SBX_API_RATE_RPS: "1" });
+		const h = harness({ UMIAK_API_RATE_BURST: "2", UMIAK_API_RATE_RPS: "1" });
 		expect((await h.request("GET", "/v1/__test/ping", as(A1))).status).toBe(
 			204,
 		);
@@ -83,7 +83,7 @@ describe("request rate limit (20/s, burst 100)", () => {
 	});
 
 	it("anonymous routes are not limited", async () => {
-		const h = harness({ SBX_API_RATE_BURST: "1", SBX_API_RATE_RPS: "1" });
+		const h = harness({ UMIAK_API_RATE_BURST: "1", UMIAK_API_RATE_RPS: "1" });
 		for (let i = 0; i < 3; i++) {
 			const r = await h.request("GET", "/v1/meta");
 			expect(r.status).toBe(200);
@@ -94,7 +94,7 @@ describe("request rate limit (20/s, burst 100)", () => {
 
 describe("starts per team per minute", () => {
 	it("over the limit: 429 rate_limited; another team is not affected", async () => {
-		const h = harness({ SBX_API_RATE_STARTS_PER_MIN: "2" });
+		const h = harness({ UMIAK_API_RATE_STARTS_PER_MIN: "2" });
 		h.app.post("/v1/__test/start", limitStarts(h.deps), (c) =>
 			c.body(null, 204),
 		);

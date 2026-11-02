@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
 )
 
 // maxRequestBody bounds request bodies the test server reads.

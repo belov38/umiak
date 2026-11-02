@@ -19,7 +19,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
 )
 
 const (
@@ -43,7 +43,7 @@ type CertSource struct {
 }
 
 // NewCertSource loads the pair; a missing or invalid pair is an error. name
-// is the label of sbx_gateway_cert_expiry_timestamp_seconds (sbx, tunnel).
+// is the label of umiak_gateway_cert_expiry_timestamp_seconds (umiak, tunnel).
 func NewCertSource(name, certFile, keyFile string, m *obs.Metrics) (*CertSource, error) {
 	c := &CertSource{
 		name: name, certFile: certFile, keyFile: keyFile, m: m,

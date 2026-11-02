@@ -1,4 +1,4 @@
-// Package system implements the sbx.agent.v1.System service (spec section
+// Package system implements the umiak.agent.v1.System service (spec section
 // 13): machine information, metrics, ports, activity counters, the claim
 // lifecycle, quiesce and update delegation, plus the activity and idle loops
 // that feed the event journal.
@@ -14,11 +14,11 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/agent/v1/agentv1connect"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ports"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/ports"
 )
 
 // maxMessageBytes bounds Connect messages in both directions.
@@ -150,7 +150,7 @@ func New(opts Options) (*Service, error) {
 	return &Service{opts: opts}, nil
 }
 
-// ConnectHandler returns the path and the handler of the sbx.agent.v1.System
+// ConnectHandler returns the path and the handler of the umiak.agent.v1.System
 // service: Options.HandlerOptions plus 16 MiB message limits and no gzip, so
 // responses are never compressed.
 func (s *Service) ConnectHandler() (string, http.Handler) {

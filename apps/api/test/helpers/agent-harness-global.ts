@@ -1,5 +1,5 @@
 // Global setup of the tests against the real guest agent (agent-real.test.ts):
-// builds services/guest-agent/cmd/sbx-agent-harness once per run with the
+// builds services/guest-agent/cmd/umiak-agent-harness once per run with the
 // pinned Go (`mise exec -- go build`, else `go build`). Without Go the tests
 // skip with the reason; a failing build fails the run.
 import { execFile } from "node:child_process";
@@ -28,16 +28,16 @@ function goMissing(e: unknown, stderr: string): boolean {
 
 export async function setup(project: TestProject): Promise<void> {
 	if (
-		process.env.SBX_TEST_SKIP_PG === "1" &&
-		!process.env.SBX_TEST_DATABASE_URL
+		process.env.UMIAK_TEST_SKIP_PG === "1" &&
+		!process.env.UMIAK_TEST_DATABASE_URL
 	) {
-		project.provide("sbxAgentHarness", { bin: "", skip: "no Postgres" });
+		project.provide("umiakAgentHarness", { bin: "", skip: "no Postgres" });
 		return;
 	}
 	const moduleDir = resolve(project.config.root, "../../services/guest-agent");
-	dir = mkdtempSync(join(tmpdir(), "sbx-agent-harness-"));
-	const bin = join(dir, "sbx-agent-harness");
-	const args = ["build", "-o", bin, "./cmd/sbx-agent-harness"];
+	dir = mkdtempSync(join(tmpdir(), "umiak-agent-harness-"));
+	const bin = join(dir, "umiak-agent-harness");
+	const args = ["build", "-o", bin, "./cmd/umiak-agent-harness"];
 	const attempts: [string, string[]][] = [
 		["mise", ["exec", "--", "go", ...args]],
 		["go", args],
@@ -46,7 +46,7 @@ export async function setup(project: TestProject): Promise<void> {
 	for (const [cmd, argv] of attempts) {
 		try {
 			await run(cmd, argv, { cwd: moduleDir, maxBuffer: 16 << 20 });
-			project.provide("sbxAgentHarness", { bin, skip: "" });
+			project.provide("umiakAgentHarness", { bin, skip: "" });
 			return;
 		} catch (e) {
 			const stderr = String((e as { stderr?: unknown }).stderr ?? "");
@@ -60,7 +60,7 @@ export async function setup(project: TestProject): Promise<void> {
 			);
 		}
 	}
-	project.provide("sbxAgentHarness", {
+	project.provide("umiakAgentHarness", {
 		bin: "",
 		skip: `go is not available (${reasons.join("; ")}): the tests against the real agent are skipped`,
 	});

@@ -1,8 +1,8 @@
 // save_snapshot (S6 §7.8): the snapshot step shared with fork, the name
 // moving from the replaced snapshot in one transaction, failures that keep
 // the old name, and leftovers of a crashed attempt.
-import { DELETE_RETRY_LIMIT } from "@sbx/core";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { DELETE_RETRY_LIMIT } from "@umiak/core";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleSandboxOp } from "../src/handlers/sandbox-op.ts";
 import { handleSnapshotOp } from "../src/handlers/snapshot-op.ts";

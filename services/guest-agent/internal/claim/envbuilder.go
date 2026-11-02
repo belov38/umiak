@@ -4,8 +4,8 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/wincmd"
+	"github.com/belov38/umiak/services/guest-agent/internal/process"
+	"github.com/belov38/umiak/services/guest-agent/internal/wincmd"
 )
 
 // Defaults of the base environment.
@@ -40,12 +40,12 @@ func (b EnvBuilder) claimEnv() (platform, claimed, secret map[string]string) {
 }
 
 // SessionEnv returns the env an SSH session takes from the agent (S9 spec
-// 12.7, layers 2-4): the platform env with SBX_ENV_APPLIED=1, the claim env
+// 12.7, layers 2-4): the platform env with UMIAK_ENV_APPLIED=1, the claim env
 // and the secret env, later layers winning, as KEY=VALUE entries. Keys
 // compare case-insensitively, as on Windows, the only OS that serves it.
 func (b EnvBuilder) SessionEnv() []string {
 	platform, claimed, secret := b.claimEnv()
-	platform["SBX_ENV_APPLIED"] = "1"
+	platform["UMIAK_ENV_APPLIED"] = "1"
 	return wincmd.MergeEnv(sortedEnv(platform), sortedEnv(claimed), sortedEnv(secret))
 }
 

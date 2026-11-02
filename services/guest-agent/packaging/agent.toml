@@ -1,4 +1,4 @@
-# sbx guest agent configuration (spec S3 section 5). Every key is optional;
+# umiak guest agent configuration (spec S3 section 5). Every key is optional;
 # an absent key keeps the default shown here.
 
 [tunnel]

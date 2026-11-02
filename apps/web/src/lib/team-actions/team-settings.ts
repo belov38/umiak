@@ -1,7 +1,7 @@
 // Data of /app/t/<team>/settings (S8 §9.9): team, members and, for those
 // who may revoke keys (owners, operators), the open team notices (§20.1).
 // Public and dashboard ids only; no UUID reaches the browser.
-import { encodeUuid } from "@sbx/auth";
+import { encodeUuid } from "@umiak/auth";
 import { z } from "zod";
 import { encodeDashboardId } from "../ids";
 import { can, type TeamRole } from "../permissions";

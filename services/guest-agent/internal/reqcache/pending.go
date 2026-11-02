@@ -3,7 +3,7 @@ package reqcache
 import (
 	"sync"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
 )
 
 // pendingSet is the bounded in-memory buffer of outcomes that could not be

@@ -16,9 +16,9 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/h2"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // Peer transport parameters.
@@ -37,7 +37,7 @@ type closeWriter interface{ CloseWrite() error }
 // (CloseWrite); the target's EOF ends the stream for the caller. The peer
 // gets only gateway-produced headers: the agent's CONNECT answer headers are
 // never copied, and an agent refusal keeps its status only if it is 400,
-// 403 or 502 (502 otherwise). The one exception is Sbx-Dial-Error, which the
+// 403 or 502 (502 otherwise). The one exception is Umiak-Dial-Error, which the
 // gateway writes itself from the closed set {refused, timeout}.
 func (h *internalHandler) serveTCP(w http.ResponseWriter, r *http.Request) {
 	authority := r.URL.Host
@@ -228,11 +228,11 @@ func NewPeerTransport() *http.Transport {
 // whose tunnel is on another gateway instance: an HTTP/2 CONNECT with
 // :authority <machineId>:<port> to that instance's internal listener at
 // instanceURL, over rt (NewPeerTransport). ctx bounds the dial only.
-// opts.DrainDeadline is sent as Sbx-Tcp-Drain-Deadline-Ms.
+// opts.DrainDeadline is sent as Umiak-Tcp-Drain-Deadline-Ms.
 //
 // Errors: 421 → *transport.MovedError with the owner's URL; 429 →
 // ErrTooManyStreams; any other non-200 → *transport.DialError, whose Reason
-// is "refused" or "timeout" from the Sbx-Dial-Error header of the answer, and
+// is "refused" or "timeout" from the Umiak-Dial-Error header of the answer, and
 // "" for any other value. The returned conn supports CloseWrite; deadlines
 // are not supported.
 //

@@ -3,15 +3,19 @@
 // next one. Two creates that saw the candidates in opposite order deadlocked
 // (40P01 to the caller). A refused admission now gives its node lock back,
 // and the admission transactions retry 40P01/40001, then `out_of_capacity`.
-import { type Tx, withTx } from "@sbx/db";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { type Tx, withTx } from "@umiak/db";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	admit,
 	lockNode,
 	RecordingJobSender,
 	SandboxServiceImpl,
-	SbxError,
+	UmiakError,
 } from "../src/index.ts";
 import { SERVICE_TX_RETRIES } from "../src/service/tx.ts";
 import { principal, serviceEnv } from "./helpers/service.ts";
@@ -79,7 +83,7 @@ describe.skipIf(skipPg())("multi-node admission lock order (M4)", () => {
 
 	// Smoke test: probabilistic (it found the deadlock only sometimes on the
 	// old code); test 1 is the deterministic regression.
-	it("smoke: parallel cold creates of different teams on two near-full nodes only fail with SbxError", async () => {
+	it("smoke: parallel cold creates of different teams on two near-full nodes only fail with UmiakError", async () => {
 		const nonDomain: string[] = [];
 		for (let round = 0; round < 8; round++) {
 			const env = await serviceEnv(t.pool, {
@@ -100,7 +104,7 @@ describe.skipIf(skipPg())("multi-node admission lock order (M4)", () => {
 			);
 			const ok = results.filter((r) => r.status === "fulfilled").length;
 			for (const r of results) {
-				if (r.status === "rejected" && !(r.reason instanceof SbxError)) {
+				if (r.status === "rejected" && !(r.reason instanceof UmiakError)) {
 					nonDomain.push(String(r.reason));
 				}
 			}
@@ -174,11 +178,11 @@ describe.skipIf(skipPg())("multi-node admission lock order (M4)", () => {
 			jobs: env.jobs,
 		});
 		const err = await svc.create(env.p, {}).catch((e: unknown) => e);
-		expect(err).toBeInstanceOf(SbxError);
-		expect((err as SbxError).code).toBe("out_of_capacity");
-		expect((err as SbxError).retryable).toBe(true);
+		expect(err).toBeInstanceOf(UmiakError);
+		expect((err as UmiakError).code).toBe("out_of_capacity");
+		expect((err as UmiakError).retryable).toBe(true);
 		expect(calls).toBe(SERVICE_TX_RETRIES + 1);
-		expect(((err as SbxError).cause as { code?: string }).code).toBe("40001");
+		expect(((err as UmiakError).cause as { code?: string }).code).toBe("40001");
 		expect(warnings).toEqual([
 			{
 				obj: { sqlstate: "40001", attempts: SERVICE_TX_RETRIES + 1 },

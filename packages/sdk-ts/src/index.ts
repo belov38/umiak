@@ -1,4 +1,4 @@
-// @sbx/sdk: TypeScript SDK of the sbx public API v1.
+// @umiak/sdk: TypeScript SDK of the umiak public API v1.
 
 export {
 	type CallOptions,
@@ -7,10 +7,10 @@ export {
 	type RawClient,
 	type RawMethod,
 	type RawResponse,
-	type SbxOptions,
 	SDK_VERSION,
 	STREAM_IDLE_TIMEOUT_MS,
 	type TokenProviderOptions,
+	type UmiakOptions,
 	type WebSocketFactory,
 	type WebSocketInit,
 } from "./client.ts";
@@ -51,9 +51,9 @@ export {
 	NO_API_URL,
 	NO_CREDENTIALS,
 	SandboxFailedError,
-	SbxError,
-	type SbxErrorInit,
 	TOKEN_PROVIDER_FAILED,
+	UmiakError,
+	type UmiakErrorInit,
 	UNEXPECTED_RESPONSE,
 	UNSUPPORTED_RUNTIME,
 	WAIT_TIMEOUT,
@@ -107,6 +107,6 @@ export {
 	type CreateSnapshotInput,
 	type OperatorSandboxFilter,
 	type SandboxFilter,
-	Sbx,
 	type SnapshotData,
-} from "./sbx.ts";
+	Umiak,
+} from "./umiak.ts";

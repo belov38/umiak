@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
 )
 
 // httpDrain is the shrunk HTTP drain deadline of the drain tests (2 min in

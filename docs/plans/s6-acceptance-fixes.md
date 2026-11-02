@@ -1,5 +1,7 @@
 # S6: исправления по итогам приёмки `eb9d214`
 
+> Исторический план до R1. Действующие имена и контракты — `docs/specs/rename-umiak.md`.
+
 > **Для исполнителей:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development и superpowers:test-driven-development. Каждый регресс-тест из `/tmp/s6acc-repros/` сначала копируется в репозиторий и падает (red), затем исправление (green).
 
 **Цель:** закрыть находки приёмки (H1, M1–M4, LOW), убрать фикстуру `tunnel` после слияния S2 и подключить `@sbx/agent-client`.

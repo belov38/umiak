@@ -1,6 +1,6 @@
 // A ConfigReader whose platform defaults a test may change between requests
 // (the api reads them on every request, S8 C7).
-import type { ConfigReader, PlatformDefaults } from "@sbx/config";
+import type { ConfigReader, PlatformDefaults } from "@umiak/config";
 
 export function mutableDefaults(base: ConfigReader): {
 	config: ConfigReader;

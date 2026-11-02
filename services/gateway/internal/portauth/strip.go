@@ -15,10 +15,10 @@ func IsPreflight(r *http.Request) bool {
 }
 
 // StripRequest removes the gateway's credentials from a request to the
-// application (spec 7.4): the gateway cookies (__Host-sbx_auth and every
-// __Host-sbx_state*, case-insensitive) and the cookies whose names
+// application (spec 7.4): the gateway cookies (__Host-umiak_auth and every
+// __Host-umiak_state*, case-insensitive) and the cookies whose names
 // start with one of prefixes, the _token query parameters and the
-// Sbx-Port-Token header. Other cookie pairs are kept byte-for-byte and in
+// Umiak-Port-Token header. Other cookie pairs are kept byte-for-byte and in
 // order (joined into one Cookie header when anything was removed); other
 // query parameters are kept raw and in order.
 func StripRequest(h http.Header, u *url.URL, prefixes []string) {

@@ -18,7 +18,7 @@ import {
 	type Smbios,
 	type SnapshotRef,
 	s2SerialPayload,
-} from "@sbx/pve";
+} from "@umiak/pve";
 import { type Ctx, RamGuard } from "./context.ts";
 import { preflight } from "./preflight.ts";
 import { redact } from "./report.ts";
@@ -67,7 +67,7 @@ const sha256 = (b: Buffer | string) =>
 
 /** Builds the bundle: /it (packages, test binary, stand-setup.sh) as tar.xz. */
 function buildBundle(): { file: string; dir: string } {
-	const dir = mkdtempSync(join(tmpdir(), "sbx-s3-stand-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-s3-stand-"));
 	log("build packages and the test binary (linux/amd64)");
 	execFileSync(join(guestAgent, "test/linux/run.sh"), [], {
 		env: { ...process.env, BUILD_ONLY: dir, GOARCH_IT: "amd64" },
@@ -216,7 +216,7 @@ export async function runS3(ctx: Ctx, o: S3Options): Promise<number> {
 			vmid,
 			[
 				"/usr/bin/env",
-				"SBX_STAND=1",
+				"UMIAK_STAND=1",
 				...Object.entries(opts.env ?? {}).map(([k, v]) => `${k}=${v}`),
 				"/it/integration.test",
 				"-test.run",
@@ -279,7 +279,7 @@ export async function runS3(ctx: Ctx, o: S3Options): Promise<number> {
 
 	const doctor = async (vmid: number) =>
 		JSON.parse(
-			(await guest(vmid, ["/usr/local/bin/sbx-agent", "doctor", "--json"]))
+			(await guest(vmid, ["/usr/local/bin/umiak-agent", "doctor", "--json"]))
 				.stdout,
 		) as {
 			units: Record<string, string>;
@@ -373,7 +373,7 @@ st=("\${PIPESTATUS[@]}")
 		const active = (
 			await guest(
 				a.vmid,
-				["systemctl", "is-active", "sbx-agent", "sbx-identity"],
+				["systemctl", "is-active", "umiak-agent", "umiak-identity"],
 				{
 					allowFail: true,
 				},
@@ -382,7 +382,10 @@ st=("\${PIPESTATUS[@]}")
 			.trim()
 			.split("\n");
 		const d = await doctor(a.vmid);
-		ev("A", `systemctl is-active sbx-agent sbx-identity: ${active.join(",")}`);
+		ev(
+			"A",
+			`systemctl is-active umiak-agent umiak-identity: ${active.join(",")}`,
+		);
 		ev(
 			"A",
 			`doctor: version ${d.versions.current}, units ${JSON.stringify(d.units)}, identity.machine_id ${d.identity?.machine_id} (smbios uuid ${smA.uuid}), tunnel_url ${d.tunnel_url.url} source ${d.tunnel_url.source}, identity_dir ${d.identity_dir}, test_aids ${JSON.stringify(d.test_aids ?? [])}`,
@@ -494,10 +497,10 @@ st=("\${PIPESTATUS[@]}")
 		// --- F (planting) before D: the snapshot of D then holds the secrets' state.
 		const fSecrets = [0, 1, 2].map(
 			(i) =>
-				`sbx-stand-${["env", "file", "cmd"][i]}-${randomBytes(12).toString("hex")}`,
+				`umiak-stand-${["env", "file", "cmd"][i]}-${randomBytes(12).toString("hex")}`,
 		);
 		secrets.push(...fSecrets);
-		const control = `sbx-stand-control-${randomBytes(12).toString("hex")}`;
+		const control = `umiak-stand-control-${randomBytes(12).toString("hex")}`;
 		{
 			const r = await standTest(a.vmid, "TestStandSecretsPlant", {
 				input: `${fSecrets.join("\n")}\n`,
@@ -533,16 +536,16 @@ command -v docker >/dev/null || exit 3
 systemctl start docker.service
 r=$(mktemp -d)
 for f in /bin/sleep $(ldd /bin/sleep | grep -o '/[^ ]*'); do mkdir -p "$r$(dirname "$f")"; cp -L "$f" "$r$f"; done
-tar -C "$r" -c . | docker import - sbx-stand/sleep:1 >/dev/null
+tar -C "$r" -c . | docker import - umiak-stand/sleep:1 >/dev/null
 rm -rf "$r"
-docker run -d --name sbx-stand-sleep sbx-stand/sleep:1 /bin/sleep 3600`,
+docker run -d --name umiak-stand-sleep umiak-stand/sleep:1 /bin/sleep 3600`,
 				{ timeoutMs: 120_000, allowFail: true },
 			);
 			if (dk.exitCode === 0) container = dk.stdout.trim();
 			ev(
 				"D",
 				container
-					? `docker container ${container.slice(0, 12)} running (agent docker enabled: ${(await guest(a.vmid, ["grep", "-A1", "^\\[docker\\]", "/etc/sbx-agent/agent.toml"], { allowFail: true })).stdout.replace(/\s+/g, " ").trim()})`
+					? `docker container ${container.slice(0, 12)} running (agent docker enabled: ${(await guest(a.vmid, ["grep", "-A1", "^\\[docker\\]", "/etc/umiak-agent/agent.toml"], { allowFail: true })).stdout.replace(/\s+/g, " ").trim()})`
 					: `no docker container (exit ${dk.exitCode}): ${dk.stderr.trim().slice(-300)}`,
 			);
 			let testRun: Promise<ExecResult> | undefined;
@@ -550,7 +553,7 @@ docker run -d --name sbx-stand-sleep sbx-stand/sleep:1 /bin/sleep 3600`,
 				const t0 = Date.now();
 				while (
 					(
-						await guest(a.vmid, ["test", "-e", `/run/sbx-stand/${name}`], {
+						await guest(a.vmid, ["test", "-e", `/run/umiak-stand/${name}`], {
 							allowFail: true,
 						})
 					).exitCode !== 0
@@ -574,7 +577,7 @@ docker run -d --name sbx-stand-sleep sbx-stand/sleep:1 /bin/sleep 3600`,
 				},
 				thaw: async () => {
 					tSnapDone = Date.now();
-					await guest(a.vmid, ["touch", "/run/sbx-stand/snapshotted"]);
+					await guest(a.vmid, ["touch", "/run/umiak-stand/snapshotted"]);
 					await waitMark("thawed", 20_000);
 				},
 			};
@@ -672,7 +675,7 @@ docker run -d --name sbx-stand-sleep sbx-stand/sleep:1 /bin/sleep 3600`,
 			);
 			const cloudInit = await bash(
 				f.vmid,
-				`cloud-init status 2>/dev/null | head -1; journalctl -b -u sbx-identity --no-pager -o cat | tail -5`,
+				`cloud-init status 2>/dev/null | head -1; journalctl -b -u umiak-identity --no-pager -o cat | tail -5`,
 				{ allowFail: true },
 			);
 			ev("E", `fork VM ${f.vmid} ip ${rf.ip} (source ${ra.ip})`);
@@ -685,7 +688,7 @@ docker run -d --name sbx-stand-sleep sbx-stand/sleep:1 /bin/sleep 3600`,
 			);
 			ev(
 				"E",
-				`fork cloud-init / sbx-identity: ${cloudInit.stdout.trim().split("\n").join(" | ")}`,
+				`fork cloud-init / umiak-identity: ${cloudInit.stdout.trim().split("\n").join(" | ")}`,
 			);
 			const conds: [string, boolean][] = [
 				[
@@ -702,8 +705,8 @@ docker run -d --name sbx-stand-sleep sbx-stand/sleep:1 /bin/sleep 3600`,
 					ff.host_keys_sha256 !== srcBefore.host_keys_sha256,
 				],
 				[
-					"hostname sbx-<last12hex>",
-					ff.hostname === `sbx-${hex.slice(-12)}` &&
+					"hostname umiak-<last12hex>",
+					ff.hostname === `umiak-${hex.slice(-12)}` &&
 						ff.etc_hostname === ff.hostname,
 				],
 				[
@@ -828,14 +831,14 @@ docker run -d --name sbx-stand-sleep sbx-stand/sleep:1 /bin/sleep 3600`,
 	const { lvs } = await node.call<{ lvs: { name: string; tags: string[] }[] }>(
 		"lv.list",
 		{
-			tags: ["sbx"],
+			tags: ["umiak"],
 		},
 	);
 	const lvLeft = lvs.filter(
 		(l) =>
-			!l.tags.includes("sbx-tpl") &&
+			!l.tags.includes("umiak-tpl") &&
 			(created.some((c) => l.name.startsWith(`vm-${c.vmid}-`)) ||
-				snaps.some((s) => l.name.startsWith(`sbx-snap-${s.id}-`))),
+				snaps.some((s) => l.name.startsWith(`umiak-snap-${s.id}-`))),
 	);
 	const rows = ctx.store
 		.list(cfg.clusterId)

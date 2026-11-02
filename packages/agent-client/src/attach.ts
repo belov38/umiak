@@ -46,7 +46,7 @@ const maxBackoffMs = 1000;
  * Retryable errors and a stream that ends without exit reopen from the
  * expected offsets; fatal errors and AgentUnavailableError (the routing
  * budget is spent) are thrown. Errors are classified by their Connect code
- * and connection state only (classifyByCode): Sbx-* metadata and details of
+ * and connection state only (classifyByCode): Umiak-* metadata and details of
  * a stream error come from the agent's end-stream message, while the
  * gateway's own stream ends use Code.Unavailable.
  */

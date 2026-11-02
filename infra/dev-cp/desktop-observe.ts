@@ -19,16 +19,16 @@ export function observeDesktop(slug: string): Observation {
 		[
 			"-o",
 			"BatchMode=yes",
-			process.env.SBX_DEVCP_SSH ?? "sbx@192.168.68.90",
+			process.env.UMIAK_DEVCP_SSH ?? "umiak@192.168.68.90",
 			"docker",
 			"exec",
 			"-i",
-			"sbx-postgres-1",
+			"umiak-postgres-1",
 			"psql",
 			"-U",
-			"sbx",
+			"umiak",
 			"-d",
-			"sbx",
+			"umiak",
 			"-At",
 		],
 		{ input: sql, encoding: "utf8", timeout: 30_000 },
@@ -41,13 +41,39 @@ export async function verifyDesktopIdleHold(
 	holdMs: number,
 	logFile: string,
 ) {
+	// Setup HTTP keep-alives may still count as TCP activity for 30 seconds.
+	// Wait for a clean baseline using SQL only; none of this time counts toward the proof.
+	const settleAt = Date.now();
+	for (;;) {
+		const row = observeDesktop(sb.data.slug);
+		await appendFile(
+			logFile,
+			`${JSON.stringify({ phase: "settle", elapsedMs: Date.now() - settleAt, ...row })}\n`,
+			{ mode: 0o600 },
+		);
+		if (row.state !== "ready")
+			throw new Error(`desktop stopped before idle proof: ${row.state}`);
+		const c = row.counters;
+		if (
+			(c?.desktopStreams ?? 0) >= 1 &&
+			c?.runningCommands === 0 &&
+			c.openPtys === 0 &&
+			c.tcpStreams === 0
+		)
+			break;
+		if (Date.now() - settleAt >= 120_000)
+			throw new Error(
+				`idle proof baseline did not settle: counters=${JSON.stringify(c)}`,
+			);
+		await new Promise((resolve) => setTimeout(resolve, 5000));
+	}
 	const start = Date.now();
 	while (Date.now() - start < holdMs) {
 		const row = observeDesktop(sb.data.slug);
 		const c = row.counters;
 		await appendFile(
 			logFile,
-			`${JSON.stringify({ elapsedMs: Date.now() - start, ...row })}\n`,
+			`${JSON.stringify({ phase: "hold", elapsedMs: Date.now() - start, ...row })}\n`,
 			{ mode: 0o600 },
 		);
 		if (row.state !== "ready")

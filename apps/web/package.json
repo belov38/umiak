@@ -1,5 +1,5 @@
 {
-	"name": "@sbx/web",
+	"name": "@umiak/web",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
@@ -21,9 +21,9 @@
 		"@fontsource/ibm-plex-mono": "5.3.0",
 		"@payloadcms/next": "3.92.1",
 		"@payloadcms/ui": "3.92.1",
-		"@sbx/auth": "workspace:*",
-		"@sbx/payload": "workspace:*",
-		"@sbx/sdk": "workspace:*",
+		"@umiak/auth": "workspace:*",
+		"@umiak/payload": "workspace:*",
+		"@umiak/sdk": "workspace:*",
 		"@tanstack/react-query": "5.105.0",
 		"@xterm/addon-fit": "0.11.0",
 		"@xterm/addon-search": "0.16.0",
@@ -45,7 +45,7 @@
 	},
 	"devDependencies": {
 		"@playwright/test": "1.64.1",
-		"@sbx/db": "workspace:*",
+		"@umiak/db": "workspace:*",
 		"@tailwindcss/postcss": "4.3.3",
 		"@types/react": "19.3.0",
 		"@types/react-dom": "19.3.0",

@@ -1,17 +1,17 @@
 "use client";
+import { useQuery } from "@tanstack/react-query";
 // The sandbox page (S8 §9.6): header with live state and actions, tabs
 // Overview | Terminal | Commands | Files | Ports | SSH | Env | Desktop (the
 // last only for templates with the `desktop` capability). The tab is in
 // `?tab=`; only the open tab is mounted, so leaving it closes its streams
 // and sockets.
-import { SbxError } from "@sbx/sdk";
-import { useQuery } from "@tanstack/react-query";
+import { UmiakError } from "@umiak/sdk";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 import { QueryError } from "@/components/app/query-error";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import { teamPath } from "@/lib/team-path";
 import { type SandboxTab, sandboxHref } from "../sandboxes/links";
 import { CommandsTab } from "./commands";
@@ -38,7 +38,7 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 function isNotFound(e: unknown): boolean {
-	return e instanceof SbxError && e.status === 404;
+	return e instanceof UmiakError && e.status === 404;
 }
 
 export function SandboxPage({
@@ -48,14 +48,14 @@ export function SandboxPage({
 	teamId: string;
 	sandboxRef: string;
 }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const router = useRouter();
 	const params = useSearchParams();
 	const live = useLiveSandbox(teamId, sandboxRef);
 	const s = live.data;
 	const templates = useQuery({
 		queryKey: ["templates", teamId],
-		queryFn: ({ signal }) => sbx.templates({ signal }),
+		queryFn: ({ signal }) => umiak.templates({ signal }),
 		staleTime: 5 * 60_000,
 	});
 	const desktop =

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { ingestAgentEvents } from "@sbx/core";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { ingestAgentEvents } from "@umiak/core";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleMachineEvents } from "../src/handlers/machine-events.ts";
 import {
@@ -543,7 +543,7 @@ describe("machine-events (§10.2)", () => {
 			machineState: "booting",
 		});
 		await synthetic(w, fork.machineId, "identity_changed");
-		expect(w.metrics.count("sbx_unexpected_identity_change_total")).toBe(0);
+		expect(w.metrics.count("umiak_unexpected_identity_change_total")).toBe(0);
 
 		const provisionedFork = await linkedSandbox(w, {
 			origin: "snapshot",
@@ -552,7 +552,7 @@ describe("machine-events (§10.2)", () => {
 		await synthetic(w, provisionedFork.machineId, "identity_changed");
 		const plain = await linkedSandbox(w);
 		await synthetic(w, plain.machineId, "identity_changed");
-		expect(w.metrics.count("sbx_unexpected_identity_change_total")).toBe(2);
+		expect(w.metrics.count("umiak_unexpected_identity_change_total")).toBe(2);
 	});
 
 	it("agent_restarted is only logged; disconnected changes nothing", async () => {
@@ -590,6 +590,6 @@ describe("machine-events (§10.2)", () => {
 		]);
 		expect((await row(w, "snapshots", snapshotId)).quiesce_broken).toBe(true);
 		expect((await row(w, "snapshots", ready)).quiesce_broken).toBe(false);
-		expect(w.metrics.count("sbx_quiesce_watchdog_thawed_total")).toBe(1);
+		expect(w.metrics.count("umiak_quiesce_watchdog_thawed_total")).toBe(1);
 	});
 });

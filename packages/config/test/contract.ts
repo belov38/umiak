@@ -10,7 +10,7 @@ import type {
 } from "../src/types.ts";
 
 // Contract of ConfigReader (S6 §5.11, S8 §7). Run against StaticConfigReader
-// here and against PayloadConfigReader in @sbx/payload. The fixture lists
+// here and against PayloadConfigReader in @umiak/payload. The fixture lists
 // values in configuration order; `make` loads them into the reader under
 // test. Values differ from the defaults, so a reader that ignores a field
 // fails.

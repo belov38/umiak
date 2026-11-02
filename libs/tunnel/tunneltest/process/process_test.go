@@ -15,10 +15,10 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/process"
-	testingv1 "github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1/testingv1connect"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/process"
+	testingv1 "github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1/testingv1connect"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 const waitTimeout = 10 * time.Second

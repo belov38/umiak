@@ -1,8 +1,8 @@
 // Keycloak access tokens on the public listener (S7 §7.10, §16 "Keycloak
 // JWT"), verified against the test OIDC server's JWKS.
 import { randomUUID } from "node:crypto";
-import { encodeUuid } from "@sbx/auth";
-import { skipPg } from "@sbx/db/testing";
+import { encodeUuid } from "@umiak/auth";
+import { skipPg } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type OidcSettings, OidcVerifier } from "../src/index.ts";
 import {
@@ -42,8 +42,8 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 			listener,
 			deps: {
 				settings: testSettings({
-					SBX_OIDC_ISSUER: oidc.issuer,
-					SBX_OPERATOR_GROUPS: OPERATOR_GROUP,
+					UMIAK_OIDC_ISSUER: oidc.issuer,
+					UMIAK_OPERATOR_GROUPS: OPERATOR_GROUP,
 				}),
 				pool: w.db.pool,
 				identity: w.identity,
@@ -91,7 +91,10 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 		[
 			"a foreign iss",
 			() =>
-				oidc.token({ ...person(), iss: "https://evil.example.com/realms/sbx" }),
+				oidc.token({
+					...person(),
+					iss: "https://evil.example.com/realms/umiak",
+				}),
 		],
 		["no aud", () => oidc.token({ ...person(), aud: undefined })],
 		["another aud", () => oidc.token({ ...person(), aud: "account" })],
@@ -133,7 +136,7 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 				details: { reason: "invalid_token" },
 			});
 			expect(r.headers.get("www-authenticate")).toBe(
-				'Bearer realm="sbx", error="invalid_token"',
+				'Bearer realm="umiak", error="invalid_token"',
 			);
 		});
 	}
@@ -144,7 +147,7 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 		expect(r.status).toBe(401);
 		expect(errorOf(r.body).code).toBe("token_expired");
 		expect(r.headers.get("www-authenticate")).toBe(
-			'Bearer realm="sbx", error="invalid_token"',
+			'Bearer realm="umiak", error="invalid_token"',
 		);
 		const ok = await me(h, await oidc.token(person(), { expiresIn: -30 }));
 		expect(ok.status).toBe(200);
@@ -160,7 +163,7 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 	});
 
 	it("Keycloak's JWKS fails: cached keys keep working offline, an unknown kid is 503", async () => {
-		const settings = testSettings({ SBX_OIDC_ISSUER: oidc.issuer });
+		const settings = testSettings({ UMIAK_OIDC_ISSUER: oidc.issuer });
 		const h = createHarness({
 			deps: {
 				settings,
@@ -207,7 +210,7 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 
 	it("a JWKS failure before any key was fetched does not start the outage backoff", async () => {
 		const other = await startTestOidcServer();
-		const settings = testSettings({ SBX_OIDC_ISSUER: other.issuer });
+		const settings = testSettings({ UMIAK_OIDC_ISSUER: other.issuer });
 		const h = createHarness({
 			deps: {
 				settings,
@@ -233,7 +236,7 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 
 	it("a failed discovery is not retried for a short while", async () => {
 		const other = await startTestOidcServer();
-		const settings = testSettings({ SBX_OIDC_ISSUER: other.issuer });
+		const settings = testSettings({ UMIAK_OIDC_ISSUER: other.issuer });
 		const h = createHarness({
 			deps: {
 				settings,
@@ -267,7 +270,7 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 	});
 
 	it("an unknown kid re-reads the JWKS once per cooldown", async () => {
-		const settings = testSettings({ SBX_OIDC_ISSUER: oidc.issuer });
+		const settings = testSettings({ UMIAK_OIDC_ISSUER: oidc.issuer });
 		const h = createHarness({
 			deps: {
 				settings,
@@ -348,16 +351,16 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 		});
 	});
 
-	it("Sbx-Team outside the user's teams: 403 team_forbidden", async () => {
+	it("Umiak-Team outside the user's teams: 403 team_forbidden", async () => {
 		const other = await w.team();
 		const r = await me(harness(), await oidc.token(person()), {
-			"sbx-team": encodeUuid("team", other),
+			"umiak-team": encodeUuid("team", other),
 		});
 		expect(r.status).toBe(403);
 		expect(errorOf(r.body).code).toBe("team_forbidden");
 	});
 
-	it("Sbx-Team of a team the user belongs to selects it with the role", async () => {
+	it("Umiak-Team of a team the user belongs to selects it with the role", async () => {
 		const p = person();
 		const h = harness();
 		const first = await me(h, await oidc.token(p));
@@ -371,7 +374,7 @@ describe.skipIf(skipPg())("Keycloak JWT", () => {
 		await w.seed.addMember(uuid, shared, "member");
 		await eventually(async () => {
 			const r = await me(h, await oidc.token(p), {
-				"sbx-team": encodeUuid("team", shared),
+				"umiak-team": encodeUuid("team", shared),
 			});
 			return (
 				r.status === 200 &&
@@ -387,7 +390,7 @@ describe("Keycloak unreachable", () => {
 		const h = createHarness({
 			deps: {
 				settings: testSettings({
-					SBX_OIDC_ISSUER: "http://127.0.0.1:1/realms/sbx",
+					UMIAK_OIDC_ISSUER: "http://127.0.0.1:1/realms/umiak",
 				}),
 			},
 		});

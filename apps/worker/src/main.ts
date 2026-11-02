@@ -5,12 +5,12 @@
 // (S6 §15.2), close the PVE clients, the S2 registry, Payload and the pool,
 // exit 0. Templates, sizes, quotas and defaults come from Payload
 // (src/payload.ts); its migrations are applied by the web-migrate job.
-// `@sbx/agent-client` and `@sbx/proto` are loaded from their `dist`: run
+// `@umiak/agent-client` and `@umiak/proto` are loaded from their `dist`: run
 // `pnpm build` once before `node src/main.ts` (the image does it).
 import { readFileSync } from "node:fs";
-import { AgentClient, PgRegistry } from "@sbx/agent-client";
-import { KeyRing } from "@sbx/core";
-import { createPool } from "@sbx/db";
+import { AgentClient, PgRegistry } from "@umiak/agent-client";
+import { KeyRing } from "@umiak/core";
+import { createPool } from "@umiak/db";
 import { ConnectAgentPort, parseCaKeys } from "./adapters/agent-connect.ts";
 import { UnavailableAgentPort } from "./adapters/agent-unavailable.ts";
 import {
@@ -41,7 +41,7 @@ async function main(): Promise<void> {
 	try {
 		env = parseWorkerEnv();
 	} catch (err) {
-		process.stderr.write(`sbx-worker: ${errText(err)}\n`);
+		process.stderr.write(`umiak-worker: ${errText(err)}\n`);
 		process.exit(1);
 	}
 	const log = processLogger(env.logLevel);
@@ -97,7 +97,7 @@ async function main(): Promise<void> {
 			log,
 		});
 		if (idpSync === undefined) {
-			log.info("SBX_IDP_SYNC_KEYCLOAK_URL is not set: ctl-idp-sync is off");
+			log.info("UMIAK_IDP_SYNC_KEYCLOAK_URL is not set: ctl-idp-sync is off");
 		}
 		let gateway: GatewayPort;
 		let agent: AgentPort;
@@ -122,7 +122,7 @@ async function main(): Promise<void> {
 			});
 		} else {
 			log.warn(
-				"SBX_GATEWAY_SERVICE_TOKEN_FILE is not set: token rotation and agent calls fail (transient) until it is",
+				"UMIAK_GATEWAY_SERVICE_TOKEN_FILE is not set: token rotation and agent calls fail (transient) until it is",
 			);
 			gateway = new UnconfiguredGatewayPort();
 			agent = new UnavailableAgentPort();

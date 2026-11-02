@@ -198,7 +198,7 @@ export function teamOf(page: Page): string {
 
 /** Headers of an unsafe dashboard API call (CSRF: Origin = the app). */
 export function apiHeaders(teamId: string): Record<string, string> {
-	return { "Sbx-Team": teamId, Origin: APP };
+	return { "Umiak-Team": teamId, Origin: APP };
 }
 
 /** POST/PUT/GET of the e2e backend's control listener. */

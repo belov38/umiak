@@ -1,10 +1,10 @@
-// Raw client (`sbx.raw`): openapi-fetch over the generated `paths`, with
-// - headers: Authorization (credential chain), Sbx-Team, User-Agent, and an
+// Raw client (`umiak.raw`): openapi-fetch over the generated `paths`, with
+// - headers: Authorization (credential chain), Umiak-Team, User-Agent, and an
 //   Idempotency-Key (UUIDv4) on the keyed POSTs of S7 §5.7 when the caller set
 //   none; the key is made once per call, so every retry repeats it;
 // - the retry policy of retry.ts, limited by `retryBudgetMs`, and `signal`;
 // - one new token and one repeat on `401 token_expired`;
-// - every error thrown as SbxError (network errors: status 0, `network_error`;
+// - every error thrown as UmiakError (network errors: status 0, `network_error`;
 //   a 2xx body that is not the expected JSON: `unexpected_response`).
 // A call resolves only on 2xx: `{data, response}`.
 // A ReadableStream request body is sent once: it is neither cloned (a tee
@@ -30,7 +30,7 @@ import {
 	errorFromResponse,
 	isAbortError,
 	NETWORK_ERROR,
-	SbxError,
+	UmiakError,
 	UNEXPECTED_RESPONSE,
 } from "./errors.ts";
 import type { paths } from "./gen/v1.d.ts";
@@ -42,7 +42,7 @@ import {
 	withRetry,
 } from "./retry.ts";
 
-/** Version of @sbx/sdk; sent as `User-Agent: sbx-sdk-ts/<version>`. */
+/** Version of @umiak/sdk; sent as `User-Agent: umiak-sdk-ts/<version>`. */
 export const SDK_VERSION = "0.1.0";
 
 /** Options every facade and raw method accepts (S7 §15.2, S11 §16.1). */
@@ -90,10 +90,10 @@ export type WebSocketFactory = (url: string, init: WebSocketInit) => WebSocket;
 export const defaultWebSocket: WebSocketFactory = (url, init) =>
 	new WebSocket(url, init as unknown as string[]);
 
-export interface SbxOptions {
-	/** API URL, e.g. https://api.example.com; else SBX_API_URL, else the sbx profile. */
+export interface UmiakOptions {
+	/** API URL, e.g. https://api.example.com; else UMIAK_API_URL, else the umiak profile. */
 	baseUrl?: string;
-	/** Team (`team_...`) sent as Sbx-Team; else SBX_TEAM, else the sbx profile. */
+	/** Team (`team_...`) sent as Umiak-Team; else UMIAK_TEAM, else the umiak profile. */
 	team?: string;
 	/**
 	 * Browser session of the dashboard (S8 §9.1): the cookie of the page's
@@ -112,7 +112,7 @@ export interface SbxOptions {
 	tokenProvider?: (o: TokenProviderOptions) => Promise<string>;
 	fetch?: typeof fetch;
 	userAgent?: string;
-	/** Environment read instead of process.env (also for the `sbx` subprocess). */
+	/** Environment read instead of process.env (also for the `umiak` subprocess). */
 	env?: Record<string, string | undefined>;
 	/**
 	 * Retry budget of a call that passes no `retryBudgetMs`; default
@@ -121,7 +121,7 @@ export interface SbxOptions {
 	retryBudgetMs?: number;
 	/** Opens the PTY WebSocket (TLS options, proxies); default the global WebSocket. */
 	webSocket?: WebSocketFactory;
-	/** Default ["sbx", "auth", "token", "--json"]. */
+	/** Default ["umiak", "auth", "token", "--json"]. */
 	authCommand?: string[];
 	/**
 	 * A command stream (run, follow) with no line for this long is treated as
@@ -185,24 +185,24 @@ export interface ClientCore {
 	credentials(signal?: AbortSignal): Promise<Credentials>;
 	userAgent: string;
 	streamIdleTimeoutMs: number;
-	/** `SbxOptions.retryBudgetMs` or the default. */
+	/** `UmiakOptions.retryBudgetMs` or the default. */
 	retryBudgetMs: number;
-	/** `SbxOptions.webSocket` or the global WebSocket. */
+	/** `UmiakOptions.webSocket` or the global WebSocket. */
 	webSocket: WebSocketFactory;
 }
 
-/** Default of `SbxOptions.streamIdleTimeoutMs` (S7 §9.7: 45 s without lines). */
+/** Default of `UmiakOptions.streamIdleTimeoutMs` (S7 §9.7: 45 s without lines). */
 export const STREAM_IDLE_TIMEOUT_MS = 45_000;
 
-export function createRawClient(opts: SbxOptions = {}): RawClient {
+export function createRawClient(opts: UmiakOptions = {}): RawClient {
 	return createClientCore(opts).raw;
 }
 
-/** For the facade (`Sbx`): the raw client and its credentials. */
-export function createClientCore(opts: SbxOptions = {}): ClientCore {
+/** For the facade (`Umiak`): the raw client and its credentials. */
+export function createClientCore(opts: UmiakOptions = {}): ClientCore {
 	const fetchImpl: (req: Request) => Promise<Response> =
 		opts.fetch ?? ((req) => globalThis.fetch(req));
-	const userAgent = opts.userAgent ?? `sbx-sdk-ts/${SDK_VERSION}`;
+	const userAgent = opts.userAgent ?? `umiak-sdk-ts/${SDK_VERSION}`;
 	const defaultBudgetMs = opts.retryBudgetMs ?? DEFAULT_RETRY_BUDGET_MS;
 	// Command streams have their own (shorter) idle limit; never below it.
 	const bodyIdleMs = Math.max(
@@ -210,7 +210,7 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 		opts.streamIdleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS,
 	);
 
-	// Resolved on the first call; a failure is not kept, so `sbx login` later helps.
+	// Resolved on the first call; a failure is not kept, so `umiak login` later helps.
 	let pending: Promise<Credentials> | undefined;
 	const credentials = () => {
 		if (!pending) {
@@ -234,8 +234,8 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 					`Bearer ${await creds.getToken(false, request.signal)}`,
 				);
 			}
-			if (creds.team !== undefined && !h.has("Sbx-Team")) {
-				h.set("Sbx-Team", creds.team);
+			if (creds.team !== undefined && !h.has("Umiak-Team")) {
+				h.set("Umiak-Team", creds.team);
 			}
 			h.set("User-Agent", userAgent);
 			if (
@@ -250,7 +250,7 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 	client.use(headers);
 
 	/**
-	 * fetch for one call: retries, token refresh, errors as SbxError.
+	 * fetch for one call: retries, token refresh, errors as UmiakError.
 	 * `oneShot`: the body is a stream, sent once without a clone or a retry
 	 * (the error keeps its `retryable`: the caller may send a new body).
 	 * `seen` keeps the last response, for errors raised after the fetch.
@@ -373,7 +373,7 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 				);
 				return { data, response };
 			} catch (err) {
-				if (err instanceof SbxError || isAbortError(err)) throw err;
+				if (err instanceof UmiakError || isAbortError(err)) throw err;
 				if (signal?.aborted) throw signal.reason;
 				if (err instanceof SyntaxError && seen.response?.ok) {
 					throw malformedAnswer(seen.response, err);
@@ -400,8 +400,8 @@ export function createClientCore(opts: SbxOptions = {}): ClientCore {
 }
 
 /** A 2xx answer whose body is not the JSON the route promises. */
-function malformedAnswer(res: Response, cause: unknown): SbxError {
-	return new SbxError({
+function malformedAnswer(res: Response, cause: unknown): UmiakError {
+	return new UmiakError({
 		status: res.status,
 		code: UNEXPECTED_RESPONSE,
 		message: `HTTP ${res.status} with a body that is not valid JSON`,
@@ -473,7 +473,7 @@ function withBodyIdleTimeout(
 				timer = setTimeout(
 					() =>
 						reject(
-							new SbxError({
+							new UmiakError({
 								status: 0,
 								code: NETWORK_ERROR,
 								message: `network error: no response data for ${ms} ms`,
@@ -511,7 +511,7 @@ function withBodyIdleTimeout(
 
 function networkError(cause: unknown, method: string, keyed: boolean) {
 	const why = cause instanceof Error ? cause.message : String(cause);
-	return new SbxError({
+	return new UmiakError({
 		status: 0,
 		code: NETWORK_ERROR,
 		message: `network error: ${why}`,
@@ -523,7 +523,7 @@ function networkError(cause: unknown, method: string, keyed: boolean) {
 
 function isTokenExpired(err: unknown): boolean {
 	return (
-		err instanceof SbxError &&
+		err instanceof UmiakError &&
 		err.status === 401 &&
 		err.code === "token_expired"
 	);

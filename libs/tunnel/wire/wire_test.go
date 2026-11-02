@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 func TestSecretRoundTrip(t *testing.T) {
@@ -57,10 +57,10 @@ func TestSMBIOSSerialRoundTrip(t *testing.T) {
 	if id != "m-123" || !bytes.Equal(got, bs) {
 		t.Fatalf("got %q %x", id, got)
 	}
-	if _, _, err := wire.ParseSMBIOSSerial("sbx2:m-123:" + wire.EncodeSecret(bs)); err == nil {
-		t.Error("sbx2 must be rejected")
+	if _, _, err := wire.ParseSMBIOSSerial("umiak2:m-123:" + wire.EncodeSecret(bs)); err == nil {
+		t.Error("umiak2 must be rejected")
 	}
-	for _, bad := range []string{"", "sbx1:", "sbx1:m", "sbx1::" + wire.EncodeSecret(bs), "sbx1:m:AAAA"} {
+	for _, bad := range []string{"sbx1:m-123:" + wire.EncodeSecret(bs), "", "umiak1:", "umiak1:m", "umiak1::" + wire.EncodeSecret(bs), "umiak1:m:AAAA"} {
 		if _, _, err := wire.ParseSMBIOSSerial(bad); err == nil {
 			t.Errorf("%q: expected error", bad)
 		}

@@ -8,13 +8,13 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
-	testingv1 "github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1/testingv1connect"
+	"github.com/belov38/umiak/libs/tunnel/rpcconv"
+	testingv1 "github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1/testingv1connect"
 )
 
 // Handler returns the path and handler of the Process service backed by s.
-// Mutating unary calls need Sbx-Request-Id (rpcconv.RequireRequestID);
+// Mutating unary calls need Umiak-Request-Id (rpcconv.RequireRequestID);
 // Start is exempt, its key is command_id.
 func (s *Store) Handler(opts ...connect.HandlerOption) (string, http.Handler) {
 	all := append([]connect.HandlerOption{

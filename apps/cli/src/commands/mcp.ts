@@ -1,9 +1,9 @@
-// `sbx mcp`: the MCP server over stdio (S11 §6.1, §8.8, §10.2). stdout
+// `umiak mcp`: the MCP server over stdio (S11 §6.1, §8.8, §10.2). stdout
 // carries only JSON-RPC: the runner's protocol mode keeps every error on
 // stderr (even with --json), and logs go to stderr or --log-file. The
 // server starts without a login (tools/list works) and every tool call then
 // answers `not_logged_in`; the config is read again on the next call (also
-// after an API 401 to a stored key), so `sbx login` in a terminal is
+// after an API 401 to a stored key), so `umiak login` in a terminal is
 // enough. The process ends (exit 0) when the client closes stdin.
 
 import {
@@ -13,8 +13,8 @@ import {
 	parseToolsets,
 	runStdio,
 	type Toolset,
-} from "@sbx/mcp";
-import { Sbx, SbxError } from "@sbx/sdk";
+} from "@umiak/mcp";
+import { Umiak, UmiakError } from "@umiak/sdk";
 import type { Command } from "commander";
 import type { Context } from "../context.ts";
 import { sandboxIdOfUuid } from "../current.ts";
@@ -69,10 +69,10 @@ function settingsOf(ctx: Context, o: McpOptions): Settings {
 	const s: Settings = {
 		readOnly:
 			o.readOnly === true ||
-			["1", "true"].includes(ctx.env.SBX_MCP_READ_ONLY ?? ""),
+			["1", "true"].includes(ctx.env.UMIAK_MCP_READ_ONLY ?? ""),
 		logLevel,
 	};
-	const csv = o.toolsets ?? nonEmpty(ctx.env.SBX_MCP_TOOLSETS);
+	const csv = o.toolsets ?? nonEmpty(ctx.env.UMIAK_MCP_TOOLSETS);
 	if (csv !== undefined) {
 		try {
 			s.toolsets = parseToolsets(csv);
@@ -90,19 +90,19 @@ function settingsOf(ctx: Context, o: McpOptions): Settings {
 	return s;
 }
 
-/** `self` is the sandbox this runs in (SBX_SANDBOX_ID, S7 §14.2). */
+/** `self` is the sandbox this runs in (UMIAK_SANDBOX_ID, S7 §14.2). */
 function pinnedSandbox(ctx: Context, ref: string): string {
 	if (ref === "self") {
-		const uuid = nonEmpty(ctx.env.SBX_SANDBOX_ID);
+		const uuid = nonEmpty(ctx.env.UMIAK_SANDBOX_ID);
 		if (uuid === undefined) {
 			throw usageError(
-				"--sandbox self: SBX_SANDBOX_ID is not set (it is set inside a sandbox); pass the sandbox ID or slug instead",
+				"--sandbox self: UMIAK_SANDBOX_ID is not set (it is set inside a sandbox); pass the sandbox ID or slug instead",
 			);
 		}
 		const id = sandboxIdOfUuid(uuid);
 		if (id === null) {
 			throw usageError(
-				`--sandbox self: SBX_SANDBOX_ID ${JSON.stringify(uuid)} is not a sandbox UUID`,
+				`--sandbox self: UMIAK_SANDBOX_ID ${JSON.stringify(uuid)} is not a sandbox UUID`,
 			);
 		}
 		return id;
@@ -115,11 +115,11 @@ function pinnedSandbox(ctx: Context, ref: string): string {
 
 /**
  * A CLI login error as the tools report it: code not_logged_in (its hint
- * says to run `sbx login` in a terminal), the CLI's own reason as the
+ * says to run `umiak login` in a terminal), the CLI's own reason as the
  * message (which profile, which API).
  */
-function notLoggedIn(err: SbxError): SbxError {
-	return new SbxError({
+function notLoggedIn(err: UmiakError): UmiakError {
+	return new UmiakError({
 		status: 0,
 		code: NOT_LOGGED_IN,
 		message: err.message,
@@ -129,36 +129,36 @@ function notLoggedIn(err: SbxError): SbxError {
 
 /** The hint of an API 401 that a new token does not fix. */
 export function unauthorizedHint(env: Record<string, string | undefined>) {
-	return nonEmpty(env.SBX_API_KEY) === undefined
-		? "run `sbx login` in a terminal, then retry."
-		: "the API rejected SBX_API_KEY: fix SBX_API_KEY in the MCP client config and restart the MCP server.";
+	return nonEmpty(env.UMIAK_API_KEY) === undefined
+		? "run `umiak login` in a terminal, then retry."
+		: "the API rejected UMIAK_API_KEY: fix UMIAK_API_KEY in the MCP client config and restart the MCP server.";
 }
 
 /**
  * The SDK client of the server, made on first use; without a login every
  * call fails with not_logged_in and the config is read again next time.
  */
-function sbxFactory(
+function umiakFactory(
 	ctx: Context,
 	log: ReturnType<typeof createLogger>,
-): () => Sbx {
-	let sbx: Sbx | undefined;
+): () => Umiak {
+	let umiak: Umiak | undefined;
 	// Read the config and the credential store again on the next call.
 	const forget = () => {
 		ctx.reload();
-		sbx = undefined;
+		umiak = undefined;
 	};
 	const creds = mcpCredentials((force) => ctx.bearer(force), ctx.fetch, {
-		// A revoked or expired key: a new `sbx login` must be picked up.
+		// A revoked or expired key: a new `umiak login` must be picked up.
 		onRejected: forget,
 	});
 	const loginError = (err: unknown): unknown => {
-		if (!(err instanceof SbxError) || !LOGIN_CODES.has(err.code)) return err;
+		if (!(err instanceof UmiakError) || !LOGIN_CODES.has(err.code)) return err;
 		forget();
 		return notLoggedIn(err);
 	};
 	return () => {
-		if (sbx !== undefined) return sbx;
+		if (umiak !== undefined) return umiak;
 		let baseUrl: string;
 		let team: string | undefined;
 		try {
@@ -167,7 +167,7 @@ function sbxFactory(
 		} catch (err) {
 			throw loginError(err);
 		}
-		sbx = new Sbx({
+		umiak = new Umiak({
 			baseUrl,
 			...(team === undefined ? {} : { team }),
 			tokenProvider: async (o) => {
@@ -178,11 +178,11 @@ function sbxFactory(
 				}
 			},
 			fetch: apiCallLogger(creds.fetch, log) as typeof fetch,
-			userAgent: `sbx-mcp/${MCP_VERSION} (stdio)`,
-			// Everything is resolved here; the SDK must not read SBX_* itself.
+			userAgent: `umiak-mcp/${MCP_VERSION} (stdio)`,
+			// Everything is resolved here; the SDK must not read UMIAK_* itself.
 			env: {},
 		});
-		return sbx;
+		return umiak;
 	};
 }
 
@@ -193,7 +193,7 @@ async function serve(ctx: Context, o: McpOptions): Promise<number> {
 		...(s.logFile === undefined ? {} : { destination: s.logFile }),
 	});
 	const server = await runStdio({
-		sbx: sbxFactory(ctx, log),
+		umiak: umiakFactory(ctx, log),
 		...(s.toolsets === undefined ? {} : { toolsets: s.toolsets }),
 		readOnly: s.readOnly,
 		unauthorizedHint: unauthorizedHint(ctx.env),
@@ -208,7 +208,7 @@ async function serve(ctx: Context, o: McpOptions): Promise<number> {
 			readOnly: s.readOnly,
 			sandbox: s.pinnedSandbox ?? null,
 		},
-		"sbx mcp serving on stdio",
+		"umiak mcp serving on stdio",
 	);
 	await server.closed;
 	log.debug("stdin closed, exiting");
@@ -223,15 +223,15 @@ export function register(program: Command, run: Runner): void {
 		)
 		.option(
 			"--toolsets <list>",
-			"only these toolsets: core, files, ports, snapshots, desktop, comma separated (env SBX_MCP_TOOLSETS; default all)",
+			"only these toolsets: core, files, ports, snapshots, desktop, comma separated (env UMIAK_MCP_TOOLSETS; default all)",
 		)
 		.option(
 			"--read-only",
-			"only tools that change nothing (env SBX_MCP_READ_ONLY=1)",
+			"only tools that change nothing (env UMIAK_MCP_READ_ONLY=1)",
 		)
 		.option(
 			"--sandbox <sb>",
-			"bind every tool to one sandbox: ID, slug, or self (SBX_SANDBOX_ID inside a sandbox)",
+			"bind every tool to one sandbox: ID, slug, or self (UMIAK_SANDBOX_ID inside a sandbox)",
 		)
 		.option(
 			"--log-level <level>",

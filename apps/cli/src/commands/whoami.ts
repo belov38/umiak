@@ -1,6 +1,6 @@
-// `sbx whoami`: GET /v1/me.
+// `umiak whoami`: GET /v1/me.
 
-import type { components } from "@sbx/sdk";
+import type { components } from "@umiak/sdk";
 import type { Command } from "commander";
 import type { Runner } from "../program.ts";
 
@@ -22,7 +22,7 @@ export function register(program: Command, run: Runner): void {
 		.description("show the caller: person or team key, team, scopes")
 		.action(
 			run(async (ctx) => {
-				ctx.out.result(await ctx.sbx().me(), humanMe);
+				ctx.out.result(await ctx.umiak().me(), humanMe);
 			}),
 		);
 }

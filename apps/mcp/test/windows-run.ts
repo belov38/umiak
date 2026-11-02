@@ -1,18 +1,18 @@
 // Live Windows input probe for infra/dev-cp acceptance: types a pwsh line into the Run
 // dialog of the console session and proves it ran. exec runs in session 0, so the dialog
 // is opened by a one-shot interactive task of user.
-import type { Sandbox } from "@sbx/sdk";
+import type { Sandbox } from "@umiak/sdk";
 
 const PWSH = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
-const SCRIPT = "C:\\Users\\Public\\sbx-e2e-run.ps1";
-const RECT = "C:\\Users\\Public\\sbx-e2e-run.json";
+const SCRIPT = "C:\\Users\\Public\\umiak-e2e-run.ps1";
+const RECT = "C:\\Users\\Public\\umiak-e2e-run.json";
 /**
  * Runs in the session of user: opens Run and records the screen rectangle of its
  * command box. Window lookup needs no foreground rights; focus comes from real clicks.
  */
 const OPEN_AND_LOCATE = String.raw`Add-Type @'
 using System; using System.Runtime.InteropServices;
-public static class SbxRun {
+public static class UmiakRun {
  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string c, string t);
  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr p, IntPtr a, string c, string t);
  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
@@ -22,11 +22,11 @@ public static class SbxRun {
 '@
 Start-Process explorer.exe 'shell:::{2559a1f3-21d7-11d4-bdaf-00c04f60b9f0}'
 for ($i = 0; $i -lt 100; $i++) {
- $h = [SbxRun]::FindWindow('#32770', 'Run')
- if ($h -ne 0 -and [SbxRun]::IsWindowVisible($h)) {
-  $box = [SbxRun]::FindWindowEx($h, 0, 'ComboBox', $null)
-  $r = New-Object SbxRun+Rect
-  if ($box -ne 0 -and [SbxRun]::GetWindowRect($box, [ref]$r)) {
+ $h = [UmiakRun]::FindWindow('#32770', 'Run')
+ if ($h -ne 0 -and [UmiakRun]::IsWindowVisible($h)) {
+  $box = [UmiakRun]::FindWindowEx($h, 0, 'ComboBox', $null)
+  $r = New-Object UmiakRun+Rect
+  if ($box -ne 0 -and [UmiakRun]::GetWindowRect($box, [ref]$r)) {
    @{ left = $r.Left; top = $r.Top; right = $r.Right; bottom = $r.Bottom } | ConvertTo-Json -Compress | Set-Content -Encoding ascii '${RECT}'
    exit 0
   }
@@ -35,7 +35,7 @@ for ($i = 0; $i -lt 100; $i++) {
 }
 exit 1`;
 /** Registers and starts the task, then waits for the rectangle (empty output: no dialog). */
-const START_TASK = `Remove-Item -ErrorAction Ignore '${RECT}';$a=New-ScheduledTaskAction -Execute conhost.exe -Argument '--headless "${PWSH}" -NoLogo -NoProfile -NonInteractive -File ${SCRIPT}';$p=New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\\user" -LogonType Interactive;Register-ScheduledTask -TaskName s10-run -TaskPath '\\sbx\\' -Action $a -Principal $p -Force|Out-Null;Start-ScheduledTask -TaskName s10-run -TaskPath '\\sbx\\';for($i=0;$i -lt 60 -and -not (Test-Path '${RECT}');$i++){Start-Sleep -Milliseconds 250};Unregister-ScheduledTask -TaskName s10-run -TaskPath '\\sbx\\' -Confirm:$false;if(Test-Path '${RECT}'){[Console]::Write((Get-Content -Raw '${RECT}'))}`;
+const START_TASK = `Remove-Item -ErrorAction Ignore '${RECT}';$a=New-ScheduledTaskAction -Execute conhost.exe -Argument '--headless "${PWSH}" -NoLogo -NoProfile -NonInteractive -File ${SCRIPT}';$p=New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\\user" -LogonType Interactive;Register-ScheduledTask -TaskName s10-run -TaskPath '\\umiak\\' -Action $a -Principal $p -Force|Out-Null;Start-ScheduledTask -TaskName s10-run -TaskPath '\\umiak\\';for($i=0;$i -lt 60 -and -not (Test-Path '${RECT}');$i++){Start-Sleep -Milliseconds 250};Unregister-ScheduledTask -TaskName s10-run -TaskPath '\\umiak\\' -Confirm:$false;if(Test-Path '${RECT}'){[Console]::Write((Get-Content -Raw '${RECT}'))}`;
 
 const pwsh = (script: string) => [
 	PWSH,

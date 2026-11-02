@@ -11,11 +11,11 @@ export interface Config {
 	nodeSshHost: string;
 	nodeSshKeyFile: string;
 	nodeSshKnownHosts: string;
-	/** Sandbox VMIDs (pve: 500-589; 590-596 are dev infrastructure). */
+	/** Sandbox VMIDs (pve: 500-589; CT 590 is dev infrastructure). */
 	vmidRange: { min: number; max: number };
 	/**
-	 * Template slots (pve: 597-599). Each recipe picks its own slots in it (Linux 597 and 599,
-	 * Windows 598); 599 stays the PoC template until a Linux build replaces it.
+	 * Recipe slots on the dev stand: Linux 597, Linux desktop 596, Windows desktop 595,
+	 * Windows 598. Bound each build to its exact slot; 599 is a protected legacy reservation.
 	 */
 	templateVmidRange: { min: number; max: number };
 	clusterId: number;
@@ -54,58 +54,58 @@ export function loadConfig(
 	const path = (k: string, d: string) => expandHome(get(k, d), home);
 
 	const vmidRange = parseRange(
-		"SBX_VMID_RANGE",
-		get("SBX_VMID_RANGE", "500-589"),
+		"UMIAK_VMID_RANGE",
+		get("UMIAK_VMID_RANGE", "500-589"),
 	);
 	const templateVmidRange = parseRange(
-		"SBX_TEMPLATE_VMID_RANGE",
-		get("SBX_TEMPLATE_VMID_RANGE", "597-599"),
+		"UMIAK_TEMPLATE_VMID_RANGE",
+		get("UMIAK_TEMPLATE_VMID_RANGE", "597-599"),
 	);
 	if (
 		templateVmidRange.min <= vmidRange.max &&
 		vmidRange.min <= templateVmidRange.max
 	)
 		throw new Error(
-			"SBX_TEMPLATE_VMID_RANGE overlaps SBX_VMID_RANGE: templates and sandboxes must not share VMIDs",
+			"UMIAK_TEMPLATE_VMID_RANGE overlaps UMIAK_VMID_RANGE: templates and sandboxes must not share VMIDs",
 		);
 
 	const templateVmid = parseIntStrict(
-		get("SBX_TEMPLATE_VMID", "599"),
-		"SBX_TEMPLATE_VMID",
+		get("UMIAK_TEMPLATE_VMID", "599"),
+		"UMIAK_TEMPLATE_VMID",
 	);
 	const clusterId = parseIntStrict(
-		get("SBX_CLUSTER_ID", "1"),
-		"SBX_CLUSTER_ID",
+		get("UMIAK_CLUSTER_ID", "1"),
+		"UMIAK_CLUSTER_ID",
 	);
-	if (clusterId > 255) throw new Error("SBX_CLUSTER_ID must fit in one byte");
+	if (clusterId > 255) throw new Error("UMIAK_CLUSTER_ID must fit in one byte");
 
 	return {
-		pveUrl: get("SBX_PVE_URL", "https://pve:8006"),
-		tokenId: get("SBX_PVE_TOKEN_ID", "sbx@pve!poc"),
+		pveUrl: get("UMIAK_PVE_URL", "https://pve:8006"),
+		tokenId: get("UMIAK_PVE_TOKEN_ID", "umiak@pve!dev"),
 		tokenSecretFile: path(
-			"SBX_PVE_TOKEN_SECRET_FILE",
-			"~/.config/sbx/pve-token",
+			"UMIAK_PVE_TOKEN_SECRET_FILE",
+			"~/.config/umiak/pve-token",
 		),
-		caFile: path("SBX_PVE_CA_FILE", "~/.config/sbx/pve-root-ca.pem"),
-		tlsName: get("SBX_PVE_TLS_NAME", "pve"),
-		nodeSshHost: get("SBX_NODE_SSH_HOST", "pve"),
+		caFile: path("UMIAK_PVE_CA_FILE", "~/.config/umiak/pve-root-ca.pem"),
+		tlsName: get("UMIAK_PVE_TLS_NAME", "pve"),
+		nodeSshHost: get("UMIAK_NODE_SSH_HOST", "pve"),
 		nodeSshKeyFile: path(
-			"SBX_NODE_SSH_KEY_FILE",
-			"~/.config/sbx/sbx-node_ed25519",
+			"UMIAK_NODE_SSH_KEY_FILE",
+			"~/.config/umiak/umiak-node_ed25519",
 		),
 		nodeSshKnownHosts: path(
-			"SBX_NODE_SSH_KNOWN_HOSTS",
-			"~/.config/sbx/known_hosts",
+			"UMIAK_NODE_SSH_KNOWN_HOSTS",
+			"~/.config/umiak/known_hosts",
 		),
 		vmidRange,
 		templateVmidRange,
 		clusterId,
-		stateDb: path("SBX_STATE_DB", "~/.local/state/sbx/poc.db"),
+		stateDb: path("UMIAK_STATE_DB", "~/.local/state/umiak/poc.db"),
 		templateVmid,
-		node: get("SBX_PVE_NODE", "pve"),
-		storage: get("SBX_PVE_STORAGE", "local-lvm"),
-		vnet: get("SBX_PVE_VNET", "sbx0"),
-		pool: get("SBX_PVE_POOL", "sandbox"),
+		node: get("UMIAK_PVE_NODE", "pve"),
+		storage: get("UMIAK_PVE_STORAGE", "local-lvm"),
+		vnet: get("UMIAK_PVE_VNET", "umiak0"),
+		pool: get("UMIAK_PVE_POOL", "umiak"),
 	};
 }
 

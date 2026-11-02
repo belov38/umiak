@@ -8,14 +8,14 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/h2"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // eventsSubscribePath is the agent's Events/Subscribe procedure. The raw
 // agent holds it open, so the gateway does not resubscribe in a loop.
-const eventsSubscribePath = "/sbx.tunnel.v1.Events/Subscribe"
+const eventsSubscribePath = "/umiak.tunnel.v1.Events/Subscribe"
 
 // NewRawAgent puts fresh credentials in the registry and connects a hostile
 // agent over Env.Net: it is admitted with the valid bootstrap secret, then h

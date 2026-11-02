@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	tunnelagent "github.com/belov38/boat-dev-clone/libs/tunnel/agent"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wstransport"
+	tunnelagent "github.com/belov38/umiak/libs/tunnel/agent"
+	"github.com/belov38/umiak/libs/tunnel/wstransport"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ports"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/update"
+	"github.com/belov38/umiak/services/guest-agent/internal/ports"
+	"github.com/belov38/umiak/services/guest-agent/internal/update"
 )
 
 // startTunnel starts the tunnel client (spec 6 step 2.5, S2): the effective

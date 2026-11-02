@@ -1,4 +1,4 @@
-// SSH helpers of `sbx ssh`, `ssh-cert` and `ssh-config` (S7 §11.3, §14.1,
+// SSH helpers of `umiak ssh`, `ssh-cert` and `ssh-config` (S7 §11.3, §14.1,
 // S4 §9.2): an ed25519 key made by the system `ssh-keygen`, a short-lived
 // certificate of it from `POST /v1/sandboxes/{sb}/ssh/certificate` (signed
 // by the SSH login CA, principal = the sandbox id, about 10 min), and the
@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { components } from "@sbx/sdk";
+import type { components } from "@umiak/sdk";
 import { writePrivateFile } from "./config.ts";
 import type { Context } from "./context.ts";
 import { CliError } from "./exit-codes.ts";
@@ -68,7 +68,7 @@ export async function certify(
 	signal?: AbortSignal,
 ): Promise<SshCertificate> {
 	const { data } = await ctx
-		.sbx()
+		.umiak()
 		.raw.POST("/v1/sandboxes/{sandbox}/ssh/certificate", {
 			params: { path: { sandbox } },
 			body: { publicKey: publicKey.trim() },

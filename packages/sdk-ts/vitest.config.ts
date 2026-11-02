@@ -1,7 +1,7 @@
 import { defineConfig } from "vitest/config";
 
 // The facade tests run apps/api in process. Workspace packages with a build
-// step (@sbx/agent-client, @sbx/proto) are resolved from their TypeScript
+// step (@umiak/agent-client, @umiak/proto) are resolved from their TypeScript
 // sources ("source" export condition), as in the api's own tests.
 const source = "source";
 
@@ -16,7 +16,7 @@ export default defineConfig({
 	},
 	test: {
 		include: ["test/**/*.test.ts"],
-		globalSetup: ["@sbx/db/testing/global-setup"],
+		globalSetup: ["@umiak/db/testing/global-setup"],
 		// A hang guard only: tests wait on conditions; under a full parallel
 		// `pnpm -r test` on a loaded machine one can take longer than 30 s.
 		testTimeout: 120_000,

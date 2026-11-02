@@ -1,4 +1,4 @@
-import { FakePve } from "@sbx/pve/testing";
+import { FakePve } from "@umiak/pve/testing";
 import { describe, expect, it } from "vitest";
 import { imageCacheDir, RamGuard, registryDir } from "../src/context.ts";
 
@@ -33,7 +33,7 @@ describe("RamGuard", () => {
 		const g = new RamGuard({
 			api: pve,
 			node: "pve",
-			pool: "sandbox",
+			pool: "umiak",
 			capMb: 8192,
 		});
 		await g.reserve(597, 4096);
@@ -48,7 +48,7 @@ describe("RamGuard", () => {
 		const g = new RamGuard({
 			api: pve,
 			node: "pve",
-			pool: "sandbox",
+			pool: "umiak",
 			capMb: 4096,
 		});
 		await g.reserve(597, 4096);
@@ -58,9 +58,9 @@ describe("RamGuard", () => {
 
 describe("paths", () => {
 	it("default to the user's state and cache dirs, env overrides", () => {
-		expect(registryDir({}, "/h")).toBe("/h/.local/state/sbx/templates");
-		expect(registryDir({ SBX_TEMPLATE_REGISTRY: "/r" }, "/h")).toBe("/r");
-		expect(imageCacheDir({}, "/h")).toBe("/h/.cache/sbx/images");
-		expect(imageCacheDir({ SBX_IMAGE_CACHE: "/c" }, "/h")).toBe("/c");
+		expect(registryDir({}, "/h")).toBe("/h/.local/state/umiak/templates");
+		expect(registryDir({ UMIAK_TEMPLATE_REGISTRY: "/r" }, "/h")).toBe("/r");
+		expect(imageCacheDir({}, "/h")).toBe("/h/.cache/umiak/images");
+		expect(imageCacheDir({ UMIAK_IMAGE_CACHE: "/c" }, "/h")).toBe("/c");
 	});
 });

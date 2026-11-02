@@ -103,23 +103,23 @@ Filename: dists/resolute/pool/stable/amd64/docker-buildx-plugin_0.38.1-1~ubuntu.
 SHA256: 423e4c264ccd33cd696365d19583b280d5e019ea7f9d00494f749db9b54376f6
 Description: Docker Buildx plugin extends build capabilities with BuildKi
 
-Package: docker-sbx
+Package: docker-umiak
 Architecture: amd64
 Version: 0.49.2-1~ubuntu.26.04~resolute
-Filename: dists/resolute/pool/stable/amd64/docker-sbx_0.49.2-1~ubuntu.26.04~resolute_amd64.deb
+Filename: dists/resolute/pool/stable/amd64/docker-umiak_0.49.2-1~ubuntu.26.04~resolute_amd64.deb
 SHA256: af206c854b398832889b3cdbe3c952a7f0fbb66c6a9da252e40f64398ce818dd
-Description: Docker sbx
+Description: Docker umiak
 
-Package: docker-sbx
+Package: docker-umiak
 Architecture: amd64
 Version: 0.50.0-1~ubuntu.26.04~resolute
-Filename: dists/resolute/pool/stable/amd64/docker-sbx_0.50.0-1~ubuntu.26.04~resolute_amd64.deb
+Filename: dists/resolute/pool/stable/amd64/docker-umiak_0.50.0-1~ubuntu.26.04~resolute_amd64.deb
 SHA256: 91082b11c616448913042b52fba5f1ed9f3c620a68cfb22714b4a83aea22ecd1
-Description: Docker sbx
+Description: Docker umiak
 
-Package: docker-sbx
+Package: docker-umiak
 Architecture: amd64
 Version: 0.50.1-1~ubuntu.26.04~resolute
-Filename: dists/resolute/pool/stable/amd64/docker-sbx_0.50.1-1~ubuntu.26.04~resolute_amd64.deb
+Filename: dists/resolute/pool/stable/amd64/docker-umiak_0.50.1-1~ubuntu.26.04~resolute_amd64.deb
 SHA256: ae77453183feeea2a6006cd6c981a4df8aebeb54dfc0721fe1d8af2bfefe74d6
-Description: Docker sbx
+Description: Docker umiak

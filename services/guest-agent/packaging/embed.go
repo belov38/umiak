@@ -11,11 +11,11 @@ import (
 //go:embed systemd/*.service systemd/*.slice
 var units embed.FS
 
-// Units holds the systemd unit files at its root (sbx-agent.service,
-// sbx-identity.service, sbx-agent-rollback.service, sbx-cmd.slice).
+// Units holds the systemd unit files at its root (umiak-agent.service,
+// umiak-identity.service, umiak-agent-rollback.service, umiak-cmd.slice).
 var Units fs.FS = mustSub(units, "systemd")
 
-// AgentTOML is the /etc/sbx-agent/agent.toml template with the defaults.
+// AgentTOML is the /etc/umiak-agent/agent.toml template with the defaults.
 //
 //go:embed agent.toml
 var AgentTOML []byte

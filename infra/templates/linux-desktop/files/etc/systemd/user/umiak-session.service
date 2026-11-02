@@ -1,0 +1,10 @@
+[Unit]
+Description=Sandbox interactive desktop helper
+StartLimitIntervalSec=0
+[Service]
+ExecStart=/usr/local/lib/umiak-agent/current/umiak-agent session --socket %t/umiak-session/socket
+RuntimeDirectory=umiak-session
+RuntimeDirectoryMode=0700
+UMask=0077
+Restart=always
+RestartSec=1

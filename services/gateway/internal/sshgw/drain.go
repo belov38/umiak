@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
+	"github.com/belov38/umiak/libs/tunnel/registry"
 )
 
 // Clock is the time source of the drain deadlines; tests use a fake one.
@@ -36,7 +36,7 @@ type OwnerSource interface {
 
 // drainWarningFormat is the drain warning (spec 10.3); %d is whole minutes,
 // rounded up.
-const drainWarningFormat = "sbx: gateway restarting, this SSH session will close in %d min; reconnect to continue"
+const drainWarningFormat = "umiak: gateway restarting, this SSH session will close in %d min; reconnect to continue"
 
 // lastWarning is how long before the deadline the second warning goes out.
 const lastWarning = time.Minute

@@ -1,7 +1,7 @@
 # api image. Build context is the repo root:
 #   docker build -f apps/api/Dockerfile .
 # The api's own packages need no build: Node 26 strips TypeScript types at
-# runtime. S2's @sbx/proto and @sbx/agent-client are compiled to `dist` in the
+# runtime. S2's @umiak/proto and @umiak/agent-client are compiled to `dist` in the
 # build stage (their package exports point there at runtime).
 ARG NODE_IMAGE=node:26.13.0-bookworm-slim
 
@@ -31,21 +31,21 @@ COPY apps/template-builder/package.json apps/template-builder/
 COPY apps/web/package.json apps/web/
 COPY apps/worker/package.json apps/worker/
 
-# ---- build: compile @sbx/proto and @sbx/agent-client (needs dev dependencies)
+# ---- build: compile @umiak/proto and @umiak/agent-client (needs dev dependencies)
 FROM base AS build
 # The workspace root brings typescript and @types/node.
-RUN pnpm install --frozen-lockfile --filter "@sbx/agent-client..." --filter "."
+RUN pnpm install --frozen-lockfile --filter "@umiak/agent-client..." --filter "."
 COPY packages/proto/tsconfig.json packages/proto/
 COPY packages/proto/src packages/proto/src
 COPY packages/agent-client/tsconfig.json packages/agent-client/tsconfig.build.json packages/agent-client/
 COPY packages/agent-client/src packages/agent-client/src
-# Only these two: "@sbx/agent-client..." also selects its dev dependencies
-# (@sbx/db for the test Postgres guard), whose sources are not copied here.
-RUN pnpm --filter "@sbx/proto" --filter "@sbx/agent-client" run build
+# Only these two: "@umiak/agent-client..." also selects its dev dependencies
+# (@umiak/db for the test Postgres guard), whose sources are not copied here.
+RUN pnpm --filter "@umiak/proto" --filter "@umiak/agent-client" run build
 
 # ---- runtime: production dependencies only
 FROM base
-RUN pnpm install --frozen-lockfile --prod --filter "@sbx/api..."
+RUN pnpm install --frozen-lockfile --prod --filter "@umiak/api..."
 
 COPY --from=build /app/packages/proto/dist packages/proto/dist
 COPY --from=build /app/packages/agent-client/dist packages/agent-client/dist

@@ -1,5 +1,5 @@
 // Client address for the request log (S7 §7.1): from `X-Forwarded-For` only
-// when the connection comes from SBX_API_TRUSTED_PROXY_CIDRS (ingress,
+// when the connection comes from UMIAK_API_TRUSTED_PROXY_CIDRS (ingress,
 // a TLS proxy on the host, via the Docker bridge, oauth2-proxy), else the
 // address of the connection. Rate limits are per principal, not per address.
 import type { IncomingMessage } from "node:http";

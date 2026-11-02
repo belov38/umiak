@@ -23,7 +23,7 @@ if (
 	![595, 596].includes(manifest.pveVmid ?? 0)
 )
 	throw new Error("expected a linux-desktop build in 595/596");
-process.env.SBX_VMID_RANGE ??= "580-589";
+process.env.UMIAK_VMID_RANGE ??= "580-589";
 const ctx = await makeContext({ node: manifest.node });
 const real = machinesFor(ctx, manifest.pveVmid as number);
 const owned = new Set<number>();

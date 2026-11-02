@@ -1,7 +1,7 @@
 // What a command gets: output, env, files, the resolved profile, the
 // credential store, the bearer and an SDK client, each made on first use.
 
-import { Sbx } from "@sbx/sdk";
+import { Umiak } from "@umiak/sdk";
 import { bunSecrets, type SecretsBackend } from "./auth/keychain.ts";
 import {
 	type CredentialStore,
@@ -25,13 +25,13 @@ import {
  * Retry budget of one SDK call of a command (CallOptions.retryBudgetMs), so
  * a dead API ends an interactive command with exit 75 quickly. Waits
  * (`--wait`, exec streams once started) keep their own deadlines.
- * SBX_RETRY_BUDGET_MS overrides it.
+ * UMIAK_RETRY_BUDGET_MS overrides it.
  */
 export const INTERACTIVE_RETRY_BUDGET_MS = 15_000;
 
 /**
  * Retry budget of a file transfer (cp, push): a whole archive is repeated
- * within it, so it is longer. SBX_RETRY_BUDGET_MS overrides it too.
+ * within it, so it is longer. UMIAK_RETRY_BUDGET_MS overrides it too.
  */
 export const TRANSFER_RETRY_BUDGET_MS = 120_000;
 
@@ -63,7 +63,7 @@ export class Context {
 	readonly #secrets: SecretsBackend | undefined;
 	#fetch: Fetch | undefined;
 	#resolved: Resolved | undefined;
-	#sbx: Sbx | undefined;
+	#umiak: Umiak | undefined;
 	#bearer: Bearer | undefined;
 
 	constructor(o: ContextOptions) {
@@ -77,9 +77,9 @@ export class Context {
 		this.#secrets = "secrets" in o ? o.secrets : bunSecrets();
 	}
 
-	/** fetch with the CA of --cacert / SBX_CA_FILE; every HTTPS call uses it. */
+	/** fetch with the CA of --cacert / UMIAK_CA_FILE; every HTTPS call uses it. */
 	get fetch(): Fetch {
-		this.#fetch ??= caFetch(this.globals.cacert ?? this.env.SBX_CA_FILE);
+		this.#fetch ??= caFetch(this.globals.cacert ?? this.env.UMIAK_CA_FILE);
 		return this.#fetch;
 	}
 
@@ -91,7 +91,7 @@ export class Context {
 	/** Re-read config.json (after a command changed it). */
 	reload(): void {
 		this.#resolved = undefined;
-		this.#sbx = undefined;
+		this.#umiak = undefined;
 		this.#bearer = undefined;
 	}
 
@@ -106,8 +106,10 @@ export class Context {
 	}
 
 	#budgetOverride(): number | undefined {
-		const v = Number(this.env.SBX_RETRY_BUDGET_MS);
-		return Number.isInteger(v) && v >= 0 && this.env.SBX_RETRY_BUDGET_MS !== ""
+		const v = Number(this.env.UMIAK_RETRY_BUDGET_MS);
+		return Number.isInteger(v) &&
+			v >= 0 &&
+			this.env.UMIAK_RETRY_BUDGET_MS !== ""
 			? v
 			: undefined;
 	}
@@ -119,7 +121,7 @@ export class Context {
 			throw new CliError({
 				code: "no_api_url",
 				message:
-					"no API URL: run sbx login --api-url <url>, or set SBX_API_URL",
+					"no API URL: run umiak login --api-url <url>, or set UMIAK_API_URL",
 				retryable: false,
 			});
 		}
@@ -127,13 +129,13 @@ export class Context {
 	}
 
 	/**
-	 * The credential store: --credential-store, SBX_CREDENTIAL_STORE, the store
+	 * The credential store: --credential-store, UMIAK_CREDENTIAL_STORE, the store
 	 * the profile was logged in with, else auto.
 	 */
 	store(profile: Profile | undefined = this.resolved.profile): CredentialStore {
 		return this.#open(
 			nonEmpty(this.globals.credentialStore) ??
-				nonEmpty(this.env.SBX_CREDENTIAL_STORE) ??
+				nonEmpty(this.env.UMIAK_CREDENTIAL_STORE) ??
 				profile?.credentialStore ??
 				"auto",
 		);
@@ -167,7 +169,7 @@ export class Context {
 			return b;
 		}
 		const r = this.resolved;
-		const envKey = this.env.SBX_API_KEY;
+		const envKey = this.env.UMIAK_API_KEY;
 		const apiUrl = this.apiUrl();
 		if (
 			(envKey === undefined || envKey === "") &&
@@ -176,7 +178,7 @@ export class Context {
 		) {
 			throw new CliError({
 				code: NOT_LOGGED_IN,
-				message: `profile ${JSON.stringify(r.profileName)} is logged in to ${r.profile.apiUrl}, not ${apiUrl}; run: sbx login --api-url ${apiUrl}`,
+				message: `profile ${JSON.stringify(r.profileName)} is logged in to ${r.profile.apiUrl}, not ${apiUrl}; run: umiak login --api-url ${apiUrl}`,
 				retryable: false,
 			});
 		}
@@ -193,21 +195,23 @@ export class Context {
 	}
 
 	/** SDK client for the resolved API, team and bearer. */
-	sbx(): Sbx {
-		if (this.#sbx !== undefined) return this.#sbx;
+	umiak(): Umiak {
+		if (this.#umiak !== undefined) return this.#umiak;
 		const team = this.resolved.team;
-		const webSocket = caWebSocket(this.globals.cacert ?? this.env.SBX_CA_FILE);
-		this.#sbx = new Sbx({
+		const webSocket = caWebSocket(
+			this.globals.cacert ?? this.env.UMIAK_CA_FILE,
+		);
+		this.#umiak = new Umiak({
 			...(webSocket === undefined ? {} : { webSocket }),
 			baseUrl: this.apiUrl(),
 			...(team === undefined ? {} : { team }),
 			tokenProvider: async ({ force }) => (await this.bearer(force)).token,
 			fetch: this.fetch as typeof fetch,
-			userAgent: `sbx-cli/${CLI_VERSION}`,
+			userAgent: `umiak-cli/${CLI_VERSION}`,
 			retryBudgetMs: this.retryBudgetMs,
-			// Everything is resolved here; the SDK must not read SBX_* itself.
+			// Everything is resolved here; the SDK must not read UMIAK_* itself.
 			env: {},
 		});
-		return this.#sbx;
+		return this.#umiak;
 	}
 }

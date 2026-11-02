@@ -1,4 +1,4 @@
-import type { OperationKind } from "@sbx/core";
+import type { OperationKind } from "@umiak/core";
 import type { WorkerCtx } from "../context.ts";
 import { operationErrorOf } from "../ops/common.ts";
 import { markCompensating, pendingCompensation } from "../ops/compensate.ts";
@@ -59,7 +59,7 @@ function fencedOut(
 		{ operationId: fenced.id, kind: fenced.op.kind, err: e.message },
 		"sandbox-op fenced out",
 	);
-	ctx.metrics.inc("sbx_fenced_out_total", {
+	ctx.metrics.inc("umiak_fenced_out_total", {
 		queue: "sandbox-op",
 		kind: fenced.op.kind,
 	});
@@ -145,7 +145,7 @@ async function compensate(
 	error: OperationError,
 ): Promise<SandboxOpResult> {
 	await h.compensate(ctx, fenced, error);
-	ctx.metrics.inc("sbx_operation_failed_total", {
+	ctx.metrics.inc("umiak_operation_failed_total", {
 		kind: fenced.op.kind,
 		code: error.code,
 	});

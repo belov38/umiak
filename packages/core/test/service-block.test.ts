@@ -2,7 +2,11 @@
 // a hosted port, the actions a block forbids for everyone but an operator,
 // the routes the gateway gets, and the all-teams list of operators.
 import { randomUUID } from "node:crypto";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -204,7 +208,7 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 			expect(await events(t.pool, s.sandboxId, "unblocked")).toHaveLength(1);
 		});
 
-		it("block notifies sbx_ssh_revoke '' (recheck SSH) and sbx_identity 'sandboxes:<id>' (api streams); unblock only sbx_identity (desktop recheck); port blocks nothing", async () => {
+		it("block notifies umiak_ssh_revoke '' (recheck SSH) and umiak_identity 'sandboxes:<id>' (api streams); unblock only umiak_identity (desktop recheck); port blocks nothing", async () => {
 			const env = await serviceEnv(t.pool);
 			const s = await seedSandbox(t.pool, env, { state: "ready" });
 			await env.svc.hostPort(env.p, s.sandboxId, 3000, "token");
@@ -215,9 +219,12 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 			listener.on("notification", (n) => {
 				notes.push(`${n.channel}=${n.payload ?? ""}`);
 			});
-			await listener.query("LISTEN sbx_ssh_revoke");
-			await listener.query("LISTEN sbx_identity");
-			const want = [`sbx_ssh_revoke=`, `sbx_identity=sandboxes:${s.sandboxId}`];
+			await listener.query("LISTEN umiak_ssh_revoke");
+			await listener.query("LISTEN umiak_identity");
+			const want = [
+				`umiak_ssh_revoke=`,
+				`umiak_identity=sandboxes:${s.sandboxId}`,
+			];
 			try {
 				await env.svc.blockPort(op, s.sandboxId, 3000, { reason: "abuse" });
 				await env.svc.block(op, s.sandboxId, { reason: "abuse" });
@@ -238,7 +245,7 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 					await new Promise((r) => setTimeout(r, 20));
 				}
 				expect(notes.slice(2)).toEqual([
-					`sbx_identity=sandboxes:${s.sandboxId}`,
+					`umiak_identity=sandboxes:${s.sandboxId}`,
 				]);
 				// A repeat unblock changes nothing and sends nothing.
 				await env.svc.unblock(op, s.sandboxId);
@@ -249,7 +256,7 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 			}
 		});
 
-		it("NOTIFY sbx_routes with the slug on block and on unblock", async () => {
+		it("NOTIFY umiak_routes with the slug on block and on unblock", async () => {
 			const env = await serviceEnv(t.pool);
 			const s = await seedSandbox(t.pool, env, { state: "ready" });
 			const op = operator();
@@ -257,9 +264,9 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 			await listener.connect();
 			const notes: string[] = [];
 			listener.on("notification", (n) => {
-				if (n.channel === "sbx_routes" && n.payload) notes.push(n.payload);
+				if (n.channel === "umiak_routes" && n.payload) notes.push(n.payload);
 			});
-			await listener.query("LISTEN sbx_routes");
+			await listener.query("LISTEN umiak_routes");
 			const waitFor = async (n: number) => {
 				for (const end = Date.now() + 10_000; notes.length < n; ) {
 					if (Date.now() > end) break;
@@ -398,7 +405,7 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 					);
 				}
 				expect(await sandboxRow(t.pool, s.sandboxId)).toEqual(before);
-				// An operator with the team selected (Sbx-Team) is not blocked.
+				// An operator with the team selected (Umiak-Team) is not blocked.
 				await c.run(env.svc, operator(env.p.teamId), s.sandboxId);
 			},
 		);

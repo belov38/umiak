@@ -43,7 +43,7 @@ describe.skipIf(skipPg())("migrate", () => {
 	}
 
 	async function tempDir(files: Record<string, string>): Promise<string> {
-		const dir = await mkdtemp(path.join(tmpdir(), "sbx-mig-"));
+		const dir = await mkdtemp(path.join(tmpdir(), "umiak-mig-"));
 		dirs.push(dir);
 		for (const [name, sql] of Object.entries(files)) {
 			await writeFile(path.join(dir, name), sql);
@@ -73,7 +73,7 @@ describe.skipIf(skipPg())("migrate", () => {
 			name: string;
 			sha256: string;
 		}>(
-			"SELECT version, name, sha256 FROM public.sbx_schema_migrations ORDER BY version",
+			"SELECT version, name, sha256 FROM public.umiak_schema_migrations ORDER BY version",
 		);
 		expect(rows.rows.map((r) => r.name)).toEqual(realFiles);
 		for (const r of rows.rows) {
@@ -115,7 +115,7 @@ describe.skipIf(skipPg())("migrate", () => {
 		);
 		expect(t.rows).toEqual([{ table_name: "mig_ok" }]);
 		const applied = await db.pool.query(
-			"SELECT name FROM public.sbx_schema_migrations",
+			"SELECT name FROM public.umiak_schema_migrations",
 		);
 		expect(applied.rows).toEqual([{ name: "0001_ok.sql" }]);
 	});
@@ -170,7 +170,7 @@ describe.skipIf(skipPg())("migrate", () => {
 		const all = [...a.applied, ...b.applied].sort();
 		expect(all).toEqual(realFiles);
 		const n = await db.pool.query(
-			"SELECT count(*)::int AS n FROM public.sbx_schema_migrations",
+			"SELECT count(*)::int AS n FROM public.umiak_schema_migrations",
 		);
 		expect(n.rows[0].n).toBe(realFiles.length);
 	});
@@ -181,7 +181,7 @@ describe.skipIf(skipPg())("migrate", () => {
 		await migrate(db.pool);
 		expect(await missingMigrations(db.pool)).toEqual([]);
 		await db.pool.query(
-			"INSERT INTO public.sbx_schema_migrations (version, name, sha256) VALUES (9999, '9999_future.sql', 'x')",
+			"INSERT INTO public.umiak_schema_migrations (version, name, sha256) VALUES (9999, '9999_future.sql', 'x')",
 		);
 		expect(await missingMigrations(db.pool)).toEqual([]);
 		// Unknown newer migrations do not break migrate either.

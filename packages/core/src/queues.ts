@@ -42,7 +42,7 @@ const OPERATION_RETRIES = {
 
 /**
  * Retry limit for delete jobs: effectively unlimited. S6 §15.1: a delete never
- * gives up and has no dead letter (alert via `sbx_delete_stuck`). Used as the
+ * gives up and has no dead letter (alert via `umiak_delete_stuck`). Used as the
  * `snapshot-op` queue limit (delete-only) and passed per job on every
  * `machine-op` delete send. `sandbox-op` delete jobs must also be sent with
  * `retryLimit: DELETE_RETRY_LIMIT` (otherwise they reach `sandbox-op-dlq`).

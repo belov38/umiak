@@ -11,7 +11,7 @@ import {
 	type FakeSandbox,
 	type FakeTemplate,
 	type OperationKind,
-	SBX_DOMAIN,
+	UMIAK_DOMAIN,
 } from "./state.ts";
 
 /** 403 `forbidden` with `details.requiredScope` unless the principal has it. */
@@ -80,11 +80,11 @@ export function hasCapability(
 export function sandboxResource(fake: Fake, sb: FakeSandbox) {
 	const active = activeOperation(fake, sb);
 	const endpoints: Record<string, string> = {
-		portUrlTemplate: `https://${sb.slug}-{port}.${SBX_DOMAIN}`,
+		portUrlTemplate: `https://${sb.slug}-{port}.${UMIAK_DOMAIN}`,
 		ssh: `ssh ${sb.slug}@ssh.example.com`,
 	};
 	if (hasCapability(fake, sb, "desktop")) {
-		endpoints.desktop = `https://${sb.slug}-desktop.${SBX_DOMAIN}/`;
+		endpoints.desktop = `https://${sb.slug}-desktop.${UMIAK_DOMAIN}/`;
 	}
 	return {
 		id: sb.id,

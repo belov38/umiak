@@ -3,7 +3,7 @@ import type {
 	LeasePurpose,
 	LeaseState,
 	VmidLease,
-} from "@sbx/pve";
+} from "@umiak/pve";
 import type pg from "pg";
 
 interface LeaseRow {

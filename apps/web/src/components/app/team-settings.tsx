@@ -35,7 +35,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import { attempt } from "@/lib/client-call";
 import { formatMb, formatTime } from "@/lib/format";
 import { can, type TeamRole } from "@/lib/permissions";
@@ -156,10 +156,10 @@ function NameSection({
 }
 
 function QuotaSection({ teamId }: { teamId: string }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const limits = useQuery({
 		queryKey: ["limits", teamId],
-		queryFn: () => sbx.limits(),
+		queryFn: () => umiak.limits(),
 	});
 	const rows = limits.data
 		? [

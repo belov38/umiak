@@ -13,7 +13,7 @@ import {
 // vitest requires a destructuring pattern for the hook's context.
 // biome-ignore lint/correctness/noEmptyPattern: the context is not used
 afterAll(({}, suite) => {
-	const dir = inject("sbxConformanceDir");
+	const dir = inject("umiakConformanceDir");
 	const file = suite.file?.filepath;
 	if (!dir || file === undefined) return;
 	const record: CoverageRecord = {

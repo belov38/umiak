@@ -68,7 +68,7 @@ export function AppShell({
 		setDark(next);
 		document.documentElement.classList.toggle("dark", next);
 		try {
-			localStorage.setItem("sbx-theme", next ? "dark" : "light");
+			localStorage.setItem("umiak-theme", next ? "dark" : "light");
 		} catch {
 			// The in-memory preference still works if storage is unavailable.
 		}
@@ -130,7 +130,7 @@ export function AppShell({
 	const sidebar = (
 		<div className="dashboard-sidebar-content">
 			<Link href="/app" className="dashboard-brand">
-				sbx
+				Umiak
 			</Link>
 			<div className="desktop-team-switcher">{switcher}</div>
 			<nav className="dashboard-nav" aria-label="Team navigation">
@@ -229,7 +229,7 @@ export function AppShell({
 							</TooltipTrigger>
 							<TooltipContent side="left" className="max-w-64">
 								Signs you out of the single sign-on session too: the CLI will
-								ask for `sbx login` again.
+								ask for `umiak login` again.
 							</TooltipContent>
 						</Tooltip>
 					</DropdownMenuContent>
@@ -245,7 +245,7 @@ export function AppShell({
 			</a>
 			<header className="dashboard-mobile-header">
 				<Link href="/app" className="dashboard-brand">
-					sbx
+					Umiak
 				</Link>
 				<div className="mobile-team-switcher">{switcher}</div>
 				<Button

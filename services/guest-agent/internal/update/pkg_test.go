@@ -140,7 +140,7 @@ func TestVerifyRejectsMissingRequiredEntry(t *testing.T) {
 	src := t.TempDir()
 	_, err := Pack(PackOptions{
 		Version: "1.0.0", OS: "linux", Arch: "amd64",
-		Binary:     writeFile(t, src, "sbx-agent", "bin"),
+		Binary:     writeFile(t, src, "umiak-agent", "bin"),
 		UpdateKeys: writeFile(t, src, "keys.pub", "k"),
 		Key:        priv,
 		Out:        filepath.Join(src, "out.tar"),

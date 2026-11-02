@@ -1,6 +1,6 @@
 // The frame of a team's pages (S8 §9.3). The team is part of the path; a
 // team the user is not in (and is no operator) gets the 403 page.
-import { decodeUuid } from "@sbx/auth";
+import { decodeUuid } from "@umiak/auth";
 import { forbidden, notFound } from "next/navigation";
 import type React from "react";
 import { AppShell } from "@/components/app/app-shell";

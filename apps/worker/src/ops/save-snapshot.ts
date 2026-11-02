@@ -1,5 +1,5 @@
-import { DELETE_RETRY_LIMIT } from "@sbx/core";
-import type { Tx } from "@sbx/db";
+import { DELETE_RETRY_LIMIT } from "@umiak/core";
+import type { Tx } from "@umiak/db";
 import type { WorkerCtx } from "../context.ts";
 import type { Fenced, OperationError, Step } from "../steps.ts";
 import { runOp } from "./common.ts";

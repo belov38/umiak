@@ -1,11 +1,11 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { encodeUuid } from "@sbx/auth";
+import { encodeUuid } from "@umiak/auth";
 import {
 	hasOperatorRights,
 	parseLabel,
 	type Sandbox,
 	sandboxBlocked,
-} from "@sbx/core";
+} from "@umiak/core";
 import type { Context } from "hono";
 import { agentErrorToHttp } from "../agent/errors.ts";
 import type { DesktopMethod } from "../agent/types.ts";
@@ -93,7 +93,7 @@ export async function desktopPolicy(deps: ApiDeps, id: string) {
 	return p;
 }
 export const desktopUrl = (deps: ApiDeps, slug: string) =>
-	`https://${slug}-desktop.${deps.settings.sbxDomain}/`;
+	`https://${slug}-desktop.${deps.settings.umiakDomain}/`;
 export const ticketHash = (ticket: string) =>
 	createHash("sha256").update(ticket).digest();
 export async function issueDesktopLink(
@@ -104,7 +104,7 @@ export async function issueDesktopLink(
 ) {
 	const p = authOf(c).principal;
 	const policy = await desktopPolicy(deps, s.id);
-	const ticket = `sbxd_${randomBytes(32).toString("base64url")}`;
+	const ticket = `umiakd_${randomBytes(32).toString("base64url")}`;
 	const result = await poolOf(deps).query<{ expires_at: Date }>(
 		`INSERT INTO runtime.desktop_tickets(ticket_hash,sandbox_id,label,user_id,api_key_id,auth_epoch,expires_at) VALUES($1,$2,$3,$4,$5,$6,now()+interval '10 minutes') RETURNING expires_at`,
 		[

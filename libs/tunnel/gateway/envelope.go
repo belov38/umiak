@@ -8,7 +8,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // Connect streaming envelopes: 1 flag byte, 4 bytes big-endian length, payload.

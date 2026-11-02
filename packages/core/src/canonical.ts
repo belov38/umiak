@@ -64,7 +64,7 @@ export interface RequestHash {
 	matches(stored: Uint8Array): boolean;
 }
 
-export const REQUEST_HASH_PURPOSE = "sbx-request-hash/v1";
+export const REQUEST_HASH_PURPOSE = "umiak-request-hash/v1";
 const VERSION_BYTES = 4;
 const MAC_BYTES = 32;
 

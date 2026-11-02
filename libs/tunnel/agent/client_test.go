@@ -15,10 +15,10 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/memnet"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/libs/tunnel/agent"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/memnet"
 )
 
 func TestConnectsWithBootstrapThenToken(t *testing.T) {
@@ -205,13 +205,13 @@ func TestInfoDefaults(t *testing.T) {
 	}
 	got := resp.Msg
 	if got.GetAgentVersion() != "1.2.3" || got.GetOs() != runtime.GOOS || got.GetArch() != runtime.GOARCH ||
-		!slices.Equal(got.GetProtoPackages(), []string{"sbx.tunnel.v1"}) {
+		!slices.Equal(got.GetProtoPackages(), []string{"umiak.tunnel.v1"}) {
 		t.Fatalf("Info = %v", got)
 	}
 }
 
 func TestInfoProvided(t *testing.T) {
-	for _, pkgs := range [][]string{{"sbx.agent.v1"}, {"sbx.agent.v1", "sbx.tunnel.v1"}} {
+	for _, pkgs := range [][]string{{"umiak.agent.v1"}, {"umiak.agent.v1", "umiak.tunnel.v1"}} {
 		cfg := fastConfig()
 		cfg.Info = func(context.Context) *tunnelv1.InfoResponse {
 			return &tunnelv1.InfoResponse{AgentVersion: "9.9.9", Os: "plan9", Arch: "mips",
@@ -225,7 +225,7 @@ func TestInfoProvided(t *testing.T) {
 		}
 		got := resp.Msg
 		if got.GetAgentVersion() != "9.9.9" || got.GetOs() != "plan9" || got.GetArch() != "mips" ||
-			!slices.Equal(got.GetProtoPackages(), []string{"sbx.agent.v1", "sbx.tunnel.v1"}) ||
+			!slices.Equal(got.GetProtoPackages(), []string{"umiak.agent.v1", "umiak.tunnel.v1"}) ||
 			!slices.Equal(got.GetCapabilities(), []string{"pty"}) {
 			t.Fatalf("Info = %v", got)
 		}

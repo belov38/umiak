@@ -14,14 +14,14 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
 )
 
 // extAuth is the Permissions extension that carries the identity of an
 // authenticated connection. It is only ever read from the Permissions of
 // the ServerConn, which x/crypto takes from the key that passed the
 // signature check (CVE-2024-45337).
-const extAuth = "sbx-auth"
+const extAuth = "umiak-auth"
 
 // Authentication methods recorded in an identity.
 const (
@@ -39,7 +39,7 @@ const (
 const maxUserLen = 128
 
 // loginKeyID is the KeyId form of login certificates (spec 9.2).
-var loginKeyID = regexp.MustCompile(`^sbx:(user|key):[A-Za-z0-9_]+$`)
+var loginKeyID = regexp.MustCompile(`^umiak:(user|key):[A-Za-z0-9_]+$`)
 
 var (
 	errRefused     = errors.New("sshgw: access denied")
@@ -199,7 +199,7 @@ func (s *Server) checkLoginCert(cert *ssh.Certificate) error {
 	// Warn, so it must describe a certificate a login CA really signed.
 	// Compared in seconds: a Duration of a huge validity would overflow.
 	if v := before - after; v > int64(s.cfg.LoginCertMaxValidity/time.Second) {
-		return fmt.Errorf("%w: validity %s exceeds the maximum %s (SBX_GATEWAY_SSH_LOGIN_CERT_MAX_VALIDITY)",
+		return fmt.Errorf("%w: validity %s exceeds the maximum %s (UMIAK_GATEWAY_SSH_LOGIN_CERT_MAX_VALIDITY)",
 			errCertTooLong, validityString(v), s.cfg.LoginCertMaxValidity)
 	}
 	return nil

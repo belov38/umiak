@@ -6,8 +6,12 @@
 // by slug, B's snapshot and environment in a create body, B's operation,
 // environment, SSH key and API key. Afterwards every stored row of team B
 // is unchanged and the agent was never called for B's machine.
-import { newPublicUlid } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { newPublicUlid } from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { type ApiDeps, PTY_SUBPROTOCOL } from "../src/index.ts";
@@ -274,7 +278,7 @@ describe.skipIf(skipPg())("IDOR: team A against team B's resources", () => {
 			expect((r.body as Any).status, id).toBe("running");
 		}
 		const offset = await hB.request("HEAD", `${sb}/files/uploads/${b.upload}`);
-		expect(offset.headers.get("sbx-upload-offset")).toBe(
+		expect(offset.headers.get("umiak-upload-offset")).toBe(
 			String(b.uploadOffset),
 		);
 		for (const name of ["f.txt", "keep.txt"]) {

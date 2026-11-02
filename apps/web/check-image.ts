@@ -6,7 +6,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const MARKERS = ["auth-proxy", "sbx_dev_identity", "/__dev/login"];
+const MARKERS = ["auth-proxy", "umiak_dev_identity", "/__dev/login"];
 
 async function* files(dir: string): AsyncGenerator<string> {
 	for (const e of await readdir(dir, { withFileTypes: true })) {

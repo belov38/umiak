@@ -39,13 +39,13 @@ const (
 	chanSession = "session"
 	// limitedMessage is the refusal of a session channel over the per-user
 	// limit (spec 11).
-	limitedMessage = "sbx: too many SSH sessions for this user"
-	closingMessage = "sbx: connection closing"
+	limitedMessage = "umiak: too many SSH sessions for this user"
+	closingMessage = "umiak: connection closing"
 	// tooManyMessage refuses a channel over Config.MaxChannels.
-	tooManyMessage = "sbx: too many open channels"
+	tooManyMessage = "umiak: too many open channels"
 	// notRequestedMessage refuses a VM agent or X11 channel the client did
 	// not ask for.
-	notRequestedMessage = "sbx: forwarding not requested"
+	notRequestedMessage = "umiak: forwarding not requested"
 )
 
 // Channel requests of the client that allow VM-initiated channels.
@@ -97,7 +97,7 @@ func (ss *session) forward(ctx context.Context, b *backend, chans <-chan ssh.New
 			}
 			typ := nc.ChannelType()
 			if !backendChannelTypes[typ] {
-				_ = nc.Reject(ssh.UnknownChannelType, "sbx: unsupported channel type")
+				_ = nc.Reject(ssh.UnknownChannelType, "umiak: unsupported channel type")
 				continue
 			}
 			// Agent and X11 channels only after the client asked for them
@@ -120,7 +120,7 @@ func (ss *session) forward(ctx context.Context, b *backend, chans <-chan ssh.New
 		}
 		typ := nc.ChannelType()
 		if !clientChannelTypes[typ] {
-			_ = nc.Reject(ssh.UnknownChannelType, "sbx: unsupported channel type")
+			_ = nc.Reject(ssh.UnknownChannelType, "umiak: unsupported channel type")
 			continue
 		}
 		if !ss.reserveChannel() {

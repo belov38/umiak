@@ -7,11 +7,11 @@ import "path"
 // build maps the slash-separated Linux production paths through f.
 func build(f func(string) string, root string) Layout {
 	const (
-		lib   = "/usr/local/lib/sbx-agent"
-		state = "/var/lib/sbx-agent"
-		run   = "/run/sbx-agent"
-		sbx   = "/run/sbx"
-		etc   = "/etc/sbx-agent"
+		lib   = "/usr/local/lib/umiak-agent"
+		state = "/var/lib/umiak-agent"
+		run   = "/run/umiak-agent"
+		umiak = "/run/umiak"
+		etc   = "/etc/umiak-agent"
 		ssh   = "/etc/ssh"
 	)
 	j := path.Join
@@ -19,7 +19,7 @@ func build(f func(string) string, root string) Layout {
 		VersionsDir:  f(j(lib, "versions")),
 		CurrentLink:  f(j(lib, "current")),
 		PreviousLink: f(j(lib, "previous")),
-		BinLink:      f("/usr/local/bin/sbx-agent"),
+		BinLink:      f("/usr/local/bin/umiak-agent"),
 
 		StateDir:          f(state),
 		StateDB:           f(j(state, "state.db")),
@@ -37,18 +37,18 @@ func build(f func(string) string, root string) Layout {
 		QuiesceThawedDir: f(j(run, "quiesce-thawed")),
 		StatusFile:       f(j(run, "status.json")),
 
-		SecretsMount:     f(sbx),
-		SecretsDir:       f(j(sbx, "secrets")),
-		SecretsEnvFile:   f(j(sbx, "secrets", "env")),
-		SecretFilesDir:   f(j(sbx, "secrets", "files")),
-		SecretsStateFile: f(j(sbx, "secrets.json")),
-		CmdSpecDir:       f(j(sbx, "cmd-spec")),
-		SbxEnvFile:       f("/etc/sbx/env"),
+		SecretsMount:     f(umiak),
+		SecretsDir:       f(j(umiak, "secrets")),
+		SecretsEnvFile:   f(j(umiak, "secrets", "env")),
+		SecretFilesDir:   f(j(umiak, "secrets", "files")),
+		SecretsStateFile: f(j(umiak, "secrets.json")),
+		CmdSpecDir:       f(j(umiak, "cmd-spec")),
+		UmiakEnvFile:     f("/etc/umiak/env"),
 
 		EtcDir:          f(etc),
 		ConfigFile:      f(j(etc, "agent.toml")),
 		TemplateSSHCA:   f(j(etc, "ssh-user-ca.pub")),
-		SSHUserCA:       f(j(ssh, "sbx_user_ca.pub")),
+		SSHUserCA:       f(j(ssh, "umiak_user_ca.pub")),
 		SSHDir:          f(ssh),
 		MachineIDFile:   f("/etc/machine-id"),
 		DbusMachineID:   f("/var/lib/dbus/machine-id"),

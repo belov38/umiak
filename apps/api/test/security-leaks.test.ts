@@ -14,9 +14,13 @@
 //   values only in the answers that show env (GET/PUT/PATCH /env and
 //   environments).
 import { randomUUID } from "node:crypto";
-import { decodeUuid, generateApiKeySecret } from "@sbx/auth";
-import { ensureQueues, PgBossJobSender, SandboxServiceImpl } from "@sbx/core";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { decodeUuid, generateApiKeySecret } from "@umiak/auth";
+import { ensureQueues, PgBossJobSender, SandboxServiceImpl } from "@umiak/core";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { PgBoss } from "pg-boss";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type ApiDeps, ServiceTokens } from "../src/index.ts";
@@ -138,9 +142,9 @@ describe.skipIf(skipPg())("secrets never leak", () => {
 		const jobs = new PgBossJobSender(boss);
 		deps = {
 			settings: testSettings({
-				SBX_API_RATE_BURST: "100000",
-				SBX_API_RATE_STARTS_PER_MIN: "100000",
-				SBX_OIDC_ISSUER: oidc.issuer,
+				UMIAK_API_RATE_BURST: "100000",
+				UMIAK_API_RATE_STARTS_PER_MIN: "100000",
+				UMIAK_OIDC_ISSUER: oidc.issuer,
 			}),
 			log: logs.log,
 			jobs,
@@ -271,7 +275,7 @@ describe.skipIf(skipPg())("secrets never leak", () => {
 		// refused bodies carrying secrets: validation errors must not echo them
 		for (const json of [
 			{ secrets: { "bad key": mark("secret", "badkey") } },
-			{ secrets: { SBX_RESERVED: mark("secret", "reserved") } },
+			{ secrets: { UMIAK_RESERVED: mark("secret", "reserved") } },
 			{ env: { "1BAD": mark("env", "badenv") } },
 			{
 				secretFiles: [
@@ -375,7 +379,7 @@ describe.skipIf(skipPg())("secrets never leak", () => {
 		const auth = await call(
 			owner.h,
 			"GET",
-			`/sbx-auth/authorize?label=${sso.label}&state=st-${RUN}-0123456789`,
+			`/umiak-auth/authorize?label=${sso.label}&state=st-${RUN}-0123456789`,
 			{ headers: owner.headers },
 		);
 		expect(auth.status, auth.text).toBe(302);

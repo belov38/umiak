@@ -13,8 +13,8 @@ import {
 	type SessionIdentity,
 	type TeamMembership,
 	type UserRecord,
-} from "@sbx/auth";
-import type { Principal } from "@sbx/core";
+} from "@umiak/auth";
+import type { Principal } from "@umiak/core";
 import type { Context } from "hono";
 import { matchedRoutes } from "hono/route";
 import type { ApiEnv } from "../deps.ts";
@@ -44,7 +44,7 @@ export interface AuthContext {
 }
 
 /** Header that selects the team of a request (`team_...`). */
-export const TEAM_HEADER = "sbx-team";
+export const TEAM_HEADER = "umiak-team";
 
 /** The auth context of an authenticated route; throws if the route is anonymous. */
 export function authOf(c: Context<ApiEnv>): AuthContext {
@@ -75,7 +75,7 @@ export function needsAuth(c: Context<ApiEnv>): boolean {
 
 // --- errors ---
 
-const REALM = 'Bearer realm="sbx"';
+const REALM = 'Bearer realm="umiak"';
 
 /** No credentials at all. */
 export function authRequired(message = "authentication required"): ApiError {
@@ -161,7 +161,7 @@ export async function selectPersonTeam(
 		const t = await identity.team(requested);
 		if (t !== null) return { teamId: t.id, name: t.name, role: null };
 	}
-	throw teamForbidden("you are not a member of the team in Sbx-Team");
+	throw teamForbidden("you are not a member of the team in Umiak-Team");
 }
 
 /** AuthContext of a person (browser session or Keycloak JWT). */
@@ -231,7 +231,7 @@ const NOT_SESSION = new Set(["api-keys", "ssh-keys", "sandboxes"]);
 /**
  * `IdentityStore.resolveSession` with a 30 s cache keyed by the claims
  * (email, sub, groups, names). Any change of users, teams or memberships
- * (NOTIFY sbx_identity) flushes it. Errors are not cached.
+ * (NOTIFY umiak_identity) flushes it. Errors are not cached.
  */
 export class SessionResolver {
 	readonly #identity: IdentityStore;

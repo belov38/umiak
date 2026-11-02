@@ -5,18 +5,18 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/winapi"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/wincmd"
+	"github.com/belov38/umiak/services/guest-agent/internal/process"
+	"github.com/belov38/umiak/services/guest-agent/internal/winapi"
+	"github.com/belov38/umiak/services/guest-agent/internal/wincmd"
 )
 
 // Build returns the environment of a command run as u (spec 12.7). Later
 // layers win, keys compare case-insensitively and keep their first
 // spelling: the environment block of the user's token (system and user
 // variables from the registry: Path, USERPROFILE, APPDATA, TEMP, ...), the
-// platform env (with SBX_HOSTNAME, SBX_ENV_APPLIED=1 and TERM for a PTY),
+// platform env (with UMIAK_HOSTNAME, UMIAK_ENV_APPLIED=1 and TERM for a PTY),
 // claim env, secret env, spec env.
 func (b EnvBuilder) Build(u *process.User, spec *agentv1.CommandSpec) []string {
 	base, err := userEnvBlock(u)
@@ -25,7 +25,7 @@ func (b EnvBuilder) Build(u *process.User, spec *agentv1.CommandSpec) []string {
 		base = b.systemEnvBlock(u)
 	}
 	platform, claimed, secret := b.claimEnv()
-	platform["SBX_ENV_APPLIED"] = "1"
+	platform["UMIAK_ENV_APPLIED"] = "1"
 	if spec.GetPty() != nil {
 		// ConPTY speaks xterm-256color whatever the spec's term is.
 		platform["TERM"] = DefaultTerm

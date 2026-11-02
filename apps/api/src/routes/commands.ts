@@ -14,7 +14,7 @@ import {
 	type Principal,
 	storableOutputTruncated,
 	uuidv5,
-} from "@sbx/core";
+} from "@umiak/core";
 import {
 	agentErrorToHttp,
 	isAgentOutcomeUnknown,
@@ -99,7 +99,7 @@ const IdempotencyHeaders = z.object({
 });
 
 const commandIdHeader = {
-	"Sbx-Command-Id": {
+	"Umiak-Command-Id": {
 		description: "Id (`cmd_...`) of the command",
 		schema: { type: "string" as const },
 	},
@@ -142,7 +142,7 @@ const startCommandRoute = createRoute({
 		"SyncCommandResult once the process exits (timeout at most 600 s; the connection is " +
 		"silent until then, so proxies may cut it: SDKs use stream); `stream` answers 200 " +
 		"application/x-ndjson frames (first `started`, last `exit`, `reconnect` or `error`) with " +
-		"`Sbx-Command-Id`; `detached` answers 201 Command right after the start. With an " +
+		"`Umiak-Command-Id`; `detached` answers 201 Command right after the start. With an " +
 		"Idempotency-Key a repeat never starts the command twice: sync waits for the same " +
 		"command, stream streams it from offset 0 with `started.replayed: true`, detached " +
 		"answers 200.",
@@ -260,9 +260,9 @@ const outputCommandRoute = createRoute({
 	summary: "Read output by offset",
 	description:
 		"Raw bytes of one stream from `offset` (up to `limit`, at most 4 MiB). Headers: " +
-		"Sbx-Offset (where the bytes start), Sbx-Next-Offset, Sbx-Available-From, Sbx-Stream-End " +
-		"(only once the stream ended), Sbx-Truncated: true when `offset` was already evicted and " +
-		"reading started at Sbx-Available-From. An offset past the end is 416. For polling " +
+		"Umiak-Offset (where the bytes start), Umiak-Next-Offset, Umiak-Available-From, Umiak-Stream-End " +
+		"(only once the stream ended), Umiak-Truncated: true when `offset` was already evicted and " +
+		"reading started at Umiak-Available-From. An offset past the end is 416. For polling " +
 		"without streams.",
 	tags: TAGS,
 	middleware: [requireScope("commands:read")] as const,
@@ -271,14 +271,14 @@ const outputCommandRoute = createRoute({
 		200: {
 			description: "The bytes",
 			headers: {
-				"Sbx-Offset": { schema: { type: "integer" as const } },
-				"Sbx-Next-Offset": { schema: { type: "integer" as const } },
-				"Sbx-Available-From": { schema: { type: "integer" as const } },
-				"Sbx-Stream-End": {
+				"Umiak-Offset": { schema: { type: "integer" as const } },
+				"Umiak-Next-Offset": { schema: { type: "integer" as const } },
+				"Umiak-Available-From": { schema: { type: "integer" as const } },
+				"Umiak-Stream-End": {
 					description: "Final size of the stream, once it ended",
 					schema: { type: "integer" as const },
 				},
-				"Sbx-Truncated": {
+				"Umiak-Truncated": {
 					schema: { type: "string" as const, enum: ["true"] },
 				},
 			},
@@ -515,7 +515,7 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 		if (mode === "detached") {
 			const r = await startCommand(deps, auth, ref, body, idemKey);
 			const headers: Record<string, string> = {
-				"Sbx-Command-Id": publicCommandId(r.command.id),
+				"Umiak-Command-Id": publicCommandId(r.command.id),
 			};
 			if (r.replayed) headers[IDEMPOTENCY_REPLAYED_HEADER] = "true";
 			return c.json(
@@ -583,7 +583,7 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 					}),
 				},
 			);
-			const headers: Record<string, string> = { "Sbx-Command-Id": pub };
+			const headers: Record<string, string> = { "Umiak-Command-Id": pub };
 			if (r.replayed) headers[IDEMPOTENCY_REPLAYED_HEADER] = "true";
 			return ndjsonResponse(c, untilDone(frames, unregister), headers, () => {
 				gone.abort();
@@ -635,7 +635,7 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 			r.command.sandboxId,
 			r.command.id,
 		);
-		const headers: Record<string, string> = { "Sbx-Command-Id": pub };
+		const headers: Record<string, string> = { "Umiak-Command-Id": pub };
 		if (r.replayed) headers[IDEMPOTENCY_REPLAYED_HEADER] = "true";
 		return c.json(
 			{
@@ -785,7 +785,7 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 		return ndjsonResponse(
 			c,
 			untilDone(frames, unregister),
-			{ "Sbx-Command-Id": pub },
+			{ "Umiak-Command-Id": pub },
 			() => {
 				gone.abort();
 				unregister();
@@ -880,12 +880,12 @@ export function registerCommandRoutes(app: ApiApp, deps: ApiDeps): void {
 		const next = offset + got;
 		const headers: Record<string, string> = {
 			"Content-Type": "application/octet-stream",
-			"Sbx-Offset": String(offset),
-			"Sbx-Next-Offset": String(next),
-			"Sbx-Available-From": String(availableFrom),
+			"Umiak-Offset": String(offset),
+			"Umiak-Next-Offset": String(next),
+			"Umiak-Available-From": String(availableFrom),
 		};
-		if (si.end !== null) headers["Sbx-Stream-End"] = String(si.end);
-		if (truncated) headers["Sbx-Truncated"] = "true";
+		if (si.end !== null) headers["Umiak-Stream-End"] = String(si.end);
+		if (truncated) headers["Umiak-Truncated"] = "true";
 		return c.body(Buffer.concat(parts), 200, headers);
 	});
 

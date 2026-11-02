@@ -2,9 +2,9 @@
 // hosted port of a label in the S4 shape plus `kind`. The gateway takes no
 // policy decisions: blocks, `public_disabled` and the sso epoch are computed
 // here, with the platform defaults read on every lookup (no cache, C7).
-import { encodeUuid } from "@sbx/auth";
-import type { PlatformDefaults } from "@sbx/config";
-import { lookupRoute, type RouteTarget } from "@sbx/core";
+import { encodeUuid } from "@umiak/auth";
+import type { PlatformDefaults } from "@umiak/config";
+import { lookupRoute, type RouteTarget } from "@umiak/core";
 import type { ApiApp, ApiDeps } from "../../deps.ts";
 import { lookupDesktopRoute } from "../../desktop/service.ts";
 import { ApiError } from "../../http/errors.ts";

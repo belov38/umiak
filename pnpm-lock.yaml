@@ -162,7 +162,7 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-pnpmfileChecksum: sha256-lDyK+adwqXFwa72lJVY0A4+cQLOCX/G02pq2wD3533w=
+pnpmfileChecksum: sha256-BFE0bu38WmaSPim5ikS9EKky0717DDGVmeIXxrM5h9g=
 
 importers:
 
@@ -195,25 +195,25 @@ importers:
       '@hono/zod-openapi':
         specifier: 1.6.3
         version: 1.6.3(hono@4.13.14)(zod@4.6.7)
-      '@sbx/agent-client':
+      '@umiak/agent-client':
         specifier: workspace:*
         version: link:../../packages/agent-client
-      '@sbx/auth':
+      '@umiak/auth':
         specifier: workspace:*
         version: link:../../packages/auth
-      '@sbx/config':
+      '@umiak/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@sbx/core':
+      '@umiak/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@sbx/db':
+      '@umiak/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@sbx/payload':
+      '@umiak/payload':
         specifier: workspace:*
         version: link:../../packages/payload
-      '@sbx/proto':
+      '@umiak/proto':
         specifier: workspace:*
         version: link:../../packages/proto
       hono:
@@ -262,32 +262,32 @@ importers:
 
   apps/bench:
     dependencies:
-      '@sbx/pve':
+      '@umiak/pve':
         specifier: workspace:*
         version: link:../../packages/pve
 
   apps/cli:
     dependencies:
-      '@sbx/auth':
+      '@umiak/auth':
         specifier: workspace:*
         version: link:../../packages/auth
-      '@sbx/mcp':
+      '@umiak/mcp':
         specifier: workspace:*
         version: link:../mcp
-      '@sbx/sdk':
+      '@umiak/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk-ts
       commander:
         specifier: 15.0.0
         version: 15.0.0
     devDependencies:
-      '@sbx/api':
+      '@umiak/api':
         specifier: workspace:*
         version: link:../api
-      '@sbx/core':
+      '@umiak/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@sbx/db':
+      '@umiak/db':
         specifier: workspace:*
         version: link:../../packages/db
 
@@ -299,7 +299,7 @@ importers:
       '@modelcontextprotocol/server':
         specifier: 2.4.0
         version: 2.4.0
-      '@sbx/sdk':
+      '@umiak/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk-ts
       hono:
@@ -324,13 +324,13 @@ importers:
       '@modelcontextprotocol/inspector':
         specifier: 2.13.0
         version: 2.13.0(@types/node@26.6.6)(@types/react@19.3.0)(esbuild@0.28.2)(jiti@2.7.0)(react-dom@19.3.1(react@19.3.1))(sass@1.77.4)(tsx@4.23.15)
-      '@sbx/api':
+      '@umiak/api':
         specifier: workspace:*
         version: link:../api
-      '@sbx/core':
+      '@umiak/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@sbx/db':
+      '@umiak/db':
         specifier: workspace:*
         version: link:../../packages/db
       ajv:
@@ -342,7 +342,7 @@ importers:
 
   apps/template-builder:
     dependencies:
-      '@sbx/pve':
+      '@umiak/pve':
         specifier: workspace:*
         version: link:../../packages/pve
       openpgp:
@@ -379,18 +379,18 @@ importers:
       '@payloadcms/ui':
         specifier: 3.92.1
         version: 3.92.1(@types/react@19.3.0)(monaco-editor@0.57.0)(next@16.4.3(@opentelemetry/api@1.10.0)(@playwright/test@1.64.1)(@types/node@26.6.6)(babel-plugin-macros@3.1.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(sass@1.77.4))(payload@3.92.1(graphql@16.14.2)(supports-color@10.2.2)(typescript@7.0.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(supports-color@10.2.2)(typescript@7.0.2)
-      '@sbx/auth':
-        specifier: workspace:*
-        version: link:../../packages/auth
-      '@sbx/payload':
-        specifier: workspace:*
-        version: link:../../packages/payload
-      '@sbx/sdk':
-        specifier: workspace:*
-        version: link:../../packages/sdk-ts
       '@tanstack/react-query':
         specifier: 5.105.0
         version: 5.105.0(@types/react@19.3.0)(react@19.3.1)
+      '@umiak/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
+      '@umiak/payload':
+        specifier: workspace:*
+        version: link:../../packages/payload
+      '@umiak/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk-ts
       '@xterm/addon-fit':
         specifier: 0.11.0
         version: 0.11.0
@@ -446,9 +446,6 @@ importers:
       '@playwright/test':
         specifier: 1.64.1
         version: 1.64.1
-      '@sbx/db':
-        specifier: workspace:*
-        version: link:../../packages/db
       '@tailwindcss/postcss':
         specifier: 4.3.3
         version: 4.3.3
@@ -458,6 +455,9 @@ importers:
       '@types/react-dom':
         specifier: 19.3.0
         version: 19.3.0(@types/react@19.3.0)
+      '@umiak/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       tailwindcss:
         specifier: 4.3.3
         version: 4.3.3
@@ -473,28 +473,28 @@ importers:
       '@connectrpc/connect':
         specifier: 2.3.0
         version: 2.3.0(@bufbuild/protobuf@2.16.0)
-      '@sbx/agent-client':
+      '@umiak/agent-client':
         specifier: workspace:*
         version: link:../../packages/agent-client
-      '@sbx/auth':
+      '@umiak/auth':
         specifier: workspace:*
         version: link:../../packages/auth
-      '@sbx/config':
+      '@umiak/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@sbx/core':
+      '@umiak/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@sbx/db':
+      '@umiak/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@sbx/payload':
+      '@umiak/payload':
         specifier: workspace:*
         version: link:../../packages/payload
-      '@sbx/proto':
+      '@umiak/proto':
         specifier: workspace:*
         version: link:../../packages/proto
-      '@sbx/pve':
+      '@umiak/pve':
         specifier: workspace:*
         version: link:../../packages/pve
       pg:
@@ -531,19 +531,19 @@ importers:
       '@connectrpc/connect-node':
         specifier: 2.3.0
         version: 2.3.0(@bufbuild/protobuf@2.16.0)(@connectrpc/connect@2.3.0(@bufbuild/protobuf@2.16.0))
-      '@sbx/proto':
+      '@umiak/proto':
         specifier: workspace:*
         version: link:../proto
       pg:
         specifier: 8.23.1
         version: 8.23.1
     devDependencies:
-      '@sbx/db':
-        specifier: workspace:*
-        version: link:../db
       '@types/pg':
         specifier: 8.23.1
         version: 8.23.1
+      '@umiak/db':
+        specifier: workspace:*
+        version: link:../db
 
   packages/auth:
     dependencies:
@@ -560,12 +560,12 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@sbx/db':
-        specifier: workspace:*
-        version: link:../db
       '@types/pg':
         specifier: 8.23.1
         version: 8.23.1
+      '@umiak/db':
+        specifier: workspace:*
+        version: link:../db
 
   packages/config:
     dependencies:
@@ -578,13 +578,13 @@ importers:
 
   packages/core:
     dependencies:
-      '@sbx/auth':
+      '@umiak/auth':
         specifier: workspace:*
         version: link:../auth
-      '@sbx/config':
+      '@umiak/config':
         specifier: workspace:*
         version: link:../config
-      '@sbx/db':
+      '@umiak/db':
         specifier: workspace:*
         version: link:../db
       pg:
@@ -606,7 +606,7 @@ importers:
 
   packages/db:
     dependencies:
-      '@sbx/pve':
+      '@umiak/pve':
         specifier: workspace:*
         version: link:../pve
       drizzle-orm:
@@ -625,10 +625,10 @@ importers:
       '@payloadcms/db-postgres':
         specifier: 3.92.1
         version: 3.92.1(@opentelemetry/api@1.10.0)(bun-types@1.4.4)(payload@3.92.1(graphql@16.14.2)(supports-color@10.2.2)(typescript@7.0.2))(supports-color@10.2.2)
-      '@sbx/auth':
+      '@umiak/auth':
         specifier: workspace:*
         version: link:../auth
-      '@sbx/config':
+      '@umiak/config':
         specifier: workspace:*
         version: link:../config
       graphql:
@@ -641,12 +641,12 @@ importers:
         specifier: 8.23.1
         version: 8.23.1
     devDependencies:
-      '@sbx/db':
-        specifier: workspace:*
-        version: link:../db
       '@types/pg':
         specifier: 8.23.1
         version: 8.23.1
+      '@umiak/db':
+        specifier: workspace:*
+        version: link:../db
       pg-boss:
         specifier: 12.38.0
         version: 12.38.0(@opentelemetry/api@1.10.0)
@@ -669,13 +669,13 @@ importers:
 
   packages/sdk-py:
     devDependencies:
-      '@sbx/api':
+      '@umiak/api':
         specifier: workspace:*
         version: link:../../apps/api
-      '@sbx/core':
+      '@umiak/core':
         specifier: workspace:*
         version: link:../core
-      '@sbx/db':
+      '@umiak/db':
         specifier: workspace:*
         version: link:../db
 
@@ -688,13 +688,13 @@ importers:
         specifier: 0.1.0
         version: 0.1.0
     devDependencies:
-      '@sbx/api':
+      '@umiak/api':
         specifier: workspace:*
         version: link:../../apps/api
-      '@sbx/core':
+      '@umiak/core':
         specifier: workspace:*
         version: link:../core
-      '@sbx/db':
+      '@umiak/db':
         specifier: workspace:*
         version: link:../db
       openapi-typescript:

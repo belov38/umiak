@@ -9,9 +9,9 @@ import {
 	type Principal,
 	SandboxServiceImpl,
 	SCOPES,
-} from "@sbx/core";
-import { createPool } from "@sbx/db";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+} from "@umiak/core";
+import { createPool } from "@umiak/db";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import type pg from "pg";
 import type { Db as BossDb } from "pg-boss";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";

@@ -126,7 +126,7 @@ const recipeFileSchema = z.strictObject({
 				),
 		)
 		.optional(),
-	seal: z.enum(["sbx-agent", "sysprep"]).optional(),
+	seal: z.enum(["umiak-agent", "sysprep"]).optional(),
 	offline: z.array(z.enum(OFFLINE_STAGES)).optional(),
 	options: z.strictObject({ vs_buildtools: z.boolean().optional() }).optional(),
 	boot_timeout_s: z.number().int().positive().optional(),
@@ -152,7 +152,7 @@ interface RecipeBase {
 	cloudinit: boolean;
 	buildVm: { cores: number; memoryMb: number };
 	steps: string[];
-	seal: "sbx-agent" | "sysprep";
+	seal: "umiak-agent" | "sysprep";
 	/** Stages of the offline WinPE boot after sysprep (windows; empty for linux). */
 	offline: OfflineStage[];
 	options: { vsBuildtools: boolean };
@@ -175,7 +175,7 @@ interface RecipeBase {
 export interface LinuxRecipe extends RecipeBase {
 	os: "linux";
 	source: CloudImageSource;
-	seal: "sbx-agent";
+	seal: "umiak-agent";
 }
 
 export interface WindowsRecipe extends RecipeBase {
@@ -394,8 +394,8 @@ function loadRecipeChain(
 
 		if (source.kind !== "cloud-image")
 			throw new Error(`os linux requires source.kind cloud-image`);
-		if (seal !== "sbx-agent")
-			throw new Error(`os linux requires seal: sbx-agent`);
+		if (seal !== "umiak-agent")
+			throw new Error(`os linux requires seal: umiak-agent`);
 		// The linux pipeline would silently ignore these: reject them instead.
 		for (const key of [
 			"offline",
@@ -526,7 +526,7 @@ export const versionsSchema = z.strictObject({
 	}),
 	chrome: z.strictObject({ google_chrome_stable: versionSha }),
 	npm: z.record(z.string(), nonEmpty),
-	sbx: z.strictObject({ cli: versionSha }).optional(),
+	umiak: z.strictObject({ cli: versionSha }).optional(),
 	// The desktop stack is optional for headless recipes, complete when present.
 	desktop: z
 		.strictObject({

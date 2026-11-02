@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
 )
 
 // SessionGate records the identity+boot whose secrets the current PAM session read.

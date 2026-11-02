@@ -22,7 +22,7 @@ export const ANONYMOUS_ROUTES: ReadonlySet<string> = new Set([
 ]);
 
 /** Public client of the CLI device flow; also used by the SDK and MCP. */
-export const OIDC_CLI_CLIENT_ID = "sbx-cli";
+export const OIDC_CLI_CLIENT_ID = "umiak-cli";
 
 export const MetaSchema = z
 	.object({
@@ -32,21 +32,21 @@ export const MetaSchema = z
 			.openapi({ description: "Build of the api", example: "1.4.0+3f2c1a9" }),
 		appUrl: z.url().openapi({ example: "https://app.example.com" }),
 		apiUrl: z.url().openapi({ example: "https://api.example.com" }),
-		sbxDomain: z.string().openapi({
+		umiakDomain: z.string().openapi({
 			description:
-				"Domain of published ports: https://<slug>-<port>.<sbxDomain>",
-			example: "sbx.example.com",
+				"Domain of published ports: https://<slug>-<port>.<umiakDomain>",
+			example: "umiak.example.com",
 		}),
 		oidc: z
 			.object({
 				issuer: z.url(),
 				clientId: z.string().openapi({ example: OIDC_CLI_CLIENT_ID }),
-				audience: z.string().openapi({ example: "sbx-api" }),
+				audience: z.string().openapi({ example: "umiak-api" }),
 			})
 			.nullable()
 			.openapi({
 				description:
-					"Keycloak for people (device flow of `sbx login`); null when only team keys work",
+					"Keycloak for people (device flow of `umiak login`); null when only team keys work",
 			}),
 		ssh: z.object({
 			host: z.string().openapi({ example: "ssh.example.com" }),
@@ -72,7 +72,7 @@ const getMeta = createRoute({
 	summary: "Platform information",
 	description:
 		"Public facts about this deployment: API and dashboard URLs, the domain of published ports, " +
-		"the Keycloak issuer for `sbx login`, the SSH endpoint with its host keys, and CLI versions. " +
+		"the Keycloak issuer for `umiak login`, the SSH endpoint with its host keys, and CLI versions. " +
 		"Needs no authentication; clients call it first to configure themselves.",
 	tags: ["meta"],
 	security: NO_AUTH,
@@ -127,7 +127,7 @@ export function metaOf(deps: ApiDeps): Meta {
 		build: s.build,
 		appUrl: s.appUrl,
 		apiUrl: s.apiUrl,
-		sbxDomain: s.sbxDomain,
+		umiakDomain: s.umiakDomain,
 		oidc:
 			s.oidc === null
 				? null
@@ -176,7 +176,7 @@ const DOCS_CONFIG = JSON.stringify({ withDefaultFonts: false });
 const DOCS_HTML = `<!doctype html>
 <html>
   <head>
-    <title>sbx API</title>
+    <title>umiak API</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
   </head>

@@ -5,7 +5,7 @@
 // line, the exit as a line. One stream at a time; it closes when the
 // viewer goes away. Download links of up to 4 MiB from an offset
 // (`/output?…&team=`), Kill and Signal for a running command.
-import type { CommandData, Sandbox } from "@sbx/sdk";
+import type { CommandData, Sandbox } from "@umiak/sdk";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";

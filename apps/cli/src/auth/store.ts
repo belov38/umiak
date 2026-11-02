@@ -1,7 +1,7 @@
 // Credential storage (S7 §7.6): the OS keychain through Bun.secrets, or the
 // file credentials.json (0600) when there is no keychain (Linux without a
 // secret service, containers). `--credential-store keychain|file|auto` (or
-// SBX_CREDENTIAL_STORE) picks one; `auto` tries the keychain and falls back
+// UMIAK_CREDENTIAL_STORE) picks one; `auto` tries the keychain and falls back
 // to the file on an error. config.json holds no secrets.
 
 import { CliError } from "../exit-codes.ts";

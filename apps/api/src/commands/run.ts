@@ -5,14 +5,14 @@
 // never starts a second process: the agent's Start is idempotent by
 // commandId, and a command that already ended is not started again.
 import { randomUUID } from "node:crypto";
-import { AgentOutdatedError } from "@sbx/agent-client";
+import { AgentOutdatedError } from "@umiak/agent-client";
 import {
 	COMMAND_SCOPE,
 	type Command,
 	type CommandSpec,
 	idempotencyPrincipal,
 	uuidv5,
-} from "@sbx/core";
+} from "@umiak/core";
 import {
 	AgentCallError,
 	agentErrorToHttp,

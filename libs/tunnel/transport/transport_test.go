@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 func TestHelloHeaderRoundTrip(t *testing.T) {
@@ -104,7 +104,7 @@ func TestHelloRedactsSecret(t *testing.T) {
 	}
 	h := transport.Hello{
 		MachineID: "0f8fad5b-d9cb-469f-a165-70867728950e", BootID: "boot-1", AgentInstanceID: "inst-1",
-		Vmgenid: "vg-1", AgentVersion: "1.2.3", Scheme: transport.AuthToken, Secret: secret, ProtoVersion: "sbx-tunnel.v1",
+		Vmgenid: "vg-1", AgentVersion: "1.2.3", Scheme: transport.AuthToken, Secret: secret, ProtoVersion: "umiak-tunnel.v1",
 	}
 	leaks := []string{
 		string(secret),

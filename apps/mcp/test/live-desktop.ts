@@ -4,7 +4,7 @@ import {
 	Client,
 	StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
-import type { Sandbox } from "@sbx/sdk";
+import type { Sandbox } from "@umiak/sdk";
 import { typeIntoRunDialog } from "./windows-run.ts";
 
 export async function verifyLiveDesktopMcp(
@@ -13,7 +13,7 @@ export async function verifyLiveDesktopMcp(
 	windows = false,
 ) {
 	const auth = JSON.parse(
-		execFileSync("sbx", ["auth", "token", "--json"], { encoding: "utf8" }),
+		execFileSync("umiak", ["auth", "token", "--json"], { encoding: "utf8" }),
 	) as { token: string };
 	const client = new Client({
 		name: "s10-desktop-acceptance",

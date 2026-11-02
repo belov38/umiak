@@ -9,7 +9,7 @@ import type {
 	ReadyInfo,
 	Smbios,
 	SnapshotRef,
-} from "@sbx/pve";
+} from "@umiak/pve";
 import { describe, expect, it } from "vitest";
 import type { Manifest } from "../src/manifest.ts";
 import type { GuestIo } from "../src/runner.ts";
@@ -68,7 +68,7 @@ describe("parseCheckLines", () => {
 
 const doctor = (over: Record<string, unknown> = {}) => ({
 	versions: { current: "0.3.1", previous: "" },
-	units: { "sbx-identity": "active", "sbx-agent": "active" },
+	units: { "umiak-identity": "active", "umiak-agent": "active" },
 	identity: { machine_id: UUID_A },
 	tunnel_url: { url: TEST_TUNNEL_URL, source: "smbios" },
 	status: { identity: { state: "ready" } },
@@ -121,7 +121,7 @@ describe("checkDoctor", () => {
 			failed(
 				checkDoctor(
 					doctor({
-						units: { "sbx-identity": "active", "sbx-agent": "failed" },
+						units: { "umiak-identity": "active", "umiak-agent": "failed" },
 					}),
 					expectDoctor,
 				),
@@ -152,13 +152,13 @@ describe("checkTools", () => {
 		const cs = checkTools(
 			{
 				node: { direct: "v26.13.0", login: "v26.13.0" },
-				sbx: { direct: "missing", login: "missing" },
+				umiak: { direct: "missing", login: "missing" },
 			},
-			{ node: "v26.13.0", sbx: null },
+			{ node: "v26.13.0", umiak: null },
 		);
 		expect(cs).toEqual([
 			{ id: "tool_node", status: "PASS", evidence: "v26.13.0" },
-			{ id: "tool_sbx", status: "PASS", evidence: "missing (as built)" },
+			{ id: "tool_umiak", status: "PASS", evidence: "missing (as built)" },
 		]);
 	});
 
@@ -192,7 +192,7 @@ const facts = (over: Partial<Facts> = {}): Facts => ({
 	uuid: UUID_A,
 	machineId: hex(UUID_A),
 	productUuid: UUID_A.toUpperCase(),
-	hostname: `sbx-${hex(UUID_A).slice(-12)}`,
+	hostname: `umiak-${hex(UUID_A).slice(-12)}`,
 	hostKey: "SHA256:aaaa",
 	ip: "10.88.0.10",
 	randomSeed: "a".repeat(64),
@@ -206,7 +206,7 @@ const forkFacts = () =>
 		uuid: UUID_F,
 		machineId: hex(UUID_F),
 		productUuid: UUID_F,
-		hostname: `sbx-${hex(UUID_F).slice(-12)}`,
+		hostname: `umiak-${hex(UUID_F).slice(-12)}`,
 		hostKey: "SHA256:ffff",
 		ip: "10.88.0.11",
 		randomSeed: "f".repeat(64),
@@ -304,11 +304,11 @@ function secretDir(): {
 	dir: string;
 	files: VerifyDeps["secretFiles"];
 } {
-	const dir = mkdtempSync(join(tmpdir(), "sbx-verify-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-verify-"));
 	const files = {
 		updateSigningKey: join(dir, "ed25519.key"),
 		pveToken: join(dir, "pve-token"),
-		nodeSshKey: join(dir, "sbx-node_ed25519"),
+		nodeSshKey: join(dir, "umiak-node_ed25519"),
 		devCaKey: join(dir, "ca.key"),
 	};
 	writeFileSync(files.updateSigningKey, PKCS8_ED25519);
@@ -369,7 +369,7 @@ function manifest(): Manifest {
 		node: "pve",
 		storage: "local-lvm",
 		pveVmid: 597,
-		vmName: "sbx-tpl-linux-20261030-1",
+		vmName: "umiak-tpl-linux-20261030-1",
 		gitCommit: "abc",
 		recipeDigest: "sha256:x",
 		base: {
@@ -383,7 +383,7 @@ function manifest(): Manifest {
 		kernel: "7.0.0-38-generic",
 		systemd: "systemd 259 (259.9)",
 		packages: {},
-		tools: { node: "v26.13.0", sbx: null },
+		tools: { node: "v26.13.0", umiak: null },
 		agentVersion: "0.3.1",
 		defaultTunnelUrl: null,
 		hw: {},
@@ -415,7 +415,7 @@ class World {
 	agentActive = true;
 	scanCount = 0;
 	scans: { name: string; patterns: string[]; at: number }[] = [];
-	/** sbx-node: lv.scan on the host. */
+	/** umiak-node: lv.scan on the host. */
 	node = {
 		call: async <T>(op: string, args?: object): Promise<T> => {
 			if (op !== "lv.scan") throw new Error(`unexpected op ${op}`);
@@ -532,17 +532,17 @@ class World {
 						[
 							"CHECK os PASS VERSION_ID=26.04",
 							"CHECK kvm INFO unavailable: no vmx/svm in /proc/cpuinfo",
-							'TOOLS {"node":{"direct":"v26.13.0","login":"v26.13.0"},"sbx":{"direct":"missing","login":"missing"}}',
+							'TOOLS {"node":{"direct":"v26.13.0","login":"v26.13.0"},"umiak":{"direct":"missing","login":"missing"}}',
 							"",
 						].join("\n"),
 					);
-				if (c0 === "sbx-agent" && c1 === "doctor")
+				if (c0 === "umiak-agent" && c1 === "doctor")
 					return ok(
 						JSON.stringify(
 							doctor({
 								identity: { machine_id: uuid },
 								tunnel_url: {
-									url: vm.smbios.family?.replace(/^sbxt1:/, ""),
+									url: vm.smbios.family?.replace(/^umiakt1:/, ""),
 									source: "smbios",
 								},
 							}),
@@ -557,7 +557,7 @@ class World {
 						[
 							`machine_id=${hex(uuid)}`,
 							`product_uuid=${uuid.toUpperCase()}`,
-							`hostname=sbx-${hex(uuid).slice(-12)}`,
+							`hostname=umiak-${hex(uuid).slice(-12)}`,
 							`host_key=${this.hostKeyOf(vmid)}`,
 							`random-seed=${this.seedOf(vmid)}`,
 							"credential.secret=absent",
@@ -661,7 +661,7 @@ describe("verifyTemplate", () => {
 			"agent_tunnel_url",
 			"docker",
 			"tool_node",
-			"tool_sbx",
+			"tool_umiak",
 			"raw_disk_patterns",
 			"raw_disk_secrets",
 			"tunnel_connected",
@@ -728,10 +728,14 @@ describe("verifyTemplate", () => {
 		const [a, f] = smbios as [Smbios, Smbios];
 		expect(a.uuid).toBe(UUID_A);
 		expect(f.uuid).toBe(UUID_F);
-		expect(a.family).toBe(`sbxt1:${TEST_TUNNEL_URL}`);
+		expect(a.family).toBe(`umiakt1:${TEST_TUNNEL_URL}`);
 		expect(f.family).toBe(a.family);
-		expect(a.serial).toMatch(new RegExp(`^sbx1:${UUID_A}:[A-Za-z0-9_-]{43}$`));
-		expect(f.serial).toMatch(new RegExp(`^sbx1:${UUID_F}:[A-Za-z0-9_-]{43}$`));
+		expect(a.serial).toMatch(
+			new RegExp(`^umiak1:${UUID_A}:[A-Za-z0-9_-]{43}$`),
+		);
+		expect(f.serial).toMatch(
+			new RegExp(`^umiak1:${UUID_F}:[A-Za-z0-9_-]{43}$`),
+		);
 		expect(f.serial.split(":")[2]).not.toBe(a.serial.split(":")[2]);
 	});
 
@@ -755,7 +759,7 @@ describe("verifyTemplate", () => {
 		expect(run?.input).toBe(
 			`export MACHINE_ID=${UUID_A}\nexport EXPECT_SUBNET=10.88.0.0/24\n${VERIFY_SH}`,
 		);
-		// The scans run on the host (sbx-node), on the template and on A, before the hard stop.
+		// The scans run on the host (umiak-node), on the template and on A, before the hard stop.
 		const stopAt = w.execs.findIndex((e) =>
 			String(e.cmd[2]).includes("grubenv"),
 		);
@@ -847,7 +851,8 @@ describe("verifyTemplate", () => {
 		const { w, deps } = setup();
 		const ac = new AbortController();
 		w.onExec = (_vmid, cmd) => {
-			if (cmd[0] === "sbx-agent") ac.abort(new Error("interrupted by SIGINT"));
+			if (cmd[0] === "umiak-agent")
+				ac.abort(new Error("interrupted by SIGINT"));
 		};
 		await expect(
 			verifyTemplate(deps, manifest(), { signal: ac.signal }),
@@ -918,7 +923,7 @@ describe("verifyTemplate with the tunnel connect check", () => {
 		expect(v.checks.find((c) => c.id === "tunnel_connected")?.status).toBe(
 			"PASS",
 		);
-		expect(smbios[0]?.family).toBe(`sbxt1:${URL}`);
+		expect(smbios[0]?.family).toBe(`umiakt1:${URL}`);
 		expect(w.log.indexOf("register")).toBeLessThan(w.log.indexOf("start 501"));
 		const bs = Buffer.from(
 			String(smbios[0]?.serial.split(":")[2]),

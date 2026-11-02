@@ -1,4 +1,4 @@
-// `sbx rename [<sb>] <slug>` (S7 §8.2): PATCH the slug. Published port URLs
+// `umiak rename [<sb>] <slug>` (S7 §8.2): PATCH the slug. Published port URLs
 // and their cookies change at once.
 
 import type { Command } from "commander";
@@ -20,10 +20,12 @@ export function register(program: Command, run: Runner): void {
 				const [a, b] = args as [string, string | undefined];
 				const ref = sandboxRef(ctx, b === undefined ? undefined : a);
 				const slug = b ?? a;
-				const { data } = await ctx.sbx().raw.PATCH("/v1/sandboxes/{sandbox}", {
-					params: { path: { sandbox: ref.ref } },
-					body: { slug },
-				});
+				const { data } = await ctx
+					.umiak()
+					.raw.PATCH("/v1/sandboxes/{sandbox}", {
+						params: { path: { sandbox: ref.ref } },
+						body: { slug },
+					});
 				if (ref.explicit) writeCurrent(ctx, data.id);
 				ctx.out.result(data, sandboxLine);
 			}),

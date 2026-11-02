@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Allocator, macFor } from "@sbx/pve";
+import { Allocator, macFor } from "@umiak/pve";
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createPool, PgAllocatorStore } from "../src/index.ts";

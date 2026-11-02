@@ -18,11 +18,11 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/ratelimit"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/sshgw"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/ratelimit"
+	"github.com/belov38/umiak/services/gateway/internal/sshgw"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
 )
 
 // userClient returns a fixture whose key logs in as usr_1, and a client.
@@ -169,8 +169,8 @@ func TestForwardPTYShell(t *testing.T) {
 	// reaches its stderr.
 	srv := f.inst.SSH()
 	eventually(t, "one interactive channel", func() bool { return sshgw.InteractiveChannels(srv) == 1 })
-	sshgw.NotifyInteractive(srv, "sbx: notice")
-	readN(stderr, "sbx: notice\r\n")
+	sshgw.NotifyInteractive(srv, "umiak: notice")
+	readN(stderr, "umiak: notice\r\n")
 
 	if _, err := io.WriteString(stdin, "more\n"); err != nil {
 		t.Fatal(err)
@@ -486,7 +486,7 @@ func TestSessionLimit(t *testing.T) {
 		t.Helper()
 		_, err := c.NewSession()
 		var oce *ssh.OpenChannelError
-		if !errors.As(err, &oce) || oce.Reason != ssh.ResourceShortage || oce.Message != "sbx: too many SSH sessions for this user" {
+		if !errors.As(err, &oce) || oce.Reason != ssh.ResourceShortage || oce.Message != "umiak: too many SSH sessions for this user" {
 			t.Fatalf("third session: %v", err)
 		}
 	}
@@ -703,7 +703,7 @@ func TestMaxChannels(t *testing.T) {
 	wantRefused := func(err error) {
 		t.Helper()
 		var oce *ssh.OpenChannelError
-		if !errors.As(err, &oce) || oce.Reason != ssh.ResourceShortage || oce.Message != "sbx: too many open channels" {
+		if !errors.As(err, &oce) || oce.Reason != ssh.ResourceShortage || oce.Message != "umiak: too many open channels" {
 			t.Fatalf("channel over the cap: %v", err)
 		}
 	}
@@ -727,7 +727,7 @@ func TestMaxChannels(t *testing.T) {
 // only after the client asked for that forwarding.
 func TestAgentX11NotRequested(t *testing.T) {
 	_, c, _ := userClient(t, nil)
-	refused := "sbx: forwarding not requested"
+	refused := "umiak: forwarding not requested"
 	r := run(t, c, "open auth-agent@openssh.com; open x11")
 	if want := "open auth-agent@openssh.com: " + refused + "\nopen x11: " + refused + "\n"; r.stdout != want {
 		t.Fatalf("stdout %q, want %q", r.stdout, want)

@@ -10,7 +10,7 @@
 //   would end past the budget, the last error is thrown.
 // - `signal` aborts the wait at once with its reason (AbortError by default).
 
-import { isAbortError, SbxError, UNEXPECTED_RESPONSE } from "./errors.ts";
+import { isAbortError, UmiakError, UNEXPECTED_RESPONSE } from "./errors.ts";
 
 export const DEFAULT_RETRY_BUDGET_MS = 60_000;
 const BASE_DELAY_MS = 500;
@@ -43,7 +43,7 @@ export function backoffMs(retry: number, random: () => number = Math.random) {
 /** Whether a request that failed with `err` may be repeated. */
 export function isRetryable(err: unknown, safeToRepeat: boolean): boolean {
 	if (isAbortError(err)) return false;
-	if (!(err instanceof SbxError)) return safeToRepeat;
+	if (!(err instanceof UmiakError)) return safeToRepeat;
 	if (err.code === UNEXPECTED_RESPONSE) {
 		return safeToRepeat && TRANSIENT_STATUSES.has(err.status);
 	}
@@ -79,7 +79,7 @@ export function retryDelayMs(
 	retry: number,
 	random: () => number = Math.random,
 ): number {
-	const hint = err instanceof SbxError ? err.retryAfterMs : null;
+	const hint = err instanceof UmiakError ? err.retryAfterMs : null;
 	return Math.max(hint ?? 0, backoffMs(retry, random));
 }
 

@@ -7,7 +7,7 @@ import {
 	type Smbios,
 	type SnapshotRef,
 	s2SerialPayload,
-} from "@sbx/pve";
+} from "@umiak/pve";
 import type {
 	BootTimes,
 	CheckResult,
@@ -25,23 +25,23 @@ import {
 	waitTunnelSession,
 } from "../verify.ts";
 
-// `sbx-tpl verify` of a Windows template (spec S9 section 15): clone A from the template boots
-// through specialize, OOBE and the agent's rename reboot (R16); guest checks (verify.ps1 over QGA), agent checks through the sbx-agent CLI,
+// `umiak-tpl verify` of a Windows template (spec S9 section 15): clone A from the template boots
+// through specialize, OOBE and the agent's rename reboot (R16); guest checks (verify.ps1 over QGA), agent checks through the umiak-agent CLI,
 // secrets, VSS; then an S1 snapshot of A, A shut down, fork B with a new identity (one rename
 // reboot, data and password kept), a normal and a hard restart of B. Everything is removed at the
 // end. At most one Windows VM runs at a time (4 GB each, Decision 9).
 
 export const PWSH_EXE = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
 /** Written with Qga.fileWriteWindows, whose paths allow no spaces. */
-export const GUEST_SCRIPT = "C:\\Windows\\Temp\\sbx-verify.ps1";
+export const GUEST_SCRIPT = "C:\\Windows\\Temp\\umiak-verify.ps1";
 const SIZE = { cores: 2, memoryMb: 4096 };
 const EXPECT_SUBNET = "10.88.0.0/24";
 const USER = "user";
-const SECRET_NAME = "sbx-verify";
-const SECRET_PATH = `C:\\ProgramData\\sbx\\secrets\\files\\${SECRET_NAME}`;
-const MARKER_PATH = "C:\\Users\\user\\sbx-verify-marker.txt";
-const DPAPI_PATH = "C:\\Users\\user\\sbx-verify-dpapi.txt";
-const FILES_DIR = "C:\\Users\\user\\sbx-verify-files";
+const SECRET_NAME = "umiak-verify";
+const SECRET_PATH = `C:\\ProgramData\\umiak\\secrets\\files\\${SECRET_NAME}`;
+const MARKER_PATH = "C:\\Users\\user\\umiak-verify-marker.txt";
+const DPAPI_PATH = "C:\\Users\\user\\umiak-verify-dpapi.txt";
+const FILES_DIR = "C:\\Users\\user\\umiak-verify-files";
 const MIN = 60_000;
 const SHUTDOWN_TIMEOUT_S = 120;
 const VERIFY_PS1_TIMEOUT_MS = 30 * MIN;
@@ -62,7 +62,7 @@ const DAY_MS = 86_400_000;
 
 // --- Agent CLI contract (spec S9 12.14, plan Task 17), assumed here; Task 26 adjusts it. ---
 // verify.ps1 builds the same `exec` argv itself (marker "agent CLI contract" in that file).
-// sbx-agent.exe runs as SYSTEM through QGA exec and talks to the agent over the admin socket:
+// umiak-agent.exe runs as SYSTEM through QGA exec and talks to the agent over the admin socket:
 //   exec [--user <u>] [--shell <script>] -- <argv...>   exit code = the command's; 125 = agent or
 //                                                        CLI error, 127 = the command did not start
 //   call <package.Service/Method> -                      Connect JSON request on stdin, response on stdout
@@ -72,12 +72,13 @@ const DAY_MS = 86_400_000;
 // for UpdateSecrets), but the boot gate (a failed boot step) still refuses commands of non-SYSTEM
 // users.
 
-export const AGENT_EXE = "C:\\Program Files\\sbx-agent\\current\\sbx-agent.exe";
-const INFO = "sbx.agent.v1.System/Info";
-const CLAIM = "sbx.agent.v1.System/Claim";
-const UPDATE_SECRETS = "sbx.agent.v1.System/UpdateSecrets";
-const PREPARE_STOP = "sbx.agent.v1.System/PrepareStop";
-const FS = (method: string) => `sbx.agent.v1.Filesystem/${method}`;
+export const AGENT_EXE =
+	"C:\\Program Files\\umiak-agent\\current\\umiak-agent.exe";
+const INFO = "umiak.agent.v1.System/Info";
+const CLAIM = "umiak.agent.v1.System/Claim";
+const UPDATE_SECRETS = "umiak.agent.v1.System/UpdateSecrets";
+const PREPARE_STOP = "umiak.agent.v1.System/PrepareStop";
+const FS = (method: string) => `umiak.agent.v1.Filesystem/${method}`;
 
 export function agentExecCmd(o: {
 	user?: string;
@@ -217,9 +218,9 @@ function errorText(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
 
-/** Computer name of a machine (spec 11.2 p.4): SBX + the last 12 hex digits of its id. */
+/** Computer name of a machine (spec 11.2 p.4): UMI + the last 12 hex digits of its id. */
 export function computerNameFor(machineId: string): string {
-	return `SBX${uuidHex(machineId).slice(-12).toUpperCase()}`;
+	return `UMI${uuidHex(machineId).slice(-12).toUpperCase()}`;
 }
 
 /** Field of a protojson object under its proto name or its JSON (lowerCamel) name. */
@@ -312,7 +313,7 @@ export function checkShellContract(
 	});
 }
 
-/** `sbx-agent doctor --json` (spec 15.1 p.6); the service, failure actions and early.json are in verify.ps1. */
+/** `umiak-agent doctor --json` (spec 15.1 p.6); the service, failure actions and early.json are in verify.ps1. */
 export function checkWindowsDoctor(
 	doc: unknown,
 	expect: { agentVersion: string; machineId: string; tunnelUrl: string },
@@ -332,7 +333,7 @@ export function checkWindowsDoctor(
 	const mid = d.identity?.machine_id;
 	const state = d.status?.identity?.state ?? identityPhase(d.readiness?.phases);
 	const url = d.tunnel_url;
-	const svc = d.units?.["sbx-agent"];
+	const svc = d.units?.["umiak-agent"];
 	const aids = d.test_aids;
 	return [
 		pass(
@@ -350,13 +351,13 @@ export function checkWindowsDoctor(
 			url?.url === expect.tunnelUrl && url?.source === "smbios",
 			`${url?.url ?? "none"} (source ${url?.source ?? "none"}), want ${expect.tunnelUrl} from smbios`,
 		),
-		// Assumed: the Windows doctor reports the SCM state of sbx-agent under units.
+		// Assumed: the Windows doctor reports the SCM state of umiak-agent under units.
 		svc === undefined
 			? info("agent_service_doctor", "not in the report")
 			: pass(
 					"agent_service_doctor",
 					svc === "running" || svc === "active",
-					`sbx-agent ${svc}`,
+					`umiak-agent ${svc}`,
 				),
 		pass(
 			"agent_test_aids",
@@ -376,7 +377,7 @@ export interface WinSide {
 	machineGuid: string;
 	/** SHA256 fingerprints of the SSH host keys. */
 	hostKeys: string[];
-	/** sha256 of a salt and the LSA secret L$sbx_user. */
+	/** sha256 of a salt and the LSA secret L$umiak_user. */
 	lsaHash: string;
 	/** System/Info of the running agent. */
 	info: { machineId: string; hostname: string; claimed: boolean };
@@ -446,7 +447,7 @@ export function checkWindowsFork(
 		pass(
 			"fork_password_kept",
 			a.lsaHash !== "" && a.lsaHash === b.lsaHash,
-			`salted sha256 of L$sbx_user: A ${a.lsaHash.slice(0, 16) || "none"}, B ${b.lsaHash.slice(0, 16) || "none"}`,
+			`salted sha256 of L$umiak_user: A ${a.lsaHash.slice(0, 16) || "none"}, B ${b.lsaHash.slice(0, 16) || "none"}`,
 		),
 		pass(
 			"fork_one_reboot",
@@ -457,7 +458,7 @@ export function checkWindowsFork(
 			"fork_identity_reset",
 			p.identityResetLogged,
 			p.identityResetLogged
-				? "identity.reset in sbx-agent logs"
+				? "identity.reset in umiak-agent logs"
 				: `no identity.reset in the last ${LOG_LINES} log lines`,
 		),
 		pass(
@@ -742,7 +743,7 @@ export async function verifyWindows(
 			c,
 			[
 				"$h = { param([string]$s) [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($s))).ToLowerInvariant() }",
-				"$e = $env:SBX_VERIFY_SECRET",
+				"$e = $env:UMIAK_VERIFY_SECRET",
 				`$f = '${SECRET_PATH}'`,
 				"Write-Output ('env=' + $(if ($null -eq $e) { 'absent' } else { & $h $e }))",
 				"Write-Output ('file=' + $(if (Test-Path -LiteralPath $f) { & $h ([IO.File]::ReadAllText($f)) } else { 'absent' }))",
@@ -807,7 +808,7 @@ export async function verifyWindows(
 	const filesCheck = async (c: WinClone): Promise<CheckResult> => {
 		const fileA = `${FILES_DIR}\\a.txt`;
 		const fileB = `${FILES_DIR}\\b.txt`;
-		const content = "sbx-verify";
+		const content = "umiak-verify";
 		const done: string[] = [];
 		const fail = (what: string) =>
 			pass("agent_files", false, [...done, what].join("; "));
@@ -937,13 +938,13 @@ export async function verifyWindows(
 		add(...lic.checks);
 		license = lic.license;
 
-		step("agent (sbx-agent doctor)");
+		step("agent (umiak-agent doctor)");
 		const dr = await exec(A, agentDoctorCmd(), AGENT_TIMEOUT_MS);
 		let doc: unknown = null;
 		try {
 			doc = JSON.parse(dr.stdout);
 		} catch {
-			log(`sbx-agent doctor: exit ${dr.exitCode}: ${lastLines(dr.stderr)}`);
+			log(`umiak-agent doctor: exit ${dr.exitCode}: ${lastLines(dr.stderr)}`);
 		}
 		add(
 			...checkWindowsDoctor(doc, {
@@ -953,7 +954,7 @@ export async function verifyWindows(
 			}),
 		);
 
-		step("agent processes (sbx-agent exec --user user)");
+		step("agent processes (umiak-agent exec --user user)");
 		const shell: { id: string; exitCode: number; stdout: string }[] = [];
 		for (const c of SHELL_CASES) {
 			const r = await userShell(A, c.script);
@@ -1000,7 +1001,7 @@ export async function verifyWindows(
 		const secretEnv = randomBytes(24).toString("base64url");
 		const secretBody = randomBytes(24).toString("base64url");
 		const secrets = {
-			secret_env: { SBX_VERIFY_SECRET: secretEnv },
+			secret_env: { UMIAK_VERIFY_SECRET: secretEnv },
 			secret_files: [
 				{
 					name: SECRET_NAME,
@@ -1010,10 +1011,10 @@ export async function verifyWindows(
 			],
 		};
 		const cl = await call(A, CLAIM, {
-			sandbox_id: `sbx-verify-${A.uuid.slice(0, 8)}`,
-			hostname: "sbx-verify",
+			sandbox_id: `umiak-verify-${A.uuid.slice(0, 8)}`,
+			hostname: "umiak-verify",
 			port_domain: "verify.invalid",
-			env: { SBX_VERIFY_ENV: "1" },
+			env: { UMIAK_VERIFY_ENV: "1" },
 			...secrets,
 		});
 		add(

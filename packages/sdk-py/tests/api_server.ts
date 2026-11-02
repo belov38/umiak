@@ -1,6 +1,6 @@
 // The api of the pytest suite (run by tests/conftest.py with `node`):
-// apps/api's public app on a real HTTP server, Postgres (SBX_TEST_DATABASE_URL
-// or a docker container, as @sbx/db/testing/global-setup), core's
+// apps/api's public app on a real HTTP server, Postgres (UMIAK_TEST_DATABASE_URL
+// or a docker container, as @umiak/db/testing/global-setup), core's
 // SandboxService over a test topology, a FakeAgent and a team key with every
 // scope (the same world as packages/sdk-ts/test/helpers/api.ts).
 //
@@ -18,18 +18,18 @@
 
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import { createApiServer, createPublicApp } from "@sbx/api";
+import { createApiServer, createPublicApp } from "@umiak/api";
 import {
 	FakeAgent,
 	type FakeAttachFailure,
 	issueApiKey,
 	makeTestDeps,
 	testSettings,
-} from "@sbx/api/testing";
-import { serviceEnv } from "@sbx/core/testing";
-import { createPool, withTx } from "@sbx/db";
-import { setup, teardown } from "@sbx/db/testing/global-setup";
-import { createDatabase, dropDatabase } from "@sbx/db/testing/pg";
+} from "@umiak/api/testing";
+import { serviceEnv } from "@umiak/core/testing";
+import { createPool, withTx } from "@umiak/db";
+import { setup, teardown } from "@umiak/db/testing/global-setup";
+import { createDatabase, dropDatabase } from "@umiak/db/testing/pg";
 
 interface Fault {
 	method?: string;
@@ -68,8 +68,8 @@ async function adminDsn(): Promise<string | null> {
 			provided[k] = v;
 		},
 	} as never);
-	if (provided.sbxPgError) throw new Error(provided.sbxPgError);
-	return provided.sbxPgAdminDsn ? provided.sbxPgAdminDsn : null;
+	if (provided.umiakPgError) throw new Error(provided.umiakPgError);
+	return provided.umiakPgAdminDsn ? provided.umiakPgAdminDsn : null;
 }
 
 function listen(server: http.Server): Promise<number> {
@@ -92,11 +92,13 @@ function readBody(req: http.IncomingMessage): Promise<Buffer> {
 async function main() {
 	const admin = await adminDsn();
 	if (admin === null) {
-		process.stdout.write(`${JSON.stringify({ skip: "SBX_TEST_SKIP_PG=1" })}\n`);
+		process.stdout.write(
+			`${JSON.stringify({ skip: "UMIAK_TEST_SKIP_PG=1" })}\n`,
+		);
 		await teardown();
 		return;
 	}
-	// The same template, lock and copy as createTestDatabase of @sbx/db/testing.
+	// The same template, lock and copy as createTestDatabase of @umiak/db/testing.
 	const { name: dbName, url: dbUrl } = await createDatabase(admin);
 	const pool = createPool(dbUrl, 20);
 	const env = await serviceEnv(pool);
@@ -108,8 +110,8 @@ async function main() {
 	const agent = new FakeAgent();
 	const deps = makeTestDeps({
 		settings: testSettings({
-			SBX_API_RATE_BURST: "100000",
-			SBX_API_RATE_STARTS_PER_MIN: "100000",
+			UMIAK_API_RATE_BURST: "100000",
+			UMIAK_API_RATE_STARTS_PER_MIN: "100000",
 		}),
 		pool,
 		svc: env.svc,

@@ -9,9 +9,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type pg from "pg";
 
-/** Absolute path of db/migrations in the repo; SBX_MIGRATIONS_DIR overrides it. */
+/** Absolute path of db/migrations in the repo; UMIAK_MIGRATIONS_DIR overrides it. */
 export const MIGRATIONS_DIR: string =
-	process.env.SBX_MIGRATIONS_DIR ||
+	process.env.UMIAK_MIGRATIONS_DIR ||
 	fileURLToPath(new URL("../../../db/migrations", import.meta.url));
 
 /** Key of pg_advisory_lock held for the whole migration run. */
@@ -75,7 +75,7 @@ export async function readMigrations(
 	return files;
 }
 
-const CREATE_TABLE = `CREATE TABLE IF NOT EXISTS public.sbx_schema_migrations (
+const CREATE_TABLE = `CREATE TABLE IF NOT EXISTS public.umiak_schema_migrations (
 	version    int PRIMARY KEY,
 	name       text NOT NULL,
 	sha256     text NOT NULL,
@@ -104,9 +104,25 @@ export async function migrate(
 	try {
 		await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_LOCK_KEY]);
 		try {
+			// R1: retain the legacy journal and its checksums under the same session lock.
+			// Refuse ambiguous histories rather than replaying or merging migrations.
+			await client.query(`DO $$ BEGIN
+			 IF to_regclass('public.sbx_schema_migrations') IS NOT NULL THEN
+			  IF to_regclass('public.umiak_schema_migrations') IS NOT NULL THEN
+			   RAISE EXCEPTION 'both legacy and Umiak migration journals exist';
+			  END IF;
+			  ALTER TABLE public.sbx_schema_migrations RENAME TO umiak_schema_migrations;
+			  IF EXISTS (SELECT 1 FROM pg_constraint
+			    WHERE conrelid='public.umiak_schema_migrations'::regclass
+			      AND conname='sbx_schema_migrations_pkey') THEN
+			   ALTER TABLE public.umiak_schema_migrations
+			    RENAME CONSTRAINT sbx_schema_migrations_pkey TO umiak_schema_migrations_pkey;
+			  END IF;
+			 END IF;
+			END $$`);
 			await client.query(CREATE_TABLE);
 			const res = await client.query<AppliedRow>(
-				"SELECT version, name, sha256 FROM public.sbx_schema_migrations",
+				"SELECT version, name, sha256 FROM public.umiak_schema_migrations",
 			);
 			const applied = new Map(res.rows.map((r) => [r.version, r]));
 			for (const f of files) {
@@ -123,7 +139,7 @@ export async function migrate(
 					await client.query("BEGIN");
 					await client.query(f.sql);
 					await client.query(
-						"INSERT INTO public.sbx_schema_migrations (version, name, sha256) VALUES ($1, $2, $3)",
+						"INSERT INTO public.umiak_schema_migrations (version, name, sha256) VALUES ($1, $2, $3)",
 						[f.version, f.name, f.sha256],
 					);
 					await client.query("COMMIT");
@@ -164,11 +180,11 @@ export async function missingMigrations(
 ): Promise<string[]> {
 	const files = await readMigrations(dir);
 	const exists = await pool.query<{ t: string | null }>(
-		"SELECT to_regclass('public.sbx_schema_migrations')::text AS t",
+		"SELECT to_regclass('public.umiak_schema_migrations')::text AS t",
 	);
 	if (exists.rows[0]?.t == null) return files.map((f) => f.name);
 	const res = await pool.query<{ version: number }>(
-		"SELECT version FROM public.sbx_schema_migrations",
+		"SELECT version FROM public.umiak_schema_migrations",
 	);
 	const applied = new Set(res.rows.map((r) => r.version));
 	return files.filter((f) => !applied.has(f.version)).map((f) => f.name);

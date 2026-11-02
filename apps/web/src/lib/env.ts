@@ -8,8 +8,8 @@ export interface WebEnv {
 	/** Origin of the dashboard, the only Origin of unsafe requests (S8 §5.6). */
 	appOrigin: string;
 	operatorGroups: string[];
-	/** Domain of sandbox hosts, for CSP frame-src (`https://*.<sbxDomain>`). */
-	sbxDomain: string;
+	/** Domain of sandbox hosts, for CSP frame-src (`https://*.<umiakDomain>`). */
+	umiakDomain: string;
 	/** Public API URL shown in the UI (CLI and SDK hints). */
 	apiPublicUrl: string;
 	/** Sign-out target after oauth2-proxy (Keycloak logout); optional. */
@@ -37,21 +37,21 @@ const schema = z.object({
 		.trim()
 		.regex(/^postgres(ql)?:\/\//, "must be a postgres:// URL"),
 	PAYLOAD_SECRET: z.string().min(16, "must be at least 16 characters"),
-	SBX_APP_ORIGIN: httpUrl.refine((v) => {
+	UMIAK_APP_ORIGIN: httpUrl.refine((v) => {
 		try {
 			return new URL(v).origin === v;
 		} catch {
 			return false;
 		}
 	}, "must be an origin: scheme://host[:port] without a path or trailing slash"),
-	SBX_OPERATOR_GROUPS: z.string().trim().min(1, "required (comma-separated)"),
-	SBX_SBX_DOMAIN: z
+	UMIAK_OPERATOR_GROUPS: z.string().trim().min(1, "required (comma-separated)"),
+	UMIAK_PREVIEW_DOMAIN: z
 		.string()
 		.trim()
 		.toLowerCase()
-		.regex(HOSTNAME, "must be a domain name, e.g. sbx.example.com"),
-	SBX_API_PUBLIC_URL: httpUrl,
-	SBX_LOGOUT_URL: httpUrl.optional(),
+		.regex(HOSTNAME, "must be a domain name, e.g. umiak.example.com"),
+	UMIAK_API_PUBLIC_URL: httpUrl,
+	UMIAK_LOGOUT_URL: httpUrl.optional(),
 });
 
 export class WebEnvError extends Error {
@@ -84,17 +84,17 @@ export function parseWebEnv(env: Record<string, string | undefined>): WebEnv {
 	return {
 		databaseUrl: e.DATABASE_URL,
 		payloadSecret: e.PAYLOAD_SECRET,
-		appOrigin: e.SBX_APP_ORIGIN,
+		appOrigin: e.UMIAK_APP_ORIGIN,
 		operatorGroups: [
 			...new Set(
-				e.SBX_OPERATOR_GROUPS.split(",")
+				e.UMIAK_OPERATOR_GROUPS.split(",")
 					.map((g) => g.trim())
 					.filter((g) => g !== ""),
 			),
 		],
-		sbxDomain: e.SBX_SBX_DOMAIN,
-		apiPublicUrl: e.SBX_API_PUBLIC_URL.replace(/\/+$/, ""),
-		logoutUrl: e.SBX_LOGOUT_URL ?? null,
+		umiakDomain: e.UMIAK_PREVIEW_DOMAIN,
+		apiPublicUrl: e.UMIAK_API_PUBLIC_URL.replace(/\/+$/, ""),
+		logoutUrl: e.UMIAK_LOGOUT_URL ?? null,
 	};
 }
 
@@ -111,7 +111,7 @@ const BUILD_ENV: WebEnv = {
 	payloadSecret: "build-time-placeholder-secret",
 	appOrigin: "https://app.build.invalid",
 	operatorGroups: [],
-	sbxDomain: "sbx.build.invalid",
+	umiakDomain: "umiak.build.invalid",
 	apiPublicUrl: "https://api.build.invalid",
 	logoutUrl: null,
 };

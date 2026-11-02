@@ -14,14 +14,14 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
+	"github.com/belov38/umiak/libs/tunnel/gateway"
+	"github.com/belov38/umiak/libs/tunnel/registry"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/wire"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
 )
 
-// Error codes (the Sbx-Error of the gateway's answer, spec 7.6).
+// Error codes (the Umiak-Error of the gateway's answer, spec 7.6).
 const (
 	CodeAppNotListening  = "app_not_listening"
 	CodeAppTimeout       = "app_timeout"
@@ -30,7 +30,7 @@ const (
 	CodeUpstreamError    = "upstream_error"
 )
 
-// Metric reasons of sbx_gateway_upstream_dial_errors_total (spec 12.1, plus
+// Metric reasons of umiak_gateway_upstream_dial_errors_total (spec 12.1, plus
 // overloaded and upstream_error, which the spec's list does not name).
 const (
 	ReasonRefused          = "refused"
@@ -72,7 +72,7 @@ var errAgentUnavailable = errors.New("upstream: machine not connected")
 type Error struct {
 	// Status is the HTTP status of the gateway's answer.
 	Status int
-	// Code is the Sbx-Error code: one of the Code* constants.
+	// Code is the Umiak-Error code: one of the Code* constants.
 	Code string
 	// Reason is the metric label: one of the Reason* constants.
 	Reason string

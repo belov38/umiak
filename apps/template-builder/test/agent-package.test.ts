@@ -15,7 +15,7 @@ const fixtures = resolve(import.meta.dirname, "fixtures/agent");
 
 const tmpDirs: string[] = [];
 function tmp(): string {
-	const dir = mkdtempSync(join(tmpdir(), "sbx-agent-pkg-test-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-agent-pkg-test-"));
 	tmpDirs.push(dir);
 	return dir;
 }
@@ -95,12 +95,12 @@ interface PackOpts {
 
 function buildPackage(o: PackOpts): Buffer {
 	const files: Record<string, Buffer> = {
-		"sbx-agent": Buffer.from("agent binary"),
+		"umiak-agent": Buffer.from("agent binary"),
 		"trust/tunnel-ca.pem": Buffer.from("ca"),
 		"trust/update-keys.pub": Buffer.from(`${o.key.line}\n`),
 	};
 	const manifest: Record<string, unknown> = {
-		format: "sbx-agent-manifest/v1",
+		format: "umiak-agent-manifest/v1",
 		version: o.version ?? "1.2.3",
 		os: o.os ?? "linux",
 		arch: o.arch ?? "amd64",
@@ -162,15 +162,17 @@ describe("readTar", () => {
 	});
 
 	// Go's tar.Reader and GNU tar skip no data after a directory header, so
-	// the hidden entry below would be extracted as sbx-agent by `tar -x`.
+	// the hidden entry below would be extracted as umiak-agent by `tar -x`.
 	it("rejects a directory entry that carries data (hidden entry)", () => {
-		const hidden = makeTar([{ name: "sbx-agent", data: Buffer.from("evil") }]);
+		const hidden = makeTar([
+			{ name: "umiak-agent", data: Buffer.from("evil") },
+		]);
 		const body = hidden.subarray(0, 1024);
 		expect(() =>
 			readTar(
 				makeTar([
 					{ name: "trust/", type: "5", size: body.length, data: body },
-					{ name: "sbx-agent", data: Buffer.from("signed") },
+					{ name: "umiak-agent", data: Buffer.from("signed") },
 				]),
 			),
 		).toThrow(/directory .* has data/);
@@ -222,7 +224,7 @@ describe("readTar", () => {
 		late[late.length - 1] = 1;
 		expect(() => readTar(late)).toThrow(/after the end/);
 		// A complete entry after the end blocks must not be reachable.
-		const tail = makeTar([{ name: "sbx-agent", data: Buffer.from("evil") }]);
+		const tail = makeTar([{ name: "umiak-agent", data: Buffer.from("evil") }]);
 		expect(() =>
 			readTar(Buffer.concat([makeTar(entries, Buffer.alloc(1024)), tail])),
 		).toThrow(/after the end/);
@@ -272,9 +274,9 @@ describe("verifyAgentPackage", () => {
 		expect(verifyAgentPackage(tarPath, keysPath).version).toBe("1.2.3");
 	});
 
-	it("accepts a package built by sbx-release (Go)", () => {
+	it("accepts a package built by umiak-release (Go)", () => {
 		const r = verifyAgentPackage(
-			join(fixtures, "sbx-agent-fixture.tar"),
+			join(fixtures, "umiak-agent-fixture.tar"),
 			join(fixtures, "update-keys.pub"),
 		);
 		expect(r).toMatchObject({
@@ -283,11 +285,11 @@ describe("verifyAgentPackage", () => {
 			arch: "amd64",
 		});
 		expect(r.sha256).toBe(
-			sha(readFileSync(join(fixtures, "sbx-agent-fixture.tar"))),
+			sha(readFileSync(join(fixtures, "umiak-agent-fixture.tar"))),
 		);
 	});
 
-	it("rejects a flipped byte in sbx-agent", () => {
+	it("rejects a flipped byte in umiak-agent", () => {
 		const key = newKey();
 		const tar = buildPackage({ key });
 		const at = tar.indexOf("agent binary");
@@ -345,20 +347,20 @@ describe("verifyAgentPackage", () => {
 		expect(() => verifyAgentPackage(win, keysPath)).toThrow(/linux\/amd64/);
 	});
 
-	it("accepts windows/amd64 with sbx-agent.exe when asked for windows", () => {
+	it("accepts windows/amd64 with umiak-agent.exe when asked for windows", () => {
 		const key = newKey();
 		const dir = tmp();
 		const win = buildPackage({
 			key,
 			os: "windows",
 			files: (f) => {
-				f["sbx-agent.exe"] = f["sbx-agent"] as Buffer;
-				delete f["sbx-agent"];
+				f["umiak-agent.exe"] = f["umiak-agent"] as Buffer;
+				delete f["umiak-agent"];
 			},
 			mutate: (m) => {
 				const files = m.files as Record<string, string>;
-				files["sbx-agent.exe"] = files["sbx-agent"] as string;
-				delete files["sbx-agent"];
+				files["umiak-agent.exe"] = files["umiak-agent"] as string;
+				delete files["umiak-agent"];
 			},
 		});
 		const [tarPath, keysPath] = write(dir, win, key.line);
@@ -380,7 +382,7 @@ describe("verifyAgentPackage", () => {
 			dir,
 			buildPackage({
 				key,
-				mutate: (m) => (m.format = "sbx-agent-manifest/v2"),
+				mutate: (m) => (m.format = "umiak-agent-manifest/v2"),
 			}),
 			key.line,
 		);
@@ -417,11 +419,12 @@ describe("verifyAgentPackage", () => {
 			tmp(),
 			buildPackage({
 				key,
-				mutate: (m) => delete (m.files as Record<string, string>)["sbx-agent"],
+				mutate: (m) =>
+					delete (m.files as Record<string, string>)["umiak-agent"],
 			}),
 			key.line,
 		);
-		expect(() => verifyAgentPackage(tarPath, keysPath)).toThrow(/sbx-agent/);
+		expect(() => verifyAgentPackage(tarPath, keysPath)).toThrow(/umiak-agent/);
 	});
 
 	it("rejects a package without manifest.sig", () => {

@@ -16,12 +16,12 @@ import (
 
 	"connectrpc.com/connect"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1/tunnelv1connect"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/memnet"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/tunnel/v1/tunnelv1connect"
+	"github.com/belov38/umiak/libs/tunnel/agent"
+	"github.com/belov38/umiak/libs/tunnel/h2"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/memnet"
 )
 
 const testMachineID = "machine-1"

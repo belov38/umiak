@@ -41,7 +41,7 @@ test("non-operators get 403 on the operator screens and allTeams", async ({
 	expect(
 		(
 			await alice.request.get(`/cms-api/users?team=${team}`, {
-				headers: { "sbx-team": team },
+				headers: { "umiak-team": team },
 			})
 		).status(),
 	).toBe(403);
@@ -182,7 +182,7 @@ test("operator blocks another team's sandbox: route blocked, owner refused write
 	await refused("POST", `/sandboxes/${id}/resume`, {});
 	// Delete works.
 	const del = await alice.request.delete(`/api/v1/sandboxes/${id}`, {
-		headers: { ...apiHeaders(team), "Sbx-Confirm-Delete": id },
+		headers: { ...apiHeaders(team), "Umiak-Confirm-Delete": id },
 	});
 	expect(del.status(), await del.text()).toBeLessThan(300);
 	await expect

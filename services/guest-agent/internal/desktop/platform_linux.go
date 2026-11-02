@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // NativeSession opens the interactive OS desktop.
@@ -24,7 +24,7 @@ func PlatformEnvironment() map[string]string {
 // NewPlatform binds Linux services. All starts are deferred until secrets readiness.
 func NewPlatform(l paths.Layout, identityBoot string) (Session, Streamer, func(context.Context) error, error) {
 	rooted := func(p string) string { r, _ := l.Rooted(p); return r }
-	h := &FileHost{SunDir: rooted("/home/user/.local/state/sbx-sunshine"), MoonDir: rooted("/var/lib/sbx-stream"), Template: rooted("/etc/sbx-desktop/moonlight.json"), IceScript: "/usr/local/lib/sbx-desktop/ice-servers", Run: ExecCommand}
+	h := &FileHost{SunDir: rooted("/home/user/.local/state/umiak-sunshine"), MoonDir: rooted("/var/lib/umiak-stream"), Template: rooted("/etc/umiak-desktop/moonlight.json"), IceScript: "/usr/local/lib/umiak-desktop/ice-servers", Run: ExecCommand}
 	h.FlowTimeout = func() (uint32, error) {
 		data, e := os.ReadFile(rooted("/proc/sys/net/netfilter/nf_conntrack_udp_timeout_stream"))
 		if e != nil {
@@ -34,9 +34,9 @@ func NewPlatform(l paths.Layout, identityBoot string) (Session, Streamer, func(c
 		return uint32(ttl), e
 	}
 	h.Service = func(ctx context.Context, action, name string) error {
-		unit := "sbx-sunshine.service"
+		unit := "umiak-sunshine.service"
 		if name == "moonlight" {
-			unit = "sbx-moonlight-web.service"
+			unit = "umiak-moonlight-web.service"
 		}
 		_, e := ExecCommand(ctx, "systemctl", action, unit)
 		return e
@@ -44,7 +44,7 @@ func NewPlatform(l paths.Layout, identityBoot string) (Session, Streamer, func(c
 	h.Own = func(ctx context.Context, path, kind string) error {
 		owner := "user:user"
 		if kind == "moon" {
-			owner = "sbxstream:sbxstream"
+			owner = "umiakstream:umiakstream"
 		}
 		if kind == "sun" {
 			if e := ownUserDesktopParents(ctx, path, ExecCommand); e != nil {
@@ -55,7 +55,7 @@ func NewPlatform(l paths.Layout, identityBoot string) (Session, Streamer, func(c
 		return e
 	}
 	h.Running = func(ctx context.Context) (bool, error) {
-		_, e := ExecCommand(ctx, "systemctl", "is-active", "--quiet", "sbx-sunshine.service")
+		_, e := ExecCommand(ctx, "systemctl", "is-active", "--quiet", "umiak-sunshine.service")
 		if e == nil {
 			return true, nil
 		}
@@ -69,5 +69,5 @@ func NewPlatform(l paths.Layout, identityBoot string) (Session, Streamer, func(c
 	marker := filepath.Join(l.RunDir, "desktop-session-boot")
 	gate := SessionGate{Marker: marker, IdentityBoot: identityBoot, Run: ExecCommand}
 
-	return SocketSession(rooted("/run/user/1000/sbx-session/socket")), streamer, gate.Start, nil
+	return SocketSession(rooted("/run/user/1000/umiak-session/socket")), streamer, gate.Start, nil
 }

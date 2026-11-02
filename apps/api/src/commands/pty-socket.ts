@@ -1,4 +1,4 @@
-// A PTY WebSocket connection (S7 §10.2, subprotocol sbx.pty.v1) after the
+// A PTY WebSocket connection (S7 §10.2, subprotocol umiak.pty.v1) after the
 // upgrade.
 //
 // Server → client:
@@ -25,7 +25,7 @@
 // a peer that missed the previous one is dropped.
 import { randomUUID } from "node:crypto";
 import { z } from "@hono/zod-openapi";
-import type { Command, Principal } from "@sbx/core";
+import type { Command, Principal } from "@umiak/core";
 import { type RawData, WebSocket } from "ws";
 import {
 	AgentCallError,
@@ -46,7 +46,7 @@ import {
 import type { ExitFrame } from "./frames.ts";
 import { requireSameMachine } from "./run.ts";
 
-export const PTY_SUBPROTOCOL = "sbx.pty.v1";
+export const PTY_SUBPROTOCOL = "umiak.pty.v1";
 
 export interface PtyTimings {
 	/** WebSocket ping interval (15 s). */
@@ -74,7 +74,7 @@ export const PTY_INPUT_MAX_QUEUED = 1024 * 1024;
 export const PTY_TOUCH_INTERVAL_MS = 30_000;
 export const PTY_MAX_SIZE = 1000;
 
-/** WebSocket close codes of sbx.pty.v1. */
+/** WebSocket close codes of umiak.pty.v1. */
 export const PTY_CLOSE = {
 	exit: 1000,
 	invalidMessage: 1008,

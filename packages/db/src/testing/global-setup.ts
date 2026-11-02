@@ -1,14 +1,14 @@
 // Vitest global setup: provides an admin Postgres DSN to the test workers.
-// SBX_TEST_DATABASE_URL is used as is; otherwise a postgres:18.6-alpine
+// UMIAK_TEST_DATABASE_URL is used as is; otherwise a postgres:18.6-alpine
 // container is started once through the docker CLI and removed in teardown.
 // A run killed before its teardown does not leave it behind: a watchdog
 // removes it when this process is gone, and the next setup removes
 // containers of dead owners (container-guard.ts).
-// SBX_TEST_SKIP_PG=1 without a URL makes database tests skip; a missing Docker
+// UMIAK_TEST_SKIP_PG=1 without a URL makes database tests skip; a missing Docker
 // without that flag makes every createTestDatabase() call fail.
 //
 // Other packages reference it from vitest.config.ts:
-//   globalSetup: ["@sbx/db/testing/global-setup"]
+//   globalSetup: ["@umiak/db/testing/global-setup"]
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import pg from "pg";
@@ -31,25 +31,25 @@ let containerId: string | undefined;
 let watchdog: Watchdog | undefined;
 
 export async function setup(project: TestProject): Promise<void> {
-	const url = process.env.SBX_TEST_DATABASE_URL;
+	const url = process.env.UMIAK_TEST_DATABASE_URL;
 	if (url) {
-		project.provide("sbxPgAdminDsn", url);
-		project.provide("sbxPgError", "");
+		project.provide("umiakPgAdminDsn", url);
+		project.provide("umiakPgError", "");
 		return;
 	}
-	if (process.env.SBX_TEST_SKIP_PG === "1") {
-		project.provide("sbxPgAdminDsn", "");
-		project.provide("sbxPgError", "");
+	if (process.env.UMIAK_TEST_SKIP_PG === "1") {
+		project.provide("umiakPgAdminDsn", "");
+		project.provide("umiakPgError", "");
 		return;
 	}
 	try {
-		project.provide("sbxPgAdminDsn", await startContainer());
-		project.provide("sbxPgError", "");
+		project.provide("umiakPgAdminDsn", await startContainer());
+		project.provide("umiakPgError", "");
 	} catch (err) {
-		project.provide("sbxPgAdminDsn", "");
+		project.provide("umiakPgAdminDsn", "");
 		project.provide(
-			"sbxPgError",
-			`postgres unavailable: ${String(err)} (set SBX_TEST_DATABASE_URL, or SBX_TEST_SKIP_PG=1 to skip database tests)`,
+			"umiakPgError",
+			`postgres unavailable: ${String(err)} (set UMIAK_TEST_DATABASE_URL, or UMIAK_TEST_SKIP_PG=1 to skip database tests)`,
 		);
 	}
 }
@@ -84,7 +84,7 @@ async function startContainer(): Promise<string> {
 			name,
 			...ownerLabels(owner),
 			"-e",
-			"POSTGRES_PASSWORD=sbx",
+			"POSTGRES_PASSWORD=umiak",
 			"-p",
 			"127.0.0.1::5432",
 			TEST_PG_IMAGE,
@@ -105,7 +105,7 @@ async function startContainer(): Promise<string> {
 	// Output looks like "127.0.0.1:49153" and may list an IPv6 line too.
 	const line = port.stdout.trim().split("\n")[0] ?? "";
 	const hostPort = line.slice(line.lastIndexOf(":") + 1);
-	const dsn = `postgres://postgres:sbx@127.0.0.1:${hostPort}/postgres?sslmode=disable`;
+	const dsn = `postgres://postgres:umiak@127.0.0.1:${hostPort}/postgres?sslmode=disable`;
 	await waitReady(dsn, 60_000);
 	return dsn;
 }

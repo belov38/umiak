@@ -1,5 +1,5 @@
 {
-	"name": "@sbx/payload",
+	"name": "@umiak/payload",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
@@ -16,14 +16,14 @@
 	},
 	"dependencies": {
 		"@payloadcms/db-postgres": "3.92.1",
-		"@sbx/auth": "workspace:*",
-		"@sbx/config": "workspace:*",
+		"@umiak/auth": "workspace:*",
+		"@umiak/config": "workspace:*",
 		"graphql": "16.14.2",
 		"payload": "3.92.1",
 		"pg": "8.23.1"
 	},
 	"devDependencies": {
-		"@sbx/db": "workspace:*",
+		"@umiak/db": "workspace:*",
 		"@types/pg": "8.23.1",
 		"pg-boss": "12.38.0"
 	}

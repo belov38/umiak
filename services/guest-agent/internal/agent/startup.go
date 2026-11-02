@@ -13,23 +13,23 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/claim"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/desktop"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ext"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/files"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ident"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/ports"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/quiesce"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/readiness"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/reqcache"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/system"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/update"
+	"github.com/belov38/umiak/libs/proto/umiak/agent/v1/agentv1connect"
+	"github.com/belov38/umiak/services/guest-agent/internal/claim"
+	"github.com/belov38/umiak/services/guest-agent/internal/desktop"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
+	"github.com/belov38/umiak/services/guest-agent/internal/ext"
+	"github.com/belov38/umiak/services/guest-agent/internal/files"
+	"github.com/belov38/umiak/services/guest-agent/internal/ident"
+	"github.com/belov38/umiak/services/guest-agent/internal/ports"
+	"github.com/belov38/umiak/services/guest-agent/internal/process"
+	"github.com/belov38/umiak/services/guest-agent/internal/quiesce"
+	"github.com/belov38/umiak/services/guest-agent/internal/readiness"
+	"github.com/belov38/umiak/services/guest-agent/internal/reqcache"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/system"
+	"github.com/belov38/umiak/services/guest-agent/internal/update"
 )
 
 // Reasons of agent.started.
@@ -58,7 +58,7 @@ var (
 //     foreign freeze, before anything is written to disk; then the start
 //     guard arms the deadline of an unconfirmed update;
 //  2. identity: read smbios and, on a mismatch with identity.json, apply the
-//     new identity (sbx-identity.service did not run). This runs before the
+//     new identity (umiak-identity.service did not run). This runs before the
 //     store opens because the reset deletes state.db;
 //  3. open state.db, set the boot id, report identity.reset as the first
 //     event of a new journal, hand the store to quiesce;
@@ -378,7 +378,7 @@ func (a *agent) buildServices() error {
 }
 
 // applyIdentity reads the smbios identity and applies it if identity.json
-// names another machine (the agent's fallback for sbx-identity.service,
+// names another machine (the agent's fallback for umiak-identity.service,
 // spec 7.2). A failure leaves the identity phase failed.
 func (a *agent) applyIdentity(ctx context.Context) {
 	id, err := a.readIdentity(ctx)
@@ -386,7 +386,7 @@ func (a *agent) applyIdentity(ctx context.Context) {
 		var changed bool
 		changed, err = ident.Apply(ctx, a.l, id, a.d.Resetter, true)
 		if changed {
-			a.log.Warn("agent: the machine identity changed and sbx-identity.service did not apply it; the agent reset the identity",
+			a.log.Warn("agent: the machine identity changed and umiak-identity.service did not apply it; the agent reset the identity",
 				"machine_id", id.MachineID)
 		}
 	}

@@ -1,6 +1,6 @@
 # Expected failures of `conformance server` (@modelcontextprotocol/conformance
 # 0.1.16) against createHttpApp (S11 14.3). Every entry needs a feature the
-# sbx MCP server does not have, or a tool of the conformance reference
+# umiak MCP server does not have, or a tool of the conformance reference
 # server. The CLI fails when an entry starts to pass: remove it then.
 server:
   # No logging capability: the server never sends notifications/message.
@@ -9,8 +9,8 @@ server:
   - completion-complete
 
   # The scenarios call the tools of the reference "everything" server
-  # (test_simple_text, test_image_content, ...); sbx publishes only its own
-  # 38 tools (S11 8). Tool listing, tool errors and progress of sbx tools are
+  # (test_simple_text, test_image_content, ...); umiak publishes only its own
+  # 38 tools (S11 8). Tool listing, tool errors and progress of umiak tools are
   # covered by tools-list here and by the contract tests.
   - tools-call-simple-text
   - tools-call-image
@@ -20,7 +20,7 @@ server:
   - tools-call-with-logging
   - tools-call-error
   - tools-call-with-progress
-  # ...and they also need sampling or elicitation from the client, which sbx
+  # ...and they also need sampling or elicitation from the client, which umiak
   # does not use (confirmation goes through the `confirm` argument, S11 11.1).
   - tools-call-sampling
   - tools-call-elicitation

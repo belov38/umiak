@@ -3,13 +3,13 @@
 // cookie. The block is applied the way core's blockSandbox does it (row + NOTIFY), because
 // the e2e user is not an operator. Never logs ticket URLs or cookies.
 //
-//   SBX_API_URL=<dev api> NODE_EXTRA_CA_CERTS=<dev ca> mise exec -- node infra/dev-cp/desktop-block-probe.ts
+//   UMIAK_API_URL=<dev api> NODE_EXTRA_CA_CERTS=<dev ca> mise exec -- node infra/dev-cp/desktop-block-probe.ts
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { type Sandbox, Sbx } from "../../packages/sdk-ts/src/index.ts";
+import { type Sandbox, Umiak } from "../../packages/sdk-ts/src/index.ts";
 import { runningSandboxMemory } from "./desktop-budget.ts";
 
-const ssh = process.env.SBX_DEVCP_SSH ?? "sbx@192.168.68.90";
+const ssh = process.env.UMIAK_DEVCP_SSH ?? "umiak@192.168.68.90";
 function sql(text: string): string {
 	return execFileSync(
 		"ssh",
@@ -20,14 +20,14 @@ function sql(text: string): string {
 			"docker",
 			"exec",
 			"-i",
-			"sbx-postgres-1",
+			"umiak-postgres-1",
 			"psql",
 			"-v",
 			"ON_ERROR_STOP=1",
 			"-U",
-			"sbx",
+			"umiak",
 			"-d",
-			"sbx",
+			"umiak",
 			"-At",
 		],
 		{ input: text, encoding: "utf8", timeout: 30_000 },
@@ -63,7 +63,7 @@ async function open(url: string) {
 	return { status: response?.status, jar, url: next };
 }
 
-const client = new Sbx();
+const client = new Umiak();
 let sb: Sandbox | undefined;
 try {
 	// One 4 GiB sandbox next to whatever runs in 500-599 (a template build included).
@@ -83,7 +83,7 @@ try {
 	const used = runningSandboxMemory(list);
 	if (used + 4096 > 8192) throw new Error(`RAM budget occupied (${used} MiB)`);
 	sb = await client.sandboxes.create({
-		template: process.env.SBX_E2E_TEMPLATE ?? "linux-desktop",
+		template: process.env.UMIAK_E2E_TEMPLATE ?? "linux-desktop",
 		size: "4gb",
 		labels: { e2e: "desktop" },
 		ttlSeconds: 1800,
@@ -107,7 +107,7 @@ try {
 		);
 	const before = epoch();
 	sql(
-		`UPDATE runtime.sandboxes SET blocked=true,block_reason='abuse',blocked_at=now(),version=version+1 WHERE id='${raw}'; SELECT pg_notify('sbx_ssh_revoke',''),pg_notify('sbx_identity','sandboxes:${raw}');`,
+		`UPDATE runtime.sandboxes SET blocked=true,block_reason='abuse',blocked_at=now(),version=version+1 WHERE id='${raw}'; SELECT pg_notify('umiak_ssh_revoke',''),pg_notify('umiak_identity','sandboxes:${raw}');`,
 	);
 	const blocked = "forbidden:sandbox_blocked";
 	check(
@@ -162,7 +162,7 @@ try {
 	// A link issued while the block was applied carries the block's epoch. Between the
 	// unblock and the access monitor (5 s tick; core's NOTIFY may be lost) it must not
 	// open the desktop: the row is unblocked here without the NOTIFY.
-	const ticket = `sbxd_${randomBytes(32).toString("base64url")}`;
+	const ticket = `umiakd_${randomBytes(32).toString("base64url")}`;
 	sql(
 		`INSERT INTO runtime.desktop_tickets(ticket_hash,sandbox_id,label,user_id,auth_epoch,expires_at) SELECT sha256(convert_to('${ticket}','UTF8')),d.sandbox_id,'${sb.data.slug}-desktop',(SELECT user_id FROM runtime.desktop_tickets WHERE sandbox_id='${raw}' AND user_id IS NOT NULL LIMIT 1),d.auth_epoch,now()+interval '10 minutes' FROM runtime.sandbox_desktops d WHERE d.sandbox_id='${raw}'`,
 	);

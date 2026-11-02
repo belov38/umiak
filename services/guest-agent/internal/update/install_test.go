@@ -10,7 +10,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 func TestInstallActivate(t *testing.T) {
@@ -22,8 +22,8 @@ func TestInstallActivate(t *testing.T) {
 	l := paths.ForRoot(t.TempDir())
 	sc := &fakeSystemctl{}
 	units := fstest.MapFS{
-		"sbx-agent.service":    {Data: []byte("[Unit]\n")},
-		"sbx-identity.service": {Data: []byte("[Unit]\n")},
+		"umiak-agent.service":    {Data: []byte("[Unit]\n")},
+		"umiak-identity.service": {Data: []byte("[Unit]\n")},
 	}
 	opts := InstallOptions{
 		Activate:     true,
@@ -58,7 +58,7 @@ func TestInstallActivate(t *testing.T) {
 			t.Errorf("unit %s: %v %v", name, fi, err)
 		}
 	}
-	want := [][]string{{"daemon-reload"}, {"enable", "sbx-identity.service", "sbx-agent.service"}}
+	want := [][]string{{"daemon-reload"}, {"enable", "umiak-identity.service", "umiak-agent.service"}}
 	if !slices.EqualFunc(sc.calls, want, slices.Equal) {
 		t.Errorf("systemctl calls = %v, want %v", sc.calls, want)
 	}

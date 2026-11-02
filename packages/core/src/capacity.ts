@@ -1,5 +1,5 @@
-import type { Quota } from "@sbx/config";
-import type { Tx } from "@sbx/db";
+import type { Quota } from "@umiak/config";
+import type { Tx } from "@umiak/db";
 import { invalidState, notFound, quotaExceeded } from "./errors.ts";
 import type { JobSender } from "./jobs.ts";
 import { lockNode, lockTeam } from "./locks.ts";
@@ -96,7 +96,7 @@ export interface AdmitInput {
 
 export type AdmitResult = { ok: true; evicted: string[] } | { ok: false };
 
-const ADMIT_SAVEPOINT = "sbx_admit";
+const ADMIT_SAVEPOINT = "umiak_admit";
 
 /**
  * Admission (S6 §8.2). Takes the node lock (the caller takes the team lock

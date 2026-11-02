@@ -2,18 +2,18 @@
 // A broken connection, a line that is not JSON, or no data for `idleTimeoutMs`
 // (S7 §9.7: 45 s without lines; the api sends a heartbeat line after 15 s of
 // silence, so a live stream never goes that long without a byte) are all
-// SbxError `network_error` with `retryable: true`: the stream may be reopened
+// UmiakError `network_error` with `retryable: true`: the stream may be reopened
 // from its offsets. Leaving the loop early cancels the body.
 
-import { NETWORK_ERROR, SbxError } from "./errors.ts";
+import { NETWORK_ERROR, UmiakError } from "./errors.ts";
 
 export interface NdjsonOptions {
 	idleTimeoutMs: number;
 	signal?: AbortSignal;
 }
 
-function broken(message: string, cause?: unknown): SbxError {
-	return new SbxError({
+function broken(message: string, cause?: unknown): UmiakError {
+	return new UmiakError({
 		status: 0,
 		code: NETWORK_ERROR,
 		message,

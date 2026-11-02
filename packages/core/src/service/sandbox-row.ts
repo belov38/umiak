@@ -1,4 +1,4 @@
-import type { Tx } from "@sbx/db";
+import type { Tx } from "@umiak/db";
 import { slugTaken } from "../errors.ts";
 import type { SandboxOrigin } from "../rows.ts";
 import { generateSlug, slugProblem } from "../slug.ts";

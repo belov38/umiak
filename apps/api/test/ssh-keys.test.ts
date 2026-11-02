@@ -1,7 +1,15 @@
 // SSH keys of a person (S7 §11.3): person only, §11.3 key types, the
 // fingerprint is unique across the platform.
-import { decodeUuid, parseSshPublicKey, signUserCertificate } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import {
+	decodeUuid,
+	parseSshPublicKey,
+	signUserCertificate,
+} from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { HarnessResponse } from "./helpers/harness.ts";
 import {

@@ -7,7 +7,7 @@ import (
 )
 
 func TestLoadMergesFileOverDefaults(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sbx-node.toml")
+	path := filepath.Join(t.TempDir(), "umiak-node.toml")
 	if err := os.WriteFile(path, []byte("vmidMin = 500\nvmidMax = 589\ntemplateVmidMin = 597\ntemplateVmidMax = 599\ntemplateVmid = 599\nleaseFile = \"/tmp/x.leases\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -15,7 +15,7 @@ func TestLoadMergesFileOverDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if c.VG != "pve" || c.ThinPool != "data" || c.VNet != "sbx0" || c.SDNZone != "sbx" || c.ClusterID != 1 || c.Node != "pve" {
+	if c.VG != "pve" || c.ThinPool != "data" || c.VNet != "umiak0" || c.SDNZone != "umiak" || c.ClusterID != 1 || c.Node != "pve" {
 		t.Errorf("defaults not kept: %+v", c)
 	}
 	if c.LeaseFile != "/tmp/x.leases" {
@@ -47,7 +47,7 @@ func TestLoadRejectsUnknownKeysAndBadRange(t *testing.T) {
 }
 
 func TestLoadWithoutTemplateVmid(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sbx-node.toml")
+	path := filepath.Join(t.TempDir(), "umiak-node.toml")
 	if err := os.WriteFile(path, []byte("vmidMin = 500\nvmidMax = 589\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestLoadWithoutTemplateVmid(t *testing.T) {
 	if c.IsoDir != "/var/lib/vz/template/iso" || c.ImportDir != "/var/lib/vz/import" {
 		t.Errorf("media dirs = %q, %q", c.IsoDir, c.ImportDir)
 	}
-	if c.StateDir != "/var/lib/sbx-node" {
+	if c.StateDir != "/var/lib/umiak-node" {
 		t.Errorf("StateDir = %q", c.StateDir)
 	}
 }
@@ -91,7 +91,7 @@ func TestDefaultLayout(t *testing.T) {
 }
 
 func TestDevelopmentDesktopSlots(t *testing.T) {
-	c, err := Load("../../../../infra/pve/sbx-node.toml")
+	c, err := Load("../../../../infra/pve/umiak-node.toml")
 	if err != nil {
 		t.Fatal(err)
 	}

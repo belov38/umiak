@@ -1,5 +1,7 @@
 # S7 Публичное API v1, SDK, CLI: план реализации
 
+> Исторический план до R1. Действующие имена и контракты — `docs/specs/rename-umiak.md`.
+
 > **Для исполнителей:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development (по задаче на субагента, после каждой задачи — ревью свежим субагентом) и superpowers:test-driven-development. Шаги — чекбоксы `- [ ]`.
 
 **Цель:** реализовать MVP S7 по `docs/specs/s7-public-api.md`: `apps/api` (три listener-а, все ресурсы `/v1`, внутренние ручки gateway), `packages/auth`, OpenAPI 3.1, `@sbx/sdk` (TS), `sbx-sdk` (Python), CLI `sbx` на Bun, сервисы `api`, Keycloak и oauth2-proxy в `deploy/compose`.

@@ -1,5 +1,5 @@
 // Per-node serialization of VM start and delete. Proxmox writes the SDN
-// ethers/IPAM entries of a VM on start and removes them on destroy, sbx-node
+// ethers/IPAM entries of a VM on start and removes them on destroy, umiak-node
 // rewrites the dnsmasq files on dhcp.release, and concurrent runs of these on
 // one node race on those files. Clones stay parallel (they are limited by
 // node_clone_slots).

@@ -16,9 +16,9 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // agentBaseURL is the base URL of requests sent to the agent; RoundTrip
@@ -253,7 +253,7 @@ func (m *MachineConn) DialTCP(ctx context.Context, port uint16) (net.Conn, error
 // conn is closed, the stream is reset, or both directions are finished
 // (read EOF and CloseWrite). A refusal by the agent is a
 // *transport.DialError; its Reason is "refused" or "timeout" when the agent
-// said so with Sbx-Dial-Error, and "" for any other value.
+// said so with Umiak-Dial-Error, and "" for any other value.
 //
 // The returned conn does not support deadlines: SetDeadline,
 // SetReadDeadline and SetWriteDeadline return an error wrapping

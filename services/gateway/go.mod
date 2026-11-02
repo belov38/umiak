@@ -1,4 +1,4 @@
-module github.com/belov38/boat-dev-clone/services/gateway
+module github.com/belov38/umiak/services/gateway
 
 go 1.27
 
@@ -6,7 +6,7 @@ toolchain go1.27.3
 
 require (
 	connectrpc.com/connect v1.21.1
-	github.com/belov38/boat-dev-clone/libs/tunnel v0.0.0
+	github.com/belov38/umiak/libs/tunnel v0.0.0
 	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/google/uuid v1.6.0
@@ -20,7 +20,7 @@ require (
 )
 
 require (
-	github.com/belov38/boat-dev-clone/libs/proto v0.0.0 // indirect
+	github.com/belov38/umiak/libs/proto v0.0.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
@@ -37,6 +37,6 @@ require (
 )
 
 replace (
-	github.com/belov38/boat-dev-clone/libs/proto => ../../libs/proto
-	github.com/belov38/boat-dev-clone/libs/tunnel => ../../libs/tunnel
+	github.com/belov38/umiak/libs/proto => ../../libs/proto
+	github.com/belov38/umiak/libs/tunnel => ../../libs/tunnel
 )

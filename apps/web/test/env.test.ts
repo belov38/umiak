@@ -3,12 +3,12 @@ import { parseWebEnv, WebEnvError } from "../src/lib/env.ts";
 import { signOutHref, switchTeamPath } from "../src/lib/team-path.ts";
 
 const OK = {
-	DATABASE_URL: "postgres://web:pw@postgres:5432/sbx",
+	DATABASE_URL: "postgres://web:pw@postgres:5432/umiak",
 	PAYLOAD_SECRET: "0123456789abcdef0123",
-	SBX_APP_ORIGIN: "https://app.sbx.example.com",
-	SBX_OPERATOR_GROUPS: " sbx-operators, admins ,,sbx-operators",
-	SBX_SBX_DOMAIN: "SBX.example.com",
-	SBX_API_PUBLIC_URL: "https://api.sbx.example.com/",
+	UMIAK_APP_ORIGIN: "https://app.umiak.example.com",
+	UMIAK_OPERATOR_GROUPS: " umiak-operators, admins ,,umiak-operators",
+	UMIAK_PREVIEW_DOMAIN: "UMIAK.example.com",
+	UMIAK_API_PUBLIC_URL: "https://api.umiak.example.com/",
 };
 
 describe("parseWebEnv (S8 §14.1)", () => {
@@ -16,14 +16,14 @@ describe("parseWebEnv (S8 §14.1)", () => {
 		expect(parseWebEnv(OK)).toEqual({
 			databaseUrl: OK.DATABASE_URL,
 			payloadSecret: OK.PAYLOAD_SECRET,
-			appOrigin: "https://app.sbx.example.com",
-			operatorGroups: ["sbx-operators", "admins"],
-			sbxDomain: "sbx.example.com",
-			apiPublicUrl: "https://api.sbx.example.com",
+			appOrigin: "https://app.umiak.example.com",
+			operatorGroups: ["umiak-operators", "admins"],
+			umiakDomain: "umiak.example.com",
+			apiPublicUrl: "https://api.umiak.example.com",
 			logoutUrl: null,
 		});
 		expect(
-			parseWebEnv({ ...OK, SBX_LOGOUT_URL: "https://kc.example.com/logout" })
+			parseWebEnv({ ...OK, UMIAK_LOGOUT_URL: "https://kc.example.com/logout" })
 				.logoutUrl,
 		).toBe("https://kc.example.com/logout");
 	});
@@ -32,10 +32,10 @@ describe("parseWebEnv (S8 §14.1)", () => {
 		let err: unknown;
 		try {
 			parseWebEnv({
-				SBX_APP_ORIGIN: "https://app.example.com/",
-				SBX_SBX_DOMAIN: "*.bad",
+				UMIAK_APP_ORIGIN: "https://app.example.com/",
+				UMIAK_PREVIEW_DOMAIN: "*.bad",
 				PAYLOAD_SECRET: "short",
-				SBX_LOGOUT_URL: "",
+				UMIAK_LOGOUT_URL: "",
 			});
 		} catch (e) {
 			err = e;
@@ -45,15 +45,15 @@ describe("parseWebEnv (S8 §14.1)", () => {
 		for (const k of [
 			"DATABASE_URL",
 			"PAYLOAD_SECRET",
-			"SBX_APP_ORIGIN",
-			"SBX_OPERATOR_GROUPS",
-			"SBX_SBX_DOMAIN",
-			"SBX_API_PUBLIC_URL",
+			"UMIAK_APP_ORIGIN",
+			"UMIAK_OPERATOR_GROUPS",
+			"UMIAK_PREVIEW_DOMAIN",
+			"UMIAK_API_PUBLIC_URL",
 		]) {
 			expect(issues).toContain(k);
 		}
 		// An empty optional value is absent, not invalid.
-		expect(issues).not.toContain("SBX_LOGOUT_URL");
+		expect(issues).not.toContain("UMIAK_LOGOUT_URL");
 	});
 });
 

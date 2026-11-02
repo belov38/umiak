@@ -3,9 +3,9 @@
 // (dhcp.release + DELETE /qemu/<vmid>) inside PveNodeInfra.create; that
 // rollback must take the same power lock (MachinesOptions.powerLock).
 import { randomUUID } from "node:crypto";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
-import { PveApiError } from "@sbx/pve";
-import { FakeNode, FakePve } from "@sbx/pve/testing";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
+import { PveApiError } from "@umiak/pve";
+import { FakeNode, FakePve } from "@umiak/pve/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PveInfraRegistry } from "../src/adapters/pve-infra.ts";
 import { createTopology, leaseVm } from "./fakes/world.ts";
@@ -42,7 +42,7 @@ class HeldStartPve extends FakePve {
 
 	override async put<T>(path: string, params?: Record<string, unknown>) {
 		// The disk config PUT of a new clone fails: S1 create rolls back.
-		if (/\/qemu\/\d+\/config$/.test(path) && params?.tags === "sbx") {
+		if (/\/qemu\/\d+\/config$/.test(path) && params?.tags === "umiak") {
 			this.cloneFailed = true;
 			throw new PveApiError(500, "simulated clone failure");
 		}
@@ -73,7 +73,7 @@ describe("regression: power lock covers S1 create rollback", () => {
 			api.startBegan = res;
 		});
 		api.vms.set(570, {
-			config: { tags: "sbx" },
+			config: { tags: "umiak" },
 			status: "stopped",
 			firewall: { rules: [], ipsets: {} },
 		});
@@ -94,7 +94,7 @@ describe("regression: power lock covers S1 create rollback", () => {
 				machineId: m,
 				templateVmid: 599,
 				size: { vcpu: 1, memoryMb: 1024 },
-				smbios: { uuid: m, serial: `sbx1:${m}:x` },
+				smbios: { uuid: m, serial: `umiak1:${m}:x` },
 			})
 			.then(
 				() => "created",

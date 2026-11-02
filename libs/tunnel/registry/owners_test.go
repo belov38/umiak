@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/registry"
+	"github.com/belov38/umiak/libs/tunnel/transport"
 )
 
 // Wait on a machine without an owner returns as soon as a session is

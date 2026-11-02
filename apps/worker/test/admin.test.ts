@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { StaticConfigReader } from "@sbx/config";
-import { DELETE_RETRY_LIMIT, RecordingJobSender } from "@sbx/core";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { StaticConfigReader } from "@umiak/config";
+import { DELETE_RETRY_LIMIT, RecordingJobSender } from "@umiak/core";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { type AdminDeps, runAdmin } from "../src/admin/commands.ts";
 import { FakeInfraRegistry } from "./fakes/infra.ts";
@@ -44,7 +44,7 @@ topology:
         - name: pve
           ramCapMb: ${o.ramCapMb ?? 24576}
           cloneConcurrency: 3
-          nodeAgentRef: sbx-node
+          nodeAgentRef: umiak-node
           storages:
             - name: local-lvm
   templateBuilds:
@@ -108,7 +108,7 @@ beforeEach(() => {
 	configYaml = topologyYaml();
 });
 
-describe("sbx-admin bootstrap", () => {
+describe("umiak-admin bootstrap", () => {
 	it("is idempotent: a second run creates no duplicates", async () => {
 		expect(await admin("bootstrap")).toBe(0);
 		const first = await counts();
@@ -146,7 +146,7 @@ describe("sbx-admin bootstrap", () => {
 		expect((await counts()).nodes).toBe(1);
 	});
 
-	it("SBX_PVE_URL / SBX_PVE_TLS_NAME override apiUrl and tlsName of the first provider", async () => {
+	it("UMIAK_PVE_URL / UMIAK_PVE_TLS_NAME override apiUrl and tlsName of the first provider", async () => {
 		const d = deps();
 		d.providerOverride = { apiUrl: "https://10.9.8.7:8006", tlsName: "pve-x" };
 		expect(await runAdmin(["bootstrap"], d)).toBe(0);
@@ -166,15 +166,15 @@ describe("sbx-admin bootstrap", () => {
 		]);
 	});
 
-	it("needs SBX_CONFIG_FILE", async () => {
+	it("needs UMIAK_CONFIG_FILE", async () => {
 		const d = deps();
 		delete d.config;
 		expect(await runAdmin(["bootstrap"], d)).toBe(1);
-		expect(String(err[0]?.error)).toMatch(/SBX_CONFIG_FILE/);
+		expect(String(err[0]?.error)).toMatch(/UMIAK_CONFIG_FILE/);
 	});
 });
 
-describe("sbx-admin template", () => {
+describe("umiak-admin template", () => {
 	it("register then promote: the old active build becomes deprecated", async () => {
 		const n = await node();
 		expect(
@@ -234,7 +234,7 @@ describe("sbx-admin template", () => {
 	});
 });
 
-describe("sbx-admin providers and nodes", () => {
+describe("umiak-admin providers and nodes", () => {
 	it("providers add and nodes add are upserts; cordon and uncordon", async () => {
 		const provider = [
 			"providers",
@@ -267,7 +267,7 @@ describe("sbx-admin providers and nodes", () => {
 			"--ram-cap-mb",
 			"16384",
 			"--node-agent-ref",
-			"sbx-node",
+			"umiak-node",
 			"--storage",
 			"local-lvm",
 		];
@@ -300,7 +300,7 @@ describe("sbx-admin providers and nodes", () => {
 	});
 });
 
-describe("sbx-admin pool status", () => {
+describe("umiak-admin pool status", () => {
 	it("prints pool counts per pair and RAM per node", async () => {
 		const n = await node();
 		const b = await db.pool.query(
@@ -339,7 +339,7 @@ describe("sbx-admin pool status", () => {
 	});
 });
 
-describe("sbx-admin op retry and machine delete", () => {
+describe("umiak-admin op retry and machine delete", () => {
 	async function sandboxWithOp(state: string): Promise<{
 		sandboxId: string;
 		operationId: string;
@@ -436,7 +436,7 @@ describe("sbx-admin op retry and machine delete", () => {
 	});
 });
 
-describe("sbx-admin misc", () => {
+describe("umiak-admin misc", () => {
 	it("reconcile requires --dry-run and prints a summary", async () => {
 		expect(await admin("reconcile")).toBe(1);
 		expect(await admin("reconcile", "--dry-run")).toBe(0);

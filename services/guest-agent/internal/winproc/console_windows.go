@@ -6,7 +6,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/winapi"
+	"github.com/belov38/umiak/services/guest-agent/internal/winapi"
 )
 
 // consoleMu serializes CtrlBreak: a process has at most one console, and

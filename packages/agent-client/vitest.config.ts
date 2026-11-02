@@ -1,6 +1,6 @@
 import { defineConfig } from "vitest/config";
 
-// Resolve workspace packages (@sbx/proto) from their TypeScript sources.
+// Resolve workspace packages (@umiak/proto) from their TypeScript sources.
 const source = "source";
 
 export default defineConfig({

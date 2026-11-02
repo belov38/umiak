@@ -3,17 +3,17 @@ clean: false
 inputs:
   - directory: .
     exclude_paths:
-      - sbx/testing
+      - umiak/testing
 plugins:
   - remote: buf.build/protocolbuffers/go:v1.36.12
     out: ../libs/proto
     opt:
-      - module=github.com/belov38/boat-dev-clone/libs/proto
+      - module=github.com/belov38/umiak/libs/proto
   # v1.21.1 is not published on the BSR; v1.21.0 output is identical to protoc-gen-connect-go v1.21.1.
   - remote: buf.build/connectrpc/go:v1.21.0
     out: ../libs/proto
     opt:
-      - module=github.com/belov38/boat-dev-clone/libs/proto
+      - module=github.com/belov38/umiak/libs/proto
   - remote: buf.build/bufbuild/es:v2.16.0
     out: ../packages/proto/src/gen
     opt:

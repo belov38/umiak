@@ -6,8 +6,8 @@ import {
 	type Operation,
 	operationFromRow,
 	TERMINAL_OPERATION_STATES,
-} from "@sbx/core";
-import { type Tx, withTx } from "@sbx/db";
+} from "@umiak/core";
+import { type Tx, withTx } from "@umiak/db";
 import type { WorkerCtx } from "./context.ts";
 import { lockSandboxRow, type MachineRow, withMachineLocked } from "./db.ts";
 

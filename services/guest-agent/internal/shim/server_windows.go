@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/shimproto"
+	"github.com/belov38/umiak/services/guest-agent/internal/shimproto"
 )
 
 const (

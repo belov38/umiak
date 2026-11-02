@@ -1,12 +1,12 @@
 // The api of the CLI tests: apps/api's public app in process on a real HTTP
-// server, Postgres from @sbx/db/testing (PgIdentityStore: team keys, JIT users
+// server, Postgres from @umiak/db/testing (PgIdentityStore: team keys, JIT users
 // from Keycloak JWTs), core's SandboxService over a test topology, and the
 // test OIDC server (device flow, refresh, revocation) as Keycloak. Built from
-// the exported pieces of @sbx/api/testing, like the SDK's test helper.
+// the exported pieces of @umiak/api/testing, like the SDK's test helper.
 
 import { generateKeyPairSync } from "node:crypto";
 import type { AddressInfo } from "node:net";
-import { type ApiDeps, createApiServer, createPublicApp } from "@sbx/api";
+import { type ApiDeps, createApiServer, createPublicApp } from "@umiak/api";
 import {
 	FakeAgent,
 	issueApiKey,
@@ -15,17 +15,17 @@ import {
 	type TestOidcServer,
 	type TestOidcServerOptions,
 	testSettings,
-} from "@sbx/api/testing";
+} from "@umiak/api/testing";
 import {
 	encodeUuid,
 	loadSshCa,
 	PgEnvironmentStore,
 	type SshCa,
-} from "@sbx/auth";
-import { validateSecretSets } from "@sbx/core";
-import { type ServiceEnv, serviceEnv } from "@sbx/core/testing";
-import { withTx } from "@sbx/db";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+} from "@umiak/auth";
+import { validateSecretSets } from "@umiak/core";
+import { type ServiceEnv, serviceEnv } from "@umiak/core/testing";
+import { withTx } from "@umiak/db";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 
 export interface CliWorld {
 	/** URL of the api (http://127.0.0.1:<port>). */
@@ -40,11 +40,11 @@ export interface CliWorld {
 	teamId: string;
 	/** Secret of a team key with every scope. */
 	secret: string;
-	/** The SSH login CA of the api (certificates of `sbx ssh`). */
+	/** The SSH login CA of the api (certificates of `umiak ssh`). */
 	sshCa: SshCa;
 	/** Gateway host keys ("<type> <base64>") served by /v1/meta. */
 	hostKeys: string[];
-	/** SSH endpoint of /v1/meta: host ssh.sbx.test, port 2222. */
+	/** SSH endpoint of /v1/meta: host ssh.umiak.test, port 2222. */
 	ssh: { host: string; port: number };
 	/** "METHOD /path?query" of every request the api received. */
 	requests: string[];
@@ -84,7 +84,7 @@ export async function until<T>(
 
 export interface WorldOptions {
 	oidc?: TestOidcServerOptions;
-	/** Extra api settings (env names), e.g. SBX_OIDC_ISSUER behind a TLS front. */
+	/** Extra api settings (env names), e.g. UMIAK_OIDC_ISSUER behind a TLS front. */
 	settings?: Record<string, string>;
 	/** A started OIDC server to use instead of a new one. */
 	oidcServer?: TestOidcServer;
@@ -113,14 +113,14 @@ export async function startWorld(o: WorldOptions = {}): Promise<CliWorld> {
 	);
 	// Any ed25519 public key stands for the gateway's host key.
 	const hostKeys = [sshCa.publicKey];
-	const ssh = { host: "ssh.sbx.test", port: 2222 };
+	const ssh = { host: "ssh.umiak.test", port: 2222 };
 	const deps = makeTestDeps({
 		settings: testSettings({
-			SBX_API_RATE_BURST: "100000",
-			SBX_API_RATE_STARTS_PER_MIN: "100000",
-			SBX_OIDC_ISSUER: oidc.issuer,
-			SBX_SSH_HOST: ssh.host,
-			SBX_SSH_PORT: String(ssh.port),
+			UMIAK_API_RATE_BURST: "100000",
+			UMIAK_API_RATE_STARTS_PER_MIN: "100000",
+			UMIAK_OIDC_ISSUER: oidc.issuer,
+			UMIAK_SSH_HOST: ssh.host,
+			UMIAK_SSH_PORT: String(ssh.port),
 			...o.settings,
 		}),
 		sshCa,

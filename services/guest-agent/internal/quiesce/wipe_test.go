@@ -10,7 +10,7 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/errs"
+	"github.com/belov38/umiak/services/guest-agent/internal/errs"
 )
 
 // fakeSecrets is the claim manager's secret file store: it logs the wipe
@@ -202,9 +202,9 @@ func TestWindowsHookList(t *testing.T) {
 	if want := []string{"10-a.ps1", "20-b.PS1"}; !slices.Equal(names, want) {
 		t.Errorf("hooks = %q, want %q", names, want)
 	}
-	argv := ps1HookArgv(`C:\Windows`, `C:\ProgramData\sbx-agent\quiesce.d\10-a.ps1`, hookFreeze)
+	argv := ps1HookArgv(`C:\Windows`, `C:\ProgramData\umiak-agent\quiesce.d\10-a.ps1`, hookFreeze)
 	want := []string{`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`, "-NoProfile", "-NonInteractive",
-		"-ExecutionPolicy", "Bypass", "-File", `C:\ProgramData\sbx-agent\quiesce.d\10-a.ps1`, "freeze"}
+		"-ExecutionPolicy", "Bypass", "-File", `C:\ProgramData\umiak-agent\quiesce.d\10-a.ps1`, "freeze"}
 	if !slices.Equal(argv, want) {
 		t.Errorf("argv = %q, want %q", argv, want)
 	}

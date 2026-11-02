@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/gateway"
+	"github.com/belov38/umiak/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // closedPort returns a local TCP port nobody listens on.

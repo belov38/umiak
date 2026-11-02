@@ -1,7 +1,7 @@
 // Every team for the operator page (S8 §9.10): Payload rows → public ids
 // and names for the team column and filter. Server only (the id codec of
-// @sbx/auth comes with its Postgres store).
-import { encodeUuid } from "@sbx/auth";
+// @umiak/auth comes with its Postgres store).
+import { encodeUuid } from "@umiak/auth";
 import type { OperatorTeam } from "./operator";
 
 const UUID_RE =

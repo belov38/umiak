@@ -7,8 +7,8 @@
 // long steps need nothing extra. A job whose worker died stops getting
 // refreshed and the supervisor of any instance fails it after
 // heartbeatSeconds (30 s for operation queues); it is then retried.
-import { DELETE_RETRY_LIMIT, isUuid, type QueueName } from "@sbx/core";
-import { type Tx, withTx } from "@sbx/db";
+import { DELETE_RETRY_LIMIT, isUuid, type QueueName } from "@umiak/core";
+import { type Tx, withTx } from "@umiak/db";
 import type pg from "pg";
 import {
 	type Db as BossDb,
@@ -74,7 +74,7 @@ export function createBoss(
 	const boss = new PgBoss({
 		db,
 		schema: BOSS_SCHEMA,
-		instanceName: "sbx-worker",
+		instanceName: "umiak-worker",
 		// Expired heartbeats are failed by the supervise pass, which handles a
 		// queue at most every monitorIntervalSeconds (default 60). 30 s each
 		// gives a dead pod's jobs back within ~30-60 s after the heartbeat.
@@ -148,20 +148,20 @@ async function opMetrics(
 		if (!op) return;
 		if (err !== undefined) {
 			const code = (err as { code?: unknown } | null)?.code;
-			ctx.metrics.inc("sbx_operation_errors_total", {
+			ctx.metrics.inc("umiak_operation_errors_total", {
 				kind: op.kind,
 				code: typeof code === "string" ? code : "internal",
 			});
 			return;
 		}
 		if (outcome === "failed") {
-			ctx.metrics.inc("sbx_operation_errors_total", {
+			ctx.metrics.inc("umiak_operation_errors_total", {
 				kind: op.kind,
 				code: op.error_code ?? "internal",
 			});
 		}
 		if ((outcome === "succeeded" || outcome === "failed") && op.s !== null) {
-			ctx.metrics.observe("sbx_operation_duration_seconds", op.s, {
+			ctx.metrics.observe("umiak_operation_duration_seconds", op.s, {
 				kind: op.kind,
 				outcome,
 			});
@@ -271,7 +271,7 @@ export async function registerHandlers(
 							},
 						),
 					);
-					c.metrics.inc("sbx_snapshot_in_use_requeued_total");
+					c.metrics.inc("umiak_snapshot_in_use_requeued_total");
 					c.log.info(
 						{ snapshotId, retryAfterS: err.retryAfterSeconds },
 						"snapshot still in use; delete postponed",
@@ -353,8 +353,8 @@ async function runController(
 		c.log.error(errFields(err), "controller run failed");
 	}
 	const seconds = (performance.now() - started) / 1000;
-	c.metrics.inc("sbx_controller_runs_total", { queue: spec.queue, result });
-	c.metrics.observe("sbx_controller_duration_seconds", seconds, {
+	c.metrics.inc("umiak_controller_runs_total", { queue: spec.queue, result });
+	c.metrics.observe("umiak_controller_duration_seconds", seconds, {
 		queue: spec.queue,
 	});
 	await withTx(c.pool, async (tx) => {

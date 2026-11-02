@@ -11,13 +11,13 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
+	"github.com/belov38/umiak/libs/tunnel/h2"
 )
 
-// Synthetic host grammar: m-<machineId>-e<epoch>-<port>.sbx.internal.
+// Synthetic host grammar: m-<machineId>-e<epoch>-<port>.umiak.internal.
 const (
 	hostPrefix = "m-"
-	hostSuffix = ".sbx.internal"
+	hostSuffix = ".umiak.internal"
 	uuidLen    = 36
 )
 

@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { type Tx, withTx } from "@sbx/db";
+import { type Tx, withTx } from "@umiak/db";
 import {
 	invalidState,
 	notFound,
@@ -26,7 +26,7 @@ import { checkKnownKeys, isPlainObject } from "./validate.ts";
 
 // Hosted ports (S6 §5.8, S7 §11.2, S4 §4.2, §8.3). Every change runs under the
 // sandbox row lock, so concurrent calls for one port serialize. The token
-// (`sbxp_` + 32 random bytes base64url) is returned only by the call that
+// (`umiakp_` + 32 random bytes base64url) is returned only by the call that
 // issued it; the row keeps its sha256. Any mode change, rotation or revoke
 // bumps `auth_epoch` (S4 §8.2); a change of only the proxy options
 // (`hostRewrite`, `appProtocol`) does not. The `hosted_ports` trigger
@@ -58,7 +58,7 @@ export const RESERVED_PORTS: readonly number[] = [
 ];
 /** S4: at most 50 hosted ports per sandbox. */
 export const MAX_HOSTED_PORTS = 50;
-export const PORT_TOKEN_PREFIX = "sbxp_";
+export const PORT_TOKEN_PREFIX = "umiakp_";
 
 export interface HostPortResult {
 	hostedPort: HostedPort;

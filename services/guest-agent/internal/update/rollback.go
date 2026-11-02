@@ -8,15 +8,15 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // stableFailurePause is how long Rollback waits before restarting a
 // version that has no pending update (spec 17.4 step 6).
 const stableFailurePause = 30 * time.Second
 
-// Rollback is `sbx-agent rollback [--to v]`, run by
-// sbx-agent-rollback.service when sbx-agent.service hits its start limit (on
+// Rollback is `umiak-agent rollback [--to v]`, run by
+// umiak-agent-rollback.service when umiak-agent.service hits its start limit (on
 // Windows by the run-command failure action of the service), or by hand
 // through the QEMU guest agent (spec 17.4 step 6, 17.6):
 //   - to set: current switches to the installed version to (previous becomes

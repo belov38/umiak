@@ -1,5 +1,5 @@
-import { DELETE_RETRY_LIMIT, stepRequestId } from "@sbx/core";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { DELETE_RETRY_LIMIT, stepRequestId } from "@umiak/core";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleSandboxOpDeadLetter } from "../src/handlers/dlq.ts";
 import { handleMachineOp } from "../src/handlers/machine-op.ts";
@@ -89,7 +89,7 @@ describe("create, cold path", () => {
 		expect(req).toEqual({
 			reason: "claim",
 			sandboxId,
-			hostname: `sbx-${s.slug}`,
+			hostname: `umiak-${s.slug}`,
 			env: ENV,
 			secretEnv: SECRETS,
 			secretFiles: [
@@ -148,7 +148,7 @@ describe("create, cold path", () => {
 		]);
 		// The saved snapshot survives the create.
 		expect((await row(w, "snapshots", snapshotId)).state).toBe("ready");
-		expect(w.infra.lvs.has(`sbx-snap-${lvId}-scsi0`)).toBe(true);
+		expect(w.infra.lvs.has(`umiak-snap-${lvId}-scsi0`)).toBe(true);
 	});
 
 	it("a failed cold preparation: machine failed → deleting, sandbox error create_failed", async () => {
@@ -320,7 +320,7 @@ describe("create, cold path", () => {
 		);
 		expect((await row(w, "machines", machineId)).state).toBe("deleted");
 		expect(await infraState(w)).toEqual({ vms: 0, lvs: [], leases: 0 });
-		expect(w.metrics.count("sbx_operation_retries_exhausted_total")).toBe(1);
+		expect(w.metrics.count("umiak_operation_retries_exhausted_total")).toBe(1);
 		// A late redelivery of the original job does nothing.
 		expect(await handleSandboxOp(w.ctx, { operationId })).toBe("skipped");
 	});
@@ -388,7 +388,7 @@ describe("create, pool claim path", () => {
 				opts: { singletonKey: id, retryLimit: DELETE_RETRY_LIMIT },
 			});
 		}
-		expect(w.metrics.count("sbx_claim_retried_total")).toBe(1);
+		expect(w.metrics.count("umiak_claim_retried_total")).toBe(1);
 	});
 
 	it("claim rejected with no other warm machine → retried cold and ready", async () => {

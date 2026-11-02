@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/transport"
+	"github.com/belov38/umiak/libs/tunnel/transport"
 )
 
 // The secret is dropped once admission checked it: nothing that outlives

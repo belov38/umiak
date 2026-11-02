@@ -1,5 +1,5 @@
 {
-	"name": "@sbx/agent-client",
+	"name": "@umiak/agent-client",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
@@ -19,11 +19,11 @@
 		"@bufbuild/protobuf": "2.16.0",
 		"@connectrpc/connect": "2.3.0",
 		"@connectrpc/connect-node": "2.3.0",
-		"@sbx/proto": "workspace:*",
+		"@umiak/proto": "workspace:*",
 		"pg": "8.23.1"
 	},
 	"devDependencies": {
-		"@sbx/db": "workspace:*",
+		"@umiak/db": "workspace:*",
 		"@types/pg": "8.23.1"
 	}
 }

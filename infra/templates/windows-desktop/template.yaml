@@ -12,7 +12,7 @@ steps:
     30-toolchains,
     40-coding-agents,
     reboot,
-    50-sbx-agent,
+    50-umiak-agent,
     60-desktop,
     65-streamer,
     90-cleanup,

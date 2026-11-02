@@ -20,7 +20,7 @@ import (
 	"github.com/jezek/xgb/xproto"
 	"github.com/jezek/xgb/xtest"
 
-	v1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	v1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 )
 
 // X11Session runs inside the autologin session; Xauthority never leaves it.
@@ -60,7 +60,7 @@ func NewX11Session() (*X11Session, error) {
 	if e = xproto.CreateWindowChecked(c, 0, s.window, s.root, 0, 0, 1, 1, 0, xproto.WindowClassInputOutput, 0, xproto.CwEventMask, []uint32{xproto.EventMaskPropertyChange}).Check(); e != nil {
 		return fail(e)
 	}
-	for name, dest := range map[string]*xproto.Atom{"CLIPBOARD": &s.clipboard, "UTF8_STRING": &s.utf8, "TARGETS": &s.targets, "SBX_CLIPBOARD": &s.property, "INCR": &s.incr} {
+	for name, dest := range map[string]*xproto.Atom{"CLIPBOARD": &s.clipboard, "UTF8_STRING": &s.utf8, "TARGETS": &s.targets, "UMIAK_CLIPBOARD": &s.property, "INCR": &s.incr} {
 		r, err := xproto.InternAtom(c, false, uint16(len(name)), name).Reply()
 		if err != nil {
 			return fail(err)

@@ -1,5 +1,5 @@
 // The sandbox list (S8 §9.4) without the DOM: filters and state classes.
-import type { SandboxData } from "@sbx/sdk";
+import type { SandboxData } from "@umiak/sdk";
 
 export type SandboxState = SandboxData["state"];
 

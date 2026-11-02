@@ -5,7 +5,7 @@ import { PlusIcon } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import {
 	emptyKeyForm,
 	KEY_DAYS_MAX,
@@ -33,7 +33,7 @@ export function NewKeyForm({
 	teamId: string;
 	onIssued: (s: ShownSecret) => void | Promise<void>;
 }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const [form, setForm] = useState<KeyFormState>(emptyKeyForm);
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -54,7 +54,7 @@ export function NewKeyForm({
 		setError(null);
 		setBusy(true);
 		try {
-			const { data } = await sbx.raw.POST("/v1/api-keys", { body: r.body });
+			const { data } = await umiak.raw.POST("/v1/api-keys", { body: r.body });
 			setForm(emptyKeyForm());
 			await onIssued({
 				keyName: data.apiKey.name,

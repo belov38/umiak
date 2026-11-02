@@ -8,7 +8,7 @@ import {
 	type Principal,
 	SandboxServiceImpl,
 	SCOPES,
-} from "@sbx/core";
+} from "@umiak/core";
 import { expect } from "vitest";
 import { handleMachineOp } from "../../src/handlers/machine-op.ts";
 import {
@@ -254,10 +254,10 @@ export async function snapshotsOf(
 	return r.rows;
 }
 
-/** LVs of a snapshot in the fake (tag `sbx-snap-<lvId>`). */
+/** LVs of a snapshot in the fake (tag `umiak-snap-<lvId>`). */
 export function snapshotLvs(w: TestWorld, lvId: string): string[] {
 	return [...w.infra.lvs.values()]
-		.filter((l) => l.tags.includes(`sbx-snap-${lvId}`))
+		.filter((l) => l.tags.includes(`umiak-snap-${lvId}`))
 		.map((l) => l.name);
 }
 

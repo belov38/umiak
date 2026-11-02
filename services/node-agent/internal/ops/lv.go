@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/belov38/boat-dev-clone/services/node-agent/internal/lvm"
+	"github.com/belov38/umiak/services/node-agent/internal/lvm"
 )
 
 func (s *Server) lvSnapshot(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -26,8 +26,8 @@ func (s *Server) lvSnapshot(ctx context.Context, raw json.RawMessage) (any, erro
 			return nil, err
 		}
 	}
-	// A vm-<id>-* or sbx-snap-<id>-* origin is trusted by its tags, not by its name: a non-sandbox
-	// guest may use a VMID in our range, and anyone may name an LV sbx-snap-*.
+	// A vm-<id>-* or umiak-snap-<id>-* origin is trusted by its tags, not by its name: a non-sandbox
+	// guest may use a VMID in our range, and anyone may name an LV umiak-snap-*.
 	all, err := s.LVM.List(ctx)
 	if err != nil {
 		return nil, err
@@ -53,15 +53,15 @@ func (s *Server) lvSnapshot(ctx context.Context, raw json.RawMessage) (any, erro
 		var owner string
 		if baseRe.MatchString(it.Origin) {
 			// A template disk: Proxmox names any template's disk base-*, so the tag decides.
-			if l, ok := byName[it.Origin]; !ok || !slices.Contains(l.Tags, "sbx-tpl") {
+			if l, ok := byName[it.Origin]; !ok || !slices.Contains(l.Tags, "umiak-tpl") {
 				return nil, forbidden("origin %q is not a tagged template disk", it.Origin)
 			}
 			continue
 		}
 		if m := vmAnyRe.FindStringSubmatch(it.Origin); m != nil {
-			owner = "sbx-vm-" + m[1]
+			owner = "umiak-vm-" + m[1]
 		} else if m := snapLVRe.FindStringSubmatch(it.Origin); m != nil {
-			owner = "sbx-snap-" + m[1]
+			owner = "umiak-snap-" + m[1]
 		} else {
 			continue
 		}
@@ -89,7 +89,7 @@ func (s *Server) lvSnapshot(ctx context.Context, raw json.RawMessage) (any, erro
 }
 
 func ours(l lvm.LV) bool {
-	return slices.Contains(l.Tags, "sbx") && !slices.Contains(l.Tags, "sbx-tpl")
+	return slices.Contains(l.Tags, "umiak") && !slices.Contains(l.Tags, "umiak-tpl")
 }
 
 func (s *Server) lvRemove(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -119,7 +119,7 @@ func (s *Server) lvRemove(ctx context.Context, raw json.RawMessage) (any, error)
 			continue
 		}
 		if !ours(l) {
-			return nil, forbidden("LV %q is not tagged sbx", n)
+			return nil, forbidden("LV %q is not tagged umiak", n)
 		}
 		todo = append(todo, n)
 	}

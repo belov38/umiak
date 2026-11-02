@@ -39,7 +39,7 @@ async function serve(handler: Handler, pki = pvePki): Promise<string> {
 function api(url: string, ca = pvePki.ca) {
 	return new PveApi({
 		url,
-		tokenId: "sbx@pve!poc",
+		tokenId: "umiak@pve!dev",
 		tokenSecret: "sec",
 		ca,
 		tlsName: "pve",
@@ -79,15 +79,15 @@ describe("PveApi", () => {
 		});
 		const r = await api(url).post<string>("/nodes/pve/qemu", {
 			vmid: 500,
-			net0: "virtio=02:01:00:00:01:F4,bridge=sbx0",
+			net0: "virtio=02:01:00:00:01:F4,bridge=umiak0",
 			command: ["bash", "-c"],
 		});
 		expect(r).toBe("UPID:x");
-		expect(seen.auth).toBe("PVEAPIToken=sbx@pve!poc=sec");
+		expect(seen.auth).toBe("PVEAPIToken=umiak@pve!dev=sec");
 		expect(seen.path).toBe("/api2/json/nodes/pve/qemu");
 		expect(seen.type).toBe("application/x-www-form-urlencoded");
 		expect(seen.body).toBe(
-			"vmid=500&net0=virtio%3D02%3A01%3A00%3A00%3A01%3AF4%2Cbridge%3Dsbx0&command=bash&command=-c",
+			"vmid=500&net0=virtio%3D02%3A01%3A00%3A00%3A01%3AF4%2Cbridge%3Dumiak0&command=bash&command=-c",
 		);
 	});
 
@@ -354,7 +354,7 @@ describe("PveApi.upload", () => {
 	}
 
 	function tmpFile(data: Buffer): string {
-		const dir = mkdtempSync(join(tmpdir(), "sbx-upload-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-upload-"));
 		const p = join(dir, "file.bin");
 		writeFileSync(p, data);
 		return p;
@@ -373,13 +373,15 @@ describe("PveApi.upload", () => {
 		const r = await api(url).upload(
 			"/nodes/pve/storage/local/upload",
 			{ content: "iso", checksum: "abc", "checksum-algorithm": "sha256" },
-			{ name: "sbx-seed-1.iso", path, size: data.length },
+			{ name: "umiak-seed-1.iso", path, size: data.length },
 		);
 		expect(r).toBe("UPID:upload");
 		if (!seen) throw new Error("no request");
 		expect(seen.req.method).toBe("POST");
 		expect(seen.req.url).toBe("/api2/json/nodes/pve/storage/local/upload");
-		expect(seen.req.headers.authorization).toBe("PVEAPIToken=sbx@pve!poc=sec");
+		expect(seen.req.headers.authorization).toBe(
+			"PVEAPIToken=umiak@pve!dev=sec",
+		);
 		expect(Number(seen.req.headers["content-length"])).toBe(seen.body.length);
 		const boundary = /^multipart\/form-data; boundary=(.+)$/.exec(
 			seen.type,
@@ -391,7 +393,7 @@ describe("PveApi.upload", () => {
 			'Content-Disposition: form-data; name="content"',
 			'Content-Disposition: form-data; name="checksum-algorithm"',
 			'Content-Disposition: form-data; name="checksum"',
-			'Content-Disposition: form-data; name="filename"; filename="sbx-seed-1.iso"\r\nContent-Type: application/octet-stream',
+			'Content-Disposition: form-data; name="filename"; filename="umiak-seed-1.iso"\r\nContent-Type: application/octet-stream',
 		]);
 		expect(parts.slice(0, 3).map((p) => p.data.toString())).toEqual([
 			"iso",

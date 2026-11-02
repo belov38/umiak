@@ -1,5 +1,5 @@
 // Keycloak Admin REST API client of ctl-idp-sync (S8 §20.1): a client
-// credentials token of `sbx-worker` (service account with the
+// credentials token of `umiak-worker` (service account with the
 // `realm-management` role `view-users`), the paged user list and a single
 // user lookup. Plain fetch, no library. The client secret and the token
 // never appear in errors.

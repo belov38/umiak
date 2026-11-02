@@ -6,8 +6,12 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
-import { migrateSbxPayload } from "@sbx/payload";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
+import { migrateUmiakPayload } from "@umiak/payload";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { WorkerCtx } from "../src/context.ts";
 import {
@@ -25,10 +29,10 @@ import {
 import { testLogger } from "./helpers/worker.ts";
 
 const BASE = {
-	DATABASE_URL: "postgres://sbx:sbx@db:5432/sbx",
+	DATABASE_URL: "postgres://umiak:umiak@db:5432/umiak",
 	PAYLOAD_SECRET: "payload-secret-0123456789abcdef",
-	SBX_DATA_KEYS_FILE: "/etc/sbx/keys.json",
-	SBX_SECRETS_DIR: "/etc/sbx/secrets",
+	UMIAK_DATA_KEYS_FILE: "/etc/umiak/keys.json",
+	UMIAK_SECRETS_DIR: "/etc/umiak/secrets",
 };
 
 const SECRET = "kc-client-secret-must-not-leak";
@@ -46,7 +50,7 @@ function ctxOf(metrics: PromMetrics, idpSync?: IdpSync) {
 const fakePayload = {} as WorkerPayload["payload"];
 
 describe("ctl-idp-sync env and registration", () => {
-	it("without SBX_IDP_SYNC_KEYCLOAK_URL the controller is not registered", () => {
+	it("without UMIAK_IDP_SYNC_KEYCLOAK_URL the controller is not registered", () => {
 		const env = parseWorkerEnv(BASE);
 		expect(env.idpSync).toBeUndefined();
 		const { log } = testLogger("silent");
@@ -66,40 +70,40 @@ describe("ctl-idp-sync env and registration", () => {
 		expect(() =>
 			parseWorkerEnv({
 				...BASE,
-				SBX_IDP_SYNC_KEYCLOAK_URL: "http://keycloak:8080",
+				UMIAK_IDP_SYNC_KEYCLOAK_URL: "http://keycloak:8080",
 			}),
 		).toThrow(EnvError);
 		expect(() =>
 			parseWorkerEnv({
 				...BASE,
-				SBX_IDP_SYNC_KEYCLOAK_URL: "http://keycloak:8080",
+				UMIAK_IDP_SYNC_KEYCLOAK_URL: "http://keycloak:8080",
 			}),
-		).toThrow(/SBX_IDP_SYNC_CLIENT_SECRET_FILE/);
+		).toThrow(/UMIAK_IDP_SYNC_CLIENT_SECRET_FILE/);
 		expect(() =>
 			parseWorkerEnv({
 				...BASE,
-				SBX_IDP_SYNC_KEYCLOAK_URL: "keycloak:8080",
-				SBX_IDP_SYNC_CLIENT_SECRET_FILE: "/run/secrets/kc",
+				UMIAK_IDP_SYNC_KEYCLOAK_URL: "keycloak:8080",
+				UMIAK_IDP_SYNC_CLIENT_SECRET_FILE: "/run/secrets/kc",
 			}),
-		).toThrow(/SBX_IDP_SYNC_KEYCLOAK_URL/);
+		).toThrow(/UMIAK_IDP_SYNC_KEYCLOAK_URL/);
 
 		const env = parseWorkerEnv({
 			...BASE,
-			SBX_IDP_SYNC_KEYCLOAK_URL: "http://keycloak:8080",
-			SBX_IDP_SYNC_CLIENT_SECRET_FILE: "/run/secrets/kc",
+			UMIAK_IDP_SYNC_KEYCLOAK_URL: "http://keycloak:8080",
+			UMIAK_IDP_SYNC_CLIENT_SECRET_FILE: "/run/secrets/kc",
 		});
 		expect(env.idpSync).toEqual({
 			keycloakUrl: "http://keycloak:8080",
-			realm: "sbx",
-			clientId: "sbx-worker",
+			realm: "umiak",
+			clientId: "umiak-worker",
 			clientSecretFile: "/run/secrets/kc",
 		});
 		const custom = parseWorkerEnv({
 			...BASE,
-			SBX_IDP_SYNC_KEYCLOAK_URL: "https://id.example.com",
-			SBX_IDP_SYNC_REALM: "corp",
-			SBX_IDP_SYNC_CLIENT_ID: "sync",
-			SBX_IDP_SYNC_CLIENT_SECRET_FILE: "/run/secrets/kc",
+			UMIAK_IDP_SYNC_KEYCLOAK_URL: "https://id.example.com",
+			UMIAK_IDP_SYNC_REALM: "corp",
+			UMIAK_IDP_SYNC_CLIENT_ID: "sync",
+			UMIAK_IDP_SYNC_CLIENT_SECRET_FILE: "/run/secrets/kc",
 		}).idpSync;
 		expect(custom).toMatchObject({ realm: "corp", clientId: "sync" });
 	});
@@ -107,8 +111,8 @@ describe("ctl-idp-sync env and registration", () => {
 	it("with it ctl-idp-sync is registered; an empty secret file is refused", () => {
 		const env = parseWorkerEnv({
 			...BASE,
-			SBX_IDP_SYNC_KEYCLOAK_URL: "http://keycloak:8080",
-			SBX_IDP_SYNC_CLIENT_SECRET_FILE: "/run/secrets/kc",
+			UMIAK_IDP_SYNC_KEYCLOAK_URL: "http://keycloak:8080",
+			UMIAK_IDP_SYNC_CLIENT_SECRET_FILE: "/run/secrets/kc",
 		});
 		const { log } = testLogger("silent");
 		const sync = createWorkerIdpSync({
@@ -132,11 +136,11 @@ describe("ctl-idp-sync env and registration", () => {
 		).toThrow(/is empty/);
 	});
 
-	it("sbx_idp_sync_aborted: 1 after an abort (plus the counter and log.error), 0 after a pass", async () => {
+	it("umiak_idp_sync_aborted: 1 after an abort (plus the counter and log.error), 0 after a pass", async () => {
 		const m = new PromMetrics();
 		const text0 = await m.registry.metrics();
-		expect(text0).toContain("# TYPE sbx_idp_sync_aborted gauge");
-		expect(text0).toContain("# TYPE sbx_idp_sync_aborted_total counter");
+		expect(text0).toContain("# TYPE umiak_idp_sync_aborted gauge");
+		expect(text0).toContain("# TYPE umiak_idp_sync_aborted_total counter");
 
 		let aborted = true;
 		const { ctx, captured } = ctxOf(m, {
@@ -156,9 +160,9 @@ describe("ctl-idp-sync env and registration", () => {
 		});
 		await runIdpSync(ctx, ctx.idpSync as IdpSync);
 		let text = await m.registry.metrics();
-		expect(text).toMatch(/^sbx_idp_sync_aborted 1$/m);
+		expect(text).toMatch(/^umiak_idp_sync_aborted 1$/m);
 		expect(text).toContain(
-			'sbx_idp_sync_aborted_total{reason="mass_deactivation"} 1',
+			'umiak_idp_sync_aborted_total{reason="mass_deactivation"} 1',
 		);
 		const err = captured.lines
 			.map((l) => JSON.parse(l) as Record<string, unknown>)
@@ -173,9 +177,9 @@ describe("ctl-idp-sync env and registration", () => {
 		aborted = false;
 		await runIdpSync(ctx, ctx.idpSync as IdpSync);
 		text = await m.registry.metrics();
-		expect(text).toMatch(/^sbx_idp_sync_aborted 0$/m);
+		expect(text).toMatch(/^umiak_idp_sync_aborted 0$/m);
 		expect(text).toContain(
-			'sbx_idp_sync_aborted_total{reason="mass_deactivation"} 1',
+			'umiak_idp_sync_aborted_total{reason="mass_deactivation"} 1',
 		);
 	});
 });
@@ -200,10 +204,10 @@ describe.skipIf(skipPg())(
 						res.writeHead(status, { "content-type": "application/json" });
 						res.end(JSON.stringify(body));
 					};
-					if (url.pathname === "/realms/sbx/protocol/openid-connect/token") {
+					if (url.pathname === "/realms/umiak/protocol/openid-connect/token") {
 						const f = new URLSearchParams(Buffer.concat(chunks).toString());
 						if (
-							f.get("client_id") !== "sbx-worker" ||
+							f.get("client_id") !== "umiak-worker" ||
 							f.get("client_secret") !== SECRET
 						) {
 							return json(401, {});
@@ -211,7 +215,7 @@ describe.skipIf(skipPg())(
 						return json(200, { access_token: "tok", expires_in: 300 });
 					}
 					if (req.headers.authorization !== "Bearer tok") return json(401, {});
-					if (url.pathname === "/admin/realms/sbx/users") {
+					if (url.pathname === "/admin/realms/umiak/users") {
 						const first = Number(url.searchParams.get("first"));
 						const max = Number(url.searchParams.get("max"));
 						return json(200, kcUsers.slice(first, first + max));
@@ -235,7 +239,7 @@ describe.skipIf(skipPg())(
 				secret: "worker-payload-secret-0123456789",
 				log,
 			});
-			await migrateSbxPayload(wp.payload, () => {});
+			await migrateUmiakPayload(wp.payload, () => {});
 			const subs: string[] = [];
 			for (let i = 0; i < 6; i++) {
 				const sub = randomUUID();
@@ -251,8 +255,8 @@ describe.skipIf(skipPg())(
 			writeFileSync(secretFile, `${SECRET}\n`);
 			const env = parseWorkerEnv({
 				...BASE,
-				SBX_IDP_SYNC_KEYCLOAK_URL: kcUrl,
-				SBX_IDP_SYNC_CLIENT_SECRET_FILE: secretFile,
+				UMIAK_IDP_SYNC_KEYCLOAK_URL: kcUrl,
+				UMIAK_IDP_SYNC_CLIENT_SECRET_FILE: secretFile,
 			});
 			const sync = createWorkerIdpSync({
 				env: env.idpSync,
@@ -268,7 +272,7 @@ describe.skipIf(skipPg())(
 
 			kcUsers = [];
 			await ctl?.run(ctx);
-			expect(await m.registry.metrics()).toMatch(/^sbx_idp_sync_aborted 1$/m);
+			expect(await m.registry.metrics()).toMatch(/^umiak_idp_sync_aborted 1$/m);
 			const users = await wp.payload.find({
 				collection: "users",
 				where: { idpSubject: { in: subs } },
@@ -279,7 +283,7 @@ describe.skipIf(skipPg())(
 
 			kcUsers = subs.map((id) => ({ id, enabled: true }));
 			await ctl?.run(ctx);
-			expect(await m.registry.metrics()).toMatch(/^sbx_idp_sync_aborted 0$/m);
+			expect(await m.registry.metrics()).toMatch(/^umiak_idp_sync_aborted 0$/m);
 			expect(captured.text()).not.toContain(SECRET);
 		});
 	},

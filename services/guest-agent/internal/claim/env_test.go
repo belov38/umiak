@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/process"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/readiness"
+	"github.com/belov38/umiak/services/guest-agent/internal/process"
+	"github.com/belov38/umiak/services/guest-agent/internal/readiness"
 )
 
 func testUser() *process.User {
@@ -132,7 +132,7 @@ func TestEnvBuilderOrder(t *testing.T) {
 	}
 	h := newHarness(t)
 	req := fullRequest()
-	req.Env = map[string]string{"SBX": "claim", "A": "claim", "B": "claim", "C": "claim", "HOME": "/claim"}
+	req.Env = map[string]string{"UMIAK": "claim", "A": "claim", "B": "claim", "C": "claim", "HOME": "/claim"}
 	req.SecretEnv = map[string]string{"B": "secret", "C": "secret"}
 	if _, err := h.m.Claim(context.Background(), req); err != nil {
 		t.Fatal(err)
@@ -163,10 +163,10 @@ func TestEnvBuilderOrder(t *testing.T) {
 		"LANG":                                   "C.UTF-8",
 		"XDG_RUNTIME_DIR":                        "/run/user/1000",
 		"TERM":                                   "xterm-kitty",
-		"SBX":                                    "claim",
-		"SBX_SANDBOX_ID":                         "sbx_1",
-		"SBX_PORT_DOMAIN":                        "sbx.example.com",
-		"__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS": ".sbx.example.com",
+		"UMIAK":                                  "claim",
+		"UMIAK_SANDBOX_ID":                       "umiak_1",
+		"UMIAK_PORT_DOMAIN":                      "umiak.example.com",
+		"__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS": ".umiak.example.com",
 		"A":                                      "claim",
 		"B":                                      "secret",
 		"C":                                      "spec",
@@ -201,11 +201,11 @@ func TestEnvBuilderOrder(t *testing.T) {
 func TestEnvBuilderBeforeClaim(t *testing.T) {
 	h := newHarness(t)
 	env := h.m.EnvBuilder().Build(testUser(), &agentv1.CommandSpec{})
-	if !slices.Contains(env, "SBX=1") {
-		t.Errorf("SBX missing: %v", env)
+	if !slices.Contains(env, "UMIAK=1") {
+		t.Errorf("UMIAK missing: %v", env)
 	}
 	for _, kv := range env {
-		if strings.HasPrefix(kv, "SBX_SANDBOX_ID=") || strings.HasPrefix(kv, "__VITE_") {
+		if strings.HasPrefix(kv, "UMIAK_SANDBOX_ID=") || strings.HasPrefix(kv, "__VITE_") {
 			t.Errorf("unclaimed env has %s", kv)
 		}
 	}
@@ -271,17 +271,17 @@ func TestWatchDocker(t *testing.T) {
 
 func TestSessionEnv(t *testing.T) {
 	h := newHarness(t)
-	if got := h.m.EnvBuilder().SessionEnv(); !slices.Equal(got, []string{"SBX=1", "SBX_ENV_APPLIED=1"}) {
+	if got := h.m.EnvBuilder().SessionEnv(); !slices.Equal(got, []string{"UMIAK=1", "UMIAK_ENV_APPLIED=1"}) {
 		t.Errorf("before the claim: %q", got)
 	}
 	req := fullRequest()
-	req.Env["SBX_SANDBOX_ID"] = "from-claim-env"
+	req.Env["UMIAK_SANDBOX_ID"] = "from-claim-env"
 	if _, err := h.m.Claim(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
 	got := h.m.EnvBuilder().SessionEnv()
-	for _, want := range []string{"SBX=1", "SBX_ENV_APPLIED=1", "SBX_PORT_DOMAIN=sbx.example.com", "FOO=bar",
-		"TOKEN=" + secretEnvValue, "SBX_SANDBOX_ID=from-claim-env"} {
+	for _, want := range []string{"UMIAK=1", "UMIAK_ENV_APPLIED=1", "UMIAK_PORT_DOMAIN=umiak.example.com", "FOO=bar",
+		"TOKEN=" + secretEnvValue, "UMIAK_SANDBOX_ID=from-claim-env"} {
 		if !slices.Contains(got, want) {
 			t.Errorf("session env %q has no %q", got, want)
 		}

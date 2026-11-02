@@ -1,8 +1,8 @@
 // Worker process fixtures: startWorker options over fakes, and small polls.
 import { randomBytes } from "node:crypto";
 import { Writable } from "node:stream";
-import { type ConfigReader, StaticConfigReader } from "@sbx/config";
-import { KeyRing } from "@sbx/core";
+import { type ConfigReader, StaticConfigReader } from "@umiak/config";
+import { KeyRing } from "@umiak/core";
 import type pg from "pg";
 import { createLogger } from "../../src/context.ts";
 import type { InfraRegistry } from "../../src/ports.ts";

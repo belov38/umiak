@@ -6,7 +6,7 @@
 // - revoke: an owner, an operator (browser session) or a key with
 //   keys:admin, within the request's team (another team's key is 404);
 // - revoke self: any key.
-// Revocation and rotation fire NOTIFY sbx_identity 'api-keys:<id>' (the
+// Revocation and rotation fire NOTIFY umiak_identity 'api-keys:<id>' (the
 // trigger of the store), so every pod drops the key; this pod drops it at
 // once. The secret is returned only by create and rotate.
 import { createRoute } from "@hono/zod-openapi";
@@ -20,8 +20,8 @@ import {
 	IdentityError,
 	PRESETS,
 	type Scope,
-} from "@sbx/auth";
-import type { Principal } from "@sbx/core";
+} from "@umiak/auth";
+import type { Principal } from "@umiak/core";
 import type { Context } from "hono";
 import { authOf } from "../auth/principal.ts";
 import { requireOwner, requireScope } from "../auth/scopes.ts";
@@ -46,7 +46,7 @@ import {
 
 const TAGS = ["api-keys"];
 
-const CLI_USER_AGENT_PREFIX = "sbx-cli/";
+const CLI_USER_AGENT_PREFIX = "umiak-cli/";
 
 const owner403 = errorResponse(
 	"`forbidden`: details.reason `role` (not an owner of the team) or `user_required` " +
@@ -79,8 +79,8 @@ const createKey = createRoute({
 	description:
 		"Issues a key of the team for automation and CI with `scopes` or a `preset` " +
 		"(read-only, ci, full) and a lifetime (default 90 days, at most 365). The secret is " +
-		"in this answer only. Only an owner of the team, as a person (dashboard or `sbx " +
-		"login`); a key cannot issue keys. People use `sbx login` instead of keys.",
+		"in this answer only. Only an owner of the team, as a person (dashboard or `umiak " +
+		"login`); a key cannot issue keys. People use `umiak login` instead of keys.",
 	tags: TAGS,
 	security: HUMAN_ONLY,
 	middleware: [requireOwner()] as const,
@@ -126,7 +126,7 @@ const revokeSelf = createRoute({
 	operationId: "apiKeys.revokeSelf",
 	summary: "Revoke the calling key",
 	description:
-		"The team key of this request revokes itself (`sbx logout --revoke`); it stops " +
+		"The team key of this request revokes itself (`umiak logout --revoke`); it stops " +
 		"working at once on every server. Any team key, no scope needed.",
 	tags: TAGS,
 	responses: {
@@ -293,7 +293,7 @@ export function registerApiKeyRoutes(app: ApiApp, deps: ApiDeps): void {
 			throw new ApiError(
 				403,
 				"forbidden",
-				"only a team API key can revoke itself; people log out with `sbx logout`",
+				"only a team API key can revoke itself; people log out with `umiak logout`",
 				{ details: { reason: "api_key_required" } },
 			);
 		}

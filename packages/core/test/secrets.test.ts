@@ -7,9 +7,9 @@ import {
 	applySecretPatch,
 	emptySecretSets,
 	KeyRing,
-	SbxError,
 	SECRET_FILE_DEFAULT_MODE,
 	type SecretSets,
+	UmiakError,
 	validateSecretSets,
 } from "../src/index.ts";
 
@@ -18,7 +18,7 @@ const k2 = randomBytes(32).toString("base64");
 
 const sets: SecretSets = {
 	env: { NODE_ENV: "test" },
-	secrets: { ANTHROPIC_API_KEY: "sk-1", SBX_API_KEY: "sbx_x" },
+	secrets: { ANTHROPIC_API_KEY: "sk-1", UMIAK_API_KEY: "umiak_x" },
 	secretFiles: [
 		{
 			name: "gcp.json",
@@ -33,9 +33,9 @@ function issuesOf(fn: () => void): { path: string; message: string }[] {
 	try {
 		fn();
 	} catch (e) {
-		expect(e).toBeInstanceOf(SbxError);
-		expect((e as SbxError).code).toBe("validation");
-		return (e as SbxError).details.issues as {
+		expect(e).toBeInstanceOf(UmiakError);
+		expect((e as UmiakError).code).toBe("validation");
+		return (e as UmiakError).details.issues as {
 			path: string;
 			message: string;
 		}[];
@@ -126,7 +126,7 @@ describe("KeyRing", () => {
 	});
 
 	it("loads from a file", () => {
-		const dir = mkdtempSync(path.join(tmpdir(), "sbx-keys-"));
+		const dir = mkdtempSync(path.join(tmpdir(), "umiak-keys-"));
 		const file = path.join(dir, "keys.json");
 		writeFileSync(
 			file,
@@ -148,7 +148,7 @@ describe("applySecretPatch", () => {
 		expect(out.env).toEqual({ DEBUG: "1" });
 		expect(out.secrets).toEqual({
 			ANTHROPIC_API_KEY: "sk-2",
-			SBX_API_KEY: "sbx_x",
+			UMIAK_API_KEY: "umiak_x",
 		});
 		expect(out.secretFiles).toEqual(sets.secretFiles);
 		// base is not mutated
@@ -183,12 +183,17 @@ describe("applySecretPatch", () => {
 });
 
 describe("validateSecretSets", () => {
-	it("accepts valid sets and the allowed SBX_ names", () => {
+	it("accepts valid sets and the allowed UMIAK_ names", () => {
 		expect(() => validateSecretSets(sets)).not.toThrow();
 		expect(() =>
 			validateSecretSets({
-				env: { SBX_API_URL: "u", SBX_TEAM: "t", SBX_PROFILE: "p", _x: "" },
-				secrets: { SBX_API_KEY: "k" },
+				env: {
+					UMIAK_API_URL: "u",
+					UMIAK_TEAM: "t",
+					UMIAK_PROFILE: "p",
+					_x: "",
+				},
+				secrets: { UMIAK_API_KEY: "k" },
 				secretFiles: [],
 			}),
 		).not.toThrow();
@@ -203,13 +208,16 @@ describe("validateSecretSets", () => {
 		).toEqual([{ path: "env", message: expect.stringContaining("100") }]);
 	});
 
-	it("rejects reserved SBX_ names", () => {
+	it("rejects reserved UMIAK_ names", () => {
 		expect(
 			issuesOf(() =>
-				validateSecretSets({ ...emptySecretSets(), secrets: { SBX_FOO: "x" } }),
+				validateSecretSets({
+					...emptySecretSets(),
+					secrets: { UMIAK_FOO: "x" },
+				}),
 			),
 		).toEqual([
-			{ path: "secrets.SBX_FOO", message: expect.stringContaining("SBX_") },
+			{ path: "secrets.UMIAK_FOO", message: expect.stringContaining("UMIAK_") },
 		]);
 	});
 

@@ -2,17 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
 	ERROR_CODES,
 	invalidState,
-	isSbxError,
+	isUmiakError,
 	notFound,
 	operationInProgress,
 	outOfCapacity,
 	poolExhausted,
 	quotaExceeded,
-	SbxError,
+	UmiakError,
 	validation,
 } from "../src/index.ts";
 
-describe("SbxError", () => {
+describe("UmiakError", () => {
 	it("contains the S6 §14.1 codes and the executor additions", () => {
 		for (const code of [
 			"not_found",
@@ -37,25 +37,25 @@ describe("SbxError", () => {
 	});
 
 	it("is an Error with code, retryable and details", () => {
-		const e = new SbxError("slug_taken", "taken", { details: { slug: "x" } });
+		const e = new UmiakError("slug_taken", "taken", { details: { slug: "x" } });
 		expect(e).toBeInstanceOf(Error);
-		expect(e.name).toBe("SbxError");
+		expect(e.name).toBe("UmiakError");
 		expect(e.code).toBe("slug_taken");
 		expect(e.retryable).toBe(false);
 		expect(e.details).toEqual({ slug: "x" });
-		expect(isSbxError(e)).toBe(true);
-		expect(isSbxError(e, "slug_taken")).toBe(true);
-		expect(isSbxError(e, "not_found")).toBe(false);
-		expect(isSbxError(new Error("x"))).toBe(false);
+		expect(isUmiakError(e)).toBe(true);
+		expect(isUmiakError(e, "slug_taken")).toBe(true);
+		expect(isUmiakError(e, "not_found")).toBe(false);
+		expect(isUmiakError(new Error("x"))).toBe(false);
 	});
 
 	it("defaults retryable by code", () => {
-		expect(new SbxError("agent_unavailable", "x").retryable).toBe(true);
-		expect(new SbxError("recover_rate_limited", "x").retryable).toBe(true);
-		expect(new SbxError("validation", "x").retryable).toBe(false);
-		expect(new SbxError("not_found", "x", { retryable: true }).retryable).toBe(
-			true,
-		);
+		expect(new UmiakError("agent_unavailable", "x").retryable).toBe(true);
+		expect(new UmiakError("recover_rate_limited", "x").retryable).toBe(true);
+		expect(new UmiakError("validation", "x").retryable).toBe(false);
+		expect(
+			new UmiakError("not_found", "x", { retryable: true }).retryable,
+		).toBe(true);
 	});
 
 	it("factories fill code, retryable and details", () => {

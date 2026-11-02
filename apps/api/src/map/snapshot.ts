@@ -1,8 +1,8 @@
 // SavedSnapshot (core) -> Snapshot resource (S7 §13). The template, its
 // version, the size and the error of a failed save are not on the core row;
 // they are read for a whole list in one query.
-import { encodeUuid } from "@sbx/auth";
-import type { SavedSnapshot } from "@sbx/core";
+import { encodeUuid } from "@umiak/auth";
+import type { SavedSnapshot } from "@umiak/core";
 import type pg from "pg";
 import type { SnapshotResource } from "../schemas/snapshot.ts";
 import { iso, isoOrNull } from "./operation.ts";

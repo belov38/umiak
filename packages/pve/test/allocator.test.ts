@@ -348,7 +348,7 @@ describe("SqliteStateStore", () => {
 	});
 
 	it("adds owner_id to a database created before the column existed", () => {
-		const dir = mkdtempSync(join(tmpdir(), "sbx-sqlite-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-sqlite-"));
 		try {
 			const path = join(dir, "state.db");
 			const old = new DatabaseSync(path);

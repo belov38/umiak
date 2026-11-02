@@ -10,8 +10,8 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
 )
 
 // ErrLookupUnavailable means the route is not cached (or too old to serve)

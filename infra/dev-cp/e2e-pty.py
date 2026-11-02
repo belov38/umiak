@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Drives `sbx shell` in a pseudo-terminal for e2e.sh. Dev only.
+"""Drives `umiak shell` in a pseudo-terminal for e2e.sh. Dev only.
 
-    e2e-pty.py <sbx> <sandbox>
+    e2e-pty.py <umiak> <sandbox>
 
 Starts the shell at 40x120, checks the terminal and its size, resizes to 50x132
 (SIGWINCH), checks the new size and exits the shell with code 5. Prints
-"pty ok" and exits 0 when everything matched and sbx exited with 5.
+"pty ok" and exits 0 when everything matched and umiak exited with 5.
 """
 
 import fcntl

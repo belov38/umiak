@@ -6,7 +6,7 @@ import {
 	PORT_HOST_REWRITES,
 	PORT_MODES,
 	RESERVED_PORTS,
-} from "@sbx/core";
+} from "@umiak/core";
 import { extensibleEnum } from "../openapi/registry.ts";
 import { Timestamp } from "./common.ts";
 import { BlockReasonSchema } from "./sandbox.ts";
@@ -70,7 +70,7 @@ const hostedPortFields = {
 		example: "quiet-otter-lamp-3000",
 	}),
 	url: z.string().openapi({
-		example: "https://quiet-otter-lamp-3000.sbx.example.com",
+		example: "https://quiet-otter-lamp-3000.umiak.example.com",
 	}),
 	access: extensibleEnum(ACCESS),
 	hostRewrite: extensibleEnum(HOST_REWRITES),
@@ -98,7 +98,7 @@ export const HostedPortWriteSchema = z
 				description:
 					"Only when this call issued a token (a new token port or a switch to token). " +
 					"It is not stored and never shown again: replace a lost one with rotate-token",
-				example: "sbxp_...",
+				example: "umiakp_...",
 			}),
 		urlWithToken: z.string().optional().openapi({
 			description: "`url` + `/?_token=<token>`, with `token`",
@@ -133,7 +133,7 @@ export const SandboxPortsSchema = z
 
 export const PortTokenSchema = z
 	.object({
-		token: z.string().openapi({ example: "sbxp_..." }),
+		token: z.string().openapi({ example: "umiakp_..." }),
 		urlWithToken: z.string(),
 	})
 	.openapi("PortToken", {

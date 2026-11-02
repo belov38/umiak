@@ -1,7 +1,7 @@
 // SSH (S7 §11.3): how to connect to a sandbox, short-lived login
 // certificates, and the SSH keys of a person.
 import { z } from "@hono/zod-openapi";
-import { SSH_KEY_TYPES } from "@sbx/auth";
+import { SSH_KEY_TYPES } from "@umiak/auth";
 import { extensibleEnum } from "../openapi/registry.ts";
 import { NO_CONTROL_CHARS, NullableTimestamp, Timestamp } from "./common.ts";
 

@@ -1,6 +1,6 @@
 "use client";
 // JSON fields of the admin as a plain textarea (see JSON_FIELD_COMPONENT in
-// @sbx/payload): Payload's Monaco editor loads from a CDN, which the CSP
+// @umiak/payload): Payload's Monaco editor loads from a CDN, which the CSP
 // blocks. Invalid JSON is shown and not written to the form.
 import {
 	FieldDescription,

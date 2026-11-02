@@ -1,4 +1,4 @@
-import type { ExecResult } from "@sbx/pve";
+import type { ExecResult } from "@umiak/pve";
 import type { GuestIo } from "./runner.ts";
 
 // Guest side of the seal stage (spec S5 section 7.2 step 7): image facts for the manifest,
@@ -7,7 +7,7 @@ import type { GuestIo } from "./runner.ts";
 const MIN = 60_000;
 /** Bytes per input-data call: Proxmox limits the size of a request parameter. */
 const WRITE_CHUNK_BYTES = 32 * 1024;
-const BUILD_LOG_DIR = "/var/log/sbx-build";
+const BUILD_LOG_DIR = "/var/log/umiak-build";
 const SEED_DIR = "/mnt/seed";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: dpkg-query format fields
 const DPKG_FORMAT = "${db:Status-Abbrev}\t${Package}\t${Version}\n";
@@ -117,7 +117,7 @@ export async function collectFacts(
 		?.trim();
 	// Each tool runs twice with a 30 s limit; the script reads its mode from the stdin prefix.
 	const tools = await must(io, ["bash", "-s"], {
-		input: `export SBX_VERIFY_MODE=tools\n${verifyScript}`,
+		input: `export UMIAK_VERIFY_MODE=tools\n${verifyScript}`,
 		timeoutMs: 30 * MIN,
 	});
 	if (!kernel || !systemd)
@@ -132,7 +132,7 @@ export async function collectFacts(
 
 /**
  * Removes the build leftovers 90-cleanup cannot remove itself and the random seed, runs
- * `sbx-agent seal`, rebuilds the initrd, then zero-fills and trims the free space. Nothing may
+ * `umiak-agent seal`, rebuilds the initrd, then zero-fills and trims the free space. Nothing may
  * write to the disk afterwards but shutdown.
  */
 export async function sealGuest(io: GuestIo): Promise<void> {
@@ -149,9 +149,9 @@ export async function sealGuest(io: GuestIo): Promise<void> {
 		"systemctl stop systemd-random-seed.service && ! systemctl is-active -q systemd-random-seed.service && rm -f /var/lib/systemd/random-seed /var/lib/systemd/credential.secret && sync",
 	]);
 	// After seal only the initrd and the zero file are written; fstrim then covers the freed blocks.
-	await must(io, ["sbx-agent", "seal"], { timeoutMs: 2 * MIN });
+	await must(io, ["umiak-agent", "seal"], { timeoutMs: 2 * MIN });
 	// dracut copies /etc/machine-id and /etc/hostname into the initrd: rebuilt now, it carries
-	// the empty machine-id and the hostname sbx instead of the build VM's, so the early boot of
+	// the empty machine-id and the hostname umiak instead of the build VM's, so the early boot of
 	// every clone runs and logs under the clone's own firmware machine-id.
 	await must(io, ["update-initramfs", "-u", "-k", "all"], {
 		timeoutMs: 10 * MIN,
@@ -172,7 +172,7 @@ export async function sealGuest(io: GuestIo): Promise<void> {
 		[
 			"bash",
 			"-c",
-			"dd if=/dev/zero of=/var/tmp/sbx-zero bs=4M status=none || true; rm -f /var/tmp/sbx-zero; sync",
+			"dd if=/dev/zero of=/var/tmp/umiak-zero bs=4M status=none || true; rm -f /var/tmp/umiak-zero; sync",
 		],
 		{ timeoutMs: 30 * MIN },
 	);

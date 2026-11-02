@@ -543,7 +543,7 @@ export function parseUserCertificate(line: string): SshUserCertificate {
 // --- host keys ---
 
 /**
- * Gateway host keys from SBX_SSH_HOST_KEYS_FILE: public key lines
+ * Gateway host keys from UMIAK_SSH_HOST_KEYS_FILE: public key lines
  * ("<type> <base64> [comment]"), blank lines and "#" comments allowed.
  * Returns "<type> <base64>" per key. Any private key is an error.
  */

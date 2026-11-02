@@ -15,14 +15,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/gateway"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/registry"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/memnet"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/pgtest"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/process"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/agent"
+	"github.com/belov38/umiak/libs/tunnel/gateway"
+	"github.com/belov38/umiak/libs/tunnel/h2"
+	"github.com/belov38/umiak/libs/tunnel/registry"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/memnet"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/pgtest"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/process"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // Shrunk timings (spec values in comments), the same as internal/e2e.
@@ -193,7 +193,7 @@ func (h *harness) startGateway() (*gw, error) {
 		InternalURL:            g.url,
 		Store:                  h.store,
 		ServiceTokens:          gateway.TokenSet{"api": {h.token}},
-		AllowedServicePrefixes: []string{"sbx.testing.v1."},
+		AllowedServicePrefixes: []string{"umiak.testing.v1."},
 		Timing:                 fastTiming(),
 		HTTP2:                  h2.ClientConfig{PingIdle: 200 * time.Millisecond, PingTimeout: 200 * time.Millisecond},
 		Logger:                 h.log.With("gw", name),

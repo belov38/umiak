@@ -1,4 +1,4 @@
-// S3 event payloads (proto/sbx/agent/v1/events.proto) carried as Any in the
+// S3 event payloads (proto/umiak/agent/v1/events.proto) carried as Any in the
 // gateway's AgentEventsRequest: decoded to protojson the core normalizer
 // understands (S6 §10.2), with zero values kept (exit code 0, no commands).
 import {
@@ -7,7 +7,7 @@ import {
 	type MessageShape,
 } from "@bufbuild/protobuf";
 import { anyPack } from "@bufbuild/protobuf/wkt";
-import { normalizeAgentEvent } from "@sbx/core";
+import { normalizeAgentEvent } from "@umiak/core";
 import {
 	ActivitySchema,
 	ClaimAppliedSchema,
@@ -23,7 +23,7 @@ import {
 	QuiesceAutoThawedSchema,
 	ReadinessChangedSchema,
 	Stream,
-} from "@sbx/proto/agent/v1";
+} from "@umiak/proto/agent/v1";
 import { describe, expect, it } from "vitest";
 import { decodePayload } from "../src/agent/event-decode.ts";
 
@@ -170,7 +170,7 @@ describe("S3 event payloads", () => {
 	});
 
 	it("a corrupt S3 payload is stored as {@type}", () => {
-		const typeUrl = "type.googleapis.com/sbx.agent.v1.CommandExited";
+		const typeUrl = "type.googleapis.com/umiak.agent.v1.CommandExited";
 		expect(
 			decodePayload({
 				$typeName: "google.protobuf.Any",

@@ -2,7 +2,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadSshCa } from "@sbx/auth";
+import { loadSshCa } from "@umiak/auth";
 import { describe, expect, it } from "vitest";
 import {
 	loadSettings,
@@ -33,7 +33,7 @@ describe("loadSettings", () => {
 			internalPort: 8082,
 			metricsPort: 9090,
 			proxiedEnabled: true,
-			sshHost: `ssh.${s.sbxDomain}`,
+			sshHost: `ssh.${s.umiakDomain}`,
 			sshPort: 22,
 			sshHostKeysFile: null,
 			sshLoginCaKeyFile: null,
@@ -53,27 +53,28 @@ describe("loadSettings", () => {
 	it("parses csv lists, ports, booleans and the OIDC block", () => {
 		const s = loadSettings({
 			...TEST_ENV,
-			SBX_API_PUBLIC_PORT: "18080",
-			SBX_API_PROXIED_ENABLED: "false",
-			SBX_OPERATOR_GROUPS: "sbx-operators, admins",
-			SBX_API_TRUSTED_PROXY_CIDRS: "10.0.0.0/8,fd00::/8",
-			SBX_OIDC_ISSUER: "http://localhost:8180/realms/sbx",
-			SBX_OIDC_JWKS_URL:
-				"http://keycloak:8080/realms/sbx/protocol/openid-connect/certs",
-			SBX_SSH_HOST: "ssh.other.test",
-			SBX_SSH_PORT: "2222",
+			UMIAK_API_PUBLIC_PORT: "18080",
+			UMIAK_API_PROXIED_ENABLED: "false",
+			UMIAK_OPERATOR_GROUPS: "umiak-operators, admins",
+			UMIAK_API_TRUSTED_PROXY_CIDRS: "10.0.0.0/8,fd00::/8",
+			UMIAK_OIDC_ISSUER: "http://localhost:8180/realms/umiak",
+			UMIAK_OIDC_JWKS_URL:
+				"http://keycloak:8080/realms/umiak/protocol/openid-connect/certs",
+			UMIAK_SSH_HOST: "ssh.other.test",
+			UMIAK_SSH_PORT: "2222",
 		});
 		expect(s.publicPort).toBe(18080);
 		expect(s.proxiedEnabled).toBe(false);
-		expect(s.operatorGroups).toEqual(["sbx-operators", "admins"]);
+		expect(s.operatorGroups).toEqual(["umiak-operators", "admins"]);
 		expect(s.trustedProxyCidrs).toEqual(["10.0.0.0/8", "fd00::/8"]);
 		expect(s.oidc).toEqual({
-			issuer: "http://localhost:8180/realms/sbx",
+			issuer: "http://localhost:8180/realms/umiak",
 			discoveryUrl:
-				"http://localhost:8180/realms/sbx/.well-known/openid-configuration",
-			jwksUrl: "http://keycloak:8080/realms/sbx/protocol/openid-connect/certs",
-			audience: "sbx-api",
-			allowedClients: ["sbx-cli", "sbx-mcp"],
+				"http://localhost:8180/realms/umiak/.well-known/openid-configuration",
+			jwksUrl:
+				"http://keycloak:8080/realms/umiak/protocol/openid-connect/certs",
+			audience: "umiak-api",
+			allowedClients: ["umiak-cli", "umiak-mcp"],
 		});
 		expect(s.sshHost).toBe("ssh.other.test");
 		expect(s.sshPort).toBe(2222);
@@ -82,8 +83,8 @@ describe("loadSettings", () => {
 	it("empty strings count as unset", () => {
 		const s = loadSettings({
 			...TEST_ENV,
-			SBX_OIDC_ISSUER: "",
-			SBX_SSH_PORT: "",
+			UMIAK_OIDC_ISSUER: "",
+			UMIAK_SSH_PORT: "",
 		});
 		expect(s.oidc).toBeNull();
 		expect(s.sshPort).toBe(22);
@@ -93,23 +94,23 @@ describe("loadSettings", () => {
 		const msg = errorOf({
 			...TEST_ENV,
 			DATABASE_URL: undefined,
-			SBX_API_CURSOR_KEY: Buffer.alloc(16).toString("base64"),
-			SBX_API_PUBLIC_PORT: "x",
-			SBX_API_TRUSTED_PROXY_CIDRS: "10.0.0.0/33",
-			SBX_MIN_CLI_VERSION: "latest",
+			UMIAK_API_CURSOR_KEY: Buffer.alloc(16).toString("base64"),
+			UMIAK_API_PUBLIC_PORT: "x",
+			UMIAK_API_TRUSTED_PROXY_CIDRS: "10.0.0.0/33",
+			UMIAK_MIN_CLI_VERSION: "latest",
 		});
 		for (const k of [
 			"DATABASE_URL",
-			"SBX_API_CURSOR_KEY",
-			"SBX_API_PUBLIC_PORT",
-			"SBX_API_TRUSTED_PROXY_CIDRS",
-			"SBX_MIN_CLI_VERSION",
+			"UMIAK_API_CURSOR_KEY",
+			"UMIAK_API_PUBLIC_PORT",
+			"UMIAK_API_TRUSTED_PROXY_CIDRS",
+			"UMIAK_MIN_CLI_VERSION",
 		]) {
 			expect(msg).toContain(k);
 		}
 	});
 
-	it("PAYLOAD_SECRET is required; SBX_CONFIG_FILE is not read (S8: config from Payload)", () => {
+	it("PAYLOAD_SECRET is required; UMIAK_CONFIG_FILE is not read (S8: config from Payload)", () => {
 		const { PAYLOAD_SECRET: _, ...rest } = TEST_ENV;
 		expect(errorOf(rest)).toMatch(/PAYLOAD_SECRET: required/);
 		expect(errorOf({ ...TEST_ENV, PAYLOAD_SECRET: "" })).toMatch(
@@ -119,14 +120,14 @@ describe("loadSettings", () => {
 		expect(s.payloadSecret).toBe(TEST_ENV.PAYLOAD_SECRET);
 		expect(s).not.toHaveProperty("configFile");
 		expect(
-			loadSettings({ ...TEST_ENV, SBX_CONFIG_FILE: "/etc/sbx/sbx.yaml" }),
+			loadSettings({ ...TEST_ENV, UMIAK_CONFIG_FILE: "/etc/umiak/umiak.yaml" }),
 		).toEqual(s);
 	});
 
 	it("rejects a cursor key that is not base64", () => {
 		expect(
-			errorOf({ ...TEST_ENV, SBX_API_CURSOR_KEY: `${CURSOR_KEY}!!` }),
-		).toContain("SBX_API_CURSOR_KEY");
+			errorOf({ ...TEST_ENV, UMIAK_API_CURSOR_KEY: `${CURSOR_KEY}!!` }),
+		).toContain("UMIAK_API_CURSOR_KEY");
 	});
 });
 
@@ -139,7 +140,7 @@ describe("readHostKeys", () => {
 				type: "pkcs8",
 			}) as string,
 		).publicKey;
-		const dir = mkdtempSync(join(tmpdir(), "sbx-api-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-api-"));
 		const file = join(dir, "host_keys");
 		writeFileSync(file, `# gateway\n${key} root@gw\n`);
 		expect(readHostKeys(file)).toEqual([key]);
@@ -149,7 +150,7 @@ describe("readHostKeys", () => {
 describe("readSshCa", () => {
 	it("is null without a file, loads the CA from the file, refuses a non-ed25519 key", () => {
 		expect(readSshCa(null)).toBeNull();
-		const dir = mkdtempSync(join(tmpdir(), "sbx-api-"));
+		const dir = mkdtempSync(join(tmpdir(), "umiak-api-"));
 		const pem = generateKeyPairSync("ed25519").privateKey.export({
 			format: "pem",
 			type: "pkcs8",

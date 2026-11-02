@@ -9,14 +9,14 @@ import {
 	type FakeEnv,
 	type FakePort,
 	type FakeSandbox,
-	SBX_DOMAIN,
+	UMIAK_DOMAIN,
 } from "./state.ts";
 
 const RESERVED_PORTS = [22, 47800, 47984, 47989, 47990, 48010];
 const MAX_HOSTED = 50;
 
 function urlOf(sb: FakeSandbox, port: number): string {
-	return `https://${sb.slug}-${port}.${SBX_DOMAIN}`;
+	return `https://${sb.slug}-${port}.${UMIAK_DOMAIN}`;
 }
 
 function hostedResource(sb: FakeSandbox, p: FakePort) {
@@ -34,7 +34,7 @@ function hostedResource(sb: FakeSandbox, p: FakePort) {
 }
 
 function newToken(): string {
-	return `sbxp_${randomBytes(16).toString("hex")}`;
+	return `umiakp_${randomBytes(16).toString("hex")}`;
 }
 
 export function registerPortRoutes(app: FakeApp, fake: Fake): void {

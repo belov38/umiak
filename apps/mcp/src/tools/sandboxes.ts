@@ -1,7 +1,7 @@
 // Sandbox lifecycle tools (S11 8.2): create, list, get, update, stop, resume,
 // fork, recover, delete.
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import { type OperationData, type SandboxData, SbxError } from "@sbx/sdk";
+import { type OperationData, type SandboxData, UmiakError } from "@umiak/sdk";
 import { z } from "zod";
 import type { ToolContext } from "../context.ts";
 import { ToolError } from "../errors.ts";
@@ -100,7 +100,7 @@ async function finishAction(
 			);
 		} catch (err) {
 			// Cancel, 401 and bugs go to the call wrapper.
-			if (!(err instanceof SbxError) || err.status === 401) throw err;
+			if (!(err instanceof UmiakError) || err.status === 401) throw err;
 			notes.push(
 				`waiting for the sandbox failed (${safeLine(err.code)}): ${safeLine(err.message)}`,
 			);
@@ -140,7 +140,7 @@ async function refreshOperation(
 ): Promise<OperationData> {
 	const active = op.state === "pending" || op.state === "running";
 	try {
-		const r = await ctx.sbx().raw.GET("/v1/operations/{operation}", {
+		const r = await ctx.umiak().raw.GET("/v1/operations/{operation}", {
 			params: {
 				path: { operation: op.id },
 				query: { waitSeconds: active ? SOURCE_OPERATION_WAIT_SECONDS : 0 },
@@ -149,7 +149,7 @@ async function refreshOperation(
 		});
 		return r.data;
 	} catch (err) {
-		if (!(err instanceof SbxError) || err.status === 401) throw err;
+		if (!(err instanceof UmiakError) || err.status === 401) throw err;
 		return op;
 	}
 }
@@ -232,7 +232,7 @@ export const sandboxCreate = defineTool({
 					: { snapshot: args.from_snapshot },
 		});
 		const r = await withUnknownOutcome(ctx, modelKey, () =>
-			ctx.sbx().raw.POST("/v1/sandboxes", {
+			ctx.umiak().raw.POST("/v1/sandboxes", {
 				body,
 				idempotencyKey: apiKey,
 				...ctx.call,
@@ -296,7 +296,7 @@ export const sandboxList = defineTool({
 			limit: args.limit ?? 50,
 			cursor: args.cursor,
 		});
-		const { data } = await ctx.sbx().raw.GET("/v1/sandboxes", {
+		const { data } = await ctx.umiak().raw.GET("/v1/sandboxes", {
 			params: { query },
 			...ctx.call,
 		});
@@ -400,7 +400,7 @@ export const sandboxUpdate = defineTool({
 				hint: "give at least one of name, slug, labels, ttl_seconds, idle_timeout_seconds.",
 			});
 		}
-		const { data } = await ctx.sbx().raw.PATCH(SANDBOX_PATH, {
+		const { data } = await ctx.umiak().raw.PATCH(SANDBOX_PATH, {
 			params: { path: { sandbox: args.sandbox } },
 			body,
 			...ctx.call,
@@ -420,7 +420,7 @@ export const sandboxStop = defineTool({
 	sandboxArg: true,
 	shape: { ...waitShape(false) },
 	async handler(args, ctx) {
-		const r = await ctx.sbx().raw.POST(`${SANDBOX_PATH}/stop`, {
+		const r = await ctx.umiak().raw.POST(`${SANDBOX_PATH}/stop`, {
 			params: { path: { sandbox: args.sandbox } },
 			...ctx.call,
 		});
@@ -449,7 +449,7 @@ export const sandboxResume = defineTool({
 		...waitShape(true),
 	},
 	async handler(args, ctx) {
-		const r = await ctx.sbx().raw.POST(`${SANDBOX_PATH}/resume`, {
+		const r = await ctx.umiak().raw.POST(`${SANDBOX_PATH}/resume`, {
 			params: { path: { sandbox: args.sandbox } },
 			body: compact({
 				env: envPatch(args.env, args.unset_env),
@@ -509,7 +509,7 @@ export const sandboxFork = defineTool({
 			forceStop: args.force_stop,
 		});
 		const r = await withUnknownOutcome(ctx, modelKey, () =>
-			ctx.sbx().raw.POST(`${SANDBOX_PATH}/fork`, {
+			ctx.umiak().raw.POST(`${SANDBOX_PATH}/fork`, {
 				params: { path: { sandbox: args.sandbox } },
 				body,
 				idempotencyKey: apiKey,
@@ -537,7 +537,7 @@ export const sandboxRecover = defineTool({
 	sandboxArg: true,
 	shape: { ...waitShape(true) },
 	async handler(args, ctx) {
-		const r = await ctx.sbx().raw.POST(`${SANDBOX_PATH}/recover`, {
+		const r = await ctx.umiak().raw.POST(`${SANDBOX_PATH}/recover`, {
 			params: { path: { sandbox: args.sandbox } },
 			...ctx.call,
 		});
@@ -574,9 +574,9 @@ export const sandboxDelete = defineTool({
 			.describe("Id of the sandbox to delete, equal to sandbox"),
 	},
 	async handler(args, ctx) {
-		const { data } = await ctx.sbx().raw.DELETE(SANDBOX_PATH, {
+		const { data } = await ctx.umiak().raw.DELETE(SANDBOX_PATH, {
 			params: { path: { sandbox: args.sandbox } },
-			headers: { "Sbx-Confirm-Delete": args.confirm },
+			headers: { "Umiak-Confirm-Delete": args.confirm },
 			...ctx.call,
 		});
 		return sandboxResult(data.sandbox, {

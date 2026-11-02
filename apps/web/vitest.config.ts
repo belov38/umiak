@@ -13,7 +13,7 @@ export default defineConfig({
 	test: {
 		include: ["test/**/*.test.ts"],
 		environment: "node",
-		globalSetup: ["@sbx/db/testing/global-setup"],
+		globalSetup: ["@umiak/db/testing/global-setup"],
 		testTimeout: 30_000,
 		hookTimeout: 120_000,
 	},

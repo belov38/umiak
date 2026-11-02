@@ -8,11 +8,11 @@ export {
 	teamDeleteAccess,
 } from "./access.ts";
 export {
-	buildSbxConfig,
+	buildUmiakConfig,
 	PAYLOAD_MIGRATIONS_DIR,
 	PAYLOAD_SCHEMA,
-	type SbxCustomConfig,
-	type SbxPayloadOptions,
+	type UmiakCustomConfig,
+	type UmiakPayloadOptions,
 } from "./config.ts";
 export {
 	PayloadConfigReader,
@@ -86,14 +86,14 @@ export {
 	type NoticeApiKey,
 } from "./idp-sync/sync.ts";
 export {
-	closeSbxPayload,
-	getSbxPayload,
-	sbxPayloadRefs,
+	closeUmiakPayload,
+	getUmiakPayload,
+	umiakPayloadRefs,
 } from "./instance.ts";
 export { type NotifyChannel, notify, txQuery } from "./notify.ts";
 export {
 	assertPayloadMigrated,
-	migrateSbxPayload,
+	migrateUmiakPayload,
 	PAYLOAD_MIGRATION_LOCK_KEY,
 	type PayloadMigration,
 	payloadMigrations,

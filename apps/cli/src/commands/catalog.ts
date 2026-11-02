@@ -1,4 +1,4 @@
-// `sbx templates`, `sbx sizes`, `sbx limits` (S7 §13): the catalog and the
+// `umiak templates`, `umiak sizes`, `umiak limits` (S7 §13): the catalog and the
 // team's quota, as the API returns them.
 
 import type { Command } from "commander";
@@ -11,7 +11,7 @@ export function register(program: Command, run: Runner): void {
 		.description("list the templates")
 		.action(
 			run(async (ctx) => {
-				const { data } = await ctx.sbx().raw.GET("/v1/templates");
+				const { data } = await ctx.umiak().raw.GET("/v1/templates");
 				ctx.out.result(data, (v) =>
 					table(
 						["SLUG", "NAME", "OS", "DEFAULT SIZE", "SIZES", "VERSION"],
@@ -33,7 +33,7 @@ export function register(program: Command, run: Runner): void {
 		.description("list the sizes")
 		.action(
 			run(async (ctx) => {
-				const { data } = await ctx.sbx().raw.GET("/v1/sizes");
+				const { data } = await ctx.umiak().raw.GET("/v1/sizes");
 				ctx.out.result(data, (v) =>
 					table(
 						["SLUG", "VCPU", "MEMORY MB"],
@@ -48,7 +48,7 @@ export function register(program: Command, run: Runner): void {
 		.description("show the quota of the team, its usage and what it can create")
 		.action(
 			run(async (ctx) => {
-				const { data } = await ctx.sbx().raw.GET("/v1/limits");
+				const { data } = await ctx.umiak().raw.GET("/v1/limits");
 				ctx.out.result(data, (v) =>
 					[
 						`can create: ${v.canCreate ? "yes" : "no"}`,

@@ -14,13 +14,13 @@ function directives(csp: string): Map<string, string[]> {
 }
 
 describe("securityHeaders (S8 §5.6)", () => {
-	const h = securityHeaders({ sbxDomain: "sbx.example.com" });
+	const h = securityHeaders({ umiakDomain: "umiak.example.com" });
 	const csp = directives(h["Content-Security-Policy"] ?? "");
 
 	it("CSP: own origin, frames of sandbox hosts only", () => {
 		expect(h["Content-Security-Policy"]).toContain("frame-ancestors 'self'");
 		expect(h["Content-Security-Policy"]).toContain(
-			"frame-src https://*.sbx.example.com",
+			"frame-src https://*.umiak.example.com",
 		);
 		expect(csp.get("default-src")).toEqual(["'self'"]);
 		expect(csp.get("connect-src")).toEqual(["'self'"]);
@@ -40,7 +40,7 @@ describe("securityHeaders (S8 §5.6)", () => {
 	it("'unsafe-eval' only in dev", () => {
 		expect(
 			directives(
-				contentSecurityPolicy({ sbxDomain: "sbx.example.com", dev: true }),
+				contentSecurityPolicy({ umiakDomain: "umiak.example.com", dev: true }),
 			).get("script-src"),
 		).toContain("'unsafe-eval'");
 	});

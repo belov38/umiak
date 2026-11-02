@@ -1,7 +1,7 @@
 // KeyCache against invalidation races, with a scripted notifier and store.
 import { randomUUID } from "node:crypto";
-import type { ApiKeyRecord, IdentityStore } from "@sbx/auth";
-import type { Notifier } from "@sbx/core";
+import type { ApiKeyRecord, IdentityStore } from "@umiak/auth";
+import type { Notifier } from "@umiak/core";
 import { describe, expect, it } from "vitest";
 import { IdentityListener, KeyCache, SessionResolver } from "../src/index.ts";
 

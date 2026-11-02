@@ -66,12 +66,12 @@ export interface AgentClientOptions {
 	 * (<internal_url>/v1/machines/<id>/rpc) with the given request headers.
 	 * Default: connect-node Connect protocol over HTTP/2 (h2c), one HTTP/2
 	 * session per gateway instance, no compression either way, messages up to
-	 * readMaxBytes, and Trailer-Sbx-* response headers dropped.
+	 * readMaxBytes, and Trailer-Umiak-* response headers dropped.
 	 *
 	 * A custom transport gets none of that: answers come from an untrusted
 	 * agent, so it must set readMaxBytes (MAX_MESSAGE_BYTES) and
 	 * writeMaxBytes, acceptCompression: [] (connect-node accepts gzip and br
-	 * by default) and no sendCompression, and drop Trailer-Sbx-* response
+	 * by default) and no sendCompression, and drop Trailer-Umiak-* response
 	 * headers before connect-es merges them into the error metadata, where
 	 * they would read as gateway routing signals. readMaxBytes of these
 	 * options does not apply to it.
@@ -134,7 +134,7 @@ export class AgentClient {
 	 * A Connect transport for one machine with routing and retries: unary calls
 	 * and server streams (until the response headers arrive) are retried on 421,
 	 * 503 agent_unavailable, Code.Unavailable and connection errors. Caller
-	 * headers (Sbx-Request-Id) are resent unchanged. Caller abort and the Connect
+	 * headers (Umiak-Request-Id) are resent unchanged. Caller abort and the Connect
 	 * deadline are never retried. Messages of a stream that already started are
 	 * not retried; use resumableAttach for that.
 	 */
@@ -194,7 +194,7 @@ export class AgentClient {
 	 * the request goes to <internal_url>/v1/machines/<id>/files<path> over
 	 * HTTP/1.1 with Authorization: Bearer <serviceToken>.
 	 *
-	 * 421, 503 with Sbx-Error-Code: agent_unavailable and network errors before a
+	 * 421, 503 with Umiak-Error-Code: agent_unavailable and network errors before a
 	 * response are retried when the body is absent, resendable or a factory. A
 	 * ReadableStream body is sent once: after a 421/503 that Response is
 	 * returned. Every other status is returned as is with a streamed body;
@@ -282,7 +282,7 @@ export class AgentClient {
 		// readMaxBytes bounds a message after decompression in connect-es.
 		return createConnectProtocolTransport({
 			baseUrl,
-			httpClient: dropTrailerSbx(
+			httpClient: dropTrailerUmiak(
 				createNodeHttpClient({
 					httpVersion: "2",
 					sessionProvider: () => manager,
@@ -437,18 +437,18 @@ export class AgentClient {
 }
 
 /**
- * Drops Trailer-Sbx-* response headers. Connect unary trailers travel as
+ * Drops Trailer-Umiak-* response headers. Connect unary trailers travel as
  * Trailer-<name> headers and connect-es merges them, without the prefix, into
- * the error metadata, where they would read as the gateway's Sbx-* routing
+ * the error metadata, where they would read as the gateway's Umiak-* routing
  * signals. Only the gateway produces those, and never as trailers; it strips
  * the agent's (spec §16 item 1), this is defence in depth.
  */
-function dropTrailerSbx(client: UniversalClientFn): UniversalClientFn {
+function dropTrailerUmiak(client: UniversalClientFn): UniversalClientFn {
 	return async (req) => {
 		const res = await client(req);
 		const header = new Headers();
 		res.header.forEach((v, k) => {
-			if (!k.toLowerCase().startsWith("trailer-sbx-")) {
+			if (!k.toLowerCase().startsWith("trailer-umiak-")) {
 				header.append(k, v);
 			}
 		});

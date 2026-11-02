@@ -1,30 +1,30 @@
 // Cache of resolved browser sessions in web (S8 §5.3, plan decision 8): 30 s
 // by the claims (sha256 of email, sub, groups, names), flushed by every
-// identity change (LISTEN sbx_identity, one connection per Payload instance)
+// identity change (LISTEN umiak_identity, one connection per Payload instance)
 // and whenever LISTEN is (re)established. The same behaviour as the api's
 // SessionResolver (S7 §7.4). It is attached to a Payload instance, so the
 // auth strategy (/admin, /cms-api) and web's own pages (/app) share it and
 // never disagree about who is logged in.
 import { createHash } from "node:crypto";
-import type { SessionHeaders } from "@sbx/auth";
+import type { SessionHeaders } from "@umiak/auth";
 import type { Payload } from "payload";
 import { ChannelListener } from "../config-listener.ts";
 
-export const IDENTITY_CHANNEL = "sbx_identity";
-export const SESSION_LISTENER_APPLICATION_NAME = "sbx-session-listener";
+export const IDENTITY_CHANNEL = "umiak_identity";
+export const SESSION_LISTENER_APPLICATION_NAME = "umiak-session-listener";
 export const SESSION_CACHE_TTL_MS = 30_000;
 
 /** Cached sessions before expired ones are pruned. */
 const MAX_ENTRIES = 10_000;
 
 /**
- * `sbx_identity` payloads that do not change a session: keys and SSH keys
+ * `umiak_identity` payloads that do not change a session: keys and SSH keys
  * are not part of it; `sandboxes:<uuid>` is an operator block for the api's
  * stream registry, not an identity change.
  */
 const NOT_SESSION = new Set(["api-keys", "ssh-keys", "sandboxes"]);
 
-/** Whether a `sbx_identity` payload (null: LISTEN re-established) must flush sessions. */
+/** Whether a `umiak_identity` payload (null: LISTEN re-established) must flush sessions. */
 export function flushesSessions(payload: string | null): boolean {
 	if (payload === null || payload === "*") return true;
 	const i = payload.indexOf(":");
@@ -118,7 +118,7 @@ export class SessionCache<V> {
 }
 
 export interface AttachSessionCacheOptions extends SessionCacheOptions {
-	/** LISTEN sbx_identity on its own connection; without it only ttlMs applies. */
+	/** LISTEN umiak_identity on its own connection; without it only ttlMs applies. */
 	listen?: { databaseUrl: string; reconnectDelayMs?: number };
 	/** Listener connection errors (it reconnects by itself). */
 	onListenError?: (err: unknown) => void;

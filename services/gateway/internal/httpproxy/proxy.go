@@ -1,5 +1,5 @@
 // Package httpproxy is the public HTTP proxy of published ports (spec 7):
-// https://<slug>-<port>.<sbx-domain> → limits, host, reserved /__sbx/ paths,
+// https://<slug>-<port>.<umiak-domain> → limits, host, reserved /__umiak/ paths,
 // route, sandbox state, access check, the header policy and the stream to
 // the application, with an access log line and metrics per request.
 package httpproxy
@@ -18,25 +18,25 @@ import (
 	"strings"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/portauth"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/ratelimit"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/routes"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/upstream"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
+	"github.com/belov38/umiak/services/gateway/internal/portauth"
+	"github.com/belov38/umiak/services/gateway/internal/ratelimit"
+	"github.com/belov38/umiak/services/gateway/internal/routes"
+	"github.com/belov38/umiak/services/gateway/internal/upstream"
 )
 
 const accessPublic = "public"
 
 // Config configures the proxy. Metrics and AccessLog may be nil.
 type Config struct {
-	SbxDomain  string
-	Grammar    routes.Grammar
-	Routes     *routes.Cache
-	Auth       *portauth.Auth
-	Limits     *ratelimit.Limits
-	Upstream   *upstream.Dialer
-	Transports *upstream.AppTransports
+	UmiakDomain string
+	Grammar     routes.Grammar
+	Routes      *routes.Cache
+	Auth        *portauth.Auth
+	Limits      *ratelimit.Limits
+	Upstream    *upstream.Dialer
+	Transports  *upstream.AppTransports
 	// TrustedProxies are the peers whose X-Forwarded-For is believed
 	// (plain mode behind an ingress, spec 5.2). They are ignored for
 	// requests that arrived over TLS: the gateway is the edge there.
@@ -110,7 +110,7 @@ func (h *handler) serve(x *exchange, trusted []netip.Prefix) {
 		x.fail(rateLimited(wait))
 		return
 	}
-	l, ok := routes.ParseHost(r.Host, h.cfg.SbxDomain, h.cfg.Grammar)
+	l, ok := routes.ParseHost(r.Host, h.cfg.UmiakDomain, h.cfg.Grammar)
 	if !ok {
 		x.fail(notFound())
 		return
@@ -264,13 +264,13 @@ func (h *handler) rewrite(x *exchange, pr *httputil.ProxyRequest, rt cpapi.Route
 	hd.Set("Forwarded", forwardedHeader(x.ip, in.Host))
 	hd.Set("X-Request-Id", x.rid)
 	if rt.Kind == cpapi.KindDesktop {
-		hd.Set("X-Sbx-Desktop-User", "sbx")
+		hd.Set("X-Umiak-Desktop-User", "umiak")
 		q := out.URL.Query()
 		q.Del("_ticket")
 		out.URL.RawQuery = q.Encode()
 	}
 	if rt.Access == portauth.AccessSSO && auth.Email != "" {
-		hd.Set("X-Sbx-User-Email", auth.Email)
+		hd.Set("X-Umiak-User-Email", auth.Email)
 	}
 
 	trace := &httptrace.ClientTrace{GotConn: func(info httptrace.GotConnInfo) { x.gotConn(info.Conn) }}

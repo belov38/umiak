@@ -2,9 +2,9 @@
 declare module "vitest" {
 	export interface ProvidedContext {
 		/** Admin DSN of the test Postgres; empty when unavailable or skipped. */
-		sbxPgAdminDsn: string;
+		umiakPgAdminDsn: string;
 		/** Why Postgres is unavailable; empty when it is available or skipped. */
-		sbxPgError: string;
+		umiakPgError: string;
 	}
 }
 

@@ -5,7 +5,7 @@ import { createLogger } from "./context.ts";
 
 export function processLogger(
 	level: string,
-	name: "sbx-worker" | "sbx-admin" = "sbx-worker",
+	name: "umiak-worker" | "umiak-admin" = "umiak-worker",
 ): Logger {
 	return createLogger({ level, name });
 }

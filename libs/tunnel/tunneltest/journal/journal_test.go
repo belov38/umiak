@@ -8,7 +8,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/journal"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/journal"
 )
 
 func TestAppendReadAck(t *testing.T) {

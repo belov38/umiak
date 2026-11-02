@@ -1,5 +1,7 @@
 # S5 Linux template Implementation Plan
 
+> Исторический план до R1. Действующие имена и контракты — `docs/specs/rename-umiak.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `sbx-tpl build linux` builds the `linux` sandbox template on `pve` from the official Ubuntu 26.04 minimal cloud image through QGA, verifies it with a clone and a fork, and records the build where the worker reads it.

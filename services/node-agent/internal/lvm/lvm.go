@@ -1,4 +1,4 @@
-// Package lvm wraps the LVM command line tools used by sbx-node.
+// Package lvm wraps the LVM command line tools used by umiak-node.
 package lvm
 
 import (

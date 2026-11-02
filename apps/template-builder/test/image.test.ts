@@ -41,7 +41,7 @@ const sha = (b: Buffer | string) =>
 
 const tmpDirs: string[] = [];
 function tmp(): string {
-	const dir = mkdtempSync(join(tmpdir(), "sbx-image-test-"));
+	const dir = mkdtempSync(join(tmpdir(), "umiak-image-test-"));
 	tmpDirs.push(dir);
 	return dir;
 }
@@ -58,7 +58,7 @@ interface TestKey {
 async function newKey(): Promise<TestKey> {
 	const { privateKey, publicKey } = await openpgp.generateKey({
 		type: "ecc",
-		userIDs: [{ name: "sbx test" }],
+		userIDs: [{ name: "umiak test" }],
 		format: "armored",
 	});
 	const fingerprint = (
@@ -95,7 +95,7 @@ describe("names", () => {
 		const base = { serial: "20261024", sha256: "0".repeat(64) };
 		expect(imageFileName(base)).toBe(IMAGE);
 		expect(pveImageName("20261024")).toBe(
-			"sbx-ubuntu-26.04-minimal-20261024.qcow2",
+			"umiak-ubuntu-26.04-minimal-20261024.qcow2",
 		);
 	});
 });

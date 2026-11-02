@@ -6,9 +6,9 @@ import (
 	"net/netip"
 	"strings"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/routes"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/sbxerr"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/routes"
+	"github.com/belov38/umiak/services/gateway/internal/umiakerr"
 )
 
 // CheckDesktop enforces desktop Origin, epoch cookies and one-use tickets.
@@ -17,12 +17,12 @@ func (a *Auth) CheckDesktop(w http.ResponseWriter, r *http.Request, l routes.Lab
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	reject := func(status int, code string) Result {
-		sbxerr.Write(w, r, sbxerr.Error{Status: status, Code: code, RequestID: rid})
+		umiakerr.Write(w, r, umiakerr.Error{Status: status, Code: code, RequestID: rid})
 		return Result{AuthResult: ResultInvalid}
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead || strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		origins := r.Header.Values("Origin")
-		if len(origins) != 1 || origins[0] != "https://"+l.Raw+"."+a.cfg.SbxDomain {
+		if len(origins) != 1 || origins[0] != "https://"+l.Raw+"."+a.cfg.UmiakDomain {
 			return reject(http.StatusForbidden, "origin_forbidden")
 		}
 	}

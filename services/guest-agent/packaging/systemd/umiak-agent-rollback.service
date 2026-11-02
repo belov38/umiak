@@ -1,0 +1,6 @@
+[Unit]
+Description=umiak guest agent rollback
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'if [ -x /usr/local/lib/umiak-agent/previous/umiak-agent ]; then exec /usr/local/lib/umiak-agent/previous/umiak-agent rollback; else exec /usr/local/lib/umiak-agent/current/umiak-agent rollback; fi'

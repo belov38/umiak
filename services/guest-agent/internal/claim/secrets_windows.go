@@ -13,12 +13,12 @@ import (
 )
 
 // The Windows secret store (S9 spec 12.8): secret files on NTFS under
-// C:\ProgramData\sbx\secrets\files with a SYSTEM + user ACL, wiped with a
+// C:\ProgramData\umiak\secrets\files with a SYSTEM + user ACL, wiped with a
 // zero overwrite; secret_env only in memory.
 
 const (
-	// appliesHostname: Windows keeps its SBX<hex> name, renaming needs a
-	// reboot (spec 11.3); the claim hostname is only SBX_HOSTNAME.
+	// appliesHostname: Windows keeps its UMIAK<hex> name, renaming needs a
+	// reboot (spec 11.3); the claim hostname is only UMIAK_HOSTNAME.
 	appliesHostname = false
 	// secretEnvMemoryOnly forces Options.SecretEnvInMemory.
 	secretEnvMemoryOnly = true
@@ -116,7 +116,7 @@ func removeSecretFile(path string) error {
 
 // tmpSuffix names the file a secret is written to before the rename; "~"
 // is not allowed in secret names, so it never collides with one.
-const tmpSuffix = "~sbx-tmp"
+const tmpSuffix = "~umiak-tmp"
 
 // writeSecret writes data as the secret file path. The content goes to a
 // new file created with FILE_ATTRIBUTE_TEMPORARY and its final DACL

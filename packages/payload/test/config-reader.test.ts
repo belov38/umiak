@@ -3,20 +3,24 @@ import {
 	type ConfigFixture,
 	makeConfigFixture,
 	runConfigReaderContract,
-} from "@sbx/config/testing";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+} from "@umiak/config/testing";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import type { Payload } from "payload";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { sql, tbl } from "../src/identity/db.ts";
 import {
-	getSbxPayload,
-	migrateSbxPayload,
+	getUmiakPayload,
+	migrateUmiakPayload,
 	PayloadConfigReader,
 } from "../src/index.ts";
 import { closePayload, testOptions } from "./helpers.ts";
 
-const LISTENER_APP = "sbx-config-listener";
+const LISTENER_APP = "umiak-config-listener";
 
 /** Empties the config collections (the initial migration seeds linux/2gb). */
 async function resetConfig(payload: Payload): Promise<void> {
@@ -146,8 +150,8 @@ describe.skipIf(skipPg())("PayloadConfigReader", () => {
 
 	beforeAll(async () => {
 		t = await createTestDatabase({ migrated: false, max: 2 });
-		payload = await getSbxPayload({ ...testOptions(t.url), poolMax: 12 });
-		await migrateSbxPayload(payload);
+		payload = await getUmiakPayload({ ...testOptions(t.url), poolMax: 12 });
+		await migrateUmiakPayload(payload);
 		admin = new pg.Client({ connectionString: t.url });
 		await admin.connect();
 	});
@@ -176,7 +180,7 @@ describe.skipIf(skipPg())("PayloadConfigReader", () => {
 		{ unknownTeamQuota: "zero" },
 	);
 
-	describe("cache and LISTEN sbx_config", () => {
+	describe("cache and LISTEN umiak_config", () => {
 		const fx = {
 			slug: "cache-t",
 			update: (name: string) =>

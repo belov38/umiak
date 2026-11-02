@@ -10,8 +10,8 @@ import {
 	PgBossJobSender,
 	SandboxServiceImpl,
 	type SecretFile,
-} from "@sbx/core";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+} from "@umiak/core";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { PgBoss } from "pg-boss";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ClaimRequest } from "../src/ports.ts";

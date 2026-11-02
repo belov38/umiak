@@ -1,8 +1,12 @@
 // The worker on Payload (S8 plan decision 5): templates, sizes, quotas and
 // defaults come from PayloadConfigReader, and /readyz waits for the Payload
 // migrations (assertPayloadMigrated) as for the runtime ones.
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
-import { migrateSbxPayload } from "@sbx/payload";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
+import { migrateUmiakPayload } from "@umiak/payload";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { openWorkerPayload, type WorkerPayload } from "../src/payload.ts";
 import { createWorker, type Worker } from "../src/worker.ts";
@@ -59,7 +63,7 @@ describe.skipIf(skipPg())("worker with Payload", () => {
 		expect(body.reasons).toHaveLength(1);
 		expect(body.reasons[0]).toMatch(/^payload_migrations: /);
 
-		await migrateSbxPayload(p.payload, () => {});
+		await migrateUmiakPayload(p.payload, () => {});
 		const ready = await getText(`${base}/readyz`);
 		expect(ready.status).toBe(200);
 		expect(JSON.parse(ready.body)).toEqual({ ready: true, reasons: [] });

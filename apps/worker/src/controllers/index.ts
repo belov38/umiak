@@ -1,4 +1,4 @@
-import type { QueueName } from "@sbx/core";
+import type { QueueName } from "@umiak/core";
 import type { WorkerCtx } from "../context.ts";
 import { refreshDesktopTurn } from "../desktop.ts";
 import { runAutostop } from "./autostop.ts";
@@ -12,7 +12,7 @@ import { runReconcile } from "./reconcile.ts";
 // intervalMs`; a pg-boss cron once a minute per queue is the safety net
 // (Task 13 wires both). `ctl-pool` is phase 2 (decision 17). `ctl-reconcile`
 // runs in dry run unless `WorkerCtx.reconcileDryRun` is false
-// (`SBX_RECONCILE_DRY_RUN`, wired by Task 13).
+// (`UMIAK_RECONCILE_DRY_RUN`, wired by Task 13).
 
 export interface ControllerSpec {
 	queue: QueueName;

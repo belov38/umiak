@@ -14,18 +14,18 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // InstallOptions controls what Install does besides placing the version.
 type InstallOptions struct {
 	// Activate points previous at the old current, current at the new
-	// version and, on Linux, the CLI link at current/sbx-agent.
+	// version and, on Linux, the CLI link at current/umiak-agent.
 	Activate bool
 	// InstallUnits installs the service. Linux: Units go into
-	// SystemdUnitDir, systemd is reloaded and sbx-identity.service and
-	// sbx-agent.service are enabled. Windows: the sbx-agent service is
+	// SystemdUnitDir, systemd is reloaded and umiak-identity.service and
+	// umiak-agent.service are enabled. Windows: the umiak-agent service is
 	// created or updated (S9 spec 12.2) and not started; it starts at the
 	// next boot.
 	InstallUnits bool
@@ -47,7 +47,7 @@ type InstallOptions struct {
 	SystemPath bool
 }
 
-// Install installs the package at tarPath (spec 17.1, `sbx-agent
+// Install installs the package at tarPath (spec 17.1, `umiak-agent
 // install-package`): unpack into StagingDir, verify against keys and the
 // running platform, move to versions/<v> and, per opts, activate it, install
 // the units and write the config. An already installed identical version is

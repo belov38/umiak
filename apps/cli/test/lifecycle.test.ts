@@ -1,7 +1,7 @@
 // Sandbox lifecycle, catalog, snapshots and environments through the real
 // CLI against the api (S7 §14.2, §14.3, §16 "Контракт CLI"): waiting
 // commands print JSON Lines ending in ready/stopped, rm needs a TTY or
-// --yes and sends Sbx-Confirm-Delete, create/fork/explicit <sb> set the
+// --yes and sends Umiak-Confirm-Delete, create/fork/explicit <sb> set the
 // current sandbox.
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -29,11 +29,11 @@ describe("sandbox lifecycle", () => {
 	});
 	beforeEach(() => {
 		home = cliHome();
-		env = { ...home.env, SBX_API_URL: w.url, SBX_API_KEY: w.secret };
+		env = { ...home.env, UMIAK_API_URL: w.url, UMIAK_API_KEY: w.secret };
 	});
 	afterEach(() => home.rm());
 
-	const sbx = (args: string[], o: { stdin?: string; tty?: boolean } = {}) =>
+	const umiak = (args: string[], o: { stdin?: string; tty?: boolean } = {}) =>
 		runCli(args, { env, ...o });
 
 	/** The slug of the one sandbox labelled `run=<tag>` once it is in `state`. */
@@ -48,7 +48,7 @@ describe("sandbox lifecycle", () => {
 
 	it("create --wait without a TTY prints JSONL: accepted first, ready last; it becomes current", async () => {
 		const tag = crypto.randomUUID();
-		const run = sbx([
+		const run = umiak([
 			"create",
 			"--label",
 			`run=${tag}`,
@@ -93,11 +93,11 @@ describe("sandbox lifecycle", () => {
 			expect(l).toMatchObject({ event: "state" });
 		}
 		const id = (lines[0] as { sandbox: { id: string } }).sandbox.id;
-		const cur = await sbx(["current"]);
+		const cur = await umiak(["current"]);
 		expect(cur.code).toBe(0);
 		expect(JSON.parse(cur.stdout).sandbox.id).toBe(id);
 		// The sets reached the sandbox; secret values are never printed.
-		const e = await sbx(["env"]);
+		const e = await umiak(["env"]);
 		expect(e.code, e.stderr).toBe(0);
 		expect(JSON.parse(e.stdout)).toMatchObject({
 			env: { A: "1" },
@@ -112,7 +112,7 @@ describe("sandbox lifecycle", () => {
 			file,
 			'# comment\nexport FROM_FILE=yes\nQUOTED="a b"\nA=file\n',
 		);
-		const r = await sbx([
+		const r = await umiak([
 			"create",
 			"--env-file",
 			file,
@@ -125,24 +125,24 @@ describe("sandbox lifecycle", () => {
 		const out = JSON.parse(r.stdout);
 		expect(out.sandbox.state).toBe("creating");
 		expect(out.operation.kind).toBe("create");
-		const e = await sbx(["env", out.sandbox.slug]);
+		const e = await umiak(["env", out.sandbox.slug]);
 		expect(JSON.parse(e.stdout).env).toEqual({
 			FROM_FILE: "yes",
 			QUOTED: "a b",
 			A: "flag",
 		});
-		const human = await sbx(["info", out.sandbox.id], { tty: true });
+		const human = await umiak(["info", out.sandbox.id], { tty: true });
 		expect(human.code).toBe(0);
 		expect(human.stdout).toContain(out.sandbox.slug);
 		expect(human.stdout).toContain("creating");
-		const bad = await sbx(["create", "--env", "NOEQUALS"]);
+		const bad = await umiak(["create", "--env", "NOEQUALS"]);
 		expect(bad.code).toBe(2);
 		expect(bad.last()).toMatchObject({ event: "error", code: "usage" });
 	});
 
 	it("create --wait: a sandbox that fails ends with the error line, exit 1", async () => {
 		const tag = crypto.randomUUID();
-		const run = sbx(["create", "--label", `run=${tag}`, "--wait"]);
+		const run = umiak(["create", "--label", `run=${tag}`, "--wait"]);
 		const slug = await slugOf(tag);
 		await w.markError(slug);
 		const r = await run;
@@ -159,28 +159,28 @@ describe("sandbox lifecycle", () => {
 	it("list filters by label and state; info by slug; unknown → 3", async () => {
 		const tag = crypto.randomUUID();
 		const a = await w.createSandbox();
-		const create = await sbx(["create", "--label", `run=${tag}`]);
+		const create = await umiak(["create", "--label", `run=${tag}`]);
 		const b = JSON.parse(create.stdout).sandbox;
-		const l = await sbx(["list", "--label", `run=${tag}`]);
+		const l = await umiak(["list", "--label", `run=${tag}`]);
 		expect(l.code, l.stderr).toBe(0);
 		const list = JSON.parse(l.stdout);
 		expect(list.data.map((s: { id: string }) => s.id)).toEqual([b.id]);
 		expect(list.nextCursor).toBeNull();
-		const byState = await sbx(["list", "--state", "creating,ready"]);
+		const byState = await umiak(["list", "--state", "creating,ready"]);
 		const ids = JSON.parse(byState.stdout).data.map(
 			(s: { id: string }) => s.id,
 		);
 		expect(ids).toContain(a.id);
-		const limited = await sbx(["list", "--limit", "1"]);
+		const limited = await umiak(["list", "--limit", "1"]);
 		const page = JSON.parse(limited.stdout);
 		expect(page.data).toHaveLength(1);
 		expect(page.nextCursor).toEqual(expect.any(String));
-		const table = await sbx(["list", "--label", `run=${tag}`], { tty: true });
+		const table = await umiak(["list", "--label", `run=${tag}`], { tty: true });
 		expect(table.stdout).toMatch(/SLUG\s+ID\s+STATE/);
 		expect(table.stdout).toContain(b.slug);
-		const info = await sbx(["info", b.slug]);
+		const info = await umiak(["info", b.slug]);
 		expect(JSON.parse(info.stdout).id).toBe(b.id);
-		const missing = await sbx(["info", "no-such-box-here"]);
+		const missing = await umiak(["info", "no-such-box-here"]);
 		expect(missing.code).toBe(3);
 		expect(missing.last()).toMatchObject({
 			event: "error",
@@ -190,7 +190,7 @@ describe("sandbox lifecycle", () => {
 
 	it("stop --wait ends with stopped; resume --wait with ready; recover without --wait", async () => {
 		const sb = await w.readySandbox();
-		const stop = sbx(["stop", sb.slug, "--wait"]);
+		const stop = umiak(["stop", sb.slug, "--wait"]);
 		await until(async () => {
 			const r = await w.db.pool.query<{ state: string }>(
 				"SELECT state FROM runtime.sandboxes WHERE slug = $1",
@@ -213,7 +213,7 @@ describe("sandbox lifecycle", () => {
 			sandbox: { id: sb.id, state: "stopped" },
 		});
 		// The explicit <sb> became current: resume without an argument.
-		const resume = sbx(["resume", "--env", "R=1", "--wait"]);
+		const resume = umiak(["resume", "--env", "R=1", "--wait"]);
 		await until(async () => {
 			const r = await w.db.pool.query<{ state: string }>(
 				"SELECT state FROM runtime.sandboxes WHERE slug = $1",
@@ -232,10 +232,10 @@ describe("sandbox lifecycle", () => {
 			event: "ready",
 			sandbox: { state: "ready" },
 		});
-		expect(JSON.parse((await sbx(["env"])).stdout).env).toMatchObject({
+		expect(JSON.parse((await umiak(["env"])).stdout).env).toMatchObject({
 			R: "1",
 		});
-		const rec = await sbx(["recover", sb.id]);
+		const rec = await umiak(["recover", sb.id]);
 		expect(rec.code, rec.stderr).toBe(0);
 		expect(JSON.parse(rec.stdout)).toMatchObject({
 			sandbox: { id: sb.id, state: "starting" },
@@ -246,7 +246,7 @@ describe("sandbox lifecycle", () => {
 	it("fork --wait prints the copy's JSONL and makes the copy current", async () => {
 		const sb = await w.readySandbox();
 		const tag = crypto.randomUUID();
-		const fork = sbx([
+		const fork = umiak([
 			"fork",
 			sb.slug,
 			"--name",
@@ -267,20 +267,20 @@ describe("sandbox lifecycle", () => {
 			sourceOperation: { kind: "fork" },
 		});
 		expect(lines.at(-1)).toMatchObject({ event: "ready", sandbox: { slug } });
-		const cur = JSON.parse((await sbx(["current"])).stdout);
+		const cur = JSON.parse((await umiak(["current"])).stdout);
 		expect(cur.sandbox.slug).toBe(slug);
 	});
 
 	it("rm without --yes and without a TTY exits 2 and deletes nothing; --yes deletes", async () => {
 		const sb = await w.readySandbox();
-		const no = await sbx(["rm", sb.slug]);
+		const no = await umiak(["rm", sb.slug]);
 		expect(no.code).toBe(2);
 		expect(no.last()).toMatchObject({ event: "error", code: "usage" });
-		const still = await sbx(["info", sb.id]);
+		const still = await umiak(["info", sb.id]);
 		expect(JSON.parse(still.stdout).state).toBe("ready");
-		const yes = await sbx(["rm", sb.slug, "--yes"]);
+		const yes = await umiak(["rm", sb.slug, "--yes"]);
 		expect(yes.code, yes.stderr).toBe(0);
-		// The api deletes only with Sbx-Confirm-Delete (428 otherwise).
+		// The api deletes only with Umiak-Confirm-Delete (428 otherwise).
 		expect(JSON.parse(yes.stdout)).toMatchObject({
 			sandbox: { id: sb.id, state: "deleting" },
 			operation: { kind: "delete" },
@@ -295,13 +295,18 @@ describe("sandbox lifecycle", () => {
 	it("rm in a terminal asks: n keeps, y deletes; several at once; the deleted current is forgotten", async () => {
 		const a = await w.readySandbox();
 		const b = await w.readySandbox();
-		const keep = await sbx(["rm", a.slug, b.slug], { tty: true, stdin: "n\n" });
+		const keep = await umiak(["rm", a.slug, b.slug], {
+			tty: true,
+			stdin: "n\n",
+		});
 		expect(keep.code).toBe(1);
 		expect(keep.stderr).toContain(a.slug);
 		expect(keep.stderr).toMatch(/\[y\/N\]/);
-		expect(JSON.parse((await sbx(["info", a.id])).stdout).state).toBe("ready");
-		await sbx(["current", a.id]);
-		const del = await sbx(["--json", "rm", a.slug, b.slug], {
+		expect(JSON.parse((await umiak(["info", a.id])).stdout).state).toBe(
+			"ready",
+		);
+		await umiak(["current", a.id]);
+		const del = await umiak(["--json", "rm", a.slug, b.slug], {
 			tty: true,
 			stdin: "y\n",
 		});
@@ -309,11 +314,11 @@ describe("sandbox lifecycle", () => {
 		// JSON: one array of the answers, not one document per sandbox.
 		const answers = JSON.parse(del.stdout) as { sandbox: { id: string } }[];
 		expect(answers.map((x) => x.sandbox.id)).toEqual([a.id, b.id]);
-		expect((await sbx(["current"])).code).toBe(3);
-		expect(JSON.parse((await sbx(["info", a.id])).stdout).state).toBe(
+		expect((await umiak(["current"])).code).toBe(3);
+		expect(JSON.parse((await umiak(["info", a.id])).stdout).state).toBe(
 			"deleting",
 		);
-		expect(JSON.parse((await sbx(["info", b.id])).stdout).state).toBe(
+		expect(JSON.parse((await umiak(["info", b.id])).stdout).state).toBe(
 			"deleting",
 		);
 	});
@@ -321,25 +326,25 @@ describe("sandbox lifecycle", () => {
 	it("rename, extend and label", async () => {
 		const sb = await w.readySandbox();
 		const slug = `renamed-${crypto.randomUUID().slice(0, 8)}x`;
-		const r = await sbx(["rename", sb.id, slug]);
+		const r = await umiak(["rename", sb.id, slug]);
 		expect(r.code, r.stderr).toBe(0);
 		expect(JSON.parse(r.stdout)).toMatchObject({ id: sb.id, slug });
-		const ext = await sbx(["extend", slug, "--ttl", "2h"]);
+		const ext = await umiak(["extend", slug, "--ttl", "2h"]);
 		expect(ext.code, ext.stderr).toBe(0);
 		expect(Date.parse(JSON.parse(ext.stdout).deadlineAt)).toBeGreaterThan(
 			Date.now() + 7_000_000,
 		);
-		const l1 = await sbx(["label", slug, "a=1", "b=2"]);
+		const l1 = await umiak(["label", slug, "a=1", "b=2"]);
 		expect(JSON.parse(l1.stdout).labels).toEqual({ a: "1", b: "2" });
 		// <sb> omitted: the current sandbox (set by the explicit <sb> above).
-		const l2 = await sbx(["label", "b=3", "--unset", "a"]);
+		const l2 = await umiak(["label", "b=3", "--unset", "a"]);
 		expect(l2.code, l2.stderr).toBe(0);
 		expect(JSON.parse(l2.stdout).labels).toEqual({ b: "3" });
 	});
 
 	it("env: show; --set, --secret, --unset merge (secret values never printed)", async () => {
 		const sb = await w.readySandbox();
-		const set = await sbx([
+		const set = await umiak([
 			"env",
 			sb.id,
 			"--set",
@@ -356,20 +361,27 @@ describe("sandbox lifecycle", () => {
 			delivered: expect.any(Boolean),
 		});
 		expect(set.stdout).not.toContain("hidden");
-		const unset = await sbx(["env", sb.id, "--unset", "A", "--unset", "TOKEN"]);
+		const unset = await umiak([
+			"env",
+			sb.id,
+			"--unset",
+			"A",
+			"--unset",
+			"TOKEN",
+		]);
 		expect(unset.code, unset.stderr).toBe(0);
 		expect(JSON.parse(unset.stdout)).toMatchObject({
 			env: { B: "2" },
 			secretKeys: [],
 		});
-		const show = await sbx(["env", sb.id], { tty: true });
+		const show = await umiak(["env", sb.id], { tty: true });
 		expect(show.stdout).toContain("B=2");
 	});
 
 	it("snapshot save --wait, list, rm (needs --yes without a TTY)", async () => {
 		const sb = await w.readySandbox();
 		const name = `snap-${crypto.randomUUID().slice(0, 8)}`;
-		const save = sbx(["snapshot", "save", sb.slug, name, "--wait"]);
+		const save = umiak(["snapshot", "save", sb.slug, name, "--wait"]);
 		await until(async () => {
 			const r = await w.db.pool.query(
 				"SELECT 1 FROM runtime.snapshots WHERE pending_name = $1",
@@ -392,19 +404,19 @@ describe("sandbox lifecycle", () => {
 			snapshot: { name, state: "ready" },
 		});
 		expect(lines).toHaveLength(2);
-		const list = await sbx(["snapshot", "list"]);
+		const list = await umiak(["snapshot", "list"]);
 		expect(
 			JSON.parse(list.stdout).data.map((x: { name: string }) => x.name),
 		).toContain(name);
-		const no = await sbx(["snapshot", "rm", name]);
+		const no = await umiak(["snapshot", "rm", name]);
 		expect(no.code).toBe(2);
-		const rm = await sbx(["snapshot", "rm", name, "--yes"]);
+		const rm = await umiak(["snapshot", "rm", name, "--yes"]);
 		expect(rm.code, rm.stderr).toBe(0);
-		const after = await sbx(["snapshot", "list"]);
+		const after = await umiak(["snapshot", "list"]);
 		expect(
 			JSON.parse(after.stdout).data.map((x: { name: string }) => x.name),
 		).not.toContain(name);
-		const noWait = await sbx(["snapshot", "save", sb.id, `${name}-2`]);
+		const noWait = await umiak(["snapshot", "save", sb.id, `${name}-2`]);
 		expect(JSON.parse(noWait.stdout)).toMatchObject({
 			snapshot: { name: `${name}-2`, state: "creating" },
 			operation: { kind: "save_snapshot" },
@@ -414,7 +426,7 @@ describe("sandbox lifecycle", () => {
 	it("snapshot save --wait: a failed snapshot ends with the error line, exit 1; text in a TTY", async () => {
 		const sb = await w.readySandbox();
 		const name = `snap-${crypto.randomUUID().slice(0, 8)}`;
-		const save = sbx(["snapshot", "save", sb.slug, name, "--wait"]);
+		const save = umiak(["snapshot", "save", sb.slug, name, "--wait"]);
 		await until(async () => {
 			const r = await w.db.pool.query(
 				`UPDATE runtime.operations
@@ -437,7 +449,7 @@ describe("sandbox lifecycle", () => {
 		});
 
 		const human = `snap-${crypto.randomUUID().slice(0, 8)}`;
-		const tty = sbx(["snapshot", "save", sb.id, human, "--wait"], {
+		const tty = umiak(["snapshot", "save", sb.id, human, "--wait"], {
 			tty: true,
 		});
 		await until(async () => {
@@ -482,7 +494,7 @@ describe("sandbox lifecycle", () => {
 
 		it("fork without --force-stop prints the API message and the hint; with it the request carries forceStop", async () => {
 			const sb = await windowsSandbox();
-			const r = await sbx(["fork", sb.slug]);
+			const r = await umiak(["fork", sb.slug]);
 			expect(r.code).toBe(1);
 			expect(r.last()).toMatchObject({
 				event: "error",
@@ -490,13 +502,13 @@ describe("sandbox lifecycle", () => {
 				details: { retryWith: { forceStop: true }, cli: "--force-stop" },
 			});
 			expect(r.stderr).toContain(
-				"sbx: Windows sandboxes are forked from a stopped VM; stop it first or retry with forceStop: true",
+				"umiak: Windows sandboxes are forked from a stopped VM; stop it first or retry with forceStop: true",
 			);
 			expect(r.stderr).toContain("\nhint: use --force-stop");
-			const tty = await sbx(["fork", sb.slug], { tty: true });
+			const tty = await umiak(["fork", sb.slug], { tty: true });
 			expect(tty.stderr).toContain("hint: use --force-stop");
 
-			const ok = await sbx(["fork", sb.slug, "--force-stop"]);
+			const ok = await umiak(["fork", sb.slug, "--force-stop"]);
 			expect(ok.code, ok.stderr).toBe(0);
 			expect(JSON.parse(ok.stdout)).toMatchObject({
 				sourceOperation: { kind: "fork", forceStop: { sourceStopped: false } },
@@ -506,15 +518,15 @@ describe("sandbox lifecycle", () => {
 		it("snapshot save: the hint without --force-stop; with --wait a failed restart is a warning", async () => {
 			const sb = await windowsSandbox();
 			const name = `snap-${crypto.randomUUID().slice(0, 8)}`;
-			const no = await sbx(["snapshot", "save", sb.slug, name]);
+			const no = await umiak(["snapshot", "save", sb.slug, name]);
 			expect(no.code).toBe(1);
 			expect(no.last()).toMatchObject({ code: "snapshot_requires_stop" });
 			expect(no.stderr).toContain(
-				"sbx: Windows snapshots are saved from a stopped VM",
+				"umiak: Windows snapshots are saved from a stopped VM",
 			);
 			expect(no.stderr).toContain("hint: use --force-stop");
 
-			const save = sbx([
+			const save = umiak([
 				"snapshot",
 				"save",
 				sb.slug,
@@ -545,35 +557,35 @@ describe("sandbox lifecycle", () => {
 			});
 			expect(s.lines().at(-1)).toMatchObject({ event: "ready" });
 			expect(s.stderr).toContain(
-				"warning: the source sandbox was stopped for the snapshot but failed to start again: no agent (agent_timeout); resume it: sbx resume sb_",
+				"warning: the source sandbox was stopped for the snapshot but failed to start again: no agent (agent_timeout); resume it: umiak resume sb_",
 			);
 		});
 	});
 
 	it("templates, sizes and limits", async () => {
-		const t = await sbx(["templates"]);
+		const t = await umiak(["templates"]);
 		expect(t.code, t.stderr).toBe(0);
 		expect(JSON.parse(t.stdout).data[0]).toMatchObject({
 			slug: expect.any(String),
 			defaultSize: expect.any(String),
 		});
-		const s = await sbx(["sizes"]);
+		const s = await umiak(["sizes"]);
 		expect(JSON.parse(s.stdout).data[0]).toMatchObject({
 			slug: expect.any(String),
 			vcpu: expect.any(Number),
 		});
-		const l = await sbx(["limits"]);
+		const l = await umiak(["limits"]);
 		expect(JSON.parse(l.stdout)).toMatchObject({
 			quota: expect.any(Object),
 			canCreate: expect.any(Boolean),
 		});
-		const human = await sbx(["templates"], { tty: true });
+		const human = await umiak(["templates"], { tty: true });
 		expect(human.stdout).toMatch(/SLUG\s+NAME/);
 	});
 
 	it("env-sets: create, list, show, set, unset, rm; create --environment applies one", async () => {
 		const name = `es-${crypto.randomUUID().slice(0, 8)}`;
-		const c = await sbx([
+		const c = await umiak([
 			"env-sets",
 			"create",
 			name,
@@ -589,16 +601,16 @@ describe("sandbox lifecycle", () => {
 			secretKeys: ["SET_SECRET"],
 			revision: 1,
 		});
-		const list = await sbx(["env-sets", "list"]);
+		const list = await umiak(["env-sets", "list"]);
 		expect(
 			JSON.parse(list.stdout).data.map((x: { name: string }) => x.name),
 		).toContain(name);
-		const set = await sbx(["env-sets", "set", name, "--env", "MORE=2"]);
+		const set = await umiak(["env-sets", "set", name, "--env", "MORE=2"]);
 		expect(JSON.parse(set.stdout)).toMatchObject({
 			env: { FROM_SET: "1", MORE: "2" },
 			revision: 2,
 		});
-		const unset = await sbx([
+		const unset = await umiak([
 			"env-sets",
 			"unset",
 			name,
@@ -609,16 +621,16 @@ describe("sandbox lifecycle", () => {
 			env: { MORE: "2" },
 			secretKeys: [],
 		});
-		const show = await sbx(["env-sets", "show", name]);
+		const show = await umiak(["env-sets", "show", name]);
 		expect(JSON.parse(show.stdout).env).toEqual({ MORE: "2" });
-		const created = await sbx(["create", "--environment", name]);
+		const created = await umiak(["create", "--environment", name]);
 		expect(created.code, created.stderr).toBe(0);
 		const id = JSON.parse(created.stdout).sandbox.id;
-		expect(JSON.parse((await sbx(["env", id])).stdout).env).toMatchObject({
+		expect(JSON.parse((await umiak(["env", id])).stdout).env).toMatchObject({
 			MORE: "2",
 		});
-		const rm = await sbx(["env-sets", "rm", name]);
+		const rm = await umiak(["env-sets", "rm", name]);
 		expect(rm.code, rm.stderr).toBe(0);
-		expect((await sbx(["env-sets", "show", name])).code).toBe(3);
+		expect((await umiak(["env-sets", "show", name])).code).toBe(3);
 	});
 });

@@ -24,7 +24,7 @@ export function fenceUntrusted(
 		return blocks
 			.map(
 				(b, n) =>
-					`<<<sbx-untrusted id=${nonce} ${b.label}>>>\n${texts[n]}\n<<<end id=${nonce}>>>`,
+					`<<<umiak-untrusted id=${nonce} ${b.label}>>>\n${texts[n]}\n<<<end id=${nonce}>>>`,
 			)
 			.join("\n");
 	}

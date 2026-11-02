@@ -1,8 +1,8 @@
 // Route guards (S7 §7.3, §7.5). Put them in `createRoute({middleware: [...]})`
 // (they run before validation) or before a plain handler. They read
 // `c.var.auth`, set by the listener's authentication.
-import type { Scope } from "@sbx/auth";
-import { hasOperatorRights } from "@sbx/core";
+import type { Scope } from "@umiak/auth";
+import { hasOperatorRights } from "@umiak/core";
 import type { MiddlewareHandler } from "hono";
 import type { ApiEnv } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
@@ -35,7 +35,7 @@ function userRequired(): ApiError {
 	return new ApiError(
 		403,
 		"forbidden",
-		"only a person can do this (browser session or `sbx login`), not a team API key",
+		"only a person can do this (browser session or `umiak login`), not a team API key",
 		{ details: { reason: "user_required" } },
 	);
 }

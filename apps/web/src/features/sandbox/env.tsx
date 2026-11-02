@@ -1,11 +1,11 @@
 "use client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 // Env tab (S8 §9.6): GET /env — env with values, names of secrets (values
 // are never sent: "•••"), secret files (name, mode, path). Each change is
 // one key through `PATCH /env` (merge, S8 C2): set or delete one secret
 // without knowing the others. `delivered: false` → "applies at the next
 // start". Secret values live only in the dialog's input until it closes.
-import type { components, Sandbox, SandboxData } from "@sbx/sdk";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { components, Sandbox, SandboxData } from "@umiak/sdk";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ConfirmButton } from "@/components/app/confirm-button";

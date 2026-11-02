@@ -1,4 +1,4 @@
-// The bearer of `sbx mcp` (S11 6.1, 10.1): one source for every parallel
+// The bearer of `umiak mcp` (S11 6.1, 10.1): one source for every parallel
 // tool call of the process, over the CLI's Context.bearer.
 // - Concurrent requests share one bearer lookup (and so one refresh when the
 //   token is due; other processes are kept out by the config lock).
@@ -8,9 +8,9 @@
 //   token. The fetch wrapper tells which token a 401 was for.
 // - Any other 401 to the current token (a revoked or expired key) is not
 //   refreshed by the SDK: `onRejected` lets the command drop its cached
-//   credentials, so a new `sbx login` is used by the next call.
+//   credentials, so a new `umiak login` is used by the next call.
 
-import type { FetchFn } from "@sbx/mcp";
+import type { FetchFn } from "@umiak/mcp";
 import type { Bearer } from "../auth/token.ts";
 import type { Fetch } from "../http.ts";
 

@@ -6,8 +6,8 @@
 // listener alone (the reader has a TTL).
 import pg from "pg";
 
-export const CONFIG_CHANNEL = "sbx_config";
-export const LISTENER_APPLICATION_NAME = "sbx-config-listener";
+export const CONFIG_CHANNEL = "umiak_config";
+export const LISTENER_APPLICATION_NAME = "umiak-config-listener";
 
 const MAX_RECONNECT_DELAY_MS = 10_000;
 
@@ -17,7 +17,7 @@ export interface ChannelListenerOptions {
 	/** The notification payload, or null when LISTEN is (re)established. */
 	onSignal: (payload: string | null) => void;
 	reconnectDelayMs?: number;
-	/** application_name of the connection; default sbx-config-listener. */
+	/** application_name of the connection; default umiak-config-listener. */
 	applicationName?: string;
 	/** Connection errors; the listener retries by itself. */
 	onError?: (err: unknown) => void;

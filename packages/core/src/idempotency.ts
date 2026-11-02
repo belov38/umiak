@@ -1,4 +1,4 @@
-import type { Tx } from "@sbx/db";
+import type { Tx } from "@umiak/db";
 import type { RequestHash } from "./canonical.ts";
 import { idempotencyKeyReused, validation } from "./errors.ts";
 

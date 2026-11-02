@@ -1,7 +1,7 @@
 // Team API keys (S7 §7.2, §13). The secret is returned only by create and
 // rotate; listings carry the prefix and the last 4 characters.
 import { z } from "@hono/zod-openapi";
-import { SCOPES } from "@sbx/auth";
+import { SCOPES } from "@umiak/auth";
 import { extensibleEnum } from "../openapi/registry.ts";
 import { NO_CONTROL_CHARS, NullableTimestamp, Timestamp } from "./common.ts";
 
@@ -88,7 +88,7 @@ export const ApiKeySchema = z
 		teamId: z.string().openapi({ example: "team_01jbx2v7d3m6c8q9w0e4r5t6y7" }),
 		name: z.string(),
 		prefix: z.string().openapi({
-			description: "First 8 characters after `sbx_`",
+			description: "First 8 characters after `umiak_`",
 			example: "a1B2c3D4",
 		}),
 		last4: z.string().openapi({ example: "9xYz" }),
@@ -122,7 +122,7 @@ export const ApiKeySecretSchema = z
 		apiKey: ApiKeySchema,
 		secret: z.string().openapi({
 			description:
-				"The secret (`sbx_...`), shown only in this answer; keep it like a password",
+				"The secret (`umiak_...`), shown only in this answer; keep it like a password",
 		}),
 	})
 	.openapi("ApiKeySecret");

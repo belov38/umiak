@@ -20,7 +20,7 @@ const OFFLINE_ERROR =
 let outDir: string;
 
 beforeAll(() => {
-	outDir = mkdtempSync(join(tmpdir(), "sbx-mcp-spike-"));
+	outDir = mkdtempSync(join(tmpdir(), "umiak-mcp-spike-"));
 });
 
 afterAll(() => {

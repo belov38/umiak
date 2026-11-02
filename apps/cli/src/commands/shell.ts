@@ -1,4 +1,4 @@
-// `sbx shell [<sb>] [--attach <cmd>] [-- <cmd...>]` (S7 §10, §14.2): a
+// `umiak shell [<sb>] [--attach <cmd>] [-- <cmd...>]` (S7 §10, §14.2): a
 // terminal in the sandbox over the PTY WebSocket.
 // - The command after `--` is a shell line (several words are joined with
 //   shell quoting); without one, the user's login shell.
@@ -8,20 +8,20 @@
 //   of stdin sends ^D (EOF on the remote terminal).
 // - The SDK reconnects by offset after a drop (input typed meanwhile is
 //   queued up to 1 MiB; past that, stdin pauses until it drains, the final
-//   ^D too). If the SDK gives up, sbx attaches again from the same offset
+//   ^D too). If the SDK gives up, umiak attaches again from the same offset
 //   (up to REATTACH_ROUNDS times). `--attach cmd_…` joins a running
 //   terminal with 64 KiB of scrollback (the agent keeps one 10 min without
 //   a client).
-// - sbx exits with the terminal command's code (128+n for a signal).
-//   SIGINT (no raw terminal), SIGTERM or SIGHUP to sbx itself leave the
+// - umiak exits with the terminal command's code (128+n for a signal).
+//   SIGINT (no raw terminal), SIGTERM or SIGHUP to umiak itself leave the
 //   terminal running, restore this terminal and exit 128 + n (130 for
 //   SIGINT).
 // - When the reader of stdout goes away, the session ends as with exec: the
-//   terminal command is killed and sbx exits 141 quietly.
+//   terminal command is killed and umiak exits 141 quietly.
 
 import { constants } from "node:os";
-import type { Pty, Sandbox } from "@sbx/sdk";
-import { SbxError } from "@sbx/sdk";
+import type { Pty, Sandbox } from "@umiak/sdk";
+import { UmiakError } from "@umiak/sdk";
 import type { Command } from "commander";
 import { splitDashDash } from "../args.ts";
 import type { Context } from "../context.ts";
@@ -85,7 +85,7 @@ function pumpInput(
 			current().write(b);
 			return true;
 		} catch (err) {
-			if (err instanceof SbxError && err.code === "pty_input_overflow") {
+			if (err instanceof UmiakError && err.code === "pty_input_overflow") {
 				return false;
 			}
 			throw err;
@@ -186,7 +186,7 @@ async function runShell(
 			} catch (err) {
 				if (stoppedBy !== undefined) {
 					ctx.out.info(
-						`sbx: the terminal keeps running; attach again: sbx shell ${sb.slug} --attach ${pty.command.id}`,
+						`umiak: the terminal keeps running; attach again: umiak shell ${sb.slug} --attach ${pty.command.id}`,
 					);
 					return stoppedBy === "SIGINT"
 						? EXIT_INTERRUPTED
@@ -199,7 +199,7 @@ async function runShell(
 					throw new OutputClosedError();
 				}
 				if (
-					!(err instanceof SbxError) ||
+					!(err instanceof UmiakError) ||
 					!err.retryable ||
 					round >= REATTACH_ROUNDS
 				) {
@@ -225,7 +225,9 @@ async function runShell(
 export function register(program: Command, run: Runner): void {
 	program
 		.command("shell")
-		.description("open a terminal in a sandbox: sbx shell [<sb>] [-- <cmd...>]")
+		.description(
+			"open a terminal in a sandbox: umiak shell [<sb>] [-- <cmd...>]",
+		)
 		.argument("[args...]", "sandbox ID or slug, then -- and a command")
 		.option(
 			"--attach <cmd>",

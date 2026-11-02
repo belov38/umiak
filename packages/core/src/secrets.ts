@@ -6,20 +6,20 @@ import {
 	randomBytes,
 } from "node:crypto";
 import { readFileSync } from "node:fs";
-import type { SecretSets } from "@sbx/auth";
+import type { SecretSets } from "@umiak/auth";
 import { type ValidationIssue, validation } from "./errors.ts";
 
 // Env and secrets of a sandbox (S7 §8.3) and their encryption at rest (S6 §13.1).
 // Values must never be logged; error messages here never include them.
 
-// Shapes and the patch rule live in @sbx/auth (shared with its environments
+// Shapes and the patch rule live in @umiak/auth (shared with its environments
 // store, which cannot import core); re-exported unchanged.
 export {
 	applySecretPatch,
 	type SecretFile,
 	type SecretPatch,
 	type SecretSets,
-} from "@sbx/auth";
+} from "@umiak/auth";
 
 export const SECRET_FILE_DEFAULT_MODE = 0o440;
 
@@ -32,12 +32,12 @@ export const SECRET_LIMITS = {
 	filesTotalBytes: 8 * 1024 * 1024,
 } as const;
 
-/** `SBX_` names a sandbox may still set: the variables of the `sbx` CLI (S7 §14.1). */
-export const ALLOWED_SBX_VARS: readonly string[] = [
-	"SBX_API_KEY",
-	"SBX_API_URL",
-	"SBX_TEAM",
-	"SBX_PROFILE",
+/** `UMIAK_` names a sandbox may still set: the variables of the `umiak` CLI (S7 §14.1). */
+export const ALLOWED_UMIAK_VARS: readonly string[] = [
+	"UMIAK_API_KEY",
+	"UMIAK_API_URL",
+	"UMIAK_TEAM",
+	"UMIAK_PROFILE",
 ];
 
 const VAR_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
@@ -79,10 +79,10 @@ function checkVars(
 				path: p,
 				message: "name must match [A-Za-z_][A-Za-z0-9_]{0,127}",
 			});
-		} else if (k.startsWith("SBX_") && !ALLOWED_SBX_VARS.includes(k)) {
+		} else if (k.startsWith("UMIAK_") && !ALLOWED_UMIAK_VARS.includes(k)) {
 			issues.push({
 				path: p,
-				message: "the SBX_ prefix is reserved by the platform",
+				message: "the UMIAK_ prefix is reserved by the platform",
 			});
 		}
 		if (typeof v !== "string") {
@@ -194,7 +194,7 @@ function checkFiles(files: unknown, issues: ValidationIssue[]): void {
 
 /**
  * Checks the S7 §8.3 limits. Set totals count UTF-8 bytes of names and values.
- * Throws SbxError `validation` with `details.issues[] {path, message}`.
+ * Throws UmiakError `validation` with `details.issues[] {path, message}`.
  */
 export function validateSecretSets(s: SecretSets): void {
 	const issues: ValidationIssue[] = [];
@@ -222,7 +222,7 @@ const TAG_BYTES = 16;
 const KEY_BYTES = 32;
 
 /**
- * AES-256-GCM key ring (S6 §13.1), file `SBX_DATA_KEYS_FILE`:
+ * AES-256-GCM key ring (S6 §13.1), file `UMIAK_DATA_KEYS_FILE`:
  * `{"current": 2, "keys": {"1": "<base64>", "2": "<base64>"}}`.
  * New records use `current`; any listed version decrypts. AAD binds the record
  * to its owner and key version: `<prefix>:<id>:v<keyVersion>`.

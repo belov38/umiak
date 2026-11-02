@@ -82,7 +82,7 @@ it("passes the conformance server scenarios except the baseline", async () => {
 			}),
 		},
 	});
-	results = await mkdtemp(join(tmpdir(), "sbx-mcp-conformance-"));
+	results = await mkdtemp(join(tmpdir(), "umiak-mcp-conformance-"));
 	const r = await run(
 		["server", "--url", h.url, "--expected-failures", BASELINE],
 		results,

@@ -1,6 +1,6 @@
 // The operator section (S8 §9.10) without Next: the server guard, the team
 // list for the client, the list query and the block body.
-import { encodeUuid } from "@sbx/auth";
+import { encodeUuid } from "@umiak/auth";
 import { describe, expect, it } from "vitest";
 import {
 	blockBody,

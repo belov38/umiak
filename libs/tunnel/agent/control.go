@@ -11,8 +11,8 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // defaultTCPDeadline applies when Drain carries no tcp_deadline (spec 7).
@@ -21,7 +21,7 @@ const defaultTCPDeadline = 2 * time.Minute
 // tunnelPackage is the proto package the library itself serves.
 var tunnelPackage = strings.TrimSuffix(wire.ServicePrefixTunnel, ".")
 
-// controlService implements sbx.tunnel.v1.Control.
+// controlService implements umiak.tunnel.v1.Control.
 type controlService struct{ c *Client }
 
 func (s controlService) Info(ctx context.Context, _ *connect.Request[tunnelv1.InfoRequest]) (*connect.Response[tunnelv1.InfoResponse], error) {

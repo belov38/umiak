@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/rpcconv"
+	"github.com/belov38/umiak/libs/tunnel/rpcconv"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // testKey returns a fresh signing key pair.
@@ -56,12 +56,12 @@ func packBuild(t *testing.T, version, goos, goarch string, priv ed25519.PrivateK
 	t.Helper()
 	src := t.TempDir()
 	pub := priv.Public().(ed25519.PublicKey)
-	out := filepath.Join(t.TempDir(), "sbx-agent-"+version+".tar")
+	out := filepath.Join(t.TempDir(), "umiak-agent-"+version+".tar")
 	_, err := Pack(PackOptions{
 		Version:    version,
 		OS:         goos,
 		Arch:       goarch,
-		Binary:     writeFile(t, src, "sbx-agent", binary),
+		Binary:     writeFile(t, src, "umiak-agent", binary),
 		TunnelCA:   writeFile(t, src, "ca.pem", "-----BEGIN CERTIFICATE-----\nMA==\n-----END CERTIFICATE-----\n"),
 		UpdateKeys: writeFile(t, src, "keys.pub", FormatKey(pub, "test")+"\n"),
 		Key:        priv,

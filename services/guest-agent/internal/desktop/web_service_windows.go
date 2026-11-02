@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/sys/windows/svc"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 type webService struct{}
@@ -20,7 +20,7 @@ func (webService) Execute(_ []string, requests <-chan svc.ChangeRequest, status 
 	if files == "" {
 		files = `C:\Program Files`
 	}
-	dir := filepath.Join(files, "sbx-desktop", "moonlight-web", "current")
+	dir := filepath.Join(files, "umiak-desktop", "moonlight-web", "current")
 	cmd := exec.Command(filepath.Join(dir, "web-server.exe"), "--config-path", filepath.Join(l.StateDir, "desktop-moonlight", "config.json"), "--disable-default-webrtc-ice-servers") //nolint:noctx // SCM stop controls the child lifetime
 	cmd.Dir = dir
 	// The service has no console: keep the output next to its config. EndStreams
@@ -60,4 +60,4 @@ func (webService) Execute(_ []string, requests <-chan svc.ChangeRequest, status 
 }
 
 // RunWebService hosts moonlight-web as a native manual SCM service.
-func RunWebService(context.Context) error { return svc.Run("sbx-moonlight-web", webService{}) }
+func RunWebService(context.Context) error { return svc.Run("umiak-moonlight-web", webService{}) }

@@ -4,7 +4,7 @@
 // the same PR.
 //
 //   mise exec -- node apps/mcp/scripts/golden.ts      rewrites the file
-//   UPDATE_GOLDEN=1 mise exec -- pnpm --filter @sbx/mcp test golden
+//   UPDATE_GOLDEN=1 mise exec -- pnpm --filter @umiak/mcp test golden
 //                                                      the same, from the test
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

@@ -14,8 +14,8 @@ import (
 
 	proxyproto "github.com/pires/go-proxyproto"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/obs"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/ratelimit"
+	"github.com/belov38/umiak/services/gateway/internal/obs"
+	"github.com/belov38/umiak/services/gateway/internal/ratelimit"
 )
 
 const (
@@ -37,25 +37,25 @@ const (
 	acceptBackoffMax = time.Second
 )
 
-// errConnLimit refuses an sbx or tunnel conn over its per-IP limit during
+// errConnLimit refuses an umiak or tunnel conn over its per-IP limit during
 // the handshake, before the certificate work.
 var errConnLimit = errors.New("edge: too many conns from the client IP")
 
 // SNI kinds, also the sni_kind label values.
 const (
 	kindUnknown = "unknown"
-	kindSbx     = "sbx"
+	kindUmiak   = "umiak"
 	kindTunnel  = "tunnel"
 )
 
 // DispatchConfig configures a Dispatcher.
 type DispatchConfig struct {
-	// SbxDomain is the parent of the sandbox hosts (sbx.<domain>).
-	SbxDomain string
+	// UmiakDomain is the parent of the sandbox hosts (umiak.<domain>).
+	UmiakDomain string
 	// TunnelHost is the tunnel endpoint host (tunnel.<domain>).
 	TunnelHost string
-	// Sbx and Tunnel are the certificates of both destinations.
-	Sbx, Tunnel *CertSource
+	// Umiak and Tunnel are the certificates of both destinations.
+	Umiak, Tunnel *CertSource
 	// HandshakeTimeout bounds each TLS handshake; 0 means 10 s.
 	HandshakeTimeout time.Duration
 	// MaxHandshakes caps the handshakes in flight of the non-exempt
@@ -66,7 +66,7 @@ type DispatchConfig struct {
 	// (ratelimit.Key: IPv4 /32, IPv6 /64), from the accept to the end of
 	// the TLS handshake, so the time before the PROXY header and the
 	// ClientHello counts. A conn over the cap is closed at once and counted
-	// as sbx_gateway_ratelimited_total{limit="handshakes"}. 0 means 64.
+	// as umiak_gateway_ratelimited_total{limit="handshakes"}. 0 means 64.
 	MaxHandshakesPerIP int
 	// HandshakeExempt are the client IPs (node SNAT) that skip
 	// MaxHandshakesPerIP and MaxHandshakes; they use MaxExemptHandshakes
@@ -83,8 +83,8 @@ type DispatchConfig struct {
 	// by the LB address). Use the same value as the listener's
 	// (WrapProxyProtocol). 0 means 2 s.
 	ProxyHeaderTimeout time.Duration
-	// ConnLimit counts one open sbx conn of the client IP; ok false refuses
-	// it. It runs when the ClientHello names an sbx host; release is called
+	// ConnLimit counts one open umiak conn of the client IP; ok false refuses
+	// it. It runs when the ClientHello names an umiak host; release is called
 	// once when the conn closes. nil means no limit.
 	ConnLimit func(ip netip.Addr) (release func(), ok bool)
 	// TunnelConnLimit is ConnLimit for the conns whose ClientHello names the
@@ -99,18 +99,18 @@ type DispatchConfig struct {
 
 // Dispatcher accepts TLS conns, completes the handshake with the
 // certificate the SNI selects and hands each conn, as a *tls.Conn, to the
-// listener of its destination: Sbx() or Tunnel().
+// listener of its destination: Umiak() or Tunnel().
 type Dispatcher struct {
 	ln  net.Listener
 	cfg DispatchConfig
 	log *slog.Logger
 
 	base      *tls.Config
-	sbxTLS    *tls.Config
+	umiakTLS  *tls.Config
 	tunnelTLS *tls.Config
 	rejectTLS *tls.Config
 
-	sbx, tunnel *connListener
+	umiak, tunnel *connListener
 	// Semaphores of the handshakes in flight: general (non-exempt
 	// clients) and exempt, and the per-IP counts of non-exempt clients.
 	handshakes       chan struct{}
@@ -142,7 +142,7 @@ func NewDispatcher(ln net.Listener, cfg DispatchConfig) *Dispatcher {
 		cfg.MaxExemptHandshakes = defaultMaxExemptHandshakes
 	}
 	cfg.HandshakeExempt = append([]netip.Prefix(nil), cfg.HandshakeExempt...)
-	cfg.SbxDomain = strings.ToLower(strings.TrimSuffix(cfg.SbxDomain, "."))
+	cfg.UmiakDomain = strings.ToLower(strings.TrimSuffix(cfg.UmiakDomain, "."))
 	cfg.TunnelHost = strings.ToLower(strings.TrimSuffix(cfg.TunnelHost, "."))
 	log := cfg.Logger
 	if log == nil {
@@ -151,7 +151,7 @@ func NewDispatcher(ln net.Listener, cfg DispatchConfig) *Dispatcher {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &Dispatcher{
 		ln: ln, cfg: cfg, log: log,
-		sbx:              newConnListener(ln.Addr()),
+		umiak:            newConnListener(ln.Addr()),
 		tunnel:           newConnListener(ln.Addr()),
 		handshakes:       make(chan struct{}, cfg.MaxHandshakes),
 		exemptHandshakes: make(chan struct{}, cfg.MaxExemptHandshakes),
@@ -161,13 +161,13 @@ func NewDispatcher(ln net.Listener, cfg DispatchConfig) *Dispatcher {
 	certOf := func(cs *CertSource) func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 		return func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return cs.Get(), nil }
 	}
-	d.sbxTLS = &tls.Config{
+	d.umiakTLS = &tls.Config{
 		MinVersion:     tls.VersionTLS12,
-		GetCertificate: certOf(cfg.Sbx),
+		GetCertificate: certOf(cfg.Umiak),
 		NextProtos:     []string{"h2", "http/1.1"},
 	}
 	// Agents reconnect rarely: no session tickets, so no ticket key is
-	// shared with the sbx config.
+	// shared with the umiak config.
 	d.tunnelTLS = &tls.Config{
 		MinVersion:             tls.VersionTLS12,
 		GetCertificate:         certOf(cfg.Tunnel),
@@ -185,8 +185,8 @@ func NewDispatcher(ln net.Listener, cfg DispatchConfig) *Dispatcher {
 	return d
 }
 
-// Sbx returns the listener of handshaked *.sbx conns (*tls.Conn).
-func (d *Dispatcher) Sbx() net.Listener { return d.sbx }
+// Umiak returns the listener of handshaked *.umiak conns (*tls.Conn).
+func (d *Dispatcher) Umiak() net.Listener { return d.umiak }
 
 // Tunnel returns the listener of handshaked tunnel conns (*tls.Conn).
 func (d *Dispatcher) Tunnel() net.Listener { return d.tunnel }
@@ -199,9 +199,9 @@ func (d *Dispatcher) kind(sni string) string {
 		return kindUnknown
 	case sni == d.cfg.TunnelHost:
 		return kindTunnel
-	case d.cfg.SbxDomain != "" && strings.HasSuffix(sni, "."+d.cfg.SbxDomain) && len(sni) > len(d.cfg.SbxDomain)+1:
+	case d.cfg.UmiakDomain != "" && strings.HasSuffix(sni, "."+d.cfg.UmiakDomain) && len(sni) > len(d.cfg.UmiakDomain)+1:
 		// One or more labels; the proxy answers 404 for nested ones.
-		return kindSbx
+		return kindUmiak
 	default:
 		return kindUnknown
 	}
@@ -214,11 +214,11 @@ func (d *Dispatcher) configFor(chi *tls.ClientHelloInfo) (*tls.Config, error) {
 		ec.kind.Store(k)
 	}
 	switch k {
-	case kindSbx:
+	case kindUmiak:
 		if err := limitConn(ec, d.cfg.ConnLimit); err != nil {
 			return nil, err
 		}
-		return d.sbxTLS, nil
+		return d.umiakTLS, nil
 	case kindTunnel:
 		if err := limitConn(ec, d.cfg.TunnelConnLimit); err != nil {
 			return nil, err
@@ -483,8 +483,8 @@ func (d *Dispatcher) handle(raw net.Conn, s *slots) {
 		return
 	}
 	switch kind {
-	case kindSbx:
-		d.sbx.push(tc)
+	case kindUmiak:
+		d.umiak.push(tc)
 	case kindTunnel:
 		d.tunnel.push(tc)
 	default:
@@ -525,7 +525,7 @@ func (d *Dispatcher) Close() error {
 	d.closeOnce.Do(func() {
 		d.cancel()
 		d.closeErr = d.ln.Close()
-		d.sbx.close()
+		d.umiak.close()
 		d.tunnel.close()
 		if errors.Is(d.closeErr, net.ErrClosed) {
 			d.closeErr = nil

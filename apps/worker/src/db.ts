@@ -1,6 +1,6 @@
-import { lockNode, type MachineState, uuidv7 } from "@sbx/core";
-import { type Tx, withTx } from "@sbx/db";
-import type { DiskSlot } from "@sbx/pve";
+import { lockNode, type MachineState, uuidv7 } from "@umiak/core";
+import { type Tx, withTx } from "@umiak/db";
+import type { DiskSlot } from "@umiak/pve";
 import type pg from "pg";
 import type { InfraDisk, InfraSnapshotRef } from "./ports.ts";
 

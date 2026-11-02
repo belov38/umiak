@@ -13,11 +13,11 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
-	tunnelv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/tunnel/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/h2"
-	testingv1 "github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/tunneltest/testpb/sbx/testing/v1/testingv1connect"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	tunnelv1 "github.com/belov38/umiak/libs/proto/umiak/tunnel/v1"
+	"github.com/belov38/umiak/libs/tunnel/h2"
+	testingv1 "github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1"
+	"github.com/belov38/umiak/libs/tunnel/tunneltest/testpb/umiak/testing/v1/testingv1connect"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 // An agent answer with a header block over 64 KiB would make the gateway
@@ -77,7 +77,7 @@ func TestAgentOversizedHeadersRefused(t *testing.T) {
 			}
 			_, _ = io.WriteString(w, `{}`)
 		})
-		mux.HandleFunc("/sbx.testing.v1.Forge/ManyTrailers", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("/umiak.testing.v1.Forge/ManyTrailers", func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.Copy(io.Discard, r.Body)
 			w.Header().Set("Content-Type", "application/connect+proto")
 			// A whole envelope: without the reset the gateway would end the
@@ -91,9 +91,9 @@ func TestAgentOversizedHeadersRefused(t *testing.T) {
 		mux.HandleFunc("/files/big-trailer", trailer("application/octet-stream", big))
 		mux.HandleFunc("/files/edge-trailer", trailer("application/octet-stream", edgeTrailer))
 		mux.HandleFunc("/files/fit-trailer", trailer("application/octet-stream", fitTrailer))
-		mux.HandleFunc("/sbx.testing.v1.Forge/BigHeader", header("X-Big", big))
-		mux.HandleFunc("/sbx.testing.v1.Forge/EdgeHeader", header("X-Edge", edge))
-		mux.HandleFunc("/sbx.testing.v1.Forge/BigTrailer", trailer("application/connect+proto", big))
+		mux.HandleFunc("/umiak.testing.v1.Forge/BigHeader", header("X-Big", big))
+		mux.HandleFunc("/umiak.testing.v1.Forge/EdgeHeader", header("X-Edge", edge))
+		mux.HandleFunc("/umiak.testing.v1.Forge/BigTrailer", trailer("application/connect+proto", big))
 		mux.HandleFunc("/files/slow", func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = io.WriteString(w, "first ")
 			w.(http.Flusher).Flush()
@@ -127,8 +127,8 @@ func TestAgentOversizedHeadersRefused(t *testing.T) {
 		{"/files/edge-header", "", http.StatusBadGateway},
 		{"/files/many-headers", "", http.StatusBadGateway},
 		{"/files/fit-header", "", http.StatusOK},
-		{"/rpc/sbx.testing.v1.Forge/BigHeader", "application/json", http.StatusBadGateway},
-		{"/rpc/sbx.testing.v1.Forge/EdgeHeader", "application/json", http.StatusBadGateway},
+		{"/rpc/umiak.testing.v1.Forge/BigHeader", "application/json", http.StatusBadGateway},
+		{"/rpc/umiak.testing.v1.Forge/EdgeHeader", "application/json", http.StatusBadGateway},
 	} {
 		resp, body := do(t, c, http.MethodPost, gw.machineURL(id)+tc.path, tc.ct, []byte(`{}`))
 		if resp.StatusCode != tc.want {
@@ -147,8 +147,8 @@ func TestAgentOversizedHeadersRefused(t *testing.T) {
 	for _, tc := range []struct{ path, ct string }{
 		{"/files/big-trailer", ""},
 		{"/files/edge-trailer", ""},
-		{"/rpc/sbx.testing.v1.Forge/BigTrailer", "application/connect+json"},
-		{"/rpc/sbx.testing.v1.Forge/ManyTrailers", "application/connect+json"},
+		{"/rpc/umiak.testing.v1.Forge/BigTrailer", "application/connect+json"},
+		{"/rpc/umiak.testing.v1.Forge/ManyTrailers", "application/connect+json"},
 	} {
 		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, gw.machineURL(id)+tc.path, strings.NewReader(`{}`))
 		if tc.ct != "" {
@@ -265,8 +265,8 @@ func TestAgentTrailerDeclarationsCounted(t *testing.T) {
 		mux.HandleFunc("/files/names-over-block", declare(names(maxDeclaredTrailers, maxTrailerNameBytes), fill, 0))
 		mux.HandleFunc("/files/too-many-fields", declare(nil, "", maxForwardHeaderFields))
 		mux.HandleFunc("/files/fit", declare(names(maxDeclaredTrailers, maxTrailerNameBytes), "", 50))
-		mux.HandleFunc("/sbx.testing.v1.Forge/LongName", declare([]string{longName}, "", 0))
-		mux.HandleFunc("/sbx.testing.v1.Forge/ManyFields", declare(nil, "", maxForwardHeaderFields))
+		mux.HandleFunc("/umiak.testing.v1.Forge/LongName", declare([]string{longName}, "", 0))
+		mux.HandleFunc("/umiak.testing.v1.Forge/ManyFields", declare(nil, "", maxForwardHeaderFields))
 		mux.HandleFunc("/files/many-trailer-fields", func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.Copy(io.Discard, r.Body)
 			_, _ = io.WriteString(w, "body")
@@ -300,8 +300,8 @@ func TestAgentTrailerDeclarationsCounted(t *testing.T) {
 		{"/files/names-over-block", "", http.StatusBadGateway},
 		{"/files/too-many-fields", "", http.StatusBadGateway},
 		{"/files/fit", "", http.StatusOK},
-		{"/rpc/sbx.testing.v1.Forge/LongName", "application/json", http.StatusBadGateway},
-		{"/rpc/sbx.testing.v1.Forge/ManyFields", "application/json", http.StatusBadGateway},
+		{"/rpc/umiak.testing.v1.Forge/LongName", "application/json", http.StatusBadGateway},
+		{"/rpc/umiak.testing.v1.Forge/ManyFields", "application/json", http.StatusBadGateway},
 	} {
 		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, gw.machineURL(idA)+tc.path, strings.NewReader(`{}`))
 		if tc.ct != "" {
@@ -386,8 +386,8 @@ func TestDeclaredTrailerNeverSent(t *testing.T) {
 		for _, send := range []bool{false, true} {
 			sfx := map[bool]string{false: "Absent", true: "Sent"}[send]
 			mux.HandleFunc("/files/declared"+sfx, declareOnly("application/octet-stream", []byte("body"), send))
-			mux.HandleFunc("/sbx.testing.v1.Forge/Declared"+sfx, declareOnly("application/json", []byte(`{}`), send))
-			mux.HandleFunc("/sbx.testing.v1.Forge/DeclaredStream"+sfx, declareOnly("application/connect+json", []byte{2, 0, 0, 0, 2, '{', '}'}, send))
+			mux.HandleFunc("/umiak.testing.v1.Forge/Declared"+sfx, declareOnly("application/json", []byte(`{}`), send))
+			mux.HandleFunc("/umiak.testing.v1.Forge/DeclaredStream"+sfx, declareOnly("application/connect+json", []byte{2, 0, 0, 0, 2, '{', '}'}, send))
 		}
 	})
 	e.startAgent(cfg).waitConnected()
@@ -399,11 +399,11 @@ func TestDeclaredTrailerNeverSent(t *testing.T) {
 		sent     bool
 	}{
 		{"/files/declaredAbsent", "", false},
-		{"/rpc/sbx.testing.v1.Forge/DeclaredAbsent", "application/json", false},
-		{"/rpc/sbx.testing.v1.Forge/DeclaredStreamAbsent", "application/connect+json", false},
+		{"/rpc/umiak.testing.v1.Forge/DeclaredAbsent", "application/json", false},
+		{"/rpc/umiak.testing.v1.Forge/DeclaredStreamAbsent", "application/connect+json", false},
 		{"/files/declaredSent", "", true},
-		{"/rpc/sbx.testing.v1.Forge/DeclaredSent", "application/json", true},
-		{"/rpc/sbx.testing.v1.Forge/DeclaredStreamSent", "application/connect+json", true},
+		{"/rpc/umiak.testing.v1.Forge/DeclaredSent", "application/json", true},
+		{"/rpc/umiak.testing.v1.Forge/DeclaredStreamSent", "application/connect+json", true},
 	} {
 		ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
 		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, gw.machineURL(id)+tc.path, strings.NewReader(`{}`))

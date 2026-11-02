@@ -17,7 +17,7 @@ const (
 	// volatileParent is a normal key; volatileName under it is created
 	// with REG_OPTION_VOLATILE, so the hive keeps it in memory only and it
 	// is gone after a reboot (a wake from sleep keeps it).
-	volatileParent = `SOFTWARE\sbx-agent`
+	volatileParent = `SOFTWARE\umiak-agent`
 	volatileName   = "Volatile"
 	bootIDValue    = "BootId"
 	// volatileSDDL keeps the key to SYSTEM.
@@ -32,7 +32,7 @@ const (
 )
 
 // VolatileBootID returns a random id that lives as long as this boot: the
-// first caller of a boot creates HKLM\SOFTWARE\sbx-agent\Volatile
+// first caller of a boot creates HKLM\SOFTWARE\umiak-agent\Volatile
 // (volatile, SYSTEM only) and stores a new UUID in it, later callers read
 // it. Unlike the kernel boot time it does not move with the system clock,
 // and unlike a file it cannot outlive the boot (S9 spec 12.4 fallback).

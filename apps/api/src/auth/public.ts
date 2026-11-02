@@ -1,8 +1,8 @@
 // Authentication of the public listener (S7 §7.1, §7.2, §7.10):
-// `Authorization: Bearer` with a team key (`sbx_`) or a Keycloak access
+// `Authorization: Bearer` with a team key (`umiak_`) or a Keycloak access
 // token. oauth2-proxy headers are removed before anything else, cookies are
 // never read.
-import { apiKeyHash, classifyBearer, isWellFormedApiKey } from "@sbx/auth";
+import { apiKeyHash, classifyBearer, isWellFormedApiKey } from "@umiak/auth";
 import type { Context, MiddlewareHandler } from "hono";
 import type { ApiDeps, ApiEnv } from "../deps.ts";
 import {
@@ -72,7 +72,7 @@ async function authenticate(
 	const token = bearerOf(c);
 	if (token === null) {
 		throw authRequired(
-			"authentication required: send `Authorization: Bearer <token>` with a team API key or a Keycloak access token (`sbx login`)",
+			"authentication required: send `Authorization: Bearer <token>` with a team API key or a Keycloak access token (`umiak login`)",
 		);
 	}
 	// Decoded after the credential passed: a stranger always gets a 401.
@@ -80,7 +80,7 @@ async function authenticate(
 	const requested = () =>
 		teamHeader === undefined
 			? null
-			: decodeTeamRef(teamHeader, "header.sbx-team");
+			: decodeTeamRef(teamHeader, "header.umiak-team");
 	switch (classifyBearer(token)) {
 		case "team_key":
 			return keyAuthenticate(deps, token, requested);
@@ -115,7 +115,7 @@ async function keyAuthenticate(
 	}
 	const team = requested();
 	if (team !== null && team !== hit.key.teamId) {
-		throw teamForbidden("the API key belongs to another team than Sbx-Team");
+		throw teamForbidden("the API key belongs to another team than Umiak-Team");
 	}
 	deps.keyCache.touch(hit.key);
 	return keyAuth(hit.key, hit.teamName);

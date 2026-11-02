@@ -1,11 +1,11 @@
 #requires -Version 7
-# Guest checks of a Windows template build (spec S9 section 15.1). sbx-tpl writes this file to
-# C:\Windows\Temp\sbx-verify.ps1 on a clone and runs it as SYSTEM through QGA:
+# Guest checks of a Windows template build (spec S9 section 15.1). umiak-tpl writes this file to
+# C:\Windows\Temp\umiak-verify.ps1 on a clone and runs it as SYSTEM through QGA:
 #   pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <this> -MachineId <uuid> ...
 # Output, one line each:
 #   CHECK <id> <PASS|FAIL|INFO> <evidence>
 #   TOOLS <json>    {"<tool>": {"direct": ..., "login": ...}}: first line of the version output as
-#                   user through `sbx-agent exec` (argv and the pwsh shell path), or "error: rc=<n> ..."
+#                   user through `umiak-agent exec` (argv and the pwsh shell path), or "error: rc=<n> ..."
 #   LICENSE <json>  {status, description, graceMinutes, evaluationEnd, editionId}
 #   FACTS <json>    (-Check facts) {computerName, machineGuid, lsaHash, hostKeys, bootsSince}
 # -Check <group>[,<group>...] runs only those groups ('-' and '_' are the same). By default:
@@ -19,7 +19,7 @@ param(
     [string]$Build = '',
     # Comma-separated tool names of the manifest.
     [string]$Tools = '',
-    # Host clock when sbx-tpl started this script (time_sync).
+    # Host clock when umiak-tpl started this script (time_sync).
     [long]$HostUnixMs = 0,
     # Hex salt of lsa_hash and FACTS.lsaHash.
     [string]$Salt = '',
@@ -34,25 +34,25 @@ $PSNativeCommandUseErrorActionPreference = $false
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $StartedUnixMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 
-$AgentExe = 'C:\Program Files\sbx-agent\current\sbx-agent.exe'
+$AgentExe = 'C:\Program Files\umiak-agent\current\umiak-agent.exe'
 $PwshExe = 'C:\Program Files\PowerShell\7\pwsh.exe'
 $OpenSshDir = Join-Path $env:SystemRoot 'System32\OpenSSH'
 $SshDataDir = Join-Path $env:ProgramData 'ssh'
-$BuildJson = Join-Path $env:ProgramData 'sbx-template\build.json'
+$BuildJson = Join-Path $env:ProgramData 'umiak-template\build.json'
 $NpmPrefix = Join-Path $env:ProgramData 'npm'
 $UserName = 'user'
 # Boots of a clone's first start without the agent: specialize, then OOBE and the logon.
 # The agent adds one rename reboot after setup (ruling R16).
 $SetupBoots = 2
-# Spec 8.1: $SbxDisabledServices of _windows/lib.ps1 plus dmwappushservice,
-# which the specialize pass of sbx-unattend.xml disables on the clone.
+# Spec 8.1: $UmiakDisabledServices of _windows/lib.ps1 plus dmwappushservice,
+# which the specialize pass of umiak-unattend.xml disables on the clone.
 $DisabledServices = @(
     'wuauserv', 'UsoSvc', 'DoSvc', 'WSearch', 'SysMain', 'DiagTrack',
     'dmwappushservice', 'MapsBroker', 'lfsvc', 'WerSvc', 'RemoteRegistry',
     'Spooler', 'SSDPSRV', 'FDResPub', 'LanmanServer', 'TermService', 'WinRM',
     'CDPSvc'
 )
-$FirstBootLog = Join-Path $env:ProgramData 'sbx-template\firstboot.log'
+$FirstBootLog = Join-Path $env:ProgramData 'umiak-template\firstboot.log'
 $FirewallPolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsFirewall'
 $DefenderServices = @('WinDefend', 'WdNisSvc', 'Sense', 'WdBoot', 'WdFilter', 'WdNisDrv')
 $ServicesKey = 'HKLM:\SYSTEM\CurrentControlSet\Services'
@@ -62,7 +62,7 @@ using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
-public static class SbxLsa
+public static class UmiakLsa
 {
     [StructLayout(LayoutKind.Sequential)]
     private struct LsaUnicodeString
@@ -194,11 +194,11 @@ function Get-SaltedHash([string]$SaltHex, [byte[]]$Secret) {
 
 # Lock state of a session: 'locked', 'unlocked' or 'unknown' (WTSSessionInfoEx SessionFlags).
 function Get-SessionLockState([int]$SessionId) {
-    if (-not ('SbxWts' -as [type])) {
+    if (-not ('UmiakWts' -as [type])) {
         Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-public static class SbxWts {
+public static class UmiakWts {
     [DllImport("wtsapi32.dll", SetLastError = true)]
     static extern bool WTSQuerySessionInformation(IntPtr server, int sessionId, int infoClass, out IntPtr buffer, out int bytes);
     [DllImport("wtsapi32.dll")]
@@ -214,7 +214,7 @@ public static class SbxWts {
 }
 '@
     }
-    $flags = try { [SbxWts]::Flags($SessionId) } catch { -2 }
+    $flags = try { [UmiakWts]::Flags($SessionId) } catch { -2 }
     switch ($flags) {
         0 { return 'locked' }
         1 { return 'unlocked' }
@@ -224,8 +224,8 @@ public static class SbxWts {
 
 # Salted sha256 and length of an LSA secret, $null when it does not exist.
 function Get-LsaSecretHash([string]$Name, [string]$SaltHex) {
-    if (-not ('SbxLsa' -as [type])) { Add-Type -TypeDefinition $LsaSource }
-    $secret = [SbxLsa]::Retrieve($Name)
+    if (-not ('UmiakLsa' -as [type])) { Add-Type -TypeDefinition $LsaSource }
+    $secret = [UmiakLsa]::Retrieve($Name)
     if ($null -eq $secret) { return $null }
     try {
         return [pscustomobject]@{ Length = $secret.Length; Hash = (Get-SaltedHash $SaltHex $secret) }
@@ -258,7 +258,7 @@ function Test-Os {
     Report os $ok "EditionID $ed (want $EditionId), build $b.$($cv.UBR) (want $Build), $($cv.ProductName) $($cv.DisplayVersion)"
 }
 
-# [2] Name SBX<12 hex> and MachineGuid of the test machine id.
+# [2] Name UMI<12 hex> and MachineGuid of the test machine id.
 function Test-Identity {
     $hex = ($MachineId -replace '-', '').ToUpperInvariant()
     if ($hex -notmatch '^[0-9A-F]{32}$') {
@@ -266,7 +266,7 @@ function Test-Identity {
         Report machine_guid $false "invalid -MachineId '$MachineId'"
         return
     }
-    $want = 'SBX' + $hex.Substring(20)
+    $want = 'UMI' + $hex.Substring(20)
     $active = [string](Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName' 'ComputerName')
     $dns = [string](Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' 'Hostname')
     Report computer_name ($active -ceq $want -and $dns -eq $want) "active $active, hostname $dns, want $want"
@@ -280,17 +280,17 @@ function Get-RestartProcessName([string]$Value) {
     return (($Value -replace '\s*\([^()]*\)\s*$', '') -split '\\')[-1]
 }
 
-# Setup's boots plus at most one planned restart by sbx-agent.exe: the rename
+# Setup's boots plus at most one planned restart by umiak-agent.exe: the rename
 # after setup overwrote the specialize name (ruling R16). Ok and Evidence.
 function Get-FirstBootVerdict([int]$Boots, [string[]]$RestartBy) {
     $by = @($RestartBy | Where-Object { $_ })
-    $agent = @($by | Where-Object { $_ -ieq 'sbx-agent.exe' }).Count
+    $agent = @($by | Where-Object { $_ -ieq 'umiak-agent.exe' }).Count
     $limit = $SetupBoots + [math]::Min($agent, 1)
     $ok = $Boots -ge 1 -and $agent -le 1 -and $Boots -le $limit
     $names = if ($by.Count) { ($by | Group-Object | ForEach-Object { "$($_.Name) x$($_.Count)" }) -join ', ' } else { 'none' }
     return [pscustomobject]@{
         Ok = $ok
-        Evidence = "$Boots boots since the seal (event 6005), allowed $limit (setup $SetupBoots + $([math]::Min($agent, 1)) rename by sbx-agent.exe, at most one); planned restarts (1074) by: $names"
+        Evidence = "$Boots boots since the seal (event 6005), allowed $limit (setup $SetupBoots + $([math]::Min($agent, 1)) rename by umiak-agent.exe, at most one); planned restarts (1074) by: $names"
     }
 }
 
@@ -316,11 +316,11 @@ function Test-FirstBoot {
     Test-FirstBootLog $FirstBootLog
 }
 
-# [2] sbx-unattend.xml removed, no password values left in the answer file copies.
+# [2] umiak-unattend.xml removed, no password values left in the answer file copies.
 function Test-Unattend {
-    $f = Join-Path $env:SystemRoot 'System32\Sysprep\sbx-unattend.xml'
+    $f = Join-Path $env:SystemRoot 'System32\Sysprep\umiak-unattend.xml'
     $exists = Test-Path -LiteralPath $f
-    Report sbx_unattend_gone (-not $exists) "$f $(if ($exists) { 'exists' } else { 'removed' })"
+    Report umiak_unattend_gone (-not $exists) "$f $(if ($exists) { 'exists' } else { 'removed' })"
     $bad = [Collections.Generic.List[string]]::new()
     foreach ($dir in @((Join-Path $env:SystemRoot 'Panther'), (Join-Path $env:SystemRoot 'System32\Sysprep'))) {
         foreach ($x in @(Get-ChildItem -LiteralPath $dir -Recurse -Force -File -Filter '*.xml' -ErrorAction SilentlyContinue)) {
@@ -405,8 +405,8 @@ function Test-Sshd {
     $lines = @($t.Lines | ForEach-Object { $_.Trim().ToLowerInvariant() })
     $want = @('passwordauthentication no', 'kbdinteractiveauthentication no', 'pubkeyauthentication yes', 'listenaddress 127.0.0.1:22', 'listenaddress [::1]:22')
     $missing = @($want | Where-Object { $_ -notin $lines })
-    $ca = @($lines | Where-Object { $_ -like 'trustedusercakeys *sbx_user_ca.pub' })
-    if ($ca.Count -eq 0) { $missing += 'trustedusercakeys .../sbx_user_ca.pub' }
+    $ca = @($lines | Where-Object { $_ -like 'trustedusercakeys *umiak_user_ca.pub' })
+    if ($ca.Count -eq 0) { $missing += 'trustedusercakeys .../umiak_user_ca.pub' }
     $ev = if ($t.Code -ne 0) { "sshd -T exit $($t.Code): $(@($t.Lines | Select-Object -Last 3) -join ' | ')" } elseif ($missing.Count) { "missing: $($missing -join '; ')" } else { ($want + $ca) -join '; ' }
     Report sshd_config ($t.Code -eq 0 -and $missing.Count -eq 0) $ev
     $svc = Get-Service -Name sshd -ErrorAction SilentlyContinue
@@ -421,10 +421,10 @@ function Test-Sshd {
     Report ssh_default_shell ($shell -eq $PwshExe) "DefaultShell $shell"
 }
 
-# [5] Certificate login of user with a test CA added to sbx_user_ca.pub for the check.
+# [5] Certificate login of user with a test CA added to umiak_user_ca.pub for the check.
 function Test-SshLogin {
-    $dir = Join-Path $env:SystemRoot 'Temp\sbx-verify-ssh'
-    $caFile = Join-Path $SshDataDir 'sbx_user_ca.pub'
+    $dir = Join-Path $env:SystemRoot 'Temp\umiak-verify-ssh'
+    $caFile = Join-Path $SshDataDir 'umiak_user_ca.pub'
     $keygen = Join-Path $OpenSshDir 'ssh-keygen.exe'
     $ssh = Join-Path $OpenSshDir 'ssh.exe'
     if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
@@ -435,10 +435,10 @@ function Test-SshLogin {
         $acl = Invoke-Capture icacls.exe @($dir, '/inheritance:r', '/grant:r', '*S-1-5-18:(OI)(CI)F')
         if ($acl.Code -ne 0) { throw "icacls: $($acl.Text)" }
         foreach ($k in @('ca', 'id')) {
-            $r = Invoke-Capture $keygen @('-q', '-t', 'ed25519', '-N', '', '-C', "sbx-verify-$k", '-f', (Join-Path $dir $k))
+            $r = Invoke-Capture $keygen @('-q', '-t', 'ed25519', '-N', '', '-C', "umiak-verify-$k", '-f', (Join-Path $dir $k))
             if ($r.Code -ne 0) { throw "ssh-keygen ${k}: $($r.Text)" }
         }
-        $r = Invoke-Capture $keygen @('-q', '-s', (Join-Path $dir 'ca'), '-I', 'sbx-verify', '-n', $UserName, '-V', '-5m:+10m', (Join-Path $dir 'id.pub'))
+        $r = Invoke-Capture $keygen @('-q', '-s', (Join-Path $dir 'ca'), '-I', 'umiak-verify', '-n', $UserName, '-V', '-5m:+10m', (Join-Path $dir 'id.pub'))
         if ($r.Code -ne 0) { throw "ssh-keygen -s: $($r.Text)" }
         $orig = [IO.File]::ReadAllBytes($caFile)
         $caPub = [IO.File]::ReadAllText((Join-Path $dir 'ca.pub')).Trim()
@@ -449,9 +449,9 @@ function Test-SshLogin {
             '-i', (Join-Path $dir 'id'), '-o', "CertificateFile=$(Join-Path $dir 'id-cert.pub')",
             '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new',
             '-o', "UserKnownHostsFile=$(Join-Path $dir 'known_hosts')", '-o', 'ConnectTimeout=20',
-            "$UserName@127.0.0.1", '$env:SBX')
+            "$UserName@127.0.0.1", '$env:UMIAK')
         $last = @($r.Lines | Where-Object { $_.Trim() }) | Select-Object -Last 1
-        Report ssh_cert_login ($r.Code -eq 0 -and "$last".Trim() -eq '1') "ssh with a test CA certificate as $UserName to 127.0.0.1, `$env:SBX in the session: exit $($r.Code), last line '$last'"
+        Report ssh_cert_login ($r.Code -eq 0 -and "$last".Trim() -eq '1') "ssh with a test CA certificate as $UserName to 127.0.0.1, `$env:UMIAK in the session: exit $($r.Code), last line '$last'"
     } catch {
         Report ssh_cert_login $false "error: $($_.Exception.Message)"
     } finally {
@@ -460,18 +460,18 @@ function Test-SshLogin {
     }
 }
 
-# [6] Service, failure actions, early.json of this boot (doctor is checked by sbx-tpl).
+# [6] Service, failure actions, early.json of this boot (doctor is checked by umiak-tpl).
 function Test-Agent {
-    $svc = Get-Service -Name sbx-agent -ErrorAction SilentlyContinue
-    Report agent_service ($null -ne $svc -and "$($svc.Status)" -eq 'Running' -and "$($svc.StartType)" -eq 'Automatic') "sbx-agent $($svc.Status), $($svc.StartType)"
-    $q = Invoke-Capture sc.exe @('qfailure', 'sbx-agent', '8192')
-    $flag = Invoke-Capture sc.exe @('qfailureflag', 'sbx-agent')
+    $svc = Get-Service -Name umiak-agent -ErrorAction SilentlyContinue
+    Report agent_service ($null -ne $svc -and "$($svc.Status)" -eq 'Running' -and "$($svc.StartType)" -eq 'Automatic') "umiak-agent $($svc.Status), $($svc.StartType)"
+    $q = Invoke-Capture sc.exe @('qfailure', 'umiak-agent', '8192')
+    $flag = Invoke-Capture sc.exe @('qfailureflag', 'umiak-agent')
     $restarts = [regex]::Matches($q.Text, '\bRESTART\b').Count
     $ok = $q.Code -eq 0 -and $restarts -ge 2 -and $q.Text -match 'RUN PROCESS' -and $q.Text -match 'rollback' -and
         $q.Text -match 'RESET_PERIOD[^:]*:\s*120\b' -and $flag.Text -match 'TRUE'
     $ev = @($q.Lines + $flag.Lines | Where-Object { $_ -match 'RESET_PERIOD|COMMAND_LINE|RESTART|RUN PROCESS|NONCRASH' } | ForEach-Object { $_.Trim() }) -join '; '
     Report agent_failure_actions $ok $ev
-    $early = Join-Path $env:ProgramData 'sbx-agent\run\early.json'
+    $early = Join-Path $env:ProgramData 'umiak-agent\run\early.json'
     if (Test-Path -LiteralPath $early) {
         $at = (Get-Item -LiteralPath $early).LastWriteTimeUtc
         Report agent_early ($at -ge $BootTime) "$early written $($at.ToString('o')), boot $($BootTime.ToString('o'))"
@@ -500,8 +500,8 @@ function Test-Users {
     } else {
         Report user_password (-not $u.Disabled -and -not $u.PasswordExpires) "$UserName disabled $($u.Disabled), password expires $($u.PasswordExpires)"
     }
-    $lsa = Get-LsaSecretHash 'L$sbx_user' ''
-    Report lsa_secret ($null -ne $lsa -and $lsa.Length -gt 0) $(if ($lsa) { "L`$sbx_user present ($($lsa.Length) bytes)" } else { 'L$sbx_user missing' })
+    $lsa = Get-LsaSecretHash 'L$umiak_user' ''
+    Report lsa_secret ($null -ne $lsa -and $lsa.Length -gt 0) $(if ($lsa) { "L`$umiak_user present ($($lsa.Length) bytes)" } else { 'L$umiak_user missing' })
     $enabled = @($accounts | Where-Object { -not $_.Disabled } | ForEach-Object Name)
     $disabled = @($accounts | Where-Object { $_.Disabled } | ForEach-Object Name)
     Report local_accounts (($enabled -join ',') -eq $UserName) "enabled: $($enabled -join ', '); disabled: $($disabled -join ', ')"
@@ -564,7 +564,7 @@ function Test-Services {
     $medic = Get-RegValue "$ServicesKey\WaaSMedicSvc" 'Start'
     Report waasmedic_off ($medic -eq 4) "WaaSMedicSvc Start=$medic"
 
-    $log = Join-Path $env:SystemRoot 'Setup\Scripts\sbx-offline.log'
+    $log = Join-Path $env:SystemRoot 'Setup\Scripts\umiak-offline.log'
     if (Test-Path -LiteralPath $log) {
         $lines = @(Get-Content -LiteralPath $log)
         $errors = @($lines | Where-Object { $_ -match '^\s*ERROR\b' })
@@ -618,11 +618,11 @@ function Test-Services {
     $nls = 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\CodePage'
     $acp = Get-RegValue $nls 'ACP'
     $oem = Get-RegValue $nls 'OEMCP'
-    if (-not ('SbxNls' -as [type])) {
-        Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public static class SbxNls { [DllImport("kernel32.dll")] public static extern uint GetACP(); [DllImport("kernel32.dll")] public static extern uint GetOEMCP(); }'
+    if (-not ('UmiakNls' -as [type])) {
+        Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public static class UmiakNls { [DllImport("kernel32.dll")] public static extern uint GetACP(); [DllImport("kernel32.dll")] public static extern uint GetOEMCP(); }'
     }
-    $activeAcp = [SbxNls]::GetACP()
-    $activeOem = [SbxNls]::GetOEMCP()
+    $activeAcp = [UmiakNls]::GetACP()
+    $activeOem = [UmiakNls]::GetOEMCP()
     Report codepage ($acp -eq '65001' -and $oem -eq '65001' -and $activeAcp -eq 65001 -and $activeOem -eq 65001) "registry ACP $acp, OEMCP $oem; active GetACP() $activeAcp, GetOEMCP() $activeOem"
 }
 
@@ -681,7 +681,7 @@ function Test-Trim {
     }
 }
 
-# [17] Licence state for the manifest; sbx-tpl judges it by the channel.
+# [17] Licence state for the manifest; umiak-tpl judges it by the channel.
 function Test-License {
     $cv = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
     $names = @('Unlicensed', 'Licensed', 'OOBGrace', 'OOTGrace', 'NonGenuineGrace', 'Notification', 'ExtendedGrace')
@@ -701,7 +701,7 @@ function Test-License {
 # [18] Build leftovers.
 function Test-Leftovers {
     $bad = [Collections.Generic.List[string]]::new()
-    if (Test-Path -LiteralPath 'C:\sbx-build') { $bad.Add('C:\sbx-build') }
+    if (Test-Path -LiteralPath 'C:\umiak-build') { $bad.Add('C:\umiak-build') }
     foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $env:SystemRoot 'Temp') -Recurse -Force -File -Include '*.msi', '*.msu', '*.exe', '*.zip' -ErrorAction SilentlyContinue)) {
         $bad.Add($f.FullName)
     }
@@ -709,7 +709,7 @@ function Test-Leftovers {
         $bad.Add($f.FullName)
     }
     if (-not (Test-Path -LiteralPath $BuildJson)) { $bad.Add("$BuildJson missing") }
-    Report leftovers ($bad.Count -eq 0) $(if ($bad.Count) { $bad -join ', ' } else { "no C:\sbx-build, installers or authorized_keys; $BuildJson present" })
+    Report leftovers ($bad.Count -eq 0) $(if ($bad.Count) { $bad -join ', ' } else { "no C:\umiak-build, installers or authorized_keys; $BuildJson present" })
 }
 
 # [12] No VSS errors since this boot (after a QGA freeze and thaw). Event 8194 "Unexpected
@@ -731,7 +731,7 @@ function Test-VssEvents {
 
 # Salted hash of the password of user (fork: unchanged).
 function Test-LsaHash {
-    $h = Get-LsaSecretHash 'L$sbx_user' $Salt
+    $h = Get-LsaSecretHash 'L$umiak_user' $Salt
     Report lsa_hash INFO $(if ($h) { $h.Hash } else { 'missing' })
 }
 
@@ -739,7 +739,7 @@ function Test-LsaHash {
 function Test-Facts {
     $active = [string](Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName' 'ComputerName')
     $guid = [string](Get-RegValue 'HKLM:\SOFTWARE\Microsoft\Cryptography' 'MachineGuid')
-    $h = Get-LsaSecretHash 'L$sbx_user' $Salt
+    $h = Get-LsaSecretHash 'L$umiak_user' $Salt
     $keygen = Join-Path $OpenSshDir 'ssh-keygen.exe'
     $keys = @(Get-ChildItem -LiteralPath $SshDataDir -Force -File -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -match '^ssh_host_\w+_key\.pub$' } |
@@ -788,8 +788,8 @@ $Groups = [ordered]@{
 }
 $OnDemand = @('vss_events', 'lsa_hash', 'facts')
 # Desktop profiles (S10) are spliced in before "# --- main ---" and add their groups here.
-if (Test-Path variable:SbxExtraGroups) {
-    foreach ($k in $SbxExtraGroups.Keys) { $Groups[$k] = $SbxExtraGroups[$k] }
+if (Test-Path variable:UmiakExtraGroups) {
+    foreach ($k in $UmiakExtraGroups.Keys) { $Groups[$k] = $UmiakExtraGroups[$k] }
 }
 
 $BootTime = (Get-CimInstance -ClassName Win32_OperatingSystem).LastBootUpTime.ToUniversalTime()

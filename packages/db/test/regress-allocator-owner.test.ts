@@ -4,7 +4,7 @@
 // VMID and it reported vmid_exhausted. Now the loser returns the winner's
 // lease with `reused: true`.
 import { randomUUID } from "node:crypto";
-import { Allocator } from "@sbx/pve";
+import { Allocator } from "@umiak/pve";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PgAllocatorStore } from "../src/index.ts";
 import {

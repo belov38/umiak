@@ -1,4 +1,4 @@
-# Identity file of the api stand-in (SBX_IDENTITY_FILE, S7 plan decision 2),
+# Identity file of the api stand-in (UMIAK_IDENTITY_FILE, S7 plan decision 2),
 # loaded at every api start as upserts: rows missing here are kept, revoked
 # keys stay revoked. People normally appear by themselves at their first
 # login (Keycloak user -> JIT user with a personal team), so the file is

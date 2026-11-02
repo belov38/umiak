@@ -7,8 +7,8 @@ import (
 
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/events"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/store"
+	"github.com/belov38/umiak/services/guest-agent/internal/events"
+	"github.com/belov38/umiak/services/guest-agent/internal/store"
 )
 
 func TestRecorderOf(t *testing.T) {
@@ -38,7 +38,7 @@ func TestStoreEmitterJournals(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 
 	e := events.StoreEmitter(st)
-	e.Emit(events.TypeClaimApplied, wrapperspb.String("sbx-1"))
+	e.Emit(events.TypeClaimApplied, wrapperspb.String("umiak-1"))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := st.Flush(ctx); err != nil {
@@ -52,7 +52,7 @@ func TestStoreEmitterJournals(t *testing.T) {
 		t.Fatalf("events = %v", evs)
 	}
 	var p wrapperspb.StringValue
-	if err := evs[0].GetPayload().UnmarshalTo(&p); err != nil || p.Value != "sbx-1" {
+	if err := evs[0].GetPayload().UnmarshalTo(&p); err != nil || p.Value != "umiak-1" {
 		t.Fatalf("payload = %v, %v", &p, err)
 	}
 }

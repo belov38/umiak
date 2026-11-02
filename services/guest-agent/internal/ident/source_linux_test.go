@@ -14,14 +14,14 @@ func TestSysfsSource(t *testing.T) {
 	serial := testSerial(testMachineID)
 	mustWrite(t, filepath.Join(dir, "product_serial"), serial+"\n")
 	mustWrite(t, filepath.Join(dir, "product_uuid"), testMachineID+"\n")
-	mustWrite(t, filepath.Join(dir, "product_family"), "sbxt1:wss://h/v1/connect\n")
+	mustWrite(t, filepath.Join(dir, "product_family"), "umiakt1:wss://h/v1/connect\n")
 	mustWrite(t, boot, "boot-1\n")
 
 	raw, err := SysfsSource{Dir: dir, BootIDPath: boot}.Read(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Raw{Serial: serial, UUID: testMachineID, Family: "sbxt1:wss://h/v1/connect", BootID: "boot-1"}
+	want := Raw{Serial: serial, UUID: testMachineID, Family: "umiakt1:wss://h/v1/connect", BootID: "boot-1"}
 	if raw != want {
 		t.Errorf("raw = %+v, want %+v", raw, want)
 	}
@@ -44,7 +44,7 @@ func TestSysfsSourceNoSerial(t *testing.T) {
 	if err == nil || !os.IsNotExist(unwrapAll(err)) {
 		t.Errorf("err = %v, want a not-exist error", err)
 	}
-	if err != nil && strings.Contains(err.Error(), "sbx1:") {
+	if err != nil && strings.Contains(err.Error(), "umiak1:") {
 		t.Errorf("error leaks serial: %v", err)
 	}
 }

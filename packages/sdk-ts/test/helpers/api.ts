@@ -1,20 +1,20 @@
 // The api of the facade tests: apps/api in process on a real HTTP server
 // (createApiServer: HTTP and the PTY WebSocket), Postgres from
-// @sbx/db/testing, core's SandboxService over a test topology, a FakeAgent
+// @umiak/db/testing, core's SandboxService over a test topology, a FakeAgent
 // and a team key with every scope. `markReady` stands in for the worker.
 // `intercept` puts a one-shot fault in front of the SDK's fetch.
 
 import type { AddressInfo } from "node:net";
-import { type ApiDeps, createApiServer, createPublicApp } from "@sbx/api";
+import { type ApiDeps, createApiServer, createPublicApp } from "@umiak/api";
 import {
 	FakeAgent,
 	issueApiKey,
 	makeTestDeps,
 	testSettings,
-} from "@sbx/api/testing";
-import { type ServiceEnv, serviceEnv } from "@sbx/core/testing";
-import { withTx } from "@sbx/db";
-import type { TestDatabase } from "@sbx/db/testing";
+} from "@umiak/api/testing";
+import { type ServiceEnv, serviceEnv } from "@umiak/core/testing";
+import { withTx } from "@umiak/db";
+import type { TestDatabase } from "@umiak/db/testing";
 
 type Pool = TestDatabase["pool"];
 
@@ -59,8 +59,8 @@ export async function startTestApi(db: TestDatabase): Promise<TestApi> {
 	const agent = new FakeAgent();
 	const deps = makeTestDeps({
 		settings: testSettings({
-			SBX_API_RATE_BURST: "100000",
-			SBX_API_RATE_STARTS_PER_MIN: "100000",
+			UMIAK_API_RATE_BURST: "100000",
+			UMIAK_API_RATE_STARTS_PER_MIN: "100000",
 		}),
 		pool,
 		svc: env.svc,

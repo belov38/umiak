@@ -23,9 +23,9 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/testenv"
+	"github.com/belov38/umiak/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/testenv"
 )
 
 // The OpenSSH tests run the real ssh client tools against the gateway and
@@ -80,7 +80,7 @@ func needTool(t *testing.T, name string) string {
 // limited to about 100 bytes, and t.TempDir is long on macOS.
 func shortTempDir(t *testing.T) string {
 	t.Helper()
-	d, err := os.MkdirTemp("", "sbx")
+	d, err := os.MkdirTemp("", "umiak")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +389,7 @@ func newOpenSSHEnv(t *testing.T) *opensshEnv {
 	})
 	c.env.API.SetSSH(func(r cpapi.SSHAuthorizeRequest) bool {
 		return r.Sandbox == opensshSlug && r.Certificate != nil && r.Certificate.Principal == "sb_x" &&
-			r.Certificate.KeyID == "sbx:key:key_1"
+			r.Certificate.KeyID == "umiak:key:key_1"
 	}, cpapi.SSHAuthorization{
 		Allowed: true, Actor: cpapi.SSHActor{Kind: "team_key", APIKeyID: "key_1"},
 		SandboxID: "sb_x", MachineID: m.ID, SandboxState: "ready", LoginUser: e.loginUser, TeamID: "team_1",
@@ -403,7 +403,7 @@ func (e *opensshEnv) preflight(t *testing.T) {
 	t.Helper()
 	key := filepath.Join(e.dir, "id_preflight")
 	s := writeKey(t, key)
-	cert := signUserCert(t, e.c.env.Keys.UserCA, s.PublicKey(), "sbx:user:preflight:0", e.loginUser)
+	cert := signUserCert(t, e.c.env.Keys.UserCA, s.PublicKey(), "umiak:user:preflight:0", e.loginUser)
 	writeFile(t, key+"-cert.pub", string(ssh.MarshalAuthorizedKey(cert)))
 	r := runCmd(t, nil, clientEnv(), e.sshPath, "-F", "none",
 		"-o", "UserKnownHostsFile=/dev/null", "-o", "StrictHostKeyChecking=no",
@@ -654,7 +654,7 @@ func TestOpenSSH(t *testing.T) {
 	t.Run("login certificate", func(t *testing.T) {
 		key := filepath.Join(e.dir, "id_cert")
 		s := writeKey(t, key)
-		cert := signUserCert(t, c.env.Keys.LoginCA, s.PublicKey(), "sbx:key:key_1", "sb_x")
+		cert := signUserCert(t, c.env.Keys.LoginCA, s.PublicKey(), "umiak:key:key_1", "sb_x")
 		certPath := filepath.Join(e.dir, "id_cert-login.pub")
 		writeFile(t, certPath, string(ssh.MarshalAuthorizedKey(cert)))
 		args := e.args(c.A, "-i", key, "-o", "CertificateFile="+certPath, "-o", "IdentityAgent=none", e.target(), "echo cert")
@@ -662,13 +662,13 @@ func TestOpenSSH(t *testing.T) {
 			t.Fatalf("ssh with a login certificate: %v", r)
 		}
 		eventually(t, "sshd log line of the team key", func() bool {
-			return acceptedWith(e.sshd.log(), "ID sbx:key:key_1:")
+			return acceptedWith(e.sshd.log(), "ID umiak:key:key_1:")
 		})
 	})
 
 	t.Run("sshd log names the user", func(t *testing.T) {
 		// Its own login: one more accepted line with the user's KeyId.
-		const id = "ID sbx:user:usr_1:"
+		const id = "ID umiak:user:usr_1:"
 		before := acceptedCount(e.sshd.log(), id)
 		if r := e.ssh(t, nil, e.target(), "echo logged"); r.err != nil || r.stdout != "logged\n" {
 			t.Fatalf("ssh: %v", r)

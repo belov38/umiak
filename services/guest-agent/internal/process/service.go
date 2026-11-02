@@ -7,14 +7,14 @@ import (
 
 	"connectrpc.com/connect"
 
-	agentv1 "github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1"
-	"github.com/belov38/boat-dev-clone/libs/proto/sbx/agent/v1/agentv1connect"
+	agentv1 "github.com/belov38/umiak/libs/proto/umiak/agent/v1"
+	"github.com/belov38/umiak/libs/proto/umiak/agent/v1/agentv1connect"
 )
 
 // maxMessageBytes bounds Connect messages in both directions.
 const maxMessageBytes = 16 << 20
 
-// Handler returns the path and the handler of the sbx.agent.v1.Process
+// Handler returns the path and the handler of the umiak.agent.v1.Process
 // service: Options.HandlerOptions plus 16 MiB message limits and no gzip,
 // so responses are never compressed.
 func (m *Manager) Handler() (string, http.Handler) {

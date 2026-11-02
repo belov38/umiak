@@ -4,11 +4,15 @@
 //   oauth2-proxy headers (X-Auth-Request-*, X-Forwarded-User/Email), the
 //   Tailscale-User-* headers of Tailscale Serve and
 //   cookies never authenticate nor change who the caller is;
-// - malformed or foreign bearers are 401, Sbx-Team of another team 403;
+// - malformed or foreign bearers are 401, Umiak-Team of another team 403;
 // - proxied: Authorization is refused, every unsafe operation needs the
 //   dashboard Origin, a WebSocket upgrade with a foreign Origin is refused.
-import { encodeUuid, generateApiKeySecret } from "@sbx/auth";
-import { createTestDatabase, skipPg, type TestDatabase } from "@sbx/db/testing";
+import { encodeUuid, generateApiKeySecret } from "@umiak/auth";
+import {
+	createTestDatabase,
+	skipPg,
+	type TestDatabase,
+} from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { type ApiDeps, PTY_SUBPROTOCOL } from "../src/index.ts";
@@ -55,7 +59,7 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 		// The identity of a platform operator, as oauth2-proxy would send it.
 		operator = {
 			...owner.headers,
-			"x-auth-request-groups": "sbx-operators",
+			"x-auth-request-groups": "umiak-operators",
 			"x-auth-request-preferred-username": "root",
 			"x-forwarded-user": owner.headers["x-auth-request-user"] as string,
 			"x-forwarded-email": owner.headers["x-auth-request-email"] as string,
@@ -74,7 +78,7 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 	function expect401(r: HarnessResponse, where: string): void {
 		expect(r.status, `${where}: ${r.text.slice(0, 300)}`).toBe(401);
 		expect(r.headers.get("www-authenticate"), where).toMatch(
-			/^Bearer realm="sbx"/,
+			/^Bearer realm="umiak"/,
 		);
 		if (r.text !== "") expect(errorOf(r).code, where).toBe("unauthorized");
 	}
@@ -129,7 +133,7 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 				"broken CRC",
 				`Bearer ${w.secret.slice(0, -1)}${w.secret.endsWith("A") ? "B" : "A"}`,
 			],
-			["sandbox key prefix", `Bearer sbxs_${w.secret.slice(4)}`],
+			["sandbox key prefix", `Bearer umiaks_${w.secret.slice(6)}`],
 			["not a JWT", "Bearer a.b.c"],
 			["revoked key", `Bearer ${revoked.secret}`],
 		];
@@ -143,24 +147,26 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 		}
 	});
 
-	it("public: a key with Sbx-Team of another team is 403 team_forbidden on every operation", async () => {
+	it("public: a key with Umiak-Team of another team is 403 team_forbidden on every operation", async () => {
 		const other = encodeUuid("team", await newTeam(db.pool));
 		const h = w.harness({ deps });
 		for (const [id, r] of authenticated) {
-			const res = await send(h, r.method, r.request(f), { "sbx-team": other });
+			const res = await send(h, r.method, r.request(f), {
+				"umiak-team": other,
+			});
 			expect(res.status, id).toBe(403);
 			if (r.method !== "HEAD")
 				expect(errorOf(res).code, id).toBe("team_forbidden");
 		}
 	});
 
-	it("a key of another team is not accepted for this team's resources (Sbx-Team of the fixture)", async () => {
+	it("a key of another team is not accepted for this team's resources (Umiak-Team of the fixture)", async () => {
 		const otherKey = await issueApiKey(w.identity, {
 			teamId: await newTeam(db.pool),
 		});
 		const h = w.harness({ bearer: otherKey.secret, deps });
 		const res = await h.request("GET", `/v1/sandboxes/${f.sandbox}`, {
-			headers: { "sbx-team": encodeUuid("team", f.teamId) },
+			headers: { "umiak-team": encodeUuid("team", f.teamId) },
 		});
 		expect(res.status).toBe(403);
 		expect(errorOf(res).code).toBe("team_forbidden");

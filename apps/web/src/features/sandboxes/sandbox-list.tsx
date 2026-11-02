@@ -1,14 +1,14 @@
 "use client";
-// /app/t/<team> (S8 §9.4): the team's sandboxes. GET /v1/sandboxes with
-// filters and infinite scroll over `nextCursor`; quota and usage from
-// GET /v1/limits. Refreshed every 5 s while the tab is visible and at once
-// after an action.
-import type { SandboxData } from "@sbx/sdk";
 import {
 	keepPreviousData,
 	useInfiniteQuery,
 	useQuery,
 } from "@tanstack/react-query";
+// /app/t/<team> (S8 §9.4): the team's sandboxes. GET /v1/sandboxes with
+// filters and infinite scroll over `nextCursor`; quota and usage from
+// GET /v1/limits. Refreshed every 5 s while the tab is visible and at once
+// after an action.
+import type { SandboxData } from "@umiak/sdk";
 import { PlusIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -33,7 +33,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
-import { useSbx } from "@/lib/api";
+import { useUmiak } from "@/lib/api";
 import type { ApiKey } from "@/lib/api-keys";
 import { formatAgo, formatTime } from "@/lib/format";
 import {
@@ -51,7 +51,7 @@ import { RowActions } from "./row-actions";
 import { BlockLock, HealthCell, StateCell } from "./state-cell";
 
 export function SandboxList({ teamId }: { teamId: string }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const [q, setQ] = useState("");
 	const [debouncedQ, setDebouncedQ] = useState("");
 	const [state, setState] = useState<SandboxState | "all">("all");
@@ -72,7 +72,7 @@ export function SandboxList({ teamId }: { teamId: string }) {
 	const list = useInfiniteQuery({
 		queryKey: ["sandboxes", teamId, filter],
 		queryFn: async ({ pageParam, signal }) => {
-			const { data } = await sbx.raw.GET("/v1/sandboxes", {
+			const { data } = await umiak.raw.GET("/v1/sandboxes", {
 				params: { query: listQuery(filter, pageParam) },
 				signal,
 				retryBudgetMs: POLL_RETRY_BUDGET_MS,
@@ -187,11 +187,11 @@ export function SandboxList({ teamId }: { teamId: string }) {
 }
 
 function QuotaLine({ teamId }: { teamId: string }) {
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const limits = useQuery({
 		queryKey: ["limits", teamId],
 		queryFn: ({ signal }) =>
-			sbx.limits({ signal, retryBudgetMs: POLL_RETRY_BUDGET_MS }),
+			umiak.limits({ signal, retryBudgetMs: POLL_RETRY_BUDGET_MS }),
 		refetchInterval: POLL_MS,
 		refetchIntervalInBackground: false,
 	});
@@ -226,7 +226,7 @@ function EmptyState({
 					>
 						Create one
 					</Link>{" "}
-					here, or with <code>sbx create</code>.
+					here, or with <code>umiak create</code>.
 				</>
 			)}
 		</DashboardEmpty>
@@ -236,11 +236,11 @@ function EmptyState({
 /** Who created the sandbox, as far as the browser knows. */
 function useCreatorName(teamId: string): (s: SandboxData) => string {
 	const session = useAppSession();
-	const sbx = useSbx(teamId);
+	const umiak = useUmiak(teamId);
 	const keys = useQuery({
 		queryKey: ["api-keys", teamId],
 		queryFn: async ({ signal }) => {
-			const { data } = await sbx.raw.GET("/v1/api-keys", { signal });
+			const { data } = await umiak.raw.GET("/v1/api-keys", { signal });
 			return data.data;
 		},
 		staleTime: 60_000,

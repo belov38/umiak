@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/cpapi"
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/routes"
+	"github.com/belov38/umiak/services/gateway/internal/cpapi"
+	"github.com/belov38/umiak/services/gateway/internal/routes"
 )
 
 type desktopAPI struct {
@@ -16,7 +16,7 @@ type desktopAPI struct {
 }
 
 func (f *desktopAPI) ExchangeDesktopTicket(_ context.Context, ticket, label string) (cpapi.PortAuthGrant, error) {
-	if f.used || ticket != "sbxd_secret" {
+	if f.used || ticket != "umiakd_secret" {
 		return cpapi.PortAuthGrant{}, cpapi.ErrInvalidCode
 	}
 	f.used = true
@@ -33,7 +33,7 @@ func TestDesktopTicketCookieReplayEpochAndOrigin(t *testing.T) {
 	request := func(method, path string) *http.Request {
 		return httptest.NewRequestWithContext(t.Context(), method, "https://quiet-otter-desktop."+testDomain+path, nil)
 	}
-	r := request("GET", "/?_ticket=sbxd_secret")
+	r := request("GET", "/?_ticket=umiakd_secret")
 	w := httptest.NewRecorder()
 	result := h.auth.CheckDesktop(w, r, l, rt, clientIP, "rid", api)
 	if !result.Proceed || result.SetCookie == nil || !result.SetCookie.Partitioned || result.SetCookie.SameSite != http.SameSiteNoneMode {
@@ -41,7 +41,7 @@ func TestDesktopTicketCookieReplayEpochAndOrigin(t *testing.T) {
 	}
 	cookie := result.SetCookie
 	w = httptest.NewRecorder()
-	if h.auth.CheckDesktop(w, request("GET", "/?_ticket=sbxd_secret"), l, rt, clientIP, "rid", api).Proceed {
+	if h.auth.CheckDesktop(w, request("GET", "/?_ticket=umiakd_secret"), l, rt, clientIP, "rid", api).Proceed {
 		t.Fatal("ticket replay accepted")
 	}
 	r = request("GET", "/stream.html")
@@ -76,7 +76,7 @@ func TestDesktopWebRTCMediaAndWebSocketRequireCurrentOriginAndEpoch(t *testing.T
 	rt := cpapi.Route{Access: "token", AuthEpoch: 7}
 	api := &desktopAPI{epoch: 7}
 	root := "https://" + label.Raw + "." + testDomain
-	issue := httptest.NewRequestWithContext(t.Context(), "GET", root+"/?_ticket=sbxd_secret", nil)
+	issue := httptest.NewRequestWithContext(t.Context(), "GET", root+"/?_ticket=umiakd_secret", nil)
 	grant := h.auth.CheckDesktop(httptest.NewRecorder(), issue, label, rt, clientIP, "rid", api)
 	if grant.SetCookie == nil {
 		t.Fatal("no viewer cookie")

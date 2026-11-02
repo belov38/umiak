@@ -16,8 +16,8 @@ import (
 	"unicode/utf8"
 	"unsafe"
 
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/fsutil"
-	"github.com/belov38/boat-dev-clone/services/guest-agent/internal/paths"
+	"github.com/belov38/umiak/services/guest-agent/internal/fsutil"
+	"github.com/belov38/umiak/services/guest-agent/internal/paths"
 )
 
 // The Windows identity apply (S9 spec section 11.2). The orchestration here
@@ -31,7 +31,7 @@ const (
 	// ModeSpecialize is the sysprep specialize pass: Windows Setup reboots
 	// on its own afterwards, so no reboot is asked for.
 	ModeSpecialize ApplyMode = iota
-	// ModeEarly is the computer startup script (sbx-agent early) or a
+	// ModeEarly is the computer startup script (umiak-agent early) or a
 	// manual `identity apply`.
 	ModeEarly
 	// ModeService is the agent service at start, a fallback for a startup
@@ -57,7 +57,7 @@ const (
 	DefaultUser = "user"
 	// computerNamePrefix and the 12 hex digits make 15 characters, the
 	// NetBIOS limit.
-	computerNamePrefix = "SBX"
+	computerNamePrefix = "UMI"
 	// passwordLen is the length of the generated password of DefaultUser.
 	passwordLen = 32
 	// MaxRenameReboots bounds the reboots for a computer name that does not
@@ -87,7 +87,7 @@ type WinResetter interface {
 	Reboot(reason string) error
 }
 
-// WindowsComputerName returns SBX<last 12 hex digits of the machine id> in
+// WindowsComputerName returns UMI<last 12 hex digits of the machine id> in
 // upper case, the computer name of a Windows machine.
 func WindowsComputerName(machineID string) string {
 	h := strings.ToUpper(strings.ReplaceAll(machineID, "-", ""))
@@ -384,7 +384,7 @@ func unsafeString(b []byte) string {
 // for tests.
 type FakeWinResetter struct {
 	// Calls lists the invoked methods in order, with the argument after a
-	// space where there is one ("SetComputerName SBX...").
+	// space where there is one ("SetComputerName UMIAK...").
 	Calls []string
 	// Errs maps a method name to the error it returns.
 	Errs map[string]error

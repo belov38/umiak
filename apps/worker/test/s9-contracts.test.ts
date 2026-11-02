@@ -1,5 +1,5 @@
-import { ingestAgentEvents } from "@sbx/core";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { ingestAgentEvents } from "@umiak/core";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { handleMachineEvents } from "../src/handlers/machine-events.ts";
 import { QuiesceFailed } from "../src/ops/snapshot-step.ts";

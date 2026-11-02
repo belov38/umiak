@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/belov38/boat-dev-clone/services/gateway/internal/config"
+	"github.com/belov38/umiak/services/gateway/internal/config"
 )
 
 var (

@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/belov38/boat-dev-clone/libs/tunnel/agent"
-	"github.com/belov38/boat-dev-clone/libs/tunnel/wire"
+	"github.com/belov38/umiak/libs/tunnel/agent"
+	"github.com/belov38/umiak/libs/tunnel/wire"
 )
 
 func TestConnectPolicy(t *testing.T) {

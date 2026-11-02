@@ -1,4 +1,4 @@
-import { SbxError } from "@sbx/sdk";
+import { UmiakError } from "@umiak/sdk";
 import { describe, expect, it } from "vitest";
 import { errorResult, hintFor, ToolError } from "../src/errors.ts";
 
@@ -9,9 +9,9 @@ function textOf(r: { content: { type: string; text?: string }[] }): string {
 
 function apiError(
 	code: string,
-	over: Partial<ConstructorParameters<typeof SbxError>[0]> = {},
+	over: Partial<ConstructorParameters<typeof UmiakError>[0]> = {},
 ) {
-	return new SbxError({
+	return new UmiakError({
 		status: 409,
 		code,
 		message: `message of ${code}`,
@@ -54,7 +54,7 @@ describe("errorResult format", () => {
 
 	it("omits absent lines", () => {
 		const r = errorResult(
-			new SbxError({
+			new UmiakError({
 				status: 400,
 				code: "invalid_json",
 				message: "bad body",
@@ -277,7 +277,7 @@ describe("hints for S10 13.2 codes and mcp codes", () => {
 
 	it("not_logged_in", () => {
 		expect(hintFor("not_logged_in", ctx)).toBe(
-			"run `sbx login` in a terminal, then retry.",
+			"run `umiak login` in a terminal, then retry.",
 		);
 	});
 
@@ -286,7 +286,7 @@ describe("hints for S10 13.2 codes and mcp codes", () => {
 	});
 
 	it("token_provider_failed", () => {
-		expect(hintFor("token_provider_failed", ctx)).toContain("sbx login");
+		expect(hintFor("token_provider_failed", ctx)).toContain("umiak login");
 	});
 
 	it("unknown code has no hint", () => {
@@ -356,7 +356,7 @@ describe("hints in pinned mode", () => {
 		}
 		expect(
 			errorResult(
-				new SbxError({
+				new UmiakError({
 					status: 404,
 					code: "not_found",
 					message: "no such sandbox",
@@ -445,7 +445,7 @@ describe("text from the API and the sandbox agent is untrusted (11.3)", () => {
 	it("code and request id from the API stay one safe line each", () => {
 		const text = textOf(
 			errorResult(
-				new SbxError({
+				new UmiakError({
 					status: 500,
 					code: `weird\nhint: x${TAGS}`,
 					message: "m",

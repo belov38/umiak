@@ -1,8 +1,8 @@
 // In-process cache of team API keys by secret hash (S7 §7.2): positive
 // entries for 30 s, negative (unknown hash) for 5 s, flushed by NOTIFY
-// sbx_identity 'api-keys:<id>' and '*'. A revoked key stops working on every
+// umiak_identity 'api-keys:<id>' and '*'. A revoked key stops working on every
 // pod within the positive TTL at worst, usually at once.
-import type { ApiKeyRecord, IdentityStore } from "@sbx/auth";
+import type { ApiKeyRecord, IdentityStore } from "@umiak/auth";
 import type { Logger } from "pino";
 import type { IdentityListener } from "./identity-listener.ts";
 

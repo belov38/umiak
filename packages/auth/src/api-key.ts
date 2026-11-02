@@ -1,16 +1,16 @@
 import { createHash, randomBytes } from "node:crypto";
 import { crc32 } from "node:zlib";
 
-// Team API key secret (S7 §7.2): "sbx_" + 43 base62 chars (32 random bytes)
+// Team API key secret (S7 §7.2): "umiak_" + 43 base62 chars (32 random bytes)
 // + 6 base62 chars of CRC32 over everything before them.
 
 const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-const PREFIX = "sbx_";
+const PREFIX = "umiak_";
 const BODY_LEN = 43;
 const CRC_LEN = 6;
 
 /** Pattern for secret scanners and the cheap pre-check before hashing. */
-export const API_KEY_RE = /^sbx_[0-9A-Za-z]{49}$/;
+export const API_KEY_RE = /^umiak_[0-9A-Za-z]{49}$/;
 
 function base62(n: bigint, width: number): string {
 	let out = "";
@@ -43,7 +43,7 @@ export function apiKeyHash(secret: string): string {
 	return createHash("sha256").update(secret).digest("hex");
 }
 
-/** Non-secret parts shown in listings: 8 chars after "sbx_" and the last 4. */
+/** Non-secret parts shown in listings: 8 chars after "umiak_" and the last 4. */
 export function apiKeyDisplay(secret: string): {
 	prefix: string;
 	last4: string;

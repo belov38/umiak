@@ -3,7 +3,7 @@ import {
 	PveApiError,
 	type PveClient,
 	QgaTimeoutError,
-} from "@sbx/pve";
+} from "@umiak/pve";
 import { describe, expect, it } from "vitest";
 import {
 	type GuestIo,
@@ -97,7 +97,7 @@ const fast = { pollMs: 1, startCheckMs: 20 };
 
 /** Log output without the builder's notes about retried errors. */
 const stepText = (out: string[]) =>
-	out.filter((c) => !c.startsWith("[sbx-tpl]")).join("");
+	out.filter((c) => !c.startsWith("[umiak-tpl]")).join("");
 
 const netError = (msg = "read ECONNRESET", code = "ECONNRESET") =>
 	Object.assign(new Error(msg), { code });
@@ -123,20 +123,20 @@ describe("runStep", () => {
 		expect(prep?.slice(0, 2)).toEqual(["bash", "-c"]);
 		// The step name is a positional argument, never part of the script text.
 		expect(prep?.[2]).not.toContain("00-base");
-		expect(prep?.slice(3)).toEqual(["sbx-prep", "00-base"]);
-		expect(prep?.[2]).toContain("mkdir -p /var/log/sbx-build");
+		expect(prep?.slice(3)).toEqual(["umiak-prep", "00-base"]);
+		expect(prep?.[2]).toContain("mkdir -p /var/log/umiak-build");
 		expect(prep?.[2]).toContain("rm -f");
 
 		const start = g.calls.find((c) => c.cmd[0] === "systemd-run");
 		expect(start?.cmd).toEqual([
 			"systemd-run",
-			"--unit=sbx-build-00-base",
+			"--unit=umiak-build-00-base",
 			"--collect",
-			"--property=StandardOutput=append:/var/log/sbx-build/00-base.log",
-			"--property=StandardError=append:/var/log/sbx-build/00-base.log",
+			"--property=StandardOutput=append:/var/log/umiak-build/00-base.log",
+			"--property=StandardError=append:/var/log/umiak-build/00-base.log",
 			"--property=WorkingDirectory=/mnt/seed/build",
 			// A single $: "$$" reaches sh unchanged in transient units and expands to its PID.
-			`--property=ExecStopPost=/bin/sh -c 'echo "$EXIT_STATUS" > /var/log/sbx-build/00-base.rc'`,
+			`--property=ExecStopPost=/bin/sh -c 'echo "$EXIT_STATUS" > /var/log/umiak-build/00-base.rc'`,
 			"--",
 			"bash",
 			SCRIPT,
@@ -271,7 +271,7 @@ describe("runStep", () => {
 		});
 		expect(r.exitStatus).toBe(0);
 		expect(stepText(out)).toBe("hi\n");
-		expect(out.some((c) => c.startsWith("[sbx-tpl] transient error"))).toBe(
+		expect(out.some((c) => c.startsWith("[umiak-tpl] transient error"))).toBe(
 			true,
 		);
 	});
@@ -306,11 +306,11 @@ describe("runStep", () => {
 		expect(r.exitStatus).toBe(0);
 		// The step log itself is unchanged; notes about retried errors come on their own lines.
 		expect(r.tail).toEqual(["hi"]);
-		const notes = out.filter((c) => c.startsWith("[sbx-tpl]"));
+		const notes = out.filter((c) => c.startsWith("[umiak-tpl]"));
 		expect(notes).toEqual([
-			"[sbx-tpl] transient error, retrying: GET /nodes/pve/qemu/1/agent/exec-status: timeout\n",
-			"[sbx-tpl] transient error, retrying: GET /nodes/pve/qemu/1/agent/exec: Bad Gateway\n",
-			"[sbx-tpl] transient error, retrying: POST /nodes/pve/qemu/1/agent/exec: Gateway Timeout\n",
+			"[umiak-tpl] transient error, retrying: GET /nodes/pve/qemu/1/agent/exec-status: timeout\n",
+			"[umiak-tpl] transient error, retrying: GET /nodes/pve/qemu/1/agent/exec: Bad Gateway\n",
+			"[umiak-tpl] transient error, retrying: POST /nodes/pve/qemu/1/agent/exec: Gateway Timeout\n",
 		]);
 	});
 
@@ -549,7 +549,7 @@ describe("runStep robustness", () => {
 		});
 		expect(r.exitStatus).toBe(0);
 		expect(stepText(out)).toBe("hi\n");
-		expect(out.some((c) => c.startsWith("[sbx-tpl] transient error"))).toBe(
+		expect(out.some((c) => c.startsWith("[umiak-tpl] transient error"))).toBe(
 			true,
 		);
 		expect(prepN).toBeGreaterThan(1);

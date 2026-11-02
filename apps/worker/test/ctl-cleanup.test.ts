@@ -1,8 +1,8 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { ENVIRONMENT_AAD_PREFIX } from "@sbx/auth";
-import { StaticConfigReader } from "@sbx/config";
-import { DELETE_RETRY_LIMIT, KeyRing } from "@sbx/core";
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
+import { ENVIRONMENT_AAD_PREFIX } from "@umiak/auth";
+import { StaticConfigReader } from "@umiak/config";
+import { DELETE_RETRY_LIMIT, KeyRing } from "@umiak/core";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runCleanup } from "../src/controllers/cleanup.ts";
 import {
@@ -156,7 +156,7 @@ describe("ctl-cleanup (§15.4)", () => {
 		expect((await row(w, "snapshots", fs.snapshotId)).state).toBe("ready");
 		expect(
 			w.metrics.calls
-				.filter((c) => c.name === "sbx_cleanup_failed_total")
+				.filter((c) => c.name === "umiak_cleanup_failed_total")
 				.map((c) => c.labels.part),
 		).toEqual(expect.arrayContaining(["retention", "fork_sources"]));
 		expect(
@@ -475,7 +475,7 @@ describe("ctl-cleanup (§15.4)", () => {
 		}
 		expect(
 			w.metrics.calls
-				.filter((c) => c.name === "sbx_secrets_old_key_rows")
+				.filter((c) => c.name === "umiak_secrets_old_key_rows")
 				.at(-1)?.value,
 		).toBe(0);
 		// Nothing left: a second run re-encrypts nothing.
@@ -561,11 +561,11 @@ describe("ctl-cleanup (§15.4)", () => {
 			if (id === ids[0])
 				expect(x.updated_at).toEqual(before.rows[0]?.updated_at);
 		}
-		expect(w.metrics.count("sbx_secrets_reencrypt_failed_total")).toBe(1);
+		expect(w.metrics.count("umiak_secrets_reencrypt_failed_total")).toBe(1);
 		// The broken row is still on an old key: the old key cannot go yet.
 		expect(
 			w.metrics.calls
-				.filter((c) => c.name === "sbx_secrets_old_key_rows")
+				.filter((c) => c.name === "umiak_secrets_old_key_rows")
 				.at(-1)?.value,
 		).toBe(1);
 		await w.pool.query("DELETE FROM runtime.environments WHERE id = $1", [
@@ -576,7 +576,7 @@ describe("ctl-cleanup (§15.4)", () => {
 		expect(again.environmentsReencryptFailed).toBe(0);
 		expect(
 			w.metrics.calls
-				.filter((c) => c.name === "sbx_secrets_old_key_rows")
+				.filter((c) => c.name === "umiak_secrets_old_key_rows")
 				.at(-1)?.value,
 		).toBe(0);
 		expect(w.logs.join("\n")).not.toContain("env-s3cr3t");

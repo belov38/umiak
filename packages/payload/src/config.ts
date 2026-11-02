@@ -18,19 +18,19 @@ import { Users } from "./collections/users.ts";
 import { PlatformDefaults } from "./globals/platform-defaults.ts";
 import { attachSessionCache } from "./identity/session-cache.ts";
 
-export interface SbxPayloadOptions {
+export interface UmiakPayloadOptions {
 	databaseUrl: string;
 	/** PAYLOAD_SECRET. */
 	secret: string;
-	/** SBX_OPERATOR_GROUPS (S8 §5.5). */
+	/** UMIAK_OPERATOR_GROUPS (S8 §5.5). */
 	operatorGroups: string[];
-	/** SBX_APP_ORIGIN: the only origin of unsafe requests (S8 §5.6). */
+	/** UMIAK_APP_ORIGIN: the only origin of unsafe requests (S8 §5.6). */
 	appOrigin?: string;
 	/** Size of the pg pool of the adapter (default 10). */
 	poolMax?: number;
 	/**
 	 * Cache resolved browser sessions on the instance (web, plan decision 8):
-	 * attached in onInit, with LISTEN sbx_identity on its own connection
+	 * attached in onInit, with LISTEN umiak_identity on its own connection
 	 * unless `listen` is false. api and worker leave it off.
 	 */
 	sessionCache?: {
@@ -54,15 +54,15 @@ export const PAYLOAD_MIGRATIONS_DIR: string = join(
 	"migrations",
 );
 
-/** Settings of the platform kept in config.custom.sbx (read by the auth strategy). */
-export interface SbxCustomConfig {
+/** Settings of the platform kept in config.custom.umiak (read by the auth strategy). */
+export interface UmiakCustomConfig {
 	operatorGroups: string[];
 }
 
 const noEmail: EmailAdapter = () => ({
 	name: "none",
 	defaultFromAddress: "noreply@invalid",
-	defaultFromName: "sbx",
+	defaultFromName: "Umiak",
 	sendEmail: async () => {
 		throw new Error("email is not configured");
 	},
@@ -92,10 +92,10 @@ function restrictInternalCollections(config: SanitizedConfig): SanitizedConfig {
 	return config;
 }
 
-export async function buildSbxConfig(
-	o: SbxPayloadOptions,
+export async function buildUmiakConfig(
+	o: UmiakPayloadOptions,
 ): Promise<SanitizedConfig> {
-	const sbx: SbxCustomConfig = { operatorGroups: [...o.operatorGroups] };
+	const umiak: UmiakCustomConfig = { operatorGroups: [...o.operatorGroups] };
 	const config = await buildConfig({
 		secret: o.secret,
 		telemetry: false,
@@ -135,7 +135,7 @@ export async function buildSbxConfig(
 			PoolTargets,
 		],
 		globals: [PlatformDefaults],
-		custom: { sbx },
+		custom: { umiak },
 		...(o.sessionCache === undefined
 			? {}
 			: { onInit: (payload) => sessionCacheOnInit(payload, o) }),
@@ -145,7 +145,7 @@ export async function buildSbxConfig(
 
 function sessionCacheOnInit(
 	payload: Parameters<typeof attachSessionCache>[0],
-	o: SbxPayloadOptions,
+	o: UmiakPayloadOptions,
 ): Promise<void> {
 	const c = o.sessionCache ?? {};
 	return attachSessionCache(payload, {

@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { stepRequestId } from "@sbx/core";
+import { stepRequestId } from "@umiak/core";
 import type { WorkerCtx } from "./context.ts";
 import {
 	AgentRejected,

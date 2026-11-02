@@ -1,8 +1,8 @@
 // S9 Windows in the worker (S9 §12.10, §18.6 p. 5, 6, 10): shutdown timeout by
 // OS, PrepareStop result, and snapshot hooks (Windows: only from a stopped VM,
 // S9 §24.8; the forced flow is in ops-force-stop.test.ts).
-import { createTestDatabase, type TestDatabase } from "@sbx/db/testing";
-import type { QuiesceHook } from "@sbx/pve";
+import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
+import type { QuiesceHook } from "@umiak/pve";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { composeHooks } from "../src/ops/snapshot-step.ts";
 import { createWorld, type TestWorld } from "./fakes/world.ts";
