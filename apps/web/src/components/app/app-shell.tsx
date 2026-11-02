@@ -18,6 +18,7 @@ import { usePathname } from "next/navigation";
 import type React from "react";
 import { useEffect, useState } from "react";
 import { useAppSession } from "@/components/app/session-context";
+import { UmiakLogo } from "@/components/app/umiak-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -129,8 +130,8 @@ export function AppShell({
 	);
 	const sidebar = (
 		<div className="dashboard-sidebar-content">
-			<Link href="/app" className="dashboard-brand">
-				Umiak
+			<Link href="/app" className="dashboard-brand" aria-label="Umiak">
+				<UmiakLogo />
 			</Link>
 			<div className="desktop-team-switcher">{switcher}</div>
 			<nav className="dashboard-nav" aria-label="Team navigation">
@@ -244,8 +245,8 @@ export function AppShell({
 				Skip to content
 			</a>
 			<header className="dashboard-mobile-header">
-				<Link href="/app" className="dashboard-brand">
-					Umiak
+				<Link href="/app" className="dashboard-brand" aria-label="Umiak">
+					<UmiakLogo />
 				</Link>
 				<div className="mobile-team-switcher">{switcher}</div>
 				<Button
