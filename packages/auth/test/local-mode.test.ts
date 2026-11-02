@@ -3,6 +3,8 @@ import {
 	authMode,
 	isLocalClientAllowed,
 	localAllowedCidrs,
+	localDeniedCidrs,
+	localPolicyWarnings,
 } from "../src/local-mode.ts";
 
 describe("local mode configuration", () => {
@@ -83,4 +85,28 @@ it("validates denied CIDRs and derives node IPv6 addresses", () => {
 			UMIAK_PVE_URL: "https://[fd00::12]:8006",
 		}),
 	).toBe(true);
+});
+
+it("warns once about open or node-blind policies, not per request", () => {
+	expect(
+		localPolicyWarnings({ UMIAK_NODE_SSH_HOST: "192.168.68.116" }),
+	).toEqual([]);
+	expect(localPolicyWarnings({ UMIAK_NODE_SSH_HOST: "pve" }).join(" ")).toMatch(
+		/UMIAK_LOCAL_DENIED_CIDRS/,
+	);
+	expect(
+		localPolicyWarnings({
+			UMIAK_NODE_SSH_HOST: "pve",
+			UMIAK_LOCAL_DENIED_CIDRS: "192.168.68.116/32",
+		}),
+	).toEqual([]);
+	expect(
+		localPolicyWarnings({
+			UMIAK_LOCAL_ALLOWED_CIDRS: "0.0.0.0/0",
+			UMIAK_LOCAL_DENIED_CIDRS: "10.88.0.0/24",
+		}).join(" "),
+	).toMatch(/entire Internet/);
+	expect(() => localDeniedCidrs({ UMIAK_LOCAL_DENIED_CIDRS: "bad" })).toThrow(
+		/UMIAK_LOCAL_DENIED_CIDRS/,
+	);
 });

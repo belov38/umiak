@@ -7,6 +7,7 @@
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { serve } from "@hono/node-server";
+import { warnLocalPolicy } from "@umiak/auth";
 import type { Hono } from "hono";
 import { createHttpApp, createOpsApp } from "./http/app.ts";
 import { createLogger, type Logger } from "./log.ts";
@@ -149,6 +150,7 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 	const log = createLogger({ level: settings.logLevel });
+	if (settings.localEnv) warnLocalPolicy(process.env);
 	process.on("unhandledRejection", (reason) => {
 		log.error(
 			{ err: reason instanceof Error ? reason.message : String(reason) },

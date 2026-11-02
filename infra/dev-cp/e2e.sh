@@ -283,7 +283,7 @@ if [[ "$AUTH_MODE" = none ]]; then
 for port in (4180,8080,8090):
  s=socket.socket(); s.settimeout(3)
  try:
-  s.connect(("192.168.68.90",port)); s.sendall(b"GET /v1/meta HTTP/1.1\r\nHost: 192.168.68.90:8080\r\nConnection: close\r\n\r\n"); data=s.recv(1024); assert b"403" in data.split(b"\r\n")[0],data
+  s.connect(("192.168.68.90",port)); s.sendall(b"GET /v1/meta HTTP/1.1\r\nHost: 192.168.68.90:%d\r\nConnection: close\r\n\r\n" % port); data=s.recv(1024); assert b"403" in data.split(b"\r\n")[0],data
  except (TimeoutError,ConnectionRefusedError,OSError): pass
  finally: s.close()
 print("app/API/MCP blocked or denied")' && pass "all three ports" || fail "guest can reach control plane"

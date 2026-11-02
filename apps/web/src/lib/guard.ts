@@ -66,6 +66,7 @@ export function guard(
 		operatorGroups: readonly string[];
 		authMode?: "oidc" | "none";
 		localAllowedCidrs?: string;
+		localDeniedCidrs?: string;
 	},
 ): GuardDenial | null {
 	if (PUBLIC_PATHS.has(r.pathname)) return null;
@@ -76,6 +77,7 @@ export function guard(
 		local &&
 		!isLocalClientAllowed(r.headers.get("x-umiak-client-ip") ?? undefined, {
 			UMIAK_LOCAL_ALLOWED_CIDRS: o.localAllowedCidrs,
+			UMIAK_LOCAL_DENIED_CIDRS: o.localDeniedCidrs,
 		})
 	) {
 		return {

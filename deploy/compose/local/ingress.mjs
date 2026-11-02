@@ -2,6 +2,19 @@
 import http from "node:http";
 import net from "node:net";
 
+function nodeAddresses(env) {
+	const out = [];
+	for (const raw of [env.UMIAK_NODE_SSH_HOST, env.UMIAK_PVE_URL]) {
+		if (!raw) continue;
+		const host = raw.includes("://")
+			? new URL(raw).hostname.replace(/^\[|\]$/g, "")
+			: raw;
+		const family = net.isIP(host);
+		if (family) out.push(`${host}/${family === 4 ? 32 : 128}`);
+	}
+	return out;
+}
+
 export function clientGuard(
 	raw,
 	denied = process.env.UMIAK_LOCAL_DENIED_CIDRS ?? "10.88.0.0/24",
@@ -10,14 +23,12 @@ export function clientGuard(
 	const list = new net.BlockList();
 	const deny = new net.BlockList();
 	const deniedEntries = denied.split(",").filter(Boolean);
-	for (const raw of [env.UMIAK_NODE_SSH_HOST, env.UMIAK_PVE_URL]) {
-		if (!raw) continue;
-		const host = raw.includes("://")
-			? new URL(raw).hostname.replace(/^\[|\]$/g, "")
-			: raw;
-		const family = net.isIP(host);
-		if (family) deniedEntries.push(`${host}/${family === 4 ? 32 : 128}`);
-	}
+	const nodes = nodeAddresses(env);
+	if (env.UMIAK_LOCAL_DENIED_CIDRS === undefined && nodes.length === 0)
+		console.warn(
+			"WARNING: PVE node address is not a literal IP and UMIAK_LOCAL_DENIED_CIDRS is unset; set it to the node LAN address",
+		);
+	deniedEntries.push(...nodes);
 	for (const entry of deniedEntries) {
 		const [ip, bits, extra] = entry.trim().split("/");
 		if (

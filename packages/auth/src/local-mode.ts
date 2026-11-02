@@ -22,15 +22,11 @@ export function authMode(env: Environment = process.env): "oidc" | "none" {
 	return mode;
 }
 
-export function localAllowedCidrs(env: Environment = process.env): string[] {
-	const cidrs =
-		env.UMIAK_LOCAL_ALLOWED_CIDRS === undefined
-			? [...DEFAULT_LOCAL_ALLOWED_CIDRS]
-			: env.UMIAK_LOCAL_ALLOWED_CIDRS.split(",")
-					.map((s) => s.trim())
-					.filter(Boolean);
-	if (!cidrs.length)
-		throw new Error("UMIAK_LOCAL_ALLOWED_CIDRS must not be empty");
+function parseCidrs(name: string, raw: string): string[] {
+	const cidrs = raw
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
 	for (const cidr of cidrs) {
 		const [ip, prefix, extra] = cidr.split("/");
 		const family = ip === undefined ? 0 : isIP(ip);
@@ -41,32 +37,68 @@ export function localAllowedCidrs(env: Environment = process.env): string[] {
 			!/^\d+$/.test(prefix) ||
 			Number(prefix) > (family === 4 ? 32 : 128)
 		)
-			throw new Error(`invalid UMIAK_LOCAL_ALLOWED_CIDRS entry: ${cidr}`);
+			throw new Error(`invalid ${name} entry: ${cidr}`);
 	}
-	if (cidrs.some((c) => c === "0.0.0.0/0" || c === "::/0"))
-		console.warn(
-			"WARNING: local CIDR policy permits the entire Internet; restrict bind and host firewall",
-		);
 	return cidrs;
 }
 
-export function localDeniedCidrs(env: Environment = process.env): string[] {
-	const entries = (env.UMIAK_LOCAL_DENIED_CIDRS ?? "10.88.0.0/24")
-		.split(",")
-		.map((s) => s.trim())
-		.filter(Boolean);
-	// Literal node addresses also cover sandbox traffic SNATed by the PVE host.
+export function localAllowedCidrs(env: Environment = process.env): string[] {
+	const cidrs =
+		env.UMIAK_LOCAL_ALLOWED_CIDRS === undefined
+			? [...DEFAULT_LOCAL_ALLOWED_CIDRS]
+			: parseCidrs("UMIAK_LOCAL_ALLOWED_CIDRS", env.UMIAK_LOCAL_ALLOWED_CIDRS);
+	if (!cidrs.length)
+		throw new Error("UMIAK_LOCAL_ALLOWED_CIDRS must not be empty");
+	return cidrs;
+}
+
+/** Literal IPs of the configured PVE node; hostnames are not resolved. */
+function nodeAddresses(env: Environment): string[] {
+	const out: string[] = [];
 	for (const raw of [env.UMIAK_NODE_SSH_HOST, env.UMIAK_PVE_URL]) {
 		if (!raw) continue;
 		const host = raw.includes("://")
 			? new URL(raw).hostname.replace(/^\[|\]$/g, "")
 			: raw;
 		const family = isIP(host);
-		if (family) entries.push(`${host}/${family === 4 ? 32 : 128}`);
+		if (family) out.push(`${host}/${family === 4 ? 32 : 128}`);
 	}
-	if (entries.length)
-		localAllowedCidrs({ UMIAK_LOCAL_ALLOWED_CIDRS: entries.join(",") });
-	return entries;
+	return out;
+}
+
+export function localDeniedCidrs(env: Environment = process.env): string[] {
+	// Literal node addresses also cover sandbox traffic SNATed by the PVE host.
+	return [
+		...parseCidrs(
+			"UMIAK_LOCAL_DENIED_CIDRS",
+			env.UMIAK_LOCAL_DENIED_CIDRS ?? "10.88.0.0/24",
+		),
+		...nodeAddresses(env),
+	];
+}
+
+/**
+ * Startup warnings for a policy that parses but is probably unsafe. Call once
+ * at startup, never per request.
+ */
+export function localPolicyWarnings(env: Environment = process.env): string[] {
+	const warnings: string[] = [];
+	if (localAllowedCidrs(env).some((c) => c.endsWith("/0")))
+		warnings.push(
+			"local CIDR policy permits the entire Internet; restrict bind and host firewall",
+		);
+	if (
+		env.UMIAK_LOCAL_DENIED_CIDRS === undefined &&
+		nodeAddresses(env).length === 0
+	)
+		warnings.push(
+			"PVE node address is not a literal IP and UMIAK_LOCAL_DENIED_CIDRS is unset; sandbox traffic SNATed by the node may pass the allowlist. Set UMIAK_LOCAL_DENIED_CIDRS to the node LAN address",
+		);
+	return warnings;
+}
+
+export function warnLocalPolicy(env: Environment = process.env): void {
+	for (const w of localPolicyWarnings(env)) console.warn(`WARNING: ${w}`);
 }
 
 export function isLocalClientAllowed(

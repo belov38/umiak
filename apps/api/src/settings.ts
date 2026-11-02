@@ -271,7 +271,8 @@ export function loadSettings(
 	env: Record<string, string | undefined>,
 ): Settings {
 	const mode = authMode(env);
-	const allowed = localAllowedCidrs(env);
+	const local = mode === "none";
+	const allowed = local ? localAllowedCidrs(env) : [];
 	const r = schema.safeParse(env);
 	const lines = r.success
 		? []
@@ -294,7 +295,7 @@ export function loadSettings(
 	return {
 		authMode: mode,
 		localAllowedCidrs: allowed,
-		localDeniedCidrs: localDeniedCidrs(env),
+		localDeniedCidrs: local ? localDeniedCidrs(env) : [],
 		localAllowedHosts: [
 			...new Set([
 				new URL(e.UMIAK_API_URL).host,
