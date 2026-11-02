@@ -211,3 +211,84 @@ test("dedicated CA authenticates IP and newly observed DNS SNI names", async () 
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+test("denied PVE peer can only invoke token-protected preparation endpoints", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	await store.init();
+	const server = createQuickstartServer({
+		store,
+		transport: http,
+		env: { UMIAK_LOCAL_DENIED_CIDRS: "127.0.0.1/32" },
+		setupHandler: async (req, res) => {
+			const valid =
+				new URL(req.url, "https://host").searchParams.get("token") ===
+				"capability";
+			res.writeHead(valid ? 200 : 403);
+			res.end();
+			return true;
+		},
+	});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const base = `http://127.0.0.1:${server.address().port}`;
+	try {
+		assert.equal(
+			(await fetch(`${base}/pve-setup.sh?token=capability`)).status,
+			200,
+		);
+		assert.equal((await fetch(`${base}/pve-setup.sh?token=bad`)).status, 403);
+		assert.equal((await fetch(`${base}/v1/me?token=capability`)).status, 403);
+		assert.equal(
+			(await fetch(`${base}/pve-setup.sh/other?token=capability`)).status,
+			403,
+		);
+	} finally {
+		await new Promise((resolve) => server.close(resolve));
+	}
+});
+
+test("wizard resolved PVE addresses are denied dynamically", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	await store.init();
+	const handler = async () => false;
+	handler.deniedPeer = async () => true;
+	const server = createQuickstartServer({
+		store,
+		setupHandler: handler,
+		transport: http,
+		env: {},
+	});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	try {
+		assert.equal(
+			(await fetch(`http://127.0.0.1:${server.address().port}/v1/me`)).status,
+			403,
+		);
+	} finally {
+		await new Promise((resolve) => server.close(resolve));
+	}
+});
+
+test("owner can persist extra IP certificate names without an env file", async () => {
+	const { mkdtempSync, rmSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const { X509Certificate } = await import("node:crypto");
+	const { quickstartTls } = await import("./server.mjs");
+	const dir = mkdtempSync(join(tmpdir(), "umiak-extra-ip-"));
+	try {
+		const tls = quickstartTls(dir);
+		const next = tls.updateNames(["192.168.2.40"]);
+		assert.equal(
+			new X509Certificate(next.cert).checkIP("192.168.2.40"),
+			"192.168.2.40",
+		);
+		const restarted = quickstartTls(dir);
+		assert.equal(
+			new X509Certificate(restarted.cert).checkIP("192.168.2.40"),
+			"192.168.2.40",
+		);
+		assert.throws(() => tls.updateNames(["bad\nsubjectAltName=DNS:evil"]));
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});

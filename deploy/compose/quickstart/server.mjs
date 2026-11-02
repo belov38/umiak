@@ -145,12 +145,22 @@ export function createQuickstartServer({
 		res.setHeader("referrer-policy", "no-referrer");
 		res.setHeader("x-frame-options", "DENY");
 		try {
-			if (!allowed(req.socket.remoteAddress))
-				return fail(res, 403, "local_network_forbidden");
 			const origin = requestOrigin(req);
 			const url = new URL(req.url, origin);
 			const path = url.pathname;
 			if (url.origin !== origin) return fail(res, 400, "invalid_path");
+			// Host preparation uses an expiring capability, never network ownership.
+			const preparation =
+				!!setupHandler &&
+				((path === "/pve-setup.sh" && req.method === "GET") ||
+					(path === "/quickstart/setup/callback" && req.method === "POST"));
+			if (
+				!preparation &&
+				(!allowed(req.socket.remoteAddress) ||
+					(await setupHandler?.deniedPeer?.(req.socket.remoteAddress)))
+			)
+				return fail(res, 403, "local_network_forbidden");
+			if (preparation && !rate(req)) return fail(res, 429, "rate_limited");
 			const safe = ["GET", "HEAD", "OPTIONS"].includes(req.method);
 			const token = bearer(req);
 			const owner = await store.authenticate(token);
@@ -204,7 +214,7 @@ export function createQuickstartServer({
 						: path.slice("/downloads/".length);
 				if (
 					!assetsDir ||
-					!/^(install\.sh|SHA256SUMS|umiak-(linux|darwin)-(arm64|x64)|umiak-windows-x64\.exe)$/.test(
+					!/^(install\.sh|SHA256SUMS|umiak-node-linux-amd64|umiak-(linux|darwin)-(arm64|x64)|umiak-windows-x64\.exe)$/.test(
 						file,
 					)
 				)
@@ -266,6 +276,18 @@ export function createQuickstartServer({
 					);
 				}
 				return fail(res, 401, "owner_required");
+			}
+			if (path === "/owner/tls" && req.method === "GET")
+				return page(
+					res,
+					"HTTPS addresses",
+					`<p>Open initially using localhost or a DNS name. Add LAN/tailnet IPs here for clients that connect by IP. The same CA remains valid.</p><form id="tls"><input id="names" placeholder="192.168.1.10,100.100.1.10"><button>Save certificate names</button></form><pre id="result"></pre><p><a href="/setup">Setup</a></p><script>document.querySelector('#tls').onsubmit=async e=>{e.preventDefault();const r=await fetch('/owner/tls',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({names:document.querySelector('#names').value.split(',').map(x=>x.trim()).filter(Boolean)})});document.querySelector('#result').textContent=r.ok?'Saved. IP clients can now connect with the verified CA.':'Invalid names';};</script>`,
+				);
+			if (path === "/owner/tls" && req.method === "POST") {
+				const input = await body(req);
+				if (!tls.updateNames) return fail(res, 400, "tls_not_configurable");
+				server.setSecureContext(tls.updateNames(input.names));
+				return json(res, 200, { saved: true });
 			}
 			if (path === "/owner/logout" && req.method === "POST") {
 				await store.revoke(token);
@@ -408,7 +430,12 @@ export function quickstartTls(dir, names = []) {
 		(net.isIP(name) ||
 			/^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$/.test(name) ||
 			name === "localhost");
+	const namesFile = join(dir, "tls-names.json");
+	const savedNames = existsSync(namesFile)
+		? JSON.parse(readFileSync(namesFile, "utf8"))
+		: [];
 	const local = [
+		...savedNames,
 		"localhost",
 		"127.0.0.1",
 		"::1",
@@ -467,6 +494,16 @@ export function quickstartTls(dir, names = []) {
 	const fallback = issue(local);
 	return {
 		...fallback,
+		updateNames(extra) {
+			if (
+				!Array.isArray(extra) ||
+				extra.length > 16 ||
+				extra.some((name) => !valid(name))
+			)
+				throw new Error("invalid_tls_names");
+			writeFileSync(namesFile, JSON.stringify(extra), { mode: 0o600 });
+			return issue([...local, ...extra]);
+		},
 		SNICallback(name, cb) {
 			try {
 				if (!valid(name)) throw new Error("invalid_sni");

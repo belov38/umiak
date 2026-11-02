@@ -45,3 +45,7 @@ build-logs/
 
 # Built by infra/templates/windows-desktop/moonlight-web/build.sh
 /infra/templates/windows-desktop/files/moonlight-web/
+
+# Python bytecode
+__pycache__/
+*.pyc

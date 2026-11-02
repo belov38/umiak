@@ -52,6 +52,7 @@ export function AppShell({
 	member,
 	logoutUrl,
 	localMode = false,
+	quickstart = false,
 	children,
 }: {
 	team: AppTeam;
@@ -59,6 +60,7 @@ export function AppShell({
 	member: boolean;
 	logoutUrl: string | null;
 	localMode?: boolean;
+	quickstart?: boolean;
 	children: React.ReactNode;
 }) {
 	const session = useAppSession();
@@ -186,6 +188,16 @@ export function AppShell({
 				</Button>
 			</nav>
 			<div className="dashboard-sidebar-footer">
+				{quickstart && (
+					<>
+						<Button asChild variant="ghost" size="sm">
+							<a href="/app/help">Help</a>
+						</Button>
+						<Button asChild variant="ghost" size="sm">
+							<a href="/setup">Setup</a>
+						</Button>
+					</>
+				)}
 				{session.isOperator && (
 					<>
 						<Button
