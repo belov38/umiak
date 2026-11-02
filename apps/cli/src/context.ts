@@ -79,7 +79,11 @@ export class Context {
 
 	/** fetch with the CA of --cacert / UMIAK_CA_FILE; every HTTPS call uses it. */
 	get fetch(): Fetch {
-		this.#fetch ??= caFetch(this.globals.cacert ?? this.env.UMIAK_CA_FILE);
+		this.#fetch ??= caFetch(
+			this.globals.cacert ??
+				this.env.UMIAK_CA_FILE ??
+				this.resolved.profile?.caFile,
+		);
 		return this.#fetch;
 	}
 
@@ -199,7 +203,9 @@ export class Context {
 		if (this.#umiak !== undefined) return this.#umiak;
 		const team = this.resolved.team;
 		const webSocket = caWebSocket(
-			this.globals.cacert ?? this.env.UMIAK_CA_FILE,
+			this.globals.cacert ??
+				this.env.UMIAK_CA_FILE ??
+				this.resolved.profile?.caFile,
 		);
 		this.#umiak = new Umiak({
 			...(webSocket === undefined ? {} : { webSocket }),
