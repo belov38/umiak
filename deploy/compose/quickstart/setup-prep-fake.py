@@ -20,7 +20,7 @@ commands = []
 objects = {"/cluster/firewall/options": {"enable": 1}}
 agent = b"fake-node-agent"
 report = {}
-config = {"origin": "https://stack.example:8443", "token": "a" * 64, "node": "pve", "gateway": "192.168.68.90", "publicKey": "ssh-ed25519 AAAA test", "nodeSha256": hashlib.sha256(agent).hexdigest()}
+config = {"origin": "https://stack.example:8443", "token": "a" * 64, "node": "pve", "gateway": "192.168.68.90", "publicKey": "ssh-ed25519 AAAA test", "tokenId": "developer@pve!quickstart", "nodeSha256": hashlib.sha256(agent).hexdigest()}
 
 
 def mapped(value="."):
@@ -115,4 +115,5 @@ assert any("UmiakTemplateMedia" in command and "--roles" in command for command 
 assert any("VM.GuestAgent.Unrestricted" in " ".join(command) for command in commands)
 assert not any("VM.Monitor" in " ".join(command) for command in commands)
 assert report["sshPublicKey"] == "ssh-ed25519 AAAA"
+assert any(command[:6] == ["pveum", "user", "token", "add", "developer@pve", "quickstart"] for command in commands)
 print("FAKE FRESH HOST PASS: role/token/pool/SDN/IPSet/rules/node-agent/callback, rollback and bridge preservation")

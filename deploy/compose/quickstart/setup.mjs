@@ -1,7 +1,7 @@
 // Owner-only setup orchestration. PVE adoption never writes to the host API.
 
 import { execFile } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, X509Certificate } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { readFile } from "node:fs/promises";
 import { isIP } from "node:net";
@@ -31,6 +31,17 @@ export { renderHelp, renderSetup, verifyAdoption };
 
 const NAME = /^[a-zA-Z][a-zA-Z0-9_-]{0,62}$/;
 const domain = /^(?=.{1,253}$)[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?$/;
+function requireRootCA(pem) {
+	try {
+		const certificate = new X509Certificate(pem);
+		if (!certificate.ca) throw new Error("not a CA");
+	} catch {
+		throw new Error(
+			"A valid PVE root CA certificate is required; supply it in Connect or generate a read-only host report",
+		);
+	}
+	return pem;
+}
 const STEPS = ["connection", "host", "limits", "network", "templates", "smoke"];
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 function requireValue(ok, message) {
@@ -273,7 +284,11 @@ export function createSetupHandler({
 			if (token) await atomicSecret(secretsDir, "pve-token", token);
 			await atomicSecret(secretsDir, "pve-token-id", connection.tokenId);
 			if (input.caPem)
-				await atomicSecret(secretsDir, "pve-root-ca.pem", input.caPem);
+				await atomicSecret(
+					secretsDir,
+					"pve-root-ca.pem",
+					requireRootCA(input.caPem),
+				);
 			if (input.sshPrivateKey)
 				await atomicSecret(
 					secretsDir,
@@ -291,9 +306,13 @@ export function createSetupHandler({
 			);
 			const connection = connectionOf(state);
 			const api = await pveOf(state);
+			requireValue(
+				requireRootCA(await readOptional(secretsDir, "pve-root-ca.pem")),
+				"PVE root CA is required before host adoption; supply it in Connect or generate a read-only host report",
+			);
 			if (state.hostReport) {
 				const report = state.hostReport;
-				verifyIsolation(report.rules, report.ipset);
+				verifyIsolation(report.rules, report.ipset, undefined, report.denySets);
 				requireValue(
 					Number(report.user?.enable ?? 1) === 1 &&
 						report.zone?.type === "simple" &&
@@ -387,7 +406,12 @@ export function createSetupHandler({
 		async network(input, state) {
 			const network = validateNetwork(input);
 			const report = state.hostReport || state.steps.host.data;
-			verifyIsolation(report.rules, report.ipset, network.gatewayAddress);
+			verifyIsolation(
+				report.rules,
+				report.ipset,
+				network.gatewayAddress,
+				report.denySets,
+			);
 			await atomicSecret(
 				secretsDir,
 				"quickstart-network.json",
@@ -761,7 +785,11 @@ export function createSetupHandler({
 							input.caPem &&
 							!(await readOptional(secretsDir, "pve-root-ca.pem"))
 						)
-							await atomicSecret(secretsDir, "pve-root-ca.pem", input.caPem);
+							await atomicSecret(
+								secretsDir,
+								"pve-root-ca.pem",
+								requireRootCA(input.caPem),
+							);
 					} else {
 						requireValue(
 							typeof input.tokenSecret === "string" &&
@@ -773,7 +801,11 @@ export function createSetupHandler({
 						const api = makePve(connection, input.tokenSecret);
 						await api.get("/pools/umiak");
 						await atomicSecret(secretsDir, "pve-token", input.tokenSecret);
-						await atomicSecret(secretsDir, "pve-root-ca.pem", input.caPem);
+						await atomicSecret(
+							secretsDir,
+							"pve-root-ca.pem",
+							requireRootCA(input.caPem),
+						);
 						await atomicSecret(
 							secretsDir,
 							"known_hosts",

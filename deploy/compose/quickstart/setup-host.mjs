@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { createHash, X509Certificate } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import https from "node:https";
-import { BlockList, isIP } from "node:net";
+import { isIP } from "node:net";
 import { join } from "node:path";
 import tls from "node:tls";
 
@@ -169,63 +169,155 @@ export async function checkNode(connection, secretsDir) {
 	});
 }
 
-export function verifyIsolation(rules, ipset, gateway) {
-	const enabled = rules.filter(
-		(rule) => Number(rule.enable ?? 1) !== 0 && rule.type === "out",
+function ipNumber(address) {
+	const family = isIP(address);
+	if (!family) throw new Error("Invalid firewall address");
+	if (family === 4)
+		return address
+			.split(".")
+			.reduce((value, part) => (value << 8n) + BigInt(part), 0n);
+	let value = address.toLowerCase();
+	if (value.includes(".")) {
+		const index = value.lastIndexOf(":");
+		const v4 = ipNumber(value.slice(index + 1));
+		value = `${value.slice(0, index)}:${(v4 >> 16n).toString(16)}:${(v4 & 65535n).toString(16)}`;
+	}
+	const halves = value.split("::");
+	const left = halves[0] ? halves[0].split(":") : [];
+	const right = halves[1] ? halves[1].split(":") : [];
+	const parts =
+		halves.length === 2
+			? [...left, ...Array(8 - left.length - right.length).fill("0"), ...right]
+			: left;
+	return parts.reduce(
+		(result, part) => (result << 16n) + BigInt(`0x${part}`),
+		0n,
 	);
+}
+function cidrRange(cidr) {
+	const [address, rawBits, ...extra] = String(cidr).split("/");
+	const family = isIP(address);
+	const width = family === 4 ? 32 : 128;
+	const bits = rawBits === undefined ? width : Number(rawBits);
 	if (
-		!enabled.some(
-			(rule) =>
-				rule.action === "ACCEPT" &&
-				rule.dest === "+umiak-gateway" &&
-				rule.proto === "tcp" &&
-				String(rule.dport) === "443",
-		)
+		!family ||
+		extra.length ||
+		!Number.isInteger(bits) ||
+		bits < 0 ||
+		bits > width
 	)
+		throw new Error("Invalid firewall CIDR");
+	const size = 1n << BigInt(width - bits);
+	const start = (ipNumber(address) / size) * size;
+	return { family, start, end: start + size - 1n };
+}
+function rangesCover(ranges, cidr) {
+	const target = cidrRange(cidr);
+	let next = target.start;
+	for (const range of ranges
+		.filter((range) => range.family === target.family)
+		.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0))) {
+		if (range.end < next) continue;
+		if (range.start > next) return false;
+		next = range.end + 1n;
+		if (next > target.end) return true;
+	}
+	return false;
+}
+function destinationRanges(dest, ipset, sets) {
+	const entries =
+		dest === "+umiak-gateway"
+			? ipset
+			: dest?.startsWith("+")
+				? sets[dest.slice(1)]
+				: [{ cidr: dest }];
+	return (entries || [])
+		.filter(
+			(item) =>
+				item.cidr && !item.nomatch && !String(item.cidr).startsWith("!"),
+		)
+		.map((item) => cidrRange(item.cidr));
+}
+export function verifyIsolation(rules, ipset, gateway, sets = {}) {
+	if (!Array.isArray(rules) || !Array.isArray(ipset))
+		throw new Error("Missing firewall rules or gateway IPSet");
+	for (const item of ipset) {
+		if (item.nomatch) continue;
+		const range = cidrRange(item.cidr);
+		if (range.start !== range.end)
+			throw new Error(
+				"Gateway IPSet must contain individual endpoint IPs, not whole networks",
+			);
+	}
+	const enabled = rules
+		.filter((rule) => Number(rule.enable ?? 1) !== 0 && rule.type === "out")
+		.map((rule, index) => ({ ...rule, index: Number(rule.pos ?? index) }))
+		.sort((a, b) => a.index - b.index);
+	const unrestricted = (rule) =>
+		!rule.source &&
+		!rule.sport &&
+		!rule.dport &&
+		!rule.proto &&
+		!rule.icmp_type;
+	const accepts = enabled.filter((rule) => rule.action === "ACCEPT");
+	for (const rule of accepts) {
+		const expected =
+			rule.dest === "+umiak-gateway" &&
+			!rule.source &&
+			!rule.sport &&
+			!rule.icmp_type &&
+			((rule.proto === "tcp" && String(rule.dport) === "443") ||
+				(rule.proto === "udp" && String(rule.dport) === "3478"));
+		if (!expected)
+			throw new Error(
+				"Unexpected ACCEPT rule can bypass sandbox isolation; inspect the Umiak egress group",
+			);
+	}
+	const gatewayRule = accepts.find(
+		(rule) => rule.proto === "tcp" && String(rule.dport) === "443",
+	);
+	if (!gatewayRule)
 		throw new Error(
 			"Gateway firewall must allow only the designated tcp/443 endpoint",
 		);
-	const drop = enabled
-		.filter((rule) => rule.action === "DROP")
-		.map((rule) => rule.dest);
-	if (
-		!(
-			drop.includes("+umiak-deny") ||
-			[
-				"10.0.0.0/8",
-				"172.16.0.0/12",
-				"192.168.0.0/16",
-				"100.64.0.0/10",
-				"169.254.0.0/16",
-			].every((cidr) => drop.includes(cidr))
-		) ||
-		!(
-			drop.includes("+umiak-deny6") ||
-			(drop.includes("::/1") && drop.includes("8000::/1"))
-		)
-	)
-		throw new Error(
-			"Sandbox firewall must deny private, tailnet and IPv6 destinations",
-		);
+	const drops = enabled.filter(
+		(rule) => ["DROP", "REJECT"].includes(rule.action) && unrestricted(rule),
+	);
+	const ranges = drops.flatMap((rule) =>
+		destinationRanges(rule.dest, ipset, sets),
+	);
+	for (const cidr of [
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"100.64.0.0/10",
+		"169.254.0.0/16",
+		"224.0.0.0/4",
+		"::/0",
+	]) {
+		if (!rangesCover(ranges, cidr))
+			throw new Error(
+				`Sandbox firewall deny coverage is incomplete for ${cidr}; verify the referenced deny IPSets`,
+			);
+	}
 	if (gateway) {
 		const family = isIP(gateway);
 		if (!family)
 			throw new Error(
 				"Gateway address must be a literal IP for IPSet verification",
 			);
-		const list = new BlockList();
-		for (const item of ipset) {
-			const [address, bits] = String(item.cidr).split("/");
-			if (isIP(address))
-				list.addSubnet(
-					address,
-					Number(bits ?? (isIP(address) === 4 ? 32 : 128)),
-					isIP(address) === 4 ? "ipv4" : "ipv6",
-				);
-		}
-		if (!list.check(gateway, family === 4 ? "ipv4" : "ipv6"))
+		if (!rangesCover(destinationRanges("+umiak-gateway", ipset, sets), gateway))
 			throw new Error(
 				"Guest gateway address is absent from the verified umiak-gateway IPSet",
+			);
+		const blocking = drops.find(
+			(rule) =>
+				rule.index < gatewayRule.index &&
+				rangesCover(destinationRanges(rule.dest, ipset, sets), gateway),
+		);
+		if (blocking)
+			throw new Error(
+				"Gateway tcp/443 rule must precede the deny rule covering its address",
 			);
 	}
 	return true;
@@ -275,7 +367,16 @@ export async function verifyAdoption(api, connection, nodeCheck) {
 		"/cluster/firewall/groups/umiak-egress",
 		(x) => Array.isArray(x) && x.length > 0,
 	);
-	verifyIsolation(rules, ipset);
+	const denySets = {};
+	for (const name of ["umiak-deny", "umiak-deny6", "umiak-deny-public"]) {
+		if (rules.some((rule) => rule.dest === `+${name}`))
+			denySets[name] = await check(
+				`${name} IPSet`,
+				`/cluster/firewall/ipset/${name}`,
+				Array.isArray,
+			);
+	}
+	verifyIsolation(rules, ipset, undefined, denySets);
 	const node = await nodeCheck();
 	if (
 		!node.version ||
@@ -287,5 +388,5 @@ export async function verifyAdoption(api, connection, nodeCheck) {
 			"Node-agent configuration must use VMIDs 500–589 and VNet umiak0",
 		);
 	checks.push({ name: "restricted node-agent", ok: true });
-	return { checks, nodeVersion: node.version, ipset, rules };
+	return { checks, nodeVersion: node.version, ipset, rules, denySets };
 }

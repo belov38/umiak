@@ -10,6 +10,17 @@ import {
 	verifyAdoption,
 } from "./setup.mjs";
 
+const denySets = {
+	"umiak-deny": [
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"100.64.0.0/10",
+		"169.254.0.0/16",
+		"224.0.0.0/4",
+	].map((cidr) => ({ cidr })),
+	"umiak-deny6": [{ cidr: "::/1" }, { cidr: "8000::/1" }],
+};
 const connection = {
 	apiUrl: "https://192.168.68.116:8006",
 	fingerprint: `${"AA:".repeat(31)}AA`,
@@ -65,7 +76,7 @@ test("adoption reads only existing PVE objects and fails closed on missing zone"
 				: path.includes("/vnets/")
 					? { zone: "umiak" }
 					: path.includes("/ipset/")
-						? [{ cidr: "192.168.68.90" }]
+						? denySets[path.split("/").at(-1)] || [{ cidr: "192.168.68.90" }]
 						: path.includes("/groups/")
 							? [
 									{
@@ -204,19 +215,42 @@ test("isolation verification rejects missing gateway rules and gateways outside 
 		{ type: "out", action: "DROP", dest: "+umiak-deny6" },
 	];
 	assert.equal(
-		verifyIsolation(rules, [{ cidr: "192.168.68.90" }], "192.168.68.90"),
+		verifyIsolation(
+			rules,
+			[{ cidr: "192.168.68.90" }],
+			"192.168.68.90",
+			denySets,
+		),
 		true,
 	);
 	assert.throws(
-		() => verifyIsolation(rules, [{ cidr: "192.168.68.91" }], "192.168.68.90"),
+		() =>
+			verifyIsolation(
+				rules,
+				[{ cidr: "192.168.68.91" }],
+				"192.168.68.90",
+				denySets,
+			),
 		/absent/,
 	);
 	assert.throws(
-		() => verifyIsolation(rules.slice(1), [{ cidr: "192.168.68.90" }]),
+		() =>
+			verifyIsolation(
+				rules.slice(1),
+				[{ cidr: "192.168.68.90" }],
+				undefined,
+				denySets,
+			),
 		/tcp\/443/,
 	);
 	assert.throws(
-		() => verifyIsolation(rules.slice(0, 1), [{ cidr: "192.168.68.90" }]),
+		() =>
+			verifyIsolation(
+				rules.slice(0, 1),
+				[{ cidr: "192.168.68.90" }],
+				undefined,
+				denySets,
+			),
 		/deny/,
 	);
 });
@@ -280,4 +314,40 @@ test("adoption callback token expires, is single use, and setup denies the confi
 	);
 	assert.equal(await handler.deniedPeer("::ffff:192.168.68.116"), true);
 	assert.equal(await handler.deniedPeer("192.168.68.50"), false);
+});
+test("host adoption cannot become ready without a valid mounted PVE root CA", async () => {
+	const { createSetupHandler } = await import("./setup.mjs");
+	const { mkdtemp } = await import("node:fs/promises");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	let state = { steps: { connection: { status: "ready", data: connection } } };
+	const store = {
+		read: async () => structuredClone(state),
+		write: async (s) => {
+			state = structuredClone(s);
+		},
+	};
+	const secretsDir = await mkdtemp(join(tmpdir(), "umiak-missing-root-"));
+	const handler = createSetupHandler({
+		pool: {},
+		store,
+		secretsDir,
+		makePve: () => ({ get: async () => ({}) }),
+	});
+	await assert.rejects(
+		() => handler.wizard.run("host", { mode: "adopt" }),
+		/valid PVE root CA/,
+	);
+	assert.equal(state.steps.host.status, "error");
+	assert.equal(state.complete, false);
+});
+test("help copy examples contain actual newlines and link certificate settings", () => {
+	const html = renderHelp("https://stack.example");
+	assert.match(html, /umiak login[^<]*\numiak create/);
+	assert.doesNotMatch(html, /\\numiak create/);
+	assert.match(html, /href="\/owner\/tls"/);
+	assert.doesNotMatch(
+		renderSetup({ steps: {} }, "https://stack.example"),
+		/otherwise pin the leaf/,
+	);
 });

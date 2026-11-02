@@ -2,6 +2,11 @@
 import { readFileSync } from "node:fs";
 export function renderPreparation(config) {
 	if (
+		config.tokenId &&
+		!/^[a-zA-Z0-9._-]+@pve![a-zA-Z0-9._-]+$/.test(config.tokenId)
+	)
+		throw new Error("Invalid preparation token ID");
+	if (
 		!/^https:\/\/[a-zA-Z0-9.:[\]-]+$/.test(config.origin) ||
 		!/^[a-f0-9]{64}$/.test(config.token) ||
 		!/^ssh-ed25519 [a-zA-Z0-9+/=]+(?: [a-zA-Z0-9_-]+)?$/.test(

@@ -21,6 +21,13 @@ def get(path):
     return json.loads(subprocess.run(["pvesh", "get", path, "--output-format", "json"], text=True, capture_output=True, check=True).stdout)
 
 
+def optional_set(name):
+    try:
+        return get("/cluster/firewall/ipset/" + name)
+    except subprocess.CalledProcessError:
+        return []
+
+
 uid, token = config["tokenId"].split("!")
 report = {
     "user": get("/access/users/" + uid),
@@ -31,6 +38,7 @@ report = {
     "vnet": get("/cluster/sdn/vnets/umiak0"),
     "ipset": get("/cluster/firewall/ipset/umiak-gateway"),
     "rules": get("/cluster/firewall/groups/umiak-egress"),
+    "denySets": {name: optional_set(name) for name in ["umiak-deny", "umiak-deny6", "umiak-deny-public"]},
     "firewall": get("/cluster/firewall/options"),
 }
 node = subprocess.run(["/usr/local/bin/umiak-node", "--stdio"], input=json.dumps({"op": "version", "args": {}}), text=True, capture_output=True, check=True)

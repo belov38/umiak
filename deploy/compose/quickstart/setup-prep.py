@@ -14,6 +14,7 @@ import urllib.request
 import ssl
 
 config = json.loads(base64.b64decode(sys.argv[1]))
+user_id, token_name = config.get("tokenId", "umiak@pve!dev").split("!")
 dry = "--dry-run" in sys.argv[2:]
 plan = [
     "Verify Proxmox prerequisites and existing Umiak objects",
@@ -114,20 +115,20 @@ if not any(x["roleid"] == "UmiakPoC" for x in roles):
 if not exists("/pools/umiak"):
     command("pveum", "pool", "add", "umiak", "--comment", "Umiak quickstart")
 users = json.loads(command("pveum", "user", "list", "--output-format", "json"))
-if not any(x["userid"] == "umiak@pve" for x in users):
-    command("pveum", "user", "add", "umiak@pve", "--comment", "Umiak quickstart")
+if not any(x["userid"] == user_id for x in users):
+    command("pveum", "user", "add", user_id, "--comment", "Umiak quickstart")
 token_path = state / "pve-token"
-tokens = json.loads(command("pveum", "user", "token", "list", "umiak@pve", "--output-format", "json"))
-if any(x["tokenid"] == "dev" for x in tokens) and not token_path.exists():
+tokens = json.loads(command("pveum", "user", "token", "list", user_id, "--output-format", "json"))
+if any(x["tokenid"] == token_name for x in tokens) and not token_path.exists():
     raise SystemExit("Existing API token secret is unavailable: use read-only adoption with the existing secret")
 if not token_path.exists():
-    token = json.loads(command("pveum", "user", "token", "add", "umiak@pve", "dev", "--privsep", "1", "--output-format", "json"))["value"]
+    token = json.loads(command("pveum", "user", "token", "add", user_id, token_name, "--privsep", "1", "--output-format", "json"))["value"]
     token_path.write_text(token)
     token_path.chmod(0o600)
 for role, privileges in [("UmiakTemplateMedia", "Datastore.AllocateTemplate Datastore.Audit"), ("UmiakConsole", "VM.Console")]:
     if not any(x["roleid"] == role for x in roles):
         command("pveum", "role", "add", role, "--privs", privileges)
-for principal_flag, principal in [("--users", "umiak@pve"), ("--tokens", "umiak@pve!dev")]:
+for principal_flag, principal in [("--users", user_id), ("--tokens", user_id + "!" + token_name)]:
     for path, role in [("/pool/umiak", "UmiakPoC"), ("/storage/local-lvm", "PVEDatastoreUser"), ("/sdn/zones/umiak", "PVESDNUser"), ("/storage/local", "UmiakTemplateMedia"), ("/pool/umiak", "UmiakConsole")]:
         command("pveum", "acl", "modify", path, principal_flag, principal, "--roles", role)
 
