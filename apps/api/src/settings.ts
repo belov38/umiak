@@ -2,7 +2,15 @@
 // environment is a fatal error that lists every problem.
 import { readFileSync } from "node:fs";
 import { isIP } from "node:net";
-import { loadSshCa, loadSshHostKeys, type SshCa } from "@umiak/auth";
+import {
+	authMode,
+	LOCAL_OPERATOR_GROUP,
+	loadSshCa,
+	loadSshHostKeys,
+	localAllowedCidrs,
+	localDeniedCidrs,
+	type SshCa,
+} from "@umiak/auth";
 import { z } from "zod";
 
 export class SettingsError extends Error {
@@ -33,6 +41,10 @@ export interface OidcSettings {
 }
 
 export interface Settings {
+	authMode: "oidc" | "none";
+	localAllowedCidrs: string[];
+	localDeniedCidrs?: string[];
+	localAllowedHosts: string[];
 	publicPort: number;
 	proxiedPort: number;
 	internalPort: number;
@@ -185,6 +197,25 @@ const version = z.preprocess(
 );
 
 const schema = z.object({
+	UMIAK_LOCAL_ALLOWED_HOSTS: csv("").refine(
+		(hosts) =>
+			hosts.every((host) => {
+				try {
+					const url = new URL(`http://${host}`);
+					return (
+						!url.username &&
+						!url.password &&
+						url.pathname === "/" &&
+						!url.search &&
+						!url.hash &&
+						url.host === host.toLowerCase()
+					);
+				} catch {
+					return false;
+				}
+			}),
+		{ message: "must be comma-separated host[:port] authorities" },
+	),
 	UMIAK_API_PUBLIC_PORT: port(8080),
 	UMIAK_API_PROXIED_PORT: port(8081),
 	UMIAK_API_INTERNAL_PORT: port(8082),
@@ -239,6 +270,9 @@ const schema = z.object({
 export function loadSettings(
 	env: Record<string, string | undefined>,
 ): Settings {
+	const mode = authMode(env);
+	const local = mode === "none";
+	const allowed = local ? localAllowedCidrs(env) : [];
 	const r = schema.safeParse(env);
 	const lines = r.success
 		? []
@@ -259,6 +293,16 @@ export function loadSettings(
 	const e = r.data;
 	const issuer = e.UMIAK_OIDC_ISSUER?.replace(/\/+$/, "");
 	return {
+		authMode: mode,
+		localAllowedCidrs: allowed,
+		localDeniedCidrs: local ? localDeniedCidrs(env) : [],
+		localAllowedHosts: [
+			...new Set([
+				new URL(e.UMIAK_API_URL).host,
+				new URL(e.UMIAK_APP_ORIGIN ?? e.UMIAK_APP_URL).host,
+				...e.UMIAK_LOCAL_ALLOWED_HOSTS.map((host) => host.toLowerCase()),
+			]),
+		],
 		publicPort: e.UMIAK_API_PUBLIC_PORT,
 		proxiedPort: e.UMIAK_API_PROXIED_PORT,
 		internalPort: e.UMIAK_API_INTERNAL_PORT,
@@ -271,9 +315,12 @@ export function loadSettings(
 		serviceTokensFile: e.UMIAK_API_SERVICE_TOKENS_FILE,
 		gatewayTokenFile: e.UMIAK_API_GATEWAY_TOKEN_FILE ?? null,
 		identityFile: e.UMIAK_IDENTITY_FILE ?? null,
-		operatorGroups: e.UMIAK_OPERATOR_GROUPS,
+		operatorGroups:
+			mode === "none"
+				? [...e.UMIAK_OPERATOR_GROUPS, LOCAL_OPERATOR_GROUP]
+				: e.UMIAK_OPERATOR_GROUPS,
 		oidc:
-			issuer === undefined
+			mode === "none" || issuer === undefined
 				? null
 				: {
 						issuer,

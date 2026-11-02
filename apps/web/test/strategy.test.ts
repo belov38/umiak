@@ -17,7 +17,7 @@ import {
 	sessionCacheOf,
 } from "@umiak/payload";
 import { getPayload, type Payload } from "payload";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { toAppSession } from "../src/lib/app-session.ts";
 
 const OPS = "umiak-operators";
@@ -96,6 +96,33 @@ describe.skipIf(skipPg())(
 			const admin = await payload.auth({ headers: h });
 			expect(admin.user?.id).toBe(app.session.user.id);
 			expect(admin.user?.collection).toBe("users");
+		});
+
+		it("local mode resolves the same owner/operator in dashboard and admin without IdP headers", async () => {
+			vi.stubEnv("UMIAK_AUTH_MODE", "none");
+			try {
+				const h = new Headers({ "x-umiak-client-ip": "192.168.1.20" });
+				const app = await authenticateRequest(payload, h);
+				if (app.kind !== "session") throw new Error(app.kind);
+				const admin = await payload.auth({ headers: h });
+				expect(admin.user?.id).toBe(app.session.user.id);
+				expect(app.session.isOperator).toBe(true);
+				expect(app.session.user.email).toBe("local@umiak.invalid");
+				const s = toAppSession(app.session, app.user?.personalTeam as string);
+				expect(s.teams).toHaveLength(1);
+				expect(s.teams[0]).toMatchObject({ role: "owner", personal: true });
+				const denied = await authenticateRequest(
+					payload,
+					new Headers({ "x-umiak-client-ip": "203.0.113.1" }),
+				);
+				expect(denied).toEqual({
+					kind: "denied",
+					status: 403,
+					reason: "client_network_forbidden",
+				});
+			} finally {
+				vi.unstubAllEnvs();
+			}
 		});
 
 		it("the browser gets public ids only", async () => {

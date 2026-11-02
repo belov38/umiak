@@ -114,7 +114,7 @@ def parse_auth_token(stdout: str) -> AuthToken:
     ok = (
         isinstance(o.get("kind"), str)
         and isinstance(o.get("token"), str)
-        and o["token"] != ""
+        and (o["token"] != "" or o.get("kind") == "none")
         and isinstance(o.get("apiUrl"), str)
         and (expires is None or isinstance(expires, str))
         and (team is None or isinstance(team, str))

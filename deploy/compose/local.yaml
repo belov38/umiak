@@ -1,0 +1,94 @@
+# S15: docker compose -f deploy/compose/compose.yaml -f deploy/compose/local.yaml up -d --build
+# Separate project/volumes from oidc. Do not enable the excluded-oidc profile.
+name: umiak-local
+
+x-local-env: &local-env
+  UMIAK_LOCAL_DENIED_CIDRS: ${UMIAK_LOCAL_DENIED_CIDRS:-10.88.0.0/24}
+  UMIAK_PVE_URL: ${UMIAK_PVE_URL:-}
+  UMIAK_NODE_SSH_HOST: ${UMIAK_NODE_SSH_HOST:-pve}
+  UMIAK_AUTH_MODE: none
+  UMIAK_LOCAL_ALLOWED_CIDRS: ${UMIAK_LOCAL_ALLOWED_CIDRS-127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7}
+
+services:
+  keycloak:
+    profiles: [excluded-oidc]
+  keycloak-db:
+    profiles: [excluded-oidc]
+  oauth2-proxy:
+    profiles: [excluded-oidc]
+  api:
+    environment:
+      <<: *local-env
+      UMIAK_LOCAL_ALLOWED_HOSTS: api:8080
+      UMIAK_API_TRUSTED_PROXY_CIDRS: ${UMIAK_LOCAL_INGRESS_IP:-172.29.115.10}/32,${UMIAK_LOCAL_MCP_IP:-172.29.115.11}/32,${UMIAK_API_TRUSTED_PROXY_CIDRS:-}
+    ports: !override
+      - "${UMIAK_LOCAL_BIND:-127.0.0.1}:${UMIAK_LOCAL_API_PORT:-8080}:8080"
+    depends_on: !override
+      web-migrate:
+        condition: service_completed_successfully
+      secrets-init:
+        condition: service_completed_successfully
+  worker:
+    environment:
+      <<: *local-env
+      UMIAK_TUNNEL_URL: ${UMIAK_TUNNEL_URL:-}
+    depends_on: !override
+      web-migrate:
+        condition: service_completed_successfully
+      secrets-init:
+        condition: service_completed_successfully
+      gateway-secrets:
+        condition: service_completed_successfully
+  web:
+    environment:
+      <<: *local-env
+    networks: !override [web-internal]
+  mcp:
+    networks:
+      umiak:
+        ipv4_address: ${UMIAK_LOCAL_MCP_IP:-172.29.115.11}
+    environment:
+      <<: *local-env
+      UMIAK_API_TRUSTED_PROXY_CIDRS: ${UMIAK_MCP_TRUSTED_PROXY_CIDRS:-}
+    ports: !override
+      - "${UMIAK_LOCAL_BIND:-127.0.0.1}:${UMIAK_LOCAL_MCP_PORT:-8090}:8080"
+  gateway:
+    environment:
+      UMIAK_AUTH_MODE: none
+      UMIAK_GATEWAY_PREVIEW_DOMAIN: ${UMIAK_PREVIEW_DOMAIN:-umiak.localhost}
+      UMIAK_GATEWAY_TUNNEL_HOST: ${UMIAK_TUNNEL_HOST:-tunnel.localhost}
+      UMIAK_GATEWAY_SSH_HOST: ${UMIAK_SSH_HOST:-ssh.localhost}
+    ports: !override
+      - "${UMIAK_LOCAL_BIND:-127.0.0.1}:${GATEWAY_HTTPS_PORT:-8443}:8443"
+      - "${UMIAK_LOCAL_BIND:-127.0.0.1}:${GATEWAY_SSH_PORT:-2222}:2222"
+  local-ingress:
+    image: node:26.13.0-bookworm-slim
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: [node, /ingress.mjs]
+    environment:
+      <<: *local-env
+      UMIAK_APP_ORIGIN: ${UMIAK_APP_ORIGIN:-http://localhost:4180}
+    volumes:
+      - ./local/ingress.mjs:/ingress.mjs:ro
+    networks:
+      umiak:
+        ipv4_address: ${UMIAK_LOCAL_INGRESS_IP:-172.29.115.10}
+      web-internal: {}
+    ports:
+      - "${UMIAK_LOCAL_BIND:-127.0.0.1}:${UMIAK_LOCAL_APP_PORT:-4180}:4180"
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+networks:
+  umiak:
+    ipam:
+      config:
+        - subnet: 172.29.115.0/24
+          ip_range: 172.29.115.128/25

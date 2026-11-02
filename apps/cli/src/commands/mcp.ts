@@ -169,6 +169,7 @@ function umiakFactory(
 		}
 		umiak = new Umiak({
 			baseUrl,
+			session: ctx.resolved.profile?.auth === "none" && !ctx.env.UMIAK_API_KEY,
 			...(team === undefined ? {} : { team }),
 			tokenProvider: async (o) => {
 				try {

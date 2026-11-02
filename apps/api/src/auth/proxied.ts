@@ -1,9 +1,11 @@
 // Authentication of the proxied listener (S7 §7.4, S8 §5.2, C4, C6): the
 // browser behind oauth2-proxy. Only oauth2-proxy reaches this port
 // (NetworkPolicy), so its X-Auth-Request-* headers are trusted here.
+
 import type { Context, MiddlewareHandler } from "hono";
 import type { ApiDeps, ApiEnv } from "../deps.ts";
 import { ApiError, validationError } from "../http/errors.ts";
+import { localAuthenticate } from "./local.ts";
 import {
 	type AuthContext,
 	authRequired,
@@ -98,7 +100,7 @@ function checkRequest(deps: ApiDeps, c: Context<ApiEnv>): void {
 }
 
 /** Team of the request: Umiak-Team, or `?team=` on GET/HEAD/upgrade (C4). */
-function requestedTeam(c: Context<ApiEnv>): string | null {
+export function requestedTeam(c: Context<ApiEnv>): string | null {
 	const header = c.req.header(TEAM_HEADER);
 	const query = c.req.query("team");
 	const fromHeader =
@@ -127,6 +129,8 @@ async function authenticate(
 	deps: ApiDeps,
 	c: Context<ApiEnv>,
 ): Promise<AuthContext> {
+	if (deps.settings.authMode === "none")
+		return localAuthenticate(deps, c, requestedTeam(c));
 	const email = c.req.header("x-auth-request-email")?.trim() ?? "";
 	if (email === "") {
 		throw authRequired("no browser session (X-Auth-Request-Email is missing)");

@@ -26,6 +26,7 @@ export const OIDC_CLI_CLIENT_ID = "umiak-cli";
 
 export const MetaSchema = z
 	.object({
+		authMode: z.enum(["oidc", "none"]).optional(),
 		apiVersion: z.string().openapi({ example: "v1" }),
 		build: z
 			.string()
@@ -123,6 +124,7 @@ const getDocs = createRoute({
 export function metaOf(deps: ApiDeps): Meta {
 	const s = deps.settings;
 	return {
+		...(s.authMode === "none" ? { authMode: "none" as const } : {}),
 		apiVersion: "v1",
 		build: s.build,
 		appUrl: s.appUrl,
@@ -209,7 +211,7 @@ export function registerMetaRoutes(
 		return c.json(doc, 200);
 	});
 
-	if (!o.docs) return;
+	if (!o.docs || deps.settings.authMode === "none") return;
 	app.openapi(getDocs, (c) =>
 		c.html(DOCS_HTML, 200, { "Content-Security-Policy": DOCS_CSP }),
 	);

@@ -56,7 +56,11 @@ function Section({
 	);
 }
 
-export function AccountSettings({ signOutHref }: { signOutHref: string }) {
+export function AccountSettings({
+	signOutHref,
+}: {
+	signOutHref: string | null;
+}) {
 	const session = useAppSession();
 	return (
 		<div className="max-w-4xl space-y-8">
@@ -64,14 +68,16 @@ export function AccountSettings({ signOutHref }: { signOutHref: string }) {
 			<section className="dashboard-card space-y-5">
 				<div className="flex items-center justify-between gap-3">
 					<h2>Account · {session.user.name}</h2>
-					<Button asChild variant="ghost">
-						<a
-							href={signOutHref}
-							title="Ends the single sign-on session too; the CLI will ask for umiak login again."
-						>
-							Sign out
-						</a>
-					</Button>
+					{signOutHref !== null && (
+						<Button asChild variant="ghost">
+							<a
+								href={signOutHref}
+								title="Ends the single sign-on session too; the CLI will ask for umiak login again."
+							>
+								Sign out
+							</a>
+						</Button>
+					)}
 				</div>
 				<Profile />
 				<DefaultTeam />

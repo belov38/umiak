@@ -629,3 +629,29 @@ func TestProcessDrainTimeout(t *testing.T) {
 		t.Errorf("explicit: %s, want 3s", got)
 	}
 }
+
+func TestAuthMode(t *testing.T) {
+	for _, mode := range []string{"", "oidc", "none", "invalid"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newFixture(t)
+			f.env["UMIAK_AUTH_MODE"] = mode
+			cfg, err := FromEnv(f.getenv)
+			if mode == "invalid" {
+				if err == nil {
+					t.Fatal("invalid auth mode accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := mode
+			if want == "" {
+				want = "oidc"
+			}
+			if cfg.AuthMode != want {
+				t.Fatalf("mode = %q, want %q", cfg.AuthMode, want)
+			}
+		})
+	}
+}

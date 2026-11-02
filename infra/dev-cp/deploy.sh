@@ -72,8 +72,9 @@ fi
 
 # 1. The working tree: tracked and untracked files that are not ignored, minus deleted ones.
 log "sync $REPO -> $CT:$DIR"
-list=$(mktemp)
-trap 'rm -f "$list"' EXIT
+list_dir=$(mktemp -d)
+list="$list_dir/files"
+trap 'python3 -c "import shutil,sys; shutil.rmtree(sys.argv[1])" "$list_dir"' EXIT
 (
 	cd "$REPO"
 	git ls-files -co --exclude-standard --deduplicate | grep -vxF -f <(git ls-files -d) >"$list"
@@ -121,7 +122,7 @@ fi
 ct "TURN_HOST=$TURN_HOST" "TURN_IP=$CT_IP" "PVE_LAN_IP=$PVE_LAN_IP" "PORT_DOMAIN=$PORT_DOMAIN" "TUNNEL_HOST=$TUNNEL_HOST" "TUNNEL_URL=$TUNNEL_URL" \
 	"TS_NAME=$TS_NAME" "SSH_HOST=$SSH_HOST" "APP_ORIGIN=$APP_ORIGIN" "API_URL=$API_URL" "MCP_URL=$MCP_URL" \
 	"KEYCLOAK_URL=$KEYCLOAK_URL" "OIDC_ISSUER=$OIDC_ISSUER" "LOGOUT_URL=$LOGOUT_URL" "SERVE=$SERVE" \
-	"FILES=$FILES" "EXTRA_ENV=$EXTRA_ENV" <<'EOF'
+	"FILES=$FILES" "EXTRA_ENV=$EXTRA_ENV" "AUTH_MODE=$AUTH_MODE" "CT_IP=$CT_IP" <<'EOF'
 ts=$(tailscale status --json | python3 -c 'import json, sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')
 [ "$ts" = "$TS_NAME" ] || { echo "the CT's MagicDNS name is $ts, not $TS_NAME (set UMIAK_DEVCP_TS_NAME)" >&2; exit 1; }
 cd deploy/compose
@@ -133,7 +134,7 @@ gw=secrets/gateway
 stamp="$(sha256sum ~/.config/umiak/dev-ca/ca.pem | cut -d' ' -f1) $TUNNEL_HOST $PORT_DOMAIN"
 if [ "$(cat secrets/devcp/gateway-tls.stamp 2>/dev/null)" != "$stamp" ]; then
 	echo "gateway TLS: dev CA $(openssl x509 -in ~/.config/umiak/dev-ca/ca.pem -noout -subject), names $TUNNEL_HOST *.$PORT_DOMAIN"
-	rm -f "$gw"/ca.pem "$gw"/ca.key "$gw"/umiak.pem "$gw"/umiak.key "$gw"/tunnel.pem "$gw"/tunnel.key
+	python3 -c 'from pathlib import Path; import sys; [Path(p).unlink(missing_ok=True) for p in sys.argv[1:]]' "$gw"/ca.pem "$gw"/ca.key "$gw"/umiak.pem "$gw"/umiak.key "$gw"/tunnel.pem "$gw"/tunnel.key
 	install -m 644 ~/.config/umiak/dev-ca/ca.pem "$gw/ca.pem"
 	install -m 600 ~/.config/umiak/dev-ca/ca.key "$gw/ca.key"
 	printf '%s\n' "$stamp" >secrets/devcp/gateway-tls.stamp
@@ -141,7 +142,7 @@ fi
 for c in umiak tunnel; do
 	if [ -s "$gw/$c.pem" ] && ! openssl x509 -in "$gw/$c.pem" -noout -checkend $((30 * 86400)) >/dev/null; then
 		echo "gateway TLS: $c.pem expires within 30 days, renewing"
-		rm -f "$gw/$c.pem" "$gw/$c.key"
+		python3 -c 'from pathlib import Path; import sys; [Path(p).unlink(missing_ok=True) for p in sys.argv[1:]]' "$gw/$c.pem" "$gw/$c.key"
 	fi
 done
 sed -E "s#^( *apiUrl:).*#\1 https://$PVE_LAN_IP:8006#" config/umiak.yaml >secrets/devcp/umiak.yaml
@@ -160,8 +161,10 @@ cat >.env <<ENV
 # Written by infra/dev-cp/deploy.sh; changes are overwritten on the next deploy.
 COMPOSE_FILE=$FILES:../../infra/dev-cp/compose.dev-cp.yaml
 COMPOSE_PROFILES=desktop
+UMIAK_AUTH_MODE=$AUTH_MODE
 UMIAK_DEVCP_DB_PASSWORD=$(cat secrets/devcp/postgres-password)
 UMIAK_DEVCP_USER_PASSWORD=$(cat secrets/devcp/dev-user-password)
+UMIAK_CP_IP=$CT_IP
 UMIAK_DEVCP_TURN_IP=$TURN_IP
 UMIAK_DEVCP_TURN_HOST=$TURN_HOST
 # Dev TURN on the CT address (README): TLS on 5349 (443 is the gateway), relay ports above
@@ -200,6 +203,16 @@ UMIAK_OAUTH2_PROXY_REDIRECT_URL=$APP_ORIGIN/oauth2/callback
 UMIAK_LOGOUT_URL=$LOGOUT_URL
 $EXTRA_ENV
 ENV
+if [ "$AUTH_MODE" = none ]; then
+ cat >>.env <<LOCAL
+COMPOSE_FILE=$FILES:../../infra/dev-cp/compose.dev-cp.yaml:local.yaml:../../infra/dev-cp/compose.local.yaml
+UMIAK_LOCAL_BIND=$CT_IP
+UMIAK_LOCAL_ALLOWED_CIDRS=127.0.0.0/8,::1/128,192.168.68.0/24,172.18.0.0/16
+UMIAK_LOCAL_DENIED_CIDRS=$PVE_LAN_IP/32,10.88.0.0/24
+UMIAK_LOCAL_INGRESS_IP=172.18.255.10
+UMIAK_LOCAL_MCP_IP=172.18.255.11
+LOCAL
+fi
 chmod 600 .env
 docker compose config --quiet
 # The one-time switch to S8 (identities move from the schema identity to payload): the pre-S8 api
@@ -216,12 +229,17 @@ if [ -n "$(docker compose ps -q --status running postgres)" ]; then
 		docker compose stop api worker
 	fi
 fi
+if [ "$AUTH_MODE" = none ]; then
+ docker compose --profile excluded-oidc stop keycloak keycloak-db oauth2-proxy
+fi
 docker compose up -d --remove-orphans 2>&1 | tail -30
 # api and oauth2-proxy wait for Keycloak, whose first start (realm import) takes a minute or two;
 # api, worker and web wait for migrate and web-migrate.
 healthy() {
 	local s
-	for s in worker gateway api oauth2-proxy web mcp turn; do
+	local services="worker gateway api web mcp turn"
+ [ "$AUTH_MODE" = none ] || services="$services oauth2-proxy"
+ for s in $services; do
 		[ "$(docker compose ps --format '{{.Health}}' "$s")" = healthy ] || return 1
 	done
 }
@@ -280,6 +298,10 @@ for port in $(tr ' ' '\n' <<<"$SERVE" | cut -d: -f1 | sort -u); do
 done
 check api "$API_URL/v1/meta" ||
 	log "WARNING: the api is not reachable through Tailscale Serve from this Mac"
+if [[ "$AUTH_MODE" = none ]]; then
+ check_ok dashboard "$APP_ORIGIN/app" -L -o /dev/null
+else
 check_ok mcp "$MCP_PRM_URL" ||
 	log "WARNING: the MCP server is not reachable through Tailscale Serve from this Mac"
-log "deployed"
+fi
+log "deployed ($AUTH_MODE)"

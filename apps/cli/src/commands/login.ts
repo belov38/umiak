@@ -36,6 +36,7 @@ import { CLI_VERSION } from "./version.ts";
 import { humanMe, type Me } from "./whoami.ts";
 
 interface MetaOidc {
+	authMode?: "none" | "oidc";
 	oidc: { issuer: string; clientId: string; audience: string } | null;
 }
 
@@ -43,12 +44,12 @@ interface MetaOidc {
 async function meWith(
 	ctx: Context,
 	apiUrl: string,
-	token: string,
+	token: string | undefined,
 	team: string | undefined,
 ): Promise<Me> {
 	const umiak = new Umiak({
 		baseUrl: apiUrl,
-		apiKey: token,
+		...(token === undefined ? { session: true } : { apiKey: token }),
 		...(team === undefined ? {} : { team }),
 		fetch: ctx.fetch as typeof fetch,
 		userAgent: `umiak-cli/${CLI_VERSION}`,
@@ -84,8 +85,8 @@ async function deviceFlow(
 	ctx: Context,
 	apiUrl: string,
 	browser: boolean,
+	meta: MetaOidc,
 ): Promise<{ cred: StoredCredential; issuer: string }> {
-	const meta = await getJson<MetaOidc>(ctx.fetch, `${apiUrl}/v1/meta`);
 	if (meta.oidc === null) {
 		throw new CliError({
 			code: "oidc_unavailable",
@@ -144,18 +145,28 @@ async function login(
 		throw usageError("no API URL: pass --api-url <url> or set UMIAK_API_URL");
 	}
 	const apiUrl = r.apiUrl;
-	let cred: StoredCredential;
+	let cred: StoredCredential | undefined;
 	let profile: Profile;
 	if (opts.keyStdin === true) {
 		const key = keyFromStdin(await readAll(ctx.stdin));
 		cred = { kind: "key", token: key };
 		profile = { apiUrl, auth: "key" };
 	} else {
-		const f = await deviceFlow(ctx, apiUrl, opts.browser !== false);
-		cred = f.cred;
-		profile = { apiUrl, auth: "oidc", issuer: f.issuer };
+		const meta = await getJson<MetaOidc>(ctx.fetch, `${apiUrl}/v1/meta`);
+		if (meta.authMode === "none") {
+			profile = { apiUrl, auth: "none" };
+		} else {
+			const f = await deviceFlow(ctx, apiUrl, opts.browser !== false, meta);
+			cred = f.cred;
+			profile = { apiUrl, auth: "oidc", issuer: f.issuer };
+		}
 	}
-	const token = cred.kind === "key" ? cred.token : cred.accessToken;
+	const token =
+		cred === undefined
+			? undefined
+			: cred.kind === "key"
+				? cred.token
+				: cred.accessToken;
 	const me = await meWith(ctx, apiUrl, token, r.team);
 	if (r.team !== undefined) profile.team = r.team;
 
@@ -170,8 +181,10 @@ async function login(
 			: parseCredential(await oldStore.get(oldEntry).catch(() => null));
 	await withFileLock(ctx.paths.lock, async () => {
 		const entry = credentialName(name, profile);
-		await store.set(entry, JSON.stringify(cred));
-		profile.credentialStore = store.kind;
+		if (cred !== undefined) {
+			await store.set(entry, JSON.stringify(cred));
+			profile.credentialStore = store.kind;
+		}
 		// An unknown old store (config of an older CLI) under the same name
 		// is the entry just written: leave it.
 		const otherStore =
@@ -179,7 +192,7 @@ async function login(
 		if (
 			oldEntry !== undefined &&
 			oldStore !== undefined &&
-			(oldEntry !== entry || otherStore)
+			(cred === undefined || oldEntry !== entry || otherStore)
 		) {
 			await oldStore.delete(oldEntry).catch(() => {});
 		}
@@ -191,7 +204,7 @@ async function login(
 	ctx.reload();
 	if (
 		oldCred?.kind === "oidc" &&
-		!(cred.kind === "oidc" && cred.refreshToken === oldCred.refreshToken)
+		!(cred?.kind === "oidc" && cred.refreshToken === oldCred.refreshToken)
 	) {
 		const limit = deadline(10_000);
 		await revokeRefreshToken({
@@ -208,7 +221,7 @@ async function login(
 				);
 			});
 	}
-	if (store.kind === "file") {
+	if (cred !== undefined && store.kind === "file") {
 		ctx.out.warn(
 			`credentials are stored in ${ctx.paths.credentials} (mode 0600), not in the OS keychain`,
 		);

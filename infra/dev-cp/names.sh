@@ -48,3 +48,16 @@ TURN_PORT=3478
 TURN_TLS_PORT=5349
 TURN_RELAY_MIN=61000
 TURN_RELAY_MAX=61040
+
+# Local HTTP deployment preserves gateway names and certificates.
+AUTH_MODE="${UMIAK_DEVCP_AUTH_MODE:-oidc}"
+case "$AUTH_MODE" in
+ none)
+  APP_ORIGIN="http://$CT_IP:4180"
+  API_URL="http://$CT_IP:8080"
+  MCP_URL="$APP_ORIGIN/mcp"
+  SERVE=""
+  ;;
+ oidc) ;;
+ *) echo "UMIAK_DEVCP_AUTH_MODE must be oidc or none" >&2; return 1 ;;
+esac

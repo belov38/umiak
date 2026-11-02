@@ -38,6 +38,7 @@ import {
 import type { AppTeam } from "@/lib/app-session";
 import { signOutHref, switchTeamPath, teamPath } from "@/lib/team-path";
 import { cn } from "@/lib/utils";
+import { LocalModeContext } from "./session-context";
 
 const NAV = [
 	{ label: "Sandboxes", section: undefined, icon: BoxIcon },
@@ -50,12 +51,14 @@ export function AppShell({
 	team,
 	member,
 	logoutUrl,
+	localMode = false,
 	children,
 }: {
 	team: AppTeam;
 	/** False when an operator looks at a team they are not in. */
 	member: boolean;
 	logoutUrl: string | null;
+	localMode?: boolean;
 	children: React.ReactNode;
 }) {
 	const session = useAppSession();
@@ -221,18 +224,20 @@ export function AppShell({
 						<DropdownMenuItem asChild>
 							<Link href="/app/account">Account</Link>
 						</DropdownMenuItem>
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<DropdownMenuItem asChild>
-									{/* oauth2-proxy route: a full page load. */}
-									<a href={signOutHref(logoutUrl)}>Sign out</a>
-								</DropdownMenuItem>
-							</TooltipTrigger>
-							<TooltipContent side="left" className="max-w-64">
-								Signs you out of the single sign-on session too: the CLI will
-								ask for `umiak login` again.
-							</TooltipContent>
-						</Tooltip>
+						{!localMode && (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<DropdownMenuItem asChild>
+										{/* oauth2-proxy route: a full page load. */}
+										<a href={signOutHref(logoutUrl)}>Sign out</a>
+									</DropdownMenuItem>
+								</TooltipTrigger>
+								<TooltipContent side="left" className="max-w-64">
+									Signs you out of the single sign-on session too: the CLI will
+									ask for `umiak login` again.
+								</TooltipContent>
+							</Tooltip>
+						)}
 					</DropdownMenuContent>
 				</DropdownMenu>
 				<ThemeSwitch dark={dark} onChange={chooseTheme} />
@@ -279,7 +284,11 @@ export function AppShell({
 				</DialogContent>
 			</Dialog>
 			<main id="dashboard-content" className="dashboard-content" tabIndex={-1}>
-				<div className="dashboard-page">{children}</div>
+				<div className="dashboard-page">
+					<LocalModeContext.Provider value={localMode}>
+						{children}
+					</LocalModeContext.Provider>
+				</div>
 			</main>
 		</div>
 	);

@@ -1,8 +1,13 @@
 // Environment of web (S8 §14.1). Parsed once; every problem is reported at
 // once, so a misconfigured deployment is fixed in one round.
+import { authMode, localAllowedCidrs, localDeniedCidrs } from "@umiak/auth";
 import { z } from "zod";
 
 export interface WebEnv {
+	authMode: "oidc" | "none";
+	localAllowedCidrs?: string;
+	/** Effective deny list in `none` mode (explicit list plus node IPs). */
+	localDeniedCidrs?: string;
 	databaseUrl: string;
 	payloadSecret: string;
 	/** Origin of the dashboard, the only Origin of unsafe requests (S8 §5.6). */
@@ -81,7 +86,16 @@ export function parseWebEnv(env: Record<string, string | undefined>): WebEnv {
 		);
 	}
 	const e = r.data;
+	const mode = authMode(env);
+	if (mode === "none") localAllowedCidrs(env);
 	return {
+		authMode: mode,
+		...(mode === "none"
+			? { localDeniedCidrs: localDeniedCidrs(env).join(",") }
+			: {}),
+		...(env.UMIAK_LOCAL_ALLOWED_CIDRS === undefined
+			? {}
+			: { localAllowedCidrs: env.UMIAK_LOCAL_ALLOWED_CIDRS }),
 		databaseUrl: e.DATABASE_URL,
 		payloadSecret: e.PAYLOAD_SECRET,
 		appOrigin: e.UMIAK_APP_ORIGIN,
@@ -94,7 +108,7 @@ export function parseWebEnv(env: Record<string, string | undefined>): WebEnv {
 		],
 		umiakDomain: e.UMIAK_PREVIEW_DOMAIN,
 		apiPublicUrl: e.UMIAK_API_PUBLIC_URL.replace(/\/+$/, ""),
-		logoutUrl: e.UMIAK_LOGOUT_URL ?? null,
+		logoutUrl: mode === "none" ? null : (e.UMIAK_LOGOUT_URL ?? null),
 	};
 }
 
@@ -107,6 +121,7 @@ export function isNextBuild(): boolean {
 }
 
 const BUILD_ENV: WebEnv = {
+	authMode: "oidc",
 	databaseUrl: "postgres://build.invalid/build",
 	payloadSecret: "build-time-placeholder-secret",
 	appOrigin: "https://app.build.invalid",

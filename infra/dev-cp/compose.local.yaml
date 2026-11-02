@@ -1,0 +1,20 @@
+# Layer after local.yaml on the existing dev project. Preserve its network and gateway.
+name: umiak
+networks:
+  umiak:
+    ipam: !reset {}
+services:
+  gateway:
+    ports: !override
+      - "443:8443"
+      - "2222:2222"
+      - "127.0.0.1:7000:7000"
+      - "127.0.0.1:9190:9090"
+    environment:
+      UMIAK_GATEWAY_PREVIEW_DOMAIN: ${UMIAK_PORT_DOMAIN}
+      UMIAK_GATEWAY_TUNNEL_HOST: ${UMIAK_DEVCP_TUNNEL_HOST}
+      UMIAK_GATEWAY_SSH_HOST: ${UMIAK_DEVCP_SSH_HOST}
+  mcp:
+    environment:
+      UMIAK_API_TRUSTED_PROXY_CIDRS: 172.18.255.10/32
+      UMIAK_MCP_ALLOWED_HOSTS: ${UMIAK_CP_IP:-192.168.68.90}:4180,${UMIAK_CP_IP:-192.168.68.90}:8090

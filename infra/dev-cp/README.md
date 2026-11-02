@@ -1,5 +1,38 @@
 # Dev control plane on `pve` (CT 590)
 
+## S15: локальный режим CT590 (2026-11-02)
+
+Переключить существующий стенд с Mac:
+
+```sh
+UMIAK_DEVCP_AUTH_MODE=none mise exec -- bash infra/dev-cp/deploy.sh
+```
+
+Dashboard: `http://192.168.68.90:4180/app`, API: `http://192.168.68.90:8080`,
+MCP: `http://192.168.68.90:4180/mcp`. Вход не нужен; `umiak login --api-url
+http://192.168.68.90:8080` сохраняет профиль без токенов. Keycloak и oauth2-proxy
+остановлены, их данные сохранены. Tailscale Serve mappings удаляются; gateway
+остаётся на :443 с прежними DNS-именами, сертификатами и CA. Превью и SSH
+сохраняют адреса, приведённые ниже. Шаблоны не пересобираются.
+
+Allowlist: LAN `192.168.68.0/24`, loopback и внутренняя Docker-сеть
+`172.18.0.0/16`; denylist: SNAT узла `192.168.68.116/32`, sandbox
+`10.88.0.0/24`. Deny побеждает allow. Bind app/API/MCP — только LAN IP CT.
+Не меняйте гостевой firewall: sandbox не должны достигать этих портов.
+Диагностика первых peer IP есть в логах ingress/API/MCP. При NAT безопасность
+обеспечивают bind и firewall, а не различение клиентов по адресу Docker.
+
+Откат одним вызовом (данные Keycloak сохраняются):
+
+```sh
+UMIAK_DEVCP_AUTH_MODE=oidc mise exec -- bash infra/dev-cp/deploy.sh
+```
+
+Live acceptance: `UMIAK_DEVCP_AUTH_MODE=none mise exec -- bash infra/dev-cp/e2e.sh`.
+Запуск требует отсутствия работающих sandbox и выполняет VM-проверки последовательно.
+Историческое описание OIDC ниже применяется после отката.
+
+
 The compose stack from `deploy/compose` runs in a container on `pve`, so that sandbox VMs on `umiak0` can reach the gateway. This is dev infrastructure, not the product: the Tailscale access and Serve, the LAN addresses and the sslip.io names below live only in `infra/`.
 
 | | |

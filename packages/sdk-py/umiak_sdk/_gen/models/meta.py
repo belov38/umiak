@@ -6,6 +6,9 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
+from ..models.meta_auth_mode import MetaAuthMode
+from ..types import UNSET, Unset
+
 if TYPE_CHECKING:
     from ..models.meta_oidc_type_0 import MetaOidcType0
     from ..models.meta_ssh import MetaSsh
@@ -27,6 +30,7 @@ class Meta:
         oidc (MetaOidcType0 | None): Keycloak for people (device flow of `umiak login`); null when only team keys work
         ssh (MetaSsh):
         umiak_domain (str): Domain of published ports: https://<slug>-<port>.<umiakDomain> Example: umiak.example.com.
+        auth_mode (MetaAuthMode | Unset):
     """
 
     api_url: str
@@ -38,6 +42,7 @@ class Meta:
     oidc: MetaOidcType0 | None
     ssh: MetaSsh
     umiak_domain: str
+    auth_mode: MetaAuthMode | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -67,6 +72,10 @@ class Meta:
 
         umiak_domain = self.umiak_domain
 
+        auth_mode: str | Unset = UNSET
+        if not isinstance(self.auth_mode, Unset):
+            auth_mode = self.auth_mode.value
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
@@ -82,6 +91,8 @@ class Meta:
                 "umiakDomain": umiak_domain,
             }
         )
+        if auth_mode is not UNSET:
+            field_dict["authMode"] = auth_mode
 
         return field_dict
 
@@ -132,6 +143,13 @@ class Meta:
 
         umiak_domain = d.pop("umiakDomain")
 
+        _auth_mode = d.pop("authMode", UNSET)
+        auth_mode: MetaAuthMode | Unset
+        if isinstance(_auth_mode, Unset):
+            auth_mode = UNSET
+        else:
+            auth_mode = MetaAuthMode(_auth_mode)
+
         meta = cls(
             api_url=api_url,
             api_version=api_version,
@@ -142,6 +160,7 @@ class Meta:
             oidc=oidc,
             ssh=ssh,
             umiak_domain=umiak_domain,
+            auth_mode=auth_mode,
         )
 
         meta.additional_properties = d

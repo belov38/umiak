@@ -4,6 +4,7 @@ import type { Sandbox, SandboxData } from "@umiak/sdk";
 import { useEffect, useRef, useState } from "react";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { QueryError } from "@/components/app/query-error";
+import { useLocalMode } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
 import { attempt } from "@/lib/client-call";
 import { fetchDesktopLink } from "./desktop-link";
@@ -18,6 +19,7 @@ export function DesktopTab({
 	handle: Sandbox;
 	track: (id: string) => void;
 }) {
+	const localMode = useLocalMode();
 	const [url, setUrl] = useState<string | null>(null);
 	const [error, setError] = useState<unknown>(null);
 	const [revision, setRevision] = useState(0);
@@ -120,7 +122,7 @@ export function DesktopTab({
 						}}
 					>
 						<option value="token">Secret link</option>
-						<option value="sso">Team members</option>
+						{!localMode && <option value="sso">Team members</option>}
 						<option value="public">Public</option>
 					</select>
 				</label>

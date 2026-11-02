@@ -10,6 +10,7 @@ import {
 	type McpRequestContext,
 	TRACEPARENT_META_KEY,
 } from "@modelcontextprotocol/server";
+import { authMode, isLocalClientAllowed, TrustedProxies } from "@umiak/auth";
 import { Umiak } from "@umiak/sdk";
 import { type Context, Hono } from "hono";
 import { type ClientInfo, userAgentOf } from "../context.ts";
@@ -43,6 +44,7 @@ import {
 } from "./prm.ts";
 
 export interface HttpOptions {
+	localEnv?: Record<string, string | undefined>;
 	/** UMIAK_MCP_API_URL: the api's public listener. */
 	apiUrl: string;
 	/** UMIAK_MCP_PUBLIC_URL, e.g. https://api.example.com/mcp. */
@@ -80,6 +82,7 @@ const STATE = "umiak";
 
 /** What one HTTP request hands to its McpServer. */
 interface RequestState {
+	clientIp?: string;
 	principal: Principal;
 	toolsets?: Toolset[];
 	readOnly: boolean;
@@ -166,6 +169,18 @@ function queryFlags(
 }
 
 export function createHttpApp(o: HttpOptions): HttpApp {
+	const clients = new WeakMap<Request, string>();
+	function forwardClient(
+		f: typeof fetch,
+		ip: string | undefined,
+	): typeof fetch {
+		if (ip === undefined) return f;
+		return (async (input, init) => {
+			const request = new Request(input, init);
+			request.headers.set("x-forwarded-for", ip);
+			return f(request);
+		}) as typeof fetch;
+	}
 	const log = o.log;
 	const apiFetch = apiCallLogger(o.fetch ?? fetch, log);
 	const mcpPath = new URL(o.publicUrl).pathname.replace(/(.)\/+$/, "$1");
@@ -190,7 +205,7 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 		o.metrics?.authRejections.inc({ status: r.status, reason: r.reason });
 		log.info({ status: r.status, reason: r.reason }, "bearer refused");
 		const headers: Record<string, string> = {};
-		if (r.status === 401) {
+		if (r.status === 401 && authMode(o.localEnv ?? {}) === "oidc") {
 			headers["WWW-Authenticate"] = bearerChallenge(metadataUrl, r.challenge);
 		}
 		if (r.status === 503) headers["Retry-After"] = "1";
@@ -205,7 +220,18 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 		team: string | undefined,
 	): Promise<Principal | Response> {
 		if (o.authenticate !== undefined) return o.authenticate(req, team);
-		const token = bearerOf(req);
+		const bearer = bearerOf(req);
+		const local = authMode(o.localEnv ?? {}) === "none";
+		if (local && req.headers.has("authorization") && bearer === null) {
+			return refuse({
+				status: 401,
+				reason: "malformed_authorization",
+				code: "unauthorized",
+				message:
+					"send one Authorization: Bearer <token> header or omit it in local mode",
+			});
+		}
+		const token = bearer ?? (local ? "" : null);
 		if (token === null) {
 			o.metrics?.authRejections.inc({ status: 401, reason: "no_bearer" });
 			return Response.json(
@@ -219,7 +245,17 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 				},
 			);
 		}
-		const r = await check(token, team);
+		const localClient = clients.get(req);
+		const verify =
+			localClient === undefined
+				? check
+				: createAuthenticator({
+						apiUrl: o.apiUrl,
+						fetch: forwardClient(apiFetch as typeof fetch, localClient),
+						cache: new MeCache(),
+						userAgent,
+					});
+		const r = await verify(token, team);
 		return isRejection(r) ? refuse(r) : r;
 	}
 
@@ -236,11 +272,16 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 			umiak: () => {
 				umiak ??= new Umiak({
 					baseUrl: o.apiUrl,
-					...(p.token.startsWith("umiak_")
-						? { apiKey: p.token }
-						: { accessToken: p.token }),
+					...(p.token === ""
+						? { session: true }
+						: p.token.startsWith("umiak_")
+							? { apiKey: p.token }
+							: { accessToken: p.token }),
 					...(p.team === undefined ? {} : { team: p.team }),
-					fetch: withTraceparent(apiFetch, state.traceparent),
+					fetch: withTraceparent(
+						forwardClient(apiFetch as typeof fetch, state.clientIp),
+						state.traceparent,
+					),
 					userAgent: userAgentOf("http", state.client),
 					env: {},
 				});
@@ -331,8 +372,10 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 		} catch {
 			// The handler answers the parse error itself.
 		}
+		const clientIp = clients.get(req);
 		const state: RequestState = {
 			principal,
+			...(clientIp === undefined ? {} : { clientIp }),
 			...flags,
 			...metaOf(parsedBody),
 			authFailed: false,
@@ -377,6 +420,40 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 	}
 
 	const app = new Hono();
+	if (authMode(o.localEnv ?? {}) === "none") {
+		let observed = 0;
+		const trusted = new TrustedProxies(
+			(o.localEnv?.UMIAK_API_TRUSTED_PROXY_CIDRS ?? "")
+				.split(",")
+				.filter(Boolean),
+		);
+		app.use("*", async (c, next) => {
+			const peer = (
+				c.env as
+					| { incoming?: { socket?: { remoteAddress?: string } } }
+					| undefined
+			)?.incoming?.socket?.remoteAddress;
+			const client = trusted.clientOf(peer, c.req.header("x-forwarded-for"));
+			if (observed++ < 10)
+				console.info("local MCP observed peer/client (may be Docker NAT)", {
+					peer,
+					client,
+				});
+			if (!isLocalClientAllowed(client, o.localEnv))
+				return c.json(
+					{
+						error: {
+							code: "local_network_forbidden",
+							message: "client address is outside UMIAK_LOCAL_ALLOWED_CIDRS",
+						},
+					},
+					403,
+				);
+			if (client !== undefined) clients.set(c.req.raw, client);
+			await next();
+		});
+	}
+
 	app.get("/healthz", (c) => c.json({ ok: true }));
 	app.get("/readyz", (c) =>
 		closing
