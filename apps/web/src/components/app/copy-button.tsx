@@ -4,6 +4,7 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { copyText } from "@/lib/clipboard";
 
 export function CopyButton({ text, label }: { text: string; label: string }) {
 	const [copied, setCopied] = useState(false);
@@ -16,20 +17,7 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
 			title={label}
 			onClick={async () => {
 				try {
-					if (navigator.clipboard) await navigator.clipboard.writeText(text);
-					else {
-						const input = document.createElement("textarea");
-						input.value = text;
-						input.style.position = "fixed";
-						input.style.opacity = "0";
-						document.body.append(input);
-						try {
-							input.select();
-							if (!document.execCommand("copy")) throw new Error("Copy failed");
-						} finally {
-							input.remove();
-						}
-					}
+					await copyText(text);
 					setCopied(true);
 					setTimeout(() => setCopied(false), 1500);
 				} catch {

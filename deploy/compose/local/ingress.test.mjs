@@ -65,3 +65,13 @@ test("default sandbox subnet is denied and malformed denylist fails startup", ()
 	for (const denied of ["bad", "192.168.1.2/33", "::/129", "10.0.0.0/8/2"])
 		assert.throws(() => clientGuard(undefined, denied));
 });
+
+test("node addresses are automatically denied on ingress", () => {
+	const allow = clientGuard(undefined, undefined, {
+		UMIAK_PVE_URL: "https://192.168.68.116:8006",
+		UMIAK_NODE_SSH_HOST: "fd00::12",
+	});
+	assert.equal(allow("192.168.68.116"), false);
+	assert.equal(allow("fd00::12"), false);
+	assert.equal(allow("192.168.68.20"), true);
+});

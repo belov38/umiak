@@ -34,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useUmiak } from "@/lib/api";
 import { attempt } from "@/lib/client-call";
+import { copyText } from "@/lib/clipboard";
 import { slugProblem } from "@/lib/create-form";
 import { describeError, isSnapshotRequiresStop } from "@/lib/errors";
 import { formatTime } from "@/lib/format";
@@ -132,7 +133,7 @@ export function SandboxHeader({
 						disabled={s.state !== "ready" || s.blocked}
 						onClick={() =>
 							void attempt(async () => {
-								await navigator.clipboard.writeText(s.endpoints.ssh);
+								await copyText(s.endpoints.ssh);
 								toast.success("SSH command copied");
 							})
 						}

@@ -5,10 +5,20 @@ import net from "node:net";
 export function clientGuard(
 	raw,
 	denied = process.env.UMIAK_LOCAL_DENIED_CIDRS ?? "10.88.0.0/24",
+	env = process.env,
 ) {
 	const list = new net.BlockList();
 	const deny = new net.BlockList();
-	for (const entry of denied.split(",").filter(Boolean)) {
+	const deniedEntries = denied.split(",").filter(Boolean);
+	for (const raw of [env.UMIAK_NODE_SSH_HOST, env.UMIAK_PVE_URL]) {
+		if (!raw) continue;
+		const host = raw.includes("://")
+			? new URL(raw).hostname.replace(/^\[|\]$/g, "")
+			: raw;
+		const family = net.isIP(host);
+		if (family) deniedEntries.push(`${host}/${family === 4 ? 32 : 128}`);
+	}
+	for (const entry of deniedEntries) {
 		const [ip, bits, extra] = entry.trim().split("/");
 		if (
 			!net.isIP(ip) ||
