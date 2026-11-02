@@ -28,6 +28,11 @@ describe("buildUmiakConfig", () => {
 		expect(c.cookiePrefix).toBe("__Host-payload");
 		expect(c.admin.user).toBe("users");
 		expect(c.admin.avatar).toBe("default");
+		expect(c.admin.components?.graphics).toMatchObject({
+			Logo: "/src/components/admin/brand#Logo",
+			Icon: "/src/components/admin/brand#Icon",
+		});
+		expect(c.admin.meta.titleSuffix).toBe(" — Umiak");
 		expect(c.telemetry).toBe(false);
 		expect(c.custom).toEqual({
 			umiak: { operatorGroups: ["umiak-operators"] },
