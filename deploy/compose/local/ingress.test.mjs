@@ -23,3 +23,45 @@ test("explicit allowlist and invalid settings fail closed", () => {
 	for (const value of ["", "0.0.0.0/99", "bad", "10.0.0.0/8/2"])
 		assert.throws(() => clientGuard(value));
 });
+
+test("deny wins over LAN allow and real socket peers differ", async () => {
+	const guard = clientGuard("127.0.0.0/8,::1/128", "::1/128");
+	const http = await import("node:http");
+	const server = http.createServer((req, res) => {
+		res.writeHead(guard(req.socket.remoteAddress) ? 200 : 403);
+		res.end();
+	});
+	await new Promise((resolve) => server.listen(0, "::", resolve));
+	try {
+		for (const [localAddress, expected] of [
+			["127.0.0.1", 200],
+			["::1", 403],
+		]) {
+			const status = await new Promise((resolve, reject) => {
+				http
+					.get(
+						{
+							host: localAddress,
+							port: server.address().port,
+							localAddress,
+							headers: { "x-forwarded-for": "127.0.0.1" },
+						},
+						(res) => {
+							res.resume();
+							resolve(res.statusCode);
+						},
+					)
+					.on("error", reject);
+			});
+			assert.equal(status, expected);
+		}
+	} finally {
+		await new Promise((resolve) => server.close(resolve));
+	}
+});
+
+test("default sandbox subnet is denied and malformed denylist fails startup", () => {
+	assert.equal(clientGuard()("10.88.0.2"), false);
+	for (const denied of ["bad", "192.168.1.2/33", "::/129", "10.0.0.0/8/2"])
+		assert.throws(() => clientGuard(undefined, denied));
+});

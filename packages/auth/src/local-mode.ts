@@ -1,4 +1,4 @@
-// Shared local deployment policy. An explicit empty allowlist denies everyone.
+// Shared local deployment policy. Invalid configuration fails startup.
 import { BlockList, isIP } from "node:net";
 import type { SessionHeaders } from "./identity.ts";
 
@@ -29,6 +29,8 @@ export function localAllowedCidrs(env: Environment = process.env): string[] {
 			: env.UMIAK_LOCAL_ALLOWED_CIDRS.split(",")
 					.map((s) => s.trim())
 					.filter(Boolean);
+	if (!cidrs.length)
+		throw new Error("UMIAK_LOCAL_ALLOWED_CIDRS must not be empty");
 	for (const cidr of cidrs) {
 		const [ip, prefix, extra] = cidr.split("/");
 		const family = ip === undefined ? 0 : isIP(ip);
@@ -41,25 +43,53 @@ export function localAllowedCidrs(env: Environment = process.env): string[] {
 		)
 			throw new Error(`invalid UMIAK_LOCAL_ALLOWED_CIDRS entry: ${cidr}`);
 	}
+	if (cidrs.some((c) => c === "0.0.0.0/0" || c === "::/0"))
+		console.warn(
+			"WARNING: local CIDR policy permits the entire Internet; restrict bind and host firewall",
+		);
 	return cidrs;
+}
+
+export function localDeniedCidrs(env: Environment = process.env): string[] {
+	const entries = (env.UMIAK_LOCAL_DENIED_CIDRS ?? "10.88.0.0/24")
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
+	// Literal node addresses also cover sandbox traffic SNATed by the PVE host.
+	for (const raw of [env.UMIAK_NODE_SSH_HOST, env.UMIAK_PVE_URL]) {
+		if (!raw) continue;
+		const host = raw.includes("://")
+			? new URL(raw).hostname.replace(/^\[|\]$/g, "")
+			: raw;
+		const family = isIP(host);
+		if (family) entries.push(`${host}/${family === 4 ? 32 : 128}`);
+	}
+	if (entries.length)
+		localAllowedCidrs({ UMIAK_LOCAL_ALLOWED_CIDRS: entries.join(",") });
+	return entries;
 }
 
 export function isLocalClientAllowed(
 	ip: string | undefined,
 	env: Environment = process.env,
 ): boolean {
-	const list = new BlockList();
-	for (const cidr of localAllowedCidrs(env)) {
-		const [address, prefix] = cidr.split("/") as [string, string];
-		list.addSubnet(
-			address,
-			Number(prefix),
-			isIP(address) === 6 ? "ipv6" : "ipv4",
-		);
-	}
 	const normalized = ip?.replace(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i, "$1");
+	const allowed = localAllowedCidrs(env);
+	const denied = localDeniedCidrs(env);
 	if (!normalized || !isIP(normalized)) return false;
-	return list.check(normalized, isIP(normalized) === 6 ? "ipv6" : "ipv4");
+	const matches = (cidrs: string[]) => {
+		const list = new BlockList();
+		for (const cidr of cidrs) {
+			const [address, prefix] = cidr.split("/") as [string, string];
+			list.addSubnet(
+				address,
+				Number(prefix),
+				isIP(address) === 6 ? "ipv6" : "ipv4",
+			);
+		}
+		return list.check(normalized, isIP(normalized) === 6 ? "ipv6" : "ipv4");
+	};
+	return !matches(denied) && matches(allowed);
 }
 
 export function localSessionHeaders(): SessionHeaders {

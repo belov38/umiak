@@ -11,11 +11,25 @@ import {
 
 /** Applies even to metadata: the local deployment is private to these networks. */
 export function localNetworkGuard(deps: ApiDeps): MiddlewareHandler<ApiEnv> {
+	let observed = 0;
 	return async (c, next) => {
+		if (deps.settings.authMode === "none" && observed++ < 10)
+			deps.log.info(
+				{
+					clientIp: c.var.clientIp,
+					peer: (
+						c.env as
+							| { incoming?: { socket?: { remoteAddress?: string } } }
+							| undefined
+					)?.incoming?.socket?.remoteAddress,
+				},
+				"local mode observed client address (may be Docker NAT)",
+			);
 		if (
 			deps.settings.authMode === "none" &&
 			!isLocalClientAllowed(c.var.clientIp, {
 				UMIAK_LOCAL_ALLOWED_CIDRS: deps.settings.localAllowedCidrs.join(","),
+				UMIAK_LOCAL_DENIED_CIDRS: deps.settings.localDeniedCidrs?.join(","),
 			})
 		)
 			throw new ApiError(

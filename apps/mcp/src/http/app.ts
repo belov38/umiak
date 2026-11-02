@@ -421,6 +421,7 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 
 	const app = new Hono();
 	if (authMode(o.localEnv ?? {}) === "none") {
+		let observed = 0;
 		const trusted = new TrustedProxies(
 			(o.localEnv?.UMIAK_API_TRUSTED_PROXY_CIDRS ?? "")
 				.split(",")
@@ -433,6 +434,11 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 					| undefined
 			)?.incoming?.socket?.remoteAddress;
 			const client = trusted.clientOf(peer, c.req.header("x-forwarded-for"));
+			if (observed++ < 10)
+				console.info("local MCP observed peer/client (may be Docker NAT)", {
+					peer,
+					client,
+				});
 			if (!isLocalClientAllowed(client, o.localEnv))
 				return c.json(
 					{

@@ -1,6 +1,6 @@
 // Environment of the remote MCP server (S11 16.3), validated once at start.
 // An invalid environment is a fatal error that lists every problem.
-import { authMode, localAllowedCidrs } from "@umiak/auth";
+import { authMode, localAllowedCidrs, localDeniedCidrs } from "@umiak/auth";
 import { z } from "zod";
 
 export class SettingsError extends Error {
@@ -115,7 +115,10 @@ export function loadSettings(
 	env: Record<string, string | undefined>,
 ): Settings {
 	const mode = authMode(env);
-	if (mode === "none") localAllowedCidrs(env);
+	if (mode === "none") {
+		localAllowedCidrs(env);
+		localDeniedCidrs(env);
+	}
 	const r = schema.safeParse(env);
 	if (!r.success) {
 		const lines = r.error.issues.map(
@@ -129,6 +132,7 @@ export function loadSettings(
 			? {
 					localEnv: {
 						UMIAK_AUTH_MODE: "none",
+						UMIAK_LOCAL_DENIED_CIDRS: localDeniedCidrs(env).join(","),
 						UMIAK_LOCAL_ALLOWED_CIDRS: env.UMIAK_LOCAL_ALLOWED_CIDRS,
 						UMIAK_API_TRUSTED_PROXY_CIDRS: env.UMIAK_API_TRUSTED_PROXY_CIDRS,
 					},

@@ -2,8 +2,23 @@
 import http from "node:http";
 import net from "node:net";
 
-export function clientGuard(raw) {
+export function clientGuard(
+	raw,
+	denied = process.env.UMIAK_LOCAL_DENIED_CIDRS ?? "10.88.0.0/24",
+) {
 	const list = new net.BlockList();
+	const deny = new net.BlockList();
+	for (const entry of denied.split(",").filter(Boolean)) {
+		const [ip, bits, extra] = entry.trim().split("/");
+		if (
+			!net.isIP(ip) ||
+			bits === undefined ||
+			!/^\d+$/.test(bits) ||
+			extra !== undefined
+		)
+			throw new Error("Invalid denied CIDR");
+		deny.addSubnet(ip, Number(bits), net.isIP(ip) === 6 ? "ipv6" : "ipv4");
+	}
 	const entries = (
 		raw ??
 		"127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
@@ -18,12 +33,18 @@ export function clientGuard(raw) {
 			extra !== undefined
 		)
 			throw new Error("Invalid local CIDR");
+		if (Number(bits) === 0)
+			console.warn("WARNING: local allowlist permits the entire Internet");
 		list.addSubnet(ip, Number(bits), family === 6 ? "ipv6" : "ipv4");
 	}
 	return (address) => {
 		const ip = address?.replace(/^::ffff:/, "") ?? "";
 		const family = net.isIP(ip);
-		return family !== 0 && list.check(ip, family === 6 ? "ipv6" : "ipv4");
+		return (
+			family !== 0 &&
+			!deny.check(ip, family === 6 ? "ipv6" : "ipv4") &&
+			list.check(ip, family === 6 ? "ipv6" : "ipv4")
+		);
 	};
 }
 export function startIngress() {
@@ -31,12 +52,20 @@ export function startIngress() {
 	const expectedHost = new URL(
 		process.env.UMIAK_APP_ORIGIN ?? "http://localhost:4180",
 	).host;
-	const validHost = (req) => req.headers.host === expectedHost;
+	let observed = 0;
+	const validHost = (req) => {
+		if (observed++ < 10)
+			console.info(
+				"local ingress observed socket peer (may be Docker NAT)",
+				req.socket.remoteAddress,
+			);
+		return req.headers.host === expectedHost;
+	};
 	const route = (url) =>
-		url.startsWith("/api/")
-			? ["api", 8081, url.slice(4)]
-			: url.startsWith("/umiak-auth/")
-				? ["api", 8081, url]
+		url.startsWith("/mcp")
+			? ["mcp", 8080, url]
+			: url.startsWith("/api/")
+				? ["api", 8081, url.slice(4)]
 				: ["web", 3000, url];
 	const headers = (req) => ({
 		...req.headers,
@@ -46,6 +75,11 @@ export function startIngress() {
 		"x-forwarded-host": expectedHost,
 	});
 	const server = http.createServer((req, res) => {
+		if (req.url.startsWith("/umiak-auth/")) {
+			res.writeHead(403);
+			res.end("SSO is unavailable in local mode");
+			return;
+		}
 		if (!validHost(req)) {
 			res.writeHead(421);
 			res.end("local_host_forbidden");

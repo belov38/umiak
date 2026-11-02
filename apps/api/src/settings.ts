@@ -8,6 +8,7 @@ import {
 	loadSshCa,
 	loadSshHostKeys,
 	localAllowedCidrs,
+	localDeniedCidrs,
 	type SshCa,
 } from "@umiak/auth";
 import { z } from "zod";
@@ -42,6 +43,7 @@ export interface OidcSettings {
 export interface Settings {
 	authMode: "oidc" | "none";
 	localAllowedCidrs: string[];
+	localDeniedCidrs?: string[];
 	localAllowedHosts: string[];
 	publicPort: number;
 	proxiedPort: number;
@@ -292,6 +294,7 @@ export function loadSettings(
 	return {
 		authMode: mode,
 		localAllowedCidrs: allowed,
+		localDeniedCidrs: localDeniedCidrs(env),
 		localAllowedHosts: [
 			...new Set([
 				new URL(e.UMIAK_API_URL).host,

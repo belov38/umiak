@@ -16,7 +16,20 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
 			title={label}
 			onClick={async () => {
 				try {
-					await navigator.clipboard.writeText(text);
+					if (navigator.clipboard) await navigator.clipboard.writeText(text);
+					else {
+						const input = document.createElement("textarea");
+						input.value = text;
+						input.style.position = "fixed";
+						input.style.opacity = "0";
+						document.body.append(input);
+						try {
+							input.select();
+							if (!document.execCommand("copy")) throw new Error("Copy failed");
+						} finally {
+							input.remove();
+						}
+					}
 					setCopied(true);
 					setTimeout(() => setCopied(false), 1500);
 				} catch {

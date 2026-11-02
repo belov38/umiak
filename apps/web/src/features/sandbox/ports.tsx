@@ -14,6 +14,7 @@ import { ConfirmButton } from "@/components/app/confirm-button";
 import { CopyButton, CopyLine } from "@/components/app/copy-button";
 import { Field, FormDialog } from "@/components/app/form-dialog";
 import { QueryError } from "@/components/app/query-error";
+import { useLocalMode } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -292,6 +293,7 @@ function PublishDialog({
 		p: Awaited<ReturnType<Sandbox["ports"]["host"]>>,
 	) => Promise<void>;
 }) {
+	const localMode = useLocalMode();
 	const [port, setPort] = useState("");
 	const [access, setAccess] = useState<Access>("token");
 	const [rewrite, setRewrite] = useState<HostRewrite>("preserve");
@@ -370,25 +372,29 @@ function PublishDialog({
 			)}
 			<fieldset className="grid gap-1 text-sm">
 				<legend className="mb-1 font-medium">Access</legend>
-				{(Object.keys(ACCESS_TEXT) as Access[]).map((a) => (
-					<label
-						key={a}
-						className={
-							a === "public" && publicOff ? "text-muted-foreground" : undefined
-						}
-					>
-						<input
-							type="radio"
-							name="access"
-							className="mr-2"
-							checked={access === a}
-							disabled={a === "public" && publicOff}
-							onChange={() => setAccess(a)}
-						/>
-						{ACCESS_TEXT[a]}
-						{a === "public" && publicOff && " (turned off by the operator)"}
-					</label>
-				))}
+				{(Object.keys(ACCESS_TEXT) as Access[])
+					.filter((a) => !localMode || a !== "sso")
+					.map((a) => (
+						<label
+							key={a}
+							className={
+								a === "public" && publicOff
+									? "text-muted-foreground"
+									: undefined
+							}
+						>
+							<input
+								type="radio"
+								name="access"
+								className="mr-2"
+								checked={access === a}
+								disabled={a === "public" && publicOff}
+								onChange={() => setAccess(a)}
+							/>
+							{ACCESS_TEXT[a]}
+							{a === "public" && publicOff && " (turned off by the operator)"}
+						</label>
+					))}
 			</fieldset>
 			<Field
 				label="Host header"

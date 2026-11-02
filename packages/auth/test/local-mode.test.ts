@@ -37,9 +37,9 @@ describe("local mode configuration", () => {
 		const env = { UMIAK_LOCAL_ALLOWED_CIDRS: "192.168.4.0/24,fd00:1::/48" };
 		expect(isLocalClientAllowed("192.168.4.5", env)).toBe(true);
 		expect(isLocalClientAllowed("127.0.0.1", env)).toBe(false);
-		expect(
-			isLocalClientAllowed("127.0.0.1", { UMIAK_LOCAL_ALLOWED_CIDRS: "" }),
-		).toBe(false);
+		expect(() =>
+			localAllowedCidrs({ UMIAK_LOCAL_ALLOWED_CIDRS: "" }),
+		).toThrow();
 		for (const cidr of [
 			"garbage",
 			"10.0.0.0/33",
@@ -51,4 +51,36 @@ describe("local mode configuration", () => {
 				localAllowedCidrs({ UMIAK_LOCAL_ALLOWED_CIDRS: cidr }),
 			).toThrow();
 	});
+});
+
+it("denies sandbox SNAT before allowing LAN, including mapped peers", () => {
+	const env = {
+		UMIAK_LOCAL_ALLOWED_CIDRS: "192.168.68.0/24",
+		UMIAK_LOCAL_DENIED_CIDRS: "192.168.68.116/32",
+	};
+	expect(isLocalClientAllowed("192.168.68.20", env)).toBe(true);
+	expect(isLocalClientAllowed("192.168.68.116", env)).toBe(false);
+	expect(isLocalClientAllowed("::ffff:192.168.68.116", env)).toBe(false);
+	expect(isLocalClientAllowed("10.88.0.2", {})).toBe(false);
+	expect(
+		isLocalClientAllowed("192.168.68.116", {
+			UMIAK_NODE_SSH_HOST: "192.168.68.116",
+		}),
+	).toBe(false);
+});
+
+it("validates denied CIDRs and derives node IPv6 addresses", () => {
+	expect(() =>
+		isLocalClientAllowed("127.0.0.1", { UMIAK_LOCAL_DENIED_CIDRS: "bad" }),
+	).toThrow();
+	expect(
+		isLocalClientAllowed("fd00::12", {
+			UMIAK_PVE_URL: "https://[fd00::12]:8006",
+		}),
+	).toBe(false);
+	expect(
+		isLocalClientAllowed("fd00::13", {
+			UMIAK_PVE_URL: "https://[fd00::12]:8006",
+		}),
+	).toBe(true);
 });

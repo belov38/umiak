@@ -40,3 +40,8 @@ export function useTeamPermission(teamId: string): {
 		team: { role: t?.role ?? null, personal: t?.personal ?? false },
 	};
 }
+
+export const LocalModeContext = createContext(false);
+export function useLocalMode() {
+	return useContext(LocalModeContext);
+}

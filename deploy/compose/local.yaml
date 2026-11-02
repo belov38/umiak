@@ -3,6 +3,7 @@
 name: umiak-local
 
 x-local-env: &local-env
+  UMIAK_LOCAL_DENIED_CIDRS: ${UMIAK_LOCAL_DENIED_CIDRS:-10.88.0.0/24}
   UMIAK_AUTH_MODE: none
   UMIAK_LOCAL_ALLOWED_CIDRS: ${UMIAK_LOCAL_ALLOWED_CIDRS-127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7}
 
@@ -17,9 +18,9 @@ services:
     environment:
       <<: *local-env
       UMIAK_LOCAL_ALLOWED_HOSTS: api:8080
-      UMIAK_API_TRUSTED_PROXY_CIDRS: 172.29.115.10/32,172.29.115.11/32,${UMIAK_API_TRUSTED_PROXY_CIDRS:-}
+      UMIAK_API_TRUSTED_PROXY_CIDRS: ${UMIAK_LOCAL_INGRESS_IP:-172.29.115.10}/32,${UMIAK_LOCAL_MCP_IP:-172.29.115.11}/32,${UMIAK_API_TRUSTED_PROXY_CIDRS:-}
     ports: !override
-      - "${UMIAK_LOCAL_BIND:-0.0.0.0}:${UMIAK_LOCAL_API_PORT:-8080}:8080"
+      - "${UMIAK_LOCAL_BIND:-127.0.0.1}:${UMIAK_LOCAL_API_PORT:-8080}:8080"
     depends_on: !override
       web-migrate:
         condition: service_completed_successfully
@@ -43,12 +44,12 @@ services:
   mcp:
     networks:
       umiak:
-        ipv4_address: 172.29.115.11
+        ipv4_address: ${UMIAK_LOCAL_MCP_IP:-172.29.115.11}
     environment:
       <<: *local-env
       UMIAK_API_TRUSTED_PROXY_CIDRS: ${UMIAK_MCP_TRUSTED_PROXY_CIDRS:-}
     ports: !override
-      - "${UMIAK_LOCAL_BIND:-0.0.0.0}:${UMIAK_LOCAL_MCP_PORT:-8090}:8080"
+      - "${UMIAK_LOCAL_BIND:-127.0.0.1}:${UMIAK_LOCAL_MCP_PORT:-8090}:8080"
   gateway:
     environment:
       UMIAK_AUTH_MODE: none
@@ -56,8 +57,8 @@ services:
       UMIAK_GATEWAY_TUNNEL_HOST: ${UMIAK_TUNNEL_HOST:-tunnel.localhost}
       UMIAK_GATEWAY_SSH_HOST: ${UMIAK_SSH_HOST:-ssh.localhost}
     ports: !override
-      - "${UMIAK_LOCAL_BIND:-0.0.0.0}:${GATEWAY_HTTPS_PORT:-8443}:8443"
-      - "${UMIAK_LOCAL_BIND:-0.0.0.0}:${GATEWAY_SSH_PORT:-2222}:2222"
+      - "${UMIAK_LOCAL_BIND:-127.0.0.1}:${GATEWAY_HTTPS_PORT:-8443}:8443"
+      - "${UMIAK_LOCAL_BIND:-127.0.0.1}:${GATEWAY_SSH_PORT:-2222}:2222"
   local-ingress:
     image: node:26.13.0-bookworm-slim
     user: "1000:1000"
@@ -72,10 +73,10 @@ services:
       - ./local/ingress.mjs:/ingress.mjs:ro
     networks:
       umiak:
-        ipv4_address: 172.29.115.10
+        ipv4_address: ${UMIAK_LOCAL_INGRESS_IP:-172.29.115.10}
       web-internal: {}
     ports:
-      - "${UMIAK_LOCAL_BIND:-0.0.0.0}:${UMIAK_LOCAL_APP_PORT:-4180}:4180"
+      - "${UMIAK_LOCAL_BIND:-127.0.0.1}:${UMIAK_LOCAL_APP_PORT:-4180}:4180"
     depends_on:
       api:
         condition: service_healthy
@@ -88,3 +89,4 @@ networks:
     ipam:
       config:
         - subnet: 172.29.115.0/24
+          ip_range: 172.29.115.128/25
