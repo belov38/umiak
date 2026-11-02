@@ -318,6 +318,12 @@ function SandboxTable({
 									title={`by ${creator(s)}`}
 								>
 									{formatTime(s.createdAt)}
+									<div
+										className="mt-1 text-muted-foreground"
+										data-testid="sandbox-creator"
+									>
+										by {creator(s)}
+									</div>
 								</TableCell>
 								<TableCell className="text-xs">
 									<span title={`${s.vcpu} vCPU / ${s.memoryMb} MB`}>

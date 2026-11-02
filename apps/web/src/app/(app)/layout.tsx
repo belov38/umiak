@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import type React from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { APPEARANCE_BOOTSTRAP } from "@/lib/appearance";
 
 export const metadata: Metadata = {
 	title: "Umiak",
@@ -19,7 +20,7 @@ export default function AppRootLayout({
 		<html lang="en" suppressHydrationWarning>
 			<head>
 				{/* Static bootstrap runs before paint; it contains no user input. */}
-				<script>{`(()=>{let saved;try{saved=localStorage.getItem("umiak-theme")}catch{}document.documentElement.classList.toggle("dark",saved?saved==="dark":matchMedia("(prefers-color-scheme: dark)").matches)})()`}</script>
+				<script>{APPEARANCE_BOOTSTRAP}</script>
 			</head>
 			<body className="min-h-screen antialiased">
 				<TooltipProvider>{children}</TooltipProvider>

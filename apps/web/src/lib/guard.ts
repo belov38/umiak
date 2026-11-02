@@ -1,3 +1,6 @@
+import { ACCESS_CSS } from "./access-style";
+import { APPEARANCE_BOOTSTRAP } from "./appearance";
+import { LOCKUP_SVG } from "./brand-markup";
 // Request checks of proxy.ts (S8 §5.1, §5.6), kept free of Next.js types so
 // they are unit-tested directly.
 //   - every path but /healthz needs X-Auth-Request-Email (only oauth2-proxy
@@ -32,7 +35,7 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 export const PUBLIC_PATHS: ReadonlySet<string> = new Set(["/healthz"]);
 
 export function page(title: string, text: string): string {
-	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title></head><body style="font-family:system-ui,sans-serif;max-width:40rem;margin:4rem auto;padding:0 1rem"><h1>${title}</h1><p>${text}</p></body></html>`;
+	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} — Umiak</title><style>${ACCESS_CSS}</style><script>${APPEARANCE_BOOTSTRAP}</script></head><body><main class="umiak-access"><a href="/app" aria-label="Umiak">${LOCKUP_SVG}</a><h1>${title}</h1><p>${text}</p></main></body></html>`;
 }
 
 /** Payload's /admin and REST: served to operators only. */
