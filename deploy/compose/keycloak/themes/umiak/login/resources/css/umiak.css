@@ -4,7 +4,7 @@
 	--pf-v5-global--primary-color--100: #263fa9;
 }
 /* The dark scheme sets the button colours on the button itself. */
-html .pf-v5-c-button.pf-v5-m-primary {
+html .pf-v5-c-button.pf-m-primary {
 	--pf-v5-c-button--m-primary--BackgroundColor: #263fa9;
 	--pf-v5-c-button--m-primary--hover--BackgroundColor: #1f3489;
 	--pf-v5-c-button--m-primary--focus--BackgroundColor: #1f3489;
