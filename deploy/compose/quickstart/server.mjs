@@ -70,6 +70,12 @@ export function requestOrigin(req) {
 		throw new Error("invalid_host");
 	const url = new URL(`https://${host}`);
 	if (url.host !== host.toLowerCase()) throw new Error("invalid_host");
+	const hostname = url.hostname.replace(/^\[|\]$/g, "");
+	if (
+		!net.isIP(hostname) &&
+		!/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/i.test(hostname)
+	)
+		throw new Error("invalid_host");
 	return url.origin;
 }
 export function upstreamHeaders(req, appOrigin) {

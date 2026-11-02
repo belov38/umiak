@@ -39,6 +39,7 @@ test("origin accepts DNS and IP but refuses malformed authority", () => {
 		"https://192.168.1.2:8444",
 	);
 	assert.throws(() => requestOrigin({ headers: { host: "evil/path" } }));
+	assert.throws(() => requestOrigin({ headers: { host: "bad'host" } }));
 });
 
 test("HTTP routes gate API and WS, claim requires same origin, pair needs owner approval", async () => {
