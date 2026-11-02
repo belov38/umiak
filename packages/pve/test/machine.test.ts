@@ -555,6 +555,28 @@ describe("snapshot and fork", () => {
 });
 
 describe("delete", () => {
+	it("deletes only this machine's disks when an unrelated PVE storage is unavailable", async () => {
+		const { api, node, machines, store } = setup();
+		const machine = await machines.create({});
+		await machines.start(machine.vmid);
+		// A deleted config may leave a tagged clone behind; our driver still removes it.
+		node.lvs.push({ name: "vm-500-disk-9", tags: ["umiak", "umiak-vm-500"] });
+		const unrelated = {
+			name: "vm-501-disk-0",
+			tags: ["umiak", "umiak-vm-501"],
+		};
+		node.lvs.push(unrelated);
+		api.unavailableStorageForScan = "vmdata";
+		await machines.delete(machine.vmid);
+		expect(api.paths()).toContain("POST /nodes/pve/qemu/500/status/stop");
+		expect(api.vms.has(machine.vmid)).toBe(false);
+		expect(node.calls.find((c) => c.op === "lv.remove")?.args).toEqual({
+			names: ["vm-500-disk-0", "vm-500-disk-9"],
+		});
+		expect(node.lvs).toEqual([unrelated]);
+		expect(store.get(1, machine.vmid)).toBeUndefined();
+	});
+
 	it("stops, destroys, removes LVs, verifies, then frees the VMID", async () => {
 		const { api, node, machines, store } = setup();
 		const a = await machines.create({});
@@ -569,7 +591,7 @@ describe("delete", () => {
 		await machines.delete(a.vmid);
 		expect(api.paths()).toContain("POST /nodes/pve/qemu/500/status/stop");
 		const del = api.calls.find((c) => c.method === "DELETE");
-		expect(del?.params).toEqual({ purge: 1, "destroy-unreferenced-disks": 1 });
+		expect(del?.params).toEqual({ purge: 1, "destroy-unreferenced-disks": 0 });
 		expect(node.calls.find((c) => c.op === "dhcp.release")?.args).toEqual({
 			mac: "02:01:00:00:01:F4",
 		});

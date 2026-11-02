@@ -853,9 +853,12 @@ export class Machines {
 			// new MAC, after which a release for our MAC finds nothing. umiak-node keeps the ethers
 			// line while the MAC is in mac-cache.json; verifyGone removes it after destroy.
 			await this.#o.node.call("dhcp.release", { mac });
+			// Restrict Proxmox to the config's attached disks. Scanning every configured
+			// storage also activates unrelated VGs and can fail before this VM is destroyed.
+			// The tag-scoped driver below removes our remaining clone disks.
 			const upid = await api.delete<string>(this.#vmPath(vmid), {
 				purge: 1,
-				"destroy-unreferenced-disks": 1,
+				"destroy-unreferenced-disks": 0,
 			});
 			await api.waitTask(this.#node, upid);
 		}
