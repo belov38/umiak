@@ -131,7 +131,7 @@ Checked on CT 590 by `e2e.sh` (`docs/plans/e2e-devcp.md`): every service healthy
 
 ### S8 dashboard (web)
 
-> **Не проверено на CT.** Checked locally only (`docker compose config` with the dev-cp files as `deploy.sh` layers them, and the base stack on the Mac). After the next deploy, verify on the CT:
+> **R1 live acceptance complete.** The fresh Umiak deployment on CT 590 has nine healthy services. E2E login, personal team, normal-user 403 and temporary-operator 200 gates, full proxy/Keycloak logout, and the live desktop iframe/CSP passed. Linux and Windows desktop acceptance also passed relay-only UDP/TCP/TLS and a full 30-minute idle hold. Operational checklist for later deployments:
 > - `docker compose ps -a`: `web-migrate` and `migrate` `Exited (0)`, `web` healthy; `docker compose logs web-migrate` lists the applied migrations (an existing S7 volume: the identity rows are copied into `payload` by the first one). api `/readyz` 200 (it checks the Payload migrations).
 > - Browser `https://<TS name>:8443/` → Keycloak (`:10000`) → `/app` → the personal team; `/api/v1/me` 200 with `"auth": {"kind": "session"}` and the same user and team ids as the dashboard.
 > - `/admin`: 403 "Operators only" for `dev@example.com`; after joining `umiak-operators` in Keycloak and signing in again: the admin and `/app/operator`.
@@ -147,7 +147,7 @@ Checked on CT 590 by `e2e.sh` (`docs/plans/e2e-devcp.md`): every service healthy
 
 ### S11 MCP behind Tailscale Serve
 
-> **Not checked on the CT.** The wiring was checked locally only (`docker compose config` with the dev-cp files, a local image build and container smoke); `deploy.sh` has not been run with the `mcp` service, and nothing was run on CT 590. To verify after the master allows a deploy:
+> **R1 live acceptance complete.** MCP is healthy behind Serve. The new realm/client passed authorization code + PKCE, issuer/audience/azp checks, 38 tools, a live limits call, refresh and a repeated call. A new read-only team key exposed 11 scoped tools; the test key was revoked. Compiled `umiak mcp` stdio also passed initialize/list/call and exited on EOF. Operational checklist for later deployments:
 > - `docker compose ps` on the CT: `mcp` healthy; `curl http://127.0.0.1:9092/readyz` answers 200.
 > - Which `Host` Serve passes to the target: the MagicDNS name with `:8443` or `127.0.0.1:8090`. Both are in `UMIAK_MCP_ALLOWED_HOSTS` (`compose.dev-cp.yaml`); a `421 this Host is not served here` from `/mcp` through Serve means a third form, add it there.
 > - `curl -i https://<TS name>:8443/mcp -X POST -H 'content-type: application/json' -d '{}'` answers `401` with `WWW-Authenticate: Bearer resource_metadata="https://<TS name>:8443/.well-known/oauth-protected-resource/mcp"`; that metadata names `authorization_servers: ["https://<TS name>:10000/realms/umiak"]`.

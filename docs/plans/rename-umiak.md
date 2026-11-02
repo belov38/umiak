@@ -34,8 +34,8 @@
 - [x] R1.2c: generated drift, compose config, девять images, signed Linux/Windows packages, integration harness и CLI platform compile; local dry-run.
 - [x] R1.2d: интегрировать main, повторить затронутый gate; inventory allowlist; commit/push. Если локальная работа исчерпана — запросить освобождение стенда.
 - [x] R1.3: после сигнала master §5 backup/clean old runtime, host identity/network/CT/CA/IdP/DB/Serve, rollback timers, 4 template builds (≥90 min background-task limit, дождаться каждого).
-- [ ] R1.4: verify four templates, 20/20 e2e, два desktop E2E (UDP/TCP/TLS/idle), TURN guard/block/cache probes; уборка и evidence, push.
-- [ ] Финал: master независимая приёмка; R1.5 только master. Никаких оставленных running tasks.
+- [x] R1.4: verify four templates, 20/20 e2e, два desktop E2E (UDP/TCP/TLS/idle), TURN guard/block/cache probes; уборка и evidence, push.
+- [x] Финал исполнителя: evidence, roadmap и push; никаких оставленных running tasks. Независимая приёмка и merge — master; R1.5 только master после merge.
 
 ## Журнал
 
@@ -123,3 +123,24 @@
 - Live dashboard iframe/CSP acceptance PASS as E2E in T3 browser: nova-canoe-fawn-desktop.umiak.100-64-10-7.sslip.io loaded inside the actual desktop tab, controls accessible and viewer Connection Complete, 0 console errors, parent frame-src allows the new domain. Full proxy + Keycloak logout returned protected app to login; tab closed and sandbox deleted with --yes (unsupported rm --wait was rejected before mutation, then corrected).
 - Smoke migration follow-up: the historical S3 helper attempted to replace the already-baked agent using throwaway fixture signing keys; trust correctly rejected the package. Its clone/rows were cleaned, then the 5-minute host timer fired harmlessly with owned VMs []. Adapted smoke to preserve and verify the baked agent/root CA instead of installing a diagnostic package; no trust bypass.
 - Complete updated live smoke PASS: 20 network isolation probes, public DNS, baked CA hash matches gateway, active umiak units, doctor URL from smbios, connected tunnel and System/Info agent 0.1.0+20261101.087b3f3a. Exact clone/credential/session cleanup, no VMIDs 500–589 left. Operator PVE tailnet SSH, CT tailnet and pinned LAN-via-jump SSH, authenticated PVE API permissions all pass; fresh 5-minute host timer cancelled while active, rollback did not fire. Bash syntax/diff checks pass.
+
+## Передача master: R1.0–R1.4 завершены
+
+- Финальная очистка сети выполнена под отдельным host auto-rollback timer на пять минут: удалены только пять старых cluster firewall sections, пустая старая IPAM zone и неактивные DHCP-файлы. Новый probe из 597 прошёл TLS 1.3 с новой CA, TURN UDP, DNS/Internet и блокировку 17 management endpoints. Настройки/адреса/default route `vmbr0` и общие NAT/raw rules совпадают до/после. Probe удалён, четыре SSH/API проверки пройдены, timer отменён до срабатывания. Перезагрузки firewall и ifreload-a не было.
+- Удалены старые PVE user/roles, пустой pool, forced SSH key, node helper/config/cache; новые ограниченные identities сохранены. Два старых media cache-файла удалены только после совпадения размера/SHA256 с новыми копиями и проверки отсутствия ссылок во всех live qemu configs. Пользовательский Windows ISO сохранён.
+- На CT удалены восемь старых image tags, неиспользуемый старый DB volume, изолированные старые home/config и старый Tailscale leaf certificate/key; на Mac — девять старых image tags, старые config/state/cache и временный legacy checkout. Покрытие encrypted backup проверено перед удалением. Старая CA отсутствует в System keychain и user/admin trust settings; новая CA проходит SSL trust check. Старый SSH alias удалён с сохранением новых pins.
+- В CT исправлены также owner labels в `/etc/subuid` и `/etc/subgid`: только старый login → `umiak`, без изменения числовых диапазонов и uid/gid 1000; scoped backup под root. Повторный idempotent deploy завершился с exit 0, внешние tunnel/preview/Serve/API/PRM probes прошли. Все девять сервисов healthy.
+- Финальные read-only проверки: активные OS/PVE configs без legacy имён; DB/user `umiak`, 22 миграции через `0500`, старых public tables нет; только realms `master`/`umiak`, новые клиенты. Windows preflight прошёл media.list через новый restricted node key, ISO hash и права; единственный ожидаемый WARN — намеренно отсутствующий Sys.Audit на ноде. Live quota 8192 MB, usage 0 MB; продуктовый default 6144 MB не менялся.
+- CLI refresh token тестового профиля отозван, credentials удалены; временный профиль удалён. У E2E нет operator membership и открытых Keycloak sessions. Все открывавшиеся браузеры/loopback listeners закрыты. Нет sandbox VMs 500–589, нет running build/verify/test/deploy jobs и R1 rollback timers. Четыре шаблона stopped/ready; pools пусты.
+- Git `origin/main` повторно проверен: `7eeb7bfc`, обе запрошенные интеграции включены. Утверждённый R1 spec и 30 исторических SQL/Payload migration files byte-identical. Остаточные legacy literals — история/spec mapping, immutable migrations, journal adoption и отрицательные compatibility tests; `boat.dev` обозначает внешний продукт, совпадение `boAt` в lockfile — integrity hash.
+- Backup retention: пять зашифрованных архивов с проверенным roundtrip и десять независимых readonly LV snapshots сохраняются минимум до `2026-11-08T21:12:06Z` (9 ноября Auckland). Private `RESTORE.txt` описывает согласованный rollback исходников/images/DB/IdP/CA/SSH/templates, восстановление ограниченных identities и новый host timer. Архивные metadata со старыми именами намеренно сохранены. Их последующая уборка — отдельная операция.
+- Открытых вопросов Илье и незавершённых R1.0–R1.4 работ нет. Master выполняет независимую приёмку, merge и затем R1.5: GitHub repo/remotes/T3 project path; origin URL до этого намеренно прежний.
+
+| Шаблон | VMID | Версия | Manifest build ID | Connected build verify |
+|---|---:|---|---|---|
+| linux | 597 | 20261101.1 | `01a1991c-0aa8-77af-94fa-6e4ec1e9a24f` | 99 PASS / 2 INFO / 0 FAIL |
+| linux-desktop | 596 | 20261101.3 | `01a1992c-8cdc-7036-802a-fa52d23f7056` | 107 PASS / 2 INFO / 0 FAIL |
+| windows-desktop | 595 | 20261101.7 | `01a1993d-3986-7c3e-ab41-4408207656c4` | 112 PASS / 5 INFO / 0 FAIL |
+| windows | 598 | 20261101.2 | `01a19983-d967-7ea4-bd34-233e58dbce4d` | 101 PASS / 5 INFO / 0 FAIL |
+
+Все четыре используют baked agent `0.1.0+20261101.087b3f3a` и новую CA. Итог проверки шаблонов: 419 PASS / 14 INFO / 0 FAIL. Полный последний local gate: TS 4472 PASS / 8 expected skips, Python 81/81; Go 1167 root PASS / 2 expected skips плюс применимые race/vet/lint/Linux/Windows gates; native Windows 19/19 binaries, 524 root PASS / 27 expected skips. E2E 20/20, оба desktop по 52 ok с полными 30 минутами каждый, dashboard Playwright 21/21, block probes по 16 ok, cache probe без PNG/роста DB, TURN guard и baked-agent smoke PASS. Сводные ранние артефакты (9 images, 5 CLI targets, signed packages, 429 generated files без drift, fresh/upgrade DB history) перечислены выше.
