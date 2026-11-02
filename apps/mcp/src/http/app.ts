@@ -205,7 +205,7 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 		o.metrics?.authRejections.inc({ status: r.status, reason: r.reason });
 		log.info({ status: r.status, reason: r.reason }, "bearer refused");
 		const headers: Record<string, string> = {};
-		if (r.status === 401) {
+		if (r.status === 401 && authMode(o.localEnv ?? {}) === "oidc") {
 			headers["WWW-Authenticate"] = bearerChallenge(metadataUrl, r.challenge);
 		}
 		if (r.status === 503) headers["Retry-After"] = "1";
