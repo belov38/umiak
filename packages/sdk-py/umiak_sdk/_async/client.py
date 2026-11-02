@@ -137,7 +137,10 @@ class _ProfileToken(AsyncCredentials):
 
 
 async def resolve_credentials(
-    chain: Chain, env: Mapping[str, str], auth_command: Sequence[str]
+    chain: Chain,
+    env: Mapping[str, str],
+    auth_command: Sequence[str],
+    metadata_transport: httpx.AsyncBaseTransport | None = None,
 ) -> AsyncCredentials:
     if chain.token is not None:
         if chain.url is None:
@@ -147,7 +150,23 @@ async def resolve_credentials(
         if chain.url is None:
             raise no_api_url()
         return _ProviderToken(chain.url, chain.team, chain.provider)
-    current = parse_auth_token(await run_auth_command(auth_command, env))
+    try:
+        current = parse_auth_token(await run_auth_command(auth_command, env))
+    except UmiakError:
+        if chain.url is not None and metadata_transport is not None:
+            request = httpx.Request(
+                "GET",
+                f"{trim_slash(chain.url)}/v1/meta",
+                extensions={"timeout": {"connect": 2.0, "read": 2.0, "write": 2.0, "pool": 2.0}},
+            )
+            try:
+                response = await metadata_transport.handle_async_request(request)
+                await response.aread()
+                if response.is_success and response.json().get("authMode") == "none":
+                    return _FixedToken(chain.url, chain.team, "")
+            except (httpx.HTTPError, ValueError, AttributeError):
+                pass
+        raise
     if chain.url is not None and not same_api(chain.url, current.api_url):
         raise no_credentials(f"the umiak profile is for {current.api_url}, not {chain.url}")
     return _ProfileToken(
@@ -205,7 +224,9 @@ class AsyncUmiakTransport(httpx.AsyncBaseTransport):
         read_body = opts.get("read_body") is True
         h = request.headers
         if path is not None:
-            h["Authorization"] = f"Bearer {await creds.get_token(False)}"
+            token = await creds.get_token(False)
+            if token:
+                h["Authorization"] = f"Bearer {token}"
             if creds.team is not None and "Umiak-Team" not in h:
                 h["Umiak-Team"] = creds.team
             if "Idempotency-Key" not in h and takes_idempotency_key(request.method, path):
@@ -318,9 +339,10 @@ class AsyncClientCore:
         self.random = random or _random.random
         self._creds: AsyncCredentials | None = None
         self._creds_lock = Lock()
+        self._inner = transport or httpx.AsyncHTTPTransport()
         self.http = httpx.AsyncClient(
             base_url=PLACEHOLDER_URL,
-            transport=AsyncUmiakTransport(self, transport or httpx.AsyncHTTPTransport()),
+            transport=AsyncUmiakTransport(self, self._inner),
             timeout=DEFAULT_TIMEOUT,
             follow_redirects=False,
         )
@@ -333,7 +355,9 @@ class AsyncClientCore:
             return self._creds
         async with self._creds_lock:
             if self._creds is None:
-                self._creds = await resolve_credentials(self._chain, self._env, self._auth_command)
+                self._creds = await resolve_credentials(
+                    self._chain, self._env, self._auth_command, self._inner
+                )
             return self._creds
 
     @staticmethod

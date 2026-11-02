@@ -39,7 +39,7 @@ export type StoredCredential =
 	  };
 
 export interface Bearer {
-	kind: "oidc" | "key";
+	kind: "oidc" | "key" | "none";
 	token: string;
 	/** ISO time; null for keys. */
 	expiresAt: string | null;
@@ -116,6 +116,8 @@ export async function getBearer(d: BearerDeps): Promise<Bearer> {
 		return { kind: "key", token: envKey, expiresAt: null };
 	}
 	if (d.profile === undefined) throw notLoggedIn(d.profileName);
+	if (d.profile.auth === "none")
+		return { kind: "none", token: "", expiresAt: null };
 	const name = credentialName(d.profileName, d.profile);
 	const c = parseCredential(await d.store.get(name));
 	if (c === null) throw notLoggedIn(d.profileName);

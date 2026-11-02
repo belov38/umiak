@@ -299,6 +299,9 @@ importers:
       '@modelcontextprotocol/server':
         specifier: 2.4.0
         version: 2.4.0
+      '@umiak/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@umiak/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk-ts

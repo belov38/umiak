@@ -14,7 +14,7 @@ import { CliError } from "./exit-codes.ts";
 
 export type Env = Record<string, string | undefined>;
 
-export type AuthKind = "oidc" | "key";
+export type AuthKind = "oidc" | "key" | "none";
 export type StoreKind = "keychain" | "file";
 
 export interface Profile {

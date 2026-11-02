@@ -1,5 +1,6 @@
 // Environment of the remote MCP server (S11 16.3), validated once at start.
 // An invalid environment is a fatal error that lists every problem.
+import { authMode, localAllowedCidrs } from "@umiak/auth";
 import { z } from "zod";
 
 export class SettingsError extends Error {
@@ -20,6 +21,7 @@ export const LOG_LEVELS = [
 ] as const;
 
 export interface Settings {
+	localEnv?: Record<string, string | undefined>;
 	/** UMIAK_MCP_PORT: /mcp, metadata, /healthz, /readyz. */
 	port: number;
 	/** UMIAK_MCP_OPS_PORT: /metrics, /healthz, /readyz. */
@@ -112,6 +114,8 @@ const schema = z.object({
 export function loadSettings(
 	env: Record<string, string | undefined>,
 ): Settings {
+	const mode = authMode(env);
+	if (mode === "none") localAllowedCidrs(env);
 	const r = schema.safeParse(env);
 	if (!r.success) {
 		const lines = r.error.issues.map(
@@ -121,11 +125,23 @@ export function loadSettings(
 	}
 	const e = r.data;
 	return {
+		...(mode === "none"
+			? {
+					localEnv: {
+						UMIAK_AUTH_MODE: "none",
+						UMIAK_LOCAL_ALLOWED_CIDRS: env.UMIAK_LOCAL_ALLOWED_CIDRS,
+						UMIAK_API_TRUSTED_PROXY_CIDRS: env.UMIAK_API_TRUSTED_PROXY_CIDRS,
+					},
+				}
+			: {}),
 		port: e.UMIAK_MCP_PORT,
 		opsPort: e.UMIAK_MCP_OPS_PORT,
 		apiUrl: e.UMIAK_MCP_API_URL.replace(/\/+$/, ""),
 		publicUrl: e.UMIAK_MCP_PUBLIC_URL,
-		issuer: e.UMIAK_OIDC_ISSUER?.replace(/\/+$/, "") ?? null,
+		issuer:
+			mode === "none"
+				? null
+				: (e.UMIAK_OIDC_ISSUER?.replace(/\/+$/, "") ?? null),
 		allowedOrigins: e.UMIAK_MCP_ALLOWED_ORIGINS,
 		allowedHosts: e.UMIAK_MCP_ALLOWED_HOSTS,
 		logLevel: e.UMIAK_LOG_LEVEL,

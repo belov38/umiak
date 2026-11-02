@@ -205,7 +205,12 @@ export class Context {
 			...(webSocket === undefined ? {} : { webSocket }),
 			baseUrl: this.apiUrl(),
 			...(team === undefined ? {} : { team }),
-			tokenProvider: async ({ force }) => (await this.bearer(force)).token,
+			...(this.resolved.profile?.auth === "none" && !this.env.UMIAK_API_KEY
+				? { session: true }
+				: {
+						tokenProvider: async ({ force }: { force: boolean }) =>
+							(await this.bearer(force)).token,
+					}),
 			fetch: this.fetch as typeof fetch,
 			userAgent: `umiak-cli/${CLI_VERSION}`,
 			retryBudgetMs: this.retryBudgetMs,

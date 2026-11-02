@@ -270,3 +270,21 @@ describe("umiak auth token --json", () => {
 		expect(await umiak.calls()).toEqual(["--profile work auth token --json"]);
 	});
 });
+
+describe("local single-user API", () => {
+	it("discovers none mode without a key or installed CLI", async () => {
+		const calls: Request[] = [];
+		const fetcher = (async (req: Request) => {
+			calls.push(req);
+			return Response.json({ authMode: "none" });
+		}) as typeof fetch;
+		const c = await resolveCredentials({
+			baseUrl: API,
+			env: { PATH: "" },
+			fetch: fetcher,
+		});
+		expect(c.session).toBe(true);
+		expect(calls[0]?.url).toBe(`${API}/v1/meta`);
+		expect(calls[0]?.headers.has("authorization")).toBe(false);
+	});
+});

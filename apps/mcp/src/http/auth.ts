@@ -204,9 +204,11 @@ export function createAuthenticator(o: AuthenticatorOptions): Authenticate {
 		const exp = jwtExpiresAt(token);
 		const umiak = new Umiak({
 			baseUrl: o.apiUrl,
-			...(token.startsWith("umiak_")
-				? { apiKey: token }
-				: { accessToken: token }),
+			...(token === ""
+				? { session: true }
+				: token.startsWith("umiak_")
+					? { apiKey: token }
+					: { accessToken: token }),
 			...(team === undefined ? {} : { team }),
 			...(o.fetch === undefined ? {} : { fetch: o.fetch }),
 			userAgent: o.userAgent,

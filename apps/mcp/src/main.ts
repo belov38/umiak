@@ -95,6 +95,7 @@ export async function startMcp(
 	};
 	const metrics = new Metrics();
 	const http = createHttpApp({
+		...(settings.localEnv ? { localEnv: settings.localEnv } : {}),
 		apiUrl: settings.apiUrl,
 		publicUrl: settings.publicUrl,
 		issuer: settings.issuer,
