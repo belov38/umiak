@@ -245,12 +245,16 @@ body {
 	overflow-y: auto;
 }
 .dashboard-brand {
-	display: block;
-	font: 400 3rem / 1 var(--font-heading);
+	display: flex;
+	align-items: center;
 	height: 44px;
-	letter-spacing: 0;
 	padding: 0 0.75rem;
 	margin-bottom: 0;
+}
+.dashboard-brand svg {
+	display: block;
+	height: 32px;
+	width: auto;
 }
 .desktop-team-switcher {
 	padding-bottom: 1rem;
@@ -500,8 +504,8 @@ h3 {
 		padding-inline: 1rem;
 		border-bottom: 1px solid var(--border);
 	}
-	.dashboard-mobile-header .dashboard-brand {
-		font-size: 2rem;
+	.dashboard-mobile-header .dashboard-brand svg {
+		height: 24px;
 	}
 	.dashboard-sidebar {
 		display: none;
