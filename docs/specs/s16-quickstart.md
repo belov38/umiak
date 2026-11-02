@@ -110,3 +110,10 @@ roadmap gap; fakes and dry run cover its code path in this scope.
 ## Execution record
 
 Implementation and verification evidence is tracked in `docs/plans/s16-quickstart.md`.
+
+### Dev exposure ruling
+
+CT590 exposes the owner service on tailnet8444 and, for LAN access, HTTPS4180 (the
+existing allowed S15 port). Both terminate at the same owner gate. This avoids
+changing PVE firewall policy or guest gateway443. Generic root compose stays on
+8444. The Mac live run used MagicDNS and tailnet IP per Ilia's follow-up.

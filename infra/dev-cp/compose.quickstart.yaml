@@ -21,6 +21,9 @@ services:
     volumes: !override
       - /home/umiak/umiak/deploy/compose/secrets/gateway:/secrets
   quickstart:
+    ports: !override
+      - "0.0.0.0:8444:8444"
+      - "0.0.0.0:4180:8444"
     volumes:
       - /home/umiak/umiak/deploy/compose/quickstart:/app/deploy/compose/quickstart:ro
     environment:

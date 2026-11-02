@@ -102,7 +102,7 @@ parallel sandbox VMs, broad cleanup or unrelated PVE modifications occurred.
    image exports; retry succeeded without resizing disk or deleting rollback images.
 3. Root compose plus `infra/dev-cp/compose.quickstart.yaml` reused the existing
    Postgres volume and gateway/PVE secret directories. Legacy unauthenticated
-   ingress was stopped; host ports8080/4180/8090 are no longer published.
+   ingress was stopped; host ports8080/8090 are no longer published;4180 serves HTTPS owner ingress.
 4. Verified TLS using CA obtained through SSH. Claimed over MagicDNS; unpaired API
    returned401. Wizard pinned the existing PVE leaf fingerprint, preserved the
    existing root CA and used a generated read-only root report to verify the
@@ -140,7 +140,7 @@ parallel sandbox VMs, broad cleanup or unrelated PVE modifications occurred.
 
 - Dashboard: https://umiak-dev-cp.tail0000.ts.net:8444/app
 - Tailnet IP: https://100.64.10.7:8444/app
-- LAN configured URL: https://192.168.68.90:8444/app (not verified from this Mac).
+- LAN configured URL: https://192.168.68.90:4180/app (not verified from this Mac).
 - Help/setup/install/MCP share the same origin at /app/help, /setup, /install.sh, /mcp.
 - Exact CA retrieval, newest log claim and pairing steps: infra/dev-cp/README.md,
   section S16. No claim code or owner credential is stored in git.
@@ -153,3 +153,13 @@ parallel sandbox VMs, broad cleanup or unrelated PVE modifications occurred.
 - Raw-IP-only bootstrap requires localhost/DNS first, then /owner/tls; this is a
   Docker NAT discovery limit, not a handwritten environment-file requirement.
 - Master independent acceptance and merge remain outstanding. No merge performed.
+
+### Final LAN exposure correction
+
+Read-only inspection of CT590's PVE firewall confirmed that8444 is not admitted on
+the LAN, while the old S15 port4180 already is. Added a CT-only HTTPS4180 alias to
+the same owner ingress, retaining the verified tailnet8444 URL. No firewall or bridge
+configuration changed. From PVE over the LAN, the HTTPS request now reaches ingress
+and returns403 for the denied node source. From the Mac over tailnet, the4180 alias
+returns401 for an unpaired API request; MagicDNS8444 remains healthy. A Mac-on-LAN
+check is still deferred per Ilia's instruction to use Tailscale.

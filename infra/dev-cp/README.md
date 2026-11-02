@@ -357,7 +357,7 @@ stopped; API/MCP/Next listeners have no host-published control ports.
 
 - Owner dashboard: `https://umiak-dev-cp.tail0000.ts.net:8444/app`
 - Tailnet IP: `https://100.64.10.7:8444/app`
-- LAN URL: `https://192.168.68.90:8444/app` (not checked from the off-LAN Mac).
+- LAN URL: `https://192.168.68.90:4180/app` (not checked from the off-LAN Mac).
 - Wizard: `/setup`; help: `/app/help`; installer: `/install.sh`; remote MCP: `/mcp`.
 - Guest gateway stays on CT590:443 with the original constrained dev CA.
 
@@ -394,3 +394,8 @@ browser pairing, wizard read-only adoption, registering templates 595–598, smo
 CLI Linux create/exec/delete. A stale unrelated `vmdata` storage reference exposed
 an existing global delete scan; the fix explicitly disables that scan and keeps
 cleanup limited to referenced/tagged disks. No foreign storage configuration changed.
+
+The LAN HTTPS4180 alias reuses the port already admitted by the existing PVE CT
+firewall. Port8444 is the verified Tailscale entry point. PVE's LAN source is denied
+by ingress (403); an unpaired tailnet client receives401. The old plaintext S15
+4180 service remains stopped. No firewall rule was added or widened.

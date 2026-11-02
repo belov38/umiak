@@ -31,5 +31,5 @@ sha256sum -c deploy/compose/secrets/devcp/s16-tls-before.sha256
 "${compose[@]}" ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
 echo 'Retrieve setup code privately with: docker compose --env-file deploy/compose/.env -f compose.yaml -f infra/dev-cp/compose.quickstart.yaml logs quickstart'
 echo 'Owner URL: https://umiak-dev-cp.tail0000.ts.net:8444'
-echo 'LAN URL: https://192.168.68.90:8444'
+echo 'LAN URL: https://192.168.68.90:4180'
 REMOTE
