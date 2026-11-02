@@ -4,16 +4,15 @@
 #
 #   infra/dev-cp/smoke.sh [--keep]
 #
-# 1. Builds the dev-signed agent package (services/guest-agent/test/linux/run.sh BUILD_ONLY).
+# 1. Checks that the gateway and baked agent pin the same dev CA.
 # 2. Registers a new machine (bootstrap secret hash) in the CT database, as the worker does.
 # 3. Clones one VM (2 GB) from template 597 into the free VMID nearest to 589, with the
 #    machine's smbios, on umiak0 with group umiak-egress.
 # 4. From the VM: the gateway port on the CT is reachable; other CT ports, the host, the
 #    router and other LAN guests are not.
-# 5. Installs the agent as the S3 stand does (stand-setup.sh install) and waits for the session
-#    in tunnel.tunnel_sessions. Nothing in the VM is patched: the tunnel URL comes from the
-#    smbios family (umiakt1:<url>, S5 14) as the worker will set it, the tunnel host resolves
-#    through the VM's public DNS (sslip.io), and the package pins the dev CA as its tunnel CA.
+# 5. Checks the baked agent and waits for its session in tunnel.tunnel_sessions. Nothing in
+#    the VM is patched: the tunnel URL comes from the smbios family (umiakt1:<url>, S5 14),
+#    the tunnel host resolves through public DNS, and the baked package pins the dev CA.
 # 6. Calls System/Info through @umiak/agent-client in the worker container.
 # The VM and the database rows are deleted at the end (unless --keep).
 set -euo pipefail
@@ -28,7 +27,6 @@ LAN_GW="${UMIAK_CP_GW:-192.168.68.1}"
 # A LAN guest that must stay unreachable from sandboxes (CT 104 by default).
 LAN_PEER="${UMIAK_DEVCP_SMOKE_LAN_PEER:-192.168.68.117}"
 NAME=umiak-devcp-smoke
-REPO="$(cd "$HERE/../.." && pwd)"
 
 KEEP=0
 if [[ "${1:-}" == "--keep" ]]; then
@@ -78,7 +76,6 @@ ctsql() {
 }
 
 work=$(mktemp -d)
-HOST_WORK=$(ssh -o BatchMode=yes "$HOST" mktemp -d)
 MID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 cleanup() {
 	local rc=$?
@@ -86,7 +83,7 @@ cleanup() {
 		log "--keep: VM $NAME and machine $MID stay"
 	else
 		log "cleanup: VM $NAME, machine $MID"
-		remote "NAME=$NAME" "D=$HOST_WORK" <<'EOF' || rc=1
+		remote "NAME=$NAME" <<'EOF' || rc=1
 for id in $(qm list | awk -v n="$NAME" '$2 == n {print $1}'); do
 	[ "$id" -ge 500 ] && [ "$id" -le 589 ] || continue
 	qm config "$id" | grep -q '^tags:.*umiak-devcp-smoke' || continue
@@ -94,7 +91,6 @@ for id in $(qm list | awk -v n="$NAME" '$2 == n {print $1}'); do
 	qm destroy "$id" --purge 1
 	echo "cleanup: VM $id destroyed"
 done
-rm -rf "$D"
 EOF
 		ctsql "DELETE FROM tunnel.tunnel_sessions WHERE machine_id = '$MID'; DELETE FROM tunnel.tunnel_credentials WHERE machine_id = '$MID';" || rc=1
 	fi
@@ -103,18 +99,12 @@ EOF
 }
 trap cleanup EXIT
 
-# 1. The agent package, signed with a throwaway dev key, with the dev CA as its tunnel CA (the
-# gateway on the CT uses the same CA: deploy.sh), and stand-setup.sh.
+# 1. A sealed recipe already has a signed agent and trusted update keys. Never replace
+# its root of trust with the throwaway keys of the historical S3 installer fixture.
 [[ -s "$CA_DIR/ca.pem" ]] || die "no $CA_DIR/ca.pem (infra/dev-cp/deploy.sh)"
 [[ "$(ssh -o BatchMode=yes "$CT" 'cat umiak/deploy/compose/secrets/gateway/ca.pem')" == "$(cat "$CA_DIR/ca.pem")" ]] ||
 	die "the gateway on the CT does not use $CA_DIR/ca.pem (run infra/dev-cp/deploy.sh)"
-log "build the agent package (linux/amd64, tunnel CA $CA_DIR/ca.pem)"
-BUILD_ONLY="$work" GOARCH_IT=amd64 TUNNEL_CA="$CA_DIR/ca.pem" "$REPO/services/guest-agent/test/linux/run.sh" >/dev/null
-[[ -s "$work/it/pkg/v1.tar" ]] || die "no $work/it/pkg/v1.tar"
-[[ "$(tar -xOf "$work/it/pkg/v1.tar" trust/tunnel-ca.pem)" == "$(cat "$CA_DIR/ca.pem")" ]] || die "the package does not pin the dev CA"
-ssh -o BatchMode=yes "$HOST" "chmod 700 $HOST_WORK"
-scp -q "$work/it/pkg/v1.tar" "$REPO/services/guest-agent/test/linux/stand-setup.sh" "$HOST:$HOST_WORK/"
-log "package $(($(wc -c <"$work/it/pkg/v1.tar") / 1024)) KiB"
+ca_sha=$(shasum -a 256 "$CA_DIR/ca.pem" | cut -d' ' -f1)
 
 # 2. Machine identity: the bootstrap secret stays in this process and in the VM's smbios;
 # the database gets only its SHA-256 (S2 §5.2).
@@ -128,12 +118,11 @@ ctsql "INSERT INTO tunnel.tunnel_credentials (machine_id, bs_hash) VALUES ('$MID
 log "machine $MID registered"
 
 # 3-5. The VM, network probes, the agent.
-remote "D=$HOST_WORK" "NAME=$NAME" "MID=$MID" "SERIAL=$serial" "FAMILY=$family" "CT_IP=$CT_IP" "TUNNEL_HOST=$TUNNEL_HOST" \
+remote "CA_SHA=$ca_sha" "NAME=$NAME" "MID=$MID" "SERIAL=$serial" "FAMILY=$family" "CT_IP=$CT_IP" "TUNNEL_HOST=$TUNNEL_HOST" \
 	"TUNNEL_URL=$TUNNEL_URL" "PVE_LAN_IP=$PVE_LAN_IP" "LAN_GW=$LAN_GW" "LAN_PEER=$LAN_PEER" <<'EOF'
-d=$D
 avail=$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo)
 [ "$avail" -ge $((2048 + 4096)) ] || { echo "smoke: only $avail MB available on the host" >&2; exit 1; }
-# One VM, the free sandbox VMID nearest to 589 (500-589; 590-596 dev, 597-599 templates); qm clone fails if another thread took it meanwhile.
+# One VM in 500-589; CT 590 and fixed recipe slots 595-598 stay outside the allocation range.
 id=""
 for c in $(seq 589 -1 500); do
 	qm config "$c" >/dev/null 2>&1 && continue
@@ -142,6 +131,10 @@ for c in $(seq 589 -1 500); do
 done
 [ -n "$id" ] || { echo "smoke: no free VMID in 500-589" >&2; exit 1; }
 qm set "$id" --tags umiak-devcp-smoke --memory 2048 --cores 2 --smbios1 "uuid=$MID,serial=$SERIAL,family=$FAMILY,base64=1" >/dev/null
+# Sealed recipes deliberately clear their build firewall. Configure only this disposable clone;
+# ipfilter permits DHCP but keeps data traffic closed until its assigned IPv4 is installed below.
+pvesh create "/nodes/pve/qemu/$id/firewall/rules" --type group --action umiak-egress --iface net0 --enable 1 >/dev/null
+pvesh set "/nodes/pve/qemu/$id/firewall/options" --enable 1 --policy_in DROP --policy_out ACCEPT --dhcp 1 --ndp 1 --macfilter 1 --ipfilter 1 >/dev/null
 grep -q 'GROUP umiak-egress -i net0' "/etc/pve/firewall/$id.fw" || { echo "smoke: VM $id has no umiak-egress rule" >&2; exit 1; }
 qm config "$id" | grep -q 'bridge=umiak0,firewall=1' || { echo "smoke: VM $id is not on umiak0 with firewall" >&2; exit 1; }
 echo "smoke: VM $id cloned from 597 (umiak0, firewall group umiak-egress)"
@@ -162,22 +155,25 @@ sys.stdout.write(d.get("out-data", ""))
 sys.stderr.write(d.get("err-data", ""))
 sys.exit(d.get("exitcode", 1) if d.get("exited") else 124)'
 }
-# push copies a host file into the guest through QGA stdin, in base64 chunks.
-push() {
-	local src=$1 dst=$2 c
-	g 30 sh -c "mkdir -p $(dirname "$dst") && : >$dst.b64"
-	rm -rf "$d/chunks"
-	mkdir "$d/chunks"
-	base64 -w0 "$src" | split -b 500000 - "$d/chunks/c"
-	for c in "$d"/chunks/c*; do
-		qm guest exec "$id" --timeout 60 --pass-stdin 1 -- sh -c "cat >>$dst.b64" <"$c" >/dev/null
-	done
-	g 60 sh -c "base64 -d $dst.b64 >$dst"
-	g 30 rm -f "$dst.b64"
-	[ "$(g 30 sha256sum "$dst" | cut -d' ' -f1)" = "$(sha256sum "$src" | cut -d' ' -f1)" ] || { echo "smoke: push $dst: checksum mismatch" >&2; exit 1; }
-}
 for _ in $(seq 1 60); do g 10 sh -c 'ip -4 -o addr show scope global | grep -q inet' >/dev/null 2>&1 && break; sleep 2; done
 echo "smoke: guest $(g 10 sh -c '. /etc/os-release; echo $PRETTY_NAME') $(g 10 sh -c 'ip -4 -o addr show scope global' | awk '{print $4}')"
+ip=$(g 10 ip -4 -j addr show scope global | python3 -c 'import json,sys; print(next(a["local"] for link in json.load(sys.stdin) for a in link.get("addr_info", []) if a.get("family")=="inet" and a["local"].startswith("10.88.0.")))')
+python3 - "$id" "$ip" <<'PYIP'
+import ipaddress, json, subprocess, sys
+from urllib.parse import quote
+vmid, address = int(sys.argv[1]), ipaddress.ip_address(sys.argv[2])
+assert 500 <= vmid <= 589 and address in ipaddress.ip_network("10.88.0.0/24")
+base = f"/nodes/pve/qemu/{vmid}/firewall/ipset"
+result = subprocess.run(["pvesh", "get", base + "/ipfilter-net0", "--output-format", "json"], capture_output=True, text=True)
+if result.returncode:
+    subprocess.run(["pvesh", "create", base, "--name", "ipfilter-net0"], check=True, stdout=subprocess.DEVNULL)
+else:
+    for entry in json.loads(result.stdout):
+        subprocess.run(["pvesh", "delete", base + "/ipfilter-net0/" + quote(entry["cidr"], safe="")], check=True, stdout=subprocess.DEVNULL)
+subprocess.run(["pvesh", "create", base + "/ipfilter-net0", "--cidr", str(address)], check=True, stdout=subprocess.DEVNULL)
+PYIP
+# Wait for pve-firewall's regular compile/apply cycle, without restarting it.
+sleep 5
 
 # Network from the sandbox: only the gateway port on the CT, plus the internet.
 probe() { g 10 timeout 4 bash -c "exec 3<>/dev/tcp/$1/$2" >/dev/null 2>&1 && echo open || echo closed; }
@@ -207,12 +203,11 @@ resolved=$(g 15 getent ahostsv4 "$TUNNEL_HOST" | awk 'NR == 1 {print $1}')
 echo "smoke: dns $TUNNEL_HOST -> ${resolved:-nothing} ($(g 10 sh -c 'resolvectl dns 2>/dev/null || grep ^nameserver /etc/resolv.conf' | tr -s '\n' ' '))"
 [ "$resolved" = "$CT_IP" ] || { echo "smoke: $TUNNEL_HOST does not resolve to $CT_IP in the VM" >&2; exit 1; }
 
-# The agent as the S3 stand installs it. Its agent.toml points the tunnel nowhere; the smbios
-# family wins, and the tunnel CA is the one in the package.
-push "$d/v1.tar" /it/pkg/v1.tar
-push "$d/stand-setup.sh" /it/stand-setup.sh
-g 300 bash /it/stand-setup.sh install 2>&1 | tail -3
-sleep 3
+# Verify the baked agent's pinned CA without installing a diagnostic package or changing trust.
+pinned=$(g 10 sha256sum /usr/local/lib/umiak-agent/current/trust/tunnel-ca.pem | awk '{print $1}')
+[ "$pinned" = "$CA_SHA" ] || { echo "smoke: baked agent does not pin the dev CA" >&2; exit 1; }
+echo "smoke: baked agent CA matches the gateway"
+g 10 systemctl is-active umiak-identity umiak-agent
 doctor=$(g 30 /usr/local/bin/umiak-agent doctor --json)
 python3 -c '
 import json, sys
