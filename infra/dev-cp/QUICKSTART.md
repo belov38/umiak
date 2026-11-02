@@ -1,11 +1,11 @@
-# Быстрый старт: dev-стенд umiak
+# Быстрый старт: dev-стенд Umiak
 
 Стенд работает в CT 590 на `pve`. С Mac он доступен через tailnet; VPN и прочие туннели не нужны.
 
 | Что | Адрес |
 |---|---|
 | API (CLI, SDK) | `https://umiak-dev-cp.tail0000.ts.net:8443` |
-| Дашборд (S8 ещё нет; сейчас вход и `/api/v1/me`) | `https://umiak-dev-cp.tail0000.ts.net:8443/` |
+| Дашборд | `https://umiak-dev-cp.tail0000.ts.net:8443/app` |
 | Keycloak (смена пароля, админка `/admin`) | `https://umiak-dev-cp.tail0000.ts.net:10000/` |
 | Превью портов | `https://<slug>-<port>.umiak.100-64-10-7.sslip.io` |
 | SSH | `ssh -p 2222 <slug>@umiak-dev-cp.tail0000.ts.net` |
@@ -24,7 +24,7 @@ umiak whoami
 
 `umiak login` откроет браузер со страницей Keycloak: войти, подтвердить код и доступ. Токены хранятся в Keychain.
 
-В браузере: `https://umiak-dev-cp.tail0000.ts.net:8443/api/v1/me` → вход в Keycloak → JSON с пользователем. Дашборд появится вместе с S8.
+В браузере: `https://umiak-dev-cp.tail0000.ts.net:8443/app` → вход в Keycloak → дашборд личной команды (sandbox, снапшоты, ключи, окружения).
 
 ## Sandbox
 
