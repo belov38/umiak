@@ -25,7 +25,7 @@ test("loads generated credentials and wizard network config without shell evalua
 			launcher,
 			process.execPath,
 			"-e",
-			"console.log(JSON.stringify({db:process.env.DATABASE_URL,payload:process.env.PAYLOAD_SECRET,token:process.env.UMIAK_PVE_TOKEN_ID,tunnel:process.env.UMIAK_TUNNEL_URL,preview:process.env.UMIAK_GATEWAY_PREVIEW_DOMAIN,host:process.env.UMIAK_GATEWAY_TUNNEL_HOST}))",
+			"console.log(JSON.stringify({db:process.env.DATABASE_URL,payload:process.env.PAYLOAD_SECRET,token:process.env.UMIAK_PVE_TOKEN_ID,tunnel:process.env.UMIAK_TUNNEL_URL,preview:process.env.UMIAK_GATEWAY_PREVIEW_DOMAIN,portDomain:process.env.UMIAK_PORT_DOMAIN,host:process.env.UMIAK_GATEWAY_TUNNEL_HOST}))",
 		],
 		{
 			env: {
@@ -44,6 +44,7 @@ test("loads generated credentials and wizard network config without shell evalua
 		token: "umiak@pve!custom",
 		tunnel: "wss://tunnel.192-168-1-2.sslip.io/v1/connect",
 		preview: "umiak.192-168-1-2.sslip.io",
+		portDomain: "umiak.192-168-1-2.sslip.io",
 		host: "tunnel.192-168-1-2.sslip.io",
 	});
 });

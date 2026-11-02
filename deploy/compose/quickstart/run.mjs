@@ -34,6 +34,7 @@ if (existsSync(`${pveDir}/quickstart-network.json`)) {
 	if (config.tunnelUrl) env.UMIAK_TUNNEL_URL = config.tunnelUrl;
 	if (config.previewDomain) {
 		env.UMIAK_PREVIEW_DOMAIN = config.previewDomain;
+		env.UMIAK_PORT_DOMAIN = config.previewDomain;
 		env.UMIAK_GATEWAY_PREVIEW_DOMAIN = config.previewDomain;
 	}
 	if (config.gatewayAddress) {

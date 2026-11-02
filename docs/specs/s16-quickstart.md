@@ -1,6 +1,6 @@
 # S16: zero-config self-host quickstart
 
-Decision: Ilia, 2026-11-03. Status: implementation in progress; acceptance pending.
+Decision: Ilia, 2026-11-03. Status: implemented and verified on the dev stand; independent acceptance pending.
 
 ## Intent and acceptance
 

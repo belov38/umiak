@@ -67,7 +67,9 @@ For a publicly trusted certificate the command is simply
 `curl -fsSL https://HOST:8444/install.sh | sh`. The installer detects Darwin/Linux
 arm64/x64, verifies SHA256SUMS, installs to `~/.local/bin` (`UMIAK_INSTALL_DIR` overrides
 it) and starts `umiak login`. Open its pairing URL in the claimed browser, compare
-the request identifier and approve. Never approve a request you did not start.
+the request identifier and approve. Never approve a request you did not start. If your owner browser uses another
+hostname for this same deployment, open the pairing path and request ID on that
+claimed hostname; cookies are intentionally host-only.
 
 ```sh
 umiak create --template linux --size 2gb --wait

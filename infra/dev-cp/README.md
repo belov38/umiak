@@ -347,3 +347,50 @@ the Run dialog (opened by a one-shot interactive task, since exec runs in sessio
 agent state through QGA as SYSTEM and retries `503 desktop_starting` with a fresh ticket.
 Create 139–146 s, first stream open ~22 s. `UMIAK_E2E_SANDBOX=<slug>` reuses an existing sandbox
 for diagnostics (it is not deleted; idle observation needs the `e2e=desktop` label).
+
+## S16 quickstart stand (2026-11-03)
+
+Deploy from the Mac: `infra/dev-cp/deploy-quickstart.sh`. It uses root compose with
+`infra/dev-cp/compose.quickstart.yaml`, preserving the existing DB, all four template
+registrations and guest gateway CA/certificates. Legacy unauthenticated ingress is
+stopped; API/MCP/Next listeners have no host-published control ports.
+
+- Owner dashboard: `https://umiak-dev-cp.tail0000.ts.net:8444/app`
+- Tailnet IP: `https://100.64.10.7:8444/app`
+- LAN URL: `https://192.168.68.90:8444/app` (not checked from the off-LAN Mac).
+- Wizard: `/setup`; help: `/app/help`; installer: `/install.sh`; remote MCP: `/mcp`.
+- Guest gateway stays on CT590:443 with the original constrained dev CA.
+
+The stand is configured but left unclaimed after testing. All test owner sessions
+and CLI pairings were revoked. Claim with the newest setup code in the logs:
+
+```sh
+ssh umiak@100.64.10.7
+cd ~/umiak
+docker compose --env-file deploy/compose/.env -f compose.yaml -f infra/dev-cp/compose.quickstart.yaml logs --tail=20 quickstart
+```
+
+Obtain the owner CA through the same trusted SSH connection (on the Mac):
+
+```sh
+mkdir -p ~/.config/umiak
+ssh umiak@100.64.10.7 'docker exec umiak-quickstart-1 cat /var/lib/umiak/owner/tls/ca.pem' > ~/.config/umiak/quickstart-ca.pem
+openssl x509 -in ~/.config/umiak/quickstart-ca.pem -noout -fingerprint -sha256
+```
+
+Owner CA SHA256: `DA:6F:9A:6E:25:60:6F:62:0B:AE:6F:D1:2A:E9:53:04:21:E5:8F:21:4E:2B:61:53:6D:65:D6:DE:C9:C9:4F:3E`.
+Trust this CA in the browser, open the dashboard and enter the latest code. For the
+CLI, use the install command in `/app/help`; pass this CA to both curl and the
+installer. Approve the CLI's request ID from the claimed browser. Setup state and
+existing templates remain ready; no PVE reprovisioning is needed.
+
+Rollback remains one command from the Mac:
+`UMIAK_DEVCP_AUTH_MODE=none infra/dev-cp/deploy.sh` (or `oidc`). When off the LAN,
+add `UMIAK_DEVCP_SSH=umiak@100.64.10.7`. The rollback reuses the S15 DB and secrets;
+quickstart tables are harmless to legacy services. No firewall change was needed.
+
+Live checks used Tailscale per Ilia's follow-up: MagicDNS and tailnet IP installer,
+browser pairing, wizard read-only adoption, registering templates 595–598, smoke and
+CLI Linux create/exec/delete. A stale unrelated `vmdata` storage reference exposed
+an existing global delete scan; the fix explicitly disables that scan and keeps
+cleanup limited to referenced/tagged disks. No foreign storage configuration changed.
