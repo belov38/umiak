@@ -313,10 +313,7 @@ function SandboxTable({
 								<TableCell>
 									<StateCell sandbox={s} />
 								</TableCell>
-								<TableCell
-									className="text-xs whitespace-nowrap"
-									title={`by ${creator(s)}`}
-								>
+								<TableCell className="text-xs whitespace-nowrap">
 									{formatTime(s.createdAt)}
 									<div
 										className="mt-1 text-muted-foreground"

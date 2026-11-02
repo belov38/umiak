@@ -178,7 +178,7 @@ export async function signIn(page: Page, user: KcUser): Promise<void> {
 	await expect(page.locator("#kc-header-wrapper")).toHaveCSS("height", "40px");
 	await expect(page.locator("#kc-header-wrapper")).toHaveCSS(
 		"background-image",
-		/keycloak-logo.svg|lockup-inter-dark.svg/,
+		/lockup-inter-dark.svg/,
 	);
 	await page.getByRole("textbox", { name: "Email" }).fill(user.email);
 	await page.getByRole("textbox", { name: "Password" }).fill(user.password);

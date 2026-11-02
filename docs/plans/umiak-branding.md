@@ -30,7 +30,7 @@ Unit regressions cover guard branding/theme support and Payload config mapping.
 Playwright covers the Keycloak lockup during sign-in, dark Next/operator and
 proxy refusals, admin icon and SVG HTTP responses, and visible creator text.
 
-Live evidence is stored outside git in `/tmp/umiak-branding.N9cIBg/`.
+Live screenshots were kept outside git and are not part of the record.
 The browser uses only `e2e@example.com`; temporary `umiak-operators` membership
 is removed after the admin check. Real 401/403 guard and Next boundaries are
 checked via an SSH tunnel and the public dashboard. No Ilia account changes.
