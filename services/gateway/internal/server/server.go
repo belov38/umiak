@@ -266,6 +266,7 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 
 	i.limits = ratelimit.New(cfg.RateLimit, i.metrics)
 	i.auth = portauth.New(portauth.Config{
+		AuthMode:    cfg.AuthMode,
 		Codec:       portauth.NewCodec(cfg.CookieKeys, deps.Now),
 		API:         deps.API,
 		AuthURL:     cfg.AuthURL,

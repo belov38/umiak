@@ -52,6 +52,7 @@ type Timeouts struct {
 
 // Config is the validated gateway configuration.
 type Config struct {
+	AuthMode string
 	// Identity and internal listener.
 	InstanceID     string
 	DatabaseURL    string
@@ -182,6 +183,13 @@ const (
 func FromEnv(getenv func(string) string) (Config, error) {
 	l := &loader{getenv: getenv}
 	var c Config
+	c.AuthMode = getenv("UMIAK_AUTH_MODE")
+	if c.AuthMode == "" {
+		c.AuthMode = "oidc"
+	}
+	if c.AuthMode != "oidc" && c.AuthMode != "none" {
+		return c, fmt.Errorf("UMIAK_AUTH_MODE must be oidc or none")
+	}
 
 	c.InstanceID = l.str("INSTANCE_ID", "")
 	if c.InstanceID == "" {

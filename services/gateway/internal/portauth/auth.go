@@ -61,6 +61,7 @@ const maxStateCookies = 8
 
 // Config configures Auth.
 type Config struct {
+	AuthMode    string
 	Codec       *Codec
 	API         cpapi.Client
 	AuthURL     string // UMIAK_GATEWAY_AUTH_URL; may carry its own query
@@ -115,6 +116,11 @@ func (a *Auth) Check(w http.ResponseWriter, r *http.Request, l routes.Label, rt 
 	case AccessToken:
 		res = a.checkToken(w, r, l, rt, ip, requestID)
 	case AccessSSO:
+		if a.cfg.AuthMode == "none" {
+			http.Error(w, "sso_unavailable_in_local_mode: use token or public preview access", http.StatusForbidden)
+			res = Result{AuthResult: ResultInvalid}
+			break
+		}
 		res = a.checkSSO(w, r, l, rt, requestID)
 	default:
 		umiakerr.Write(w, r, umiakerr.Error{Status: http.StatusUnauthorized, Code: umiakerr.CodeAuthRequired, RequestID: requestID})
