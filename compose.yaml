@@ -4,7 +4,7 @@ name: umiak-quickstart
 
 x-app-env: &app-env
   UMIAK_AUTH_MODE: none
-  UMIAK_QUICKSTART: '1'
+  UMIAK_QUICKSTART: "1"
   UMIAK_LOCAL_ALLOWED_CIDRS: 127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,fc00::/7
   UMIAK_LOCAL_DENIED_CIDRS: ${UMIAK_LOCAL_DENIED_CIDRS:-10.88.0.0/24}
   UMIAK_APP_ORIGIN: https://localhost:8444
@@ -20,7 +20,7 @@ x-restart: &restart
   restart: unless-stopped
   logging:
     driver: json-file
-    options: {max-size: 10m, max-file: '3'}
+    options: { max-size: 10m, max-file: "3" }
 
 x-quickstart-build: &quickstart-build
   context: .
@@ -38,14 +38,14 @@ services:
   gateway-secrets:
     image: umiak-quickstart:dev
     build: *quickstart-build
-    user: '0:0'
+    user: "0:0"
     entrypoint: [node, deploy/compose/quickstart/gateway-init.mjs]
-    environment: {UMIAK_SECRETS_DIR: /pve-secrets}
+    environment: { UMIAK_SECRETS_DIR: /pve-secrets }
     volumes:
       - gateway-secrets:/gateway-secrets
       - pve-secrets:/pve-secrets:ro
     network_mode: none
-    restart: 'no'
+    restart: "no"
 
   secrets-init:
     build:
@@ -56,8 +56,8 @@ services:
         COPY deploy/compose/secrets-init/init.sh /legacy-init.sh
         COPY deploy/compose/quickstart/bootstrap.sh /bootstrap.sh
         ENTRYPOINT ["sh", "/bootstrap.sh"]
-    user: '0:0'
-    environment: {UMIAK_SECRETS_ROOT: /secrets}
+    user: "0:0"
+    environment: { UMIAK_SECRETS_ROOT: /secrets }
     volumes:
       - secrets:/secrets
       - gateway-secrets:/secrets/gateway
@@ -65,9 +65,9 @@ services:
       - owner-data:/secrets/owner
       - pve-secrets:/secrets/pve
     depends_on:
-      gateway-secrets: {condition: service_completed_successfully}
+      gateway-secrets: { condition: service_completed_successfully }
     network_mode: none
-    restart: 'no'
+    restart: "no"
 
   postgres:
     <<: *restart
@@ -81,10 +81,10 @@ services:
       - postgres-data:/var/lib/postgresql
       - database-secret:/quickstart-db:ro
     depends_on:
-      secrets-init: {condition: service_completed_successfully}
+      secrets-init: { condition: service_completed_successfully }
     networks: [control, web-internal]
     healthcheck:
-      test: [CMD-SHELL, 'pg_isready -U umiak -d umiak']
+      test: [CMD-SHELL, "pg_isready -U umiak -d umiak"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -100,8 +100,8 @@ services:
       - database-secret:/quickstart-db:ro
     networks: [control]
     depends_on:
-      postgres: {condition: service_healthy}
-    restart: 'no'
+      postgres: { condition: service_healthy }
+    restart: "no"
 
   web-migrate:
     image: umiak-web:quickstart
@@ -118,9 +118,9 @@ services:
       - secrets:/all-secrets:ro
     networks: [control]
     depends_on:
-      migrate: {condition: service_completed_successfully}
-    healthcheck: {disable: true}
-    restart: 'no'
+      migrate: { condition: service_completed_successfully }
+    healthcheck: { disable: true }
+    restart: "no"
 
   worker:
     <<: *restart
@@ -134,9 +134,9 @@ services:
       UMIAK_DATA_KEYS_FILE: /all-secrets/data-keys.json
       UMIAK_GATEWAY_SERVICE_TOKEN_FILE: /gateway-secrets/worker-gateway-token
       UMIAK_SSH_USER_CA_KEYS_FILE: /gateway-secrets/ssh_user_ca.pub
-      UMIAK_RECONCILE_DRY_RUN: '1'
-      UMIAK_MIGRATE_ON_START: '0'
-      UMIAK_HTTP_PORT: '9090'
+      UMIAK_RECONCILE_DRY_RUN: "1"
+      UMIAK_MIGRATE_ON_START: "0"
+      UMIAK_HTTP_PORT: "9090"
     volumes:
       - ./deploy/compose/quickstart/run.mjs:/quickstart/run.mjs:ro
       - database-secret:/quickstart-db:ro
@@ -145,9 +145,15 @@ services:
       - gateway-secrets:/gateway-secrets:ro
     networks: [control]
     depends_on:
-      web-migrate: {condition: service_completed_successfully}
+      web-migrate: { condition: service_completed_successfully }
     healthcheck:
-      test: [CMD, node, -e, "fetch('http://127.0.0.1:9090/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:9090/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -174,7 +180,7 @@ services:
       UMIAK_LOCAL_ALLOWED_HOSTS: api:8080,localhost:8444
       UMIAK_API_TRUSTED_PROXY_CIDRS: 172.29.116.10/32,172.29.116.11/32
       UMIAK_SSH_HOST: localhost
-      UMIAK_SSH_PORT: '2222'
+      UMIAK_SSH_PORT: "2222"
     volumes:
       - ./deploy/compose/quickstart/run.mjs:/quickstart/run.mjs:ro
       - ./deploy/compose/config/identity.yaml:/identity.yaml:ro
@@ -183,9 +189,15 @@ services:
       - pve-secrets:/pve-secrets:ro
     networks: [control]
     depends_on:
-      web-migrate: {condition: service_completed_successfully}
+      web-migrate: { condition: service_completed_successfully }
     healthcheck:
-      test: [CMD, node, -e, "fetch('http://127.0.0.1:9090/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:9090/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -206,7 +218,7 @@ services:
       - secrets:/all-secrets:ro
     networks: [web-internal]
     depends_on:
-      web-migrate: {condition: service_completed_successfully}
+      web-migrate: { condition: service_completed_successfully }
     stop_grace_period: 30s
 
   mcp:
@@ -222,9 +234,9 @@ services:
       UMIAK_MCP_ALLOWED_HOSTS: localhost:8444
       UMIAK_API_TRUSTED_PROXY_CIDRS: 172.29.116.10/32
     networks:
-      control: {ipv4_address: 172.29.116.11}
+      control: { ipv4_address: 172.29.116.11 }
     depends_on:
-      api: {condition: service_healthy}
+      api: { condition: service_healthy }
     stop_grace_period: 30s
 
   gateway:
@@ -235,8 +247,8 @@ services:
     environment:
       <<: *app-env
       UMIAK_DATABASE_PASSWORD_FILE: /quickstart-db/gateway-password
-      UMIAK_RUN_UID: '65532'
-      UMIAK_RUN_GID: '65532'
+      UMIAK_RUN_UID: "65532"
+      UMIAK_RUN_GID: "65532"
       UMIAK_GATEWAY_INTERNAL_URL: http://gateway:7000
       UMIAK_GATEWAY_PREVIEW_DOMAIN: umiak.localhost
       UMIAK_GATEWAY_TUNNEL_HOST: tunnel.localhost
@@ -253,19 +265,20 @@ services:
       UMIAK_GATEWAY_SSH_USER_CA_KEY_FILE: /gateway-secrets/ssh_user_ca
       UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS_FILE: /gateway-secrets/login-ca-keys
     # Gateway secrets are owned by its existing uid; read-only, never the owner CA.
-    user: '0:0'
+    user: "0:0"
     volumes:
       - database-secret:/quickstart-db:ro
       - gateway-secrets:/gateway-secrets:ro
       - pve-secrets:/pve-secrets:ro
     ports:
-      - '${UMIAK_GATEWAY_BIND:-0.0.0.0}:${UMIAK_GATEWAY_HTTPS_PORT:-443}:8443'
-      - '${UMIAK_GATEWAY_BIND:-0.0.0.0}:${UMIAK_GATEWAY_SSH_PORT:-2222}:2222'
+      - "${UMIAK_GATEWAY_BIND:-0.0.0.0}:${UMIAK_GATEWAY_HTTPS_PORT:-443}:8443"
+      - "${UMIAK_GATEWAY_BIND:-0.0.0.0}:${UMIAK_GATEWAY_SSH_PORT:-2222}:2222"
     networks: [control]
     depends_on:
-      migrate: {condition: service_completed_successfully}
+      migrate: { condition: service_completed_successfully }
     healthcheck:
-      test: [CMD, /umiak-gateway, healthcheck, '-url=http://127.0.0.1:9090/readyz']
+      test:
+        [CMD, /umiak-gateway, healthcheck, "-url=http://127.0.0.1:9090/readyz"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -277,7 +290,7 @@ services:
     build: *quickstart-build
     environment:
       <<: *app-env
-      UMIAK_QUICKSTART_PORT: '8444'
+      UMIAK_QUICKSTART_PORT: "8444"
       UMIAK_QUICKSTART_ASSETS: /app/quickstart-assets
       UMIAK_QUICKSTART_TLS_DIR: /var/lib/umiak/owner/tls
     volumes:
@@ -286,14 +299,14 @@ services:
       - pve-secrets:/pve-secrets
       - gateway-secrets:/gateway-secrets:ro
     ports:
-      - '${UMIAK_QUICKSTART_BIND:-0.0.0.0}:${UMIAK_QUICKSTART_PORT:-8444}:8444'
+      - "${UMIAK_QUICKSTART_BIND:-0.0.0.0}:${UMIAK_QUICKSTART_PORT:-8444}:8444"
     networks:
-      control: {ipv4_address: 172.29.116.10}
+      control: { ipv4_address: 172.29.116.10 }
       web-internal: {}
     depends_on:
-      web-migrate: {condition: service_completed_successfully}
-      api: {condition: service_healthy}
-      web: {condition: service_started}
+      web-migrate: { condition: service_completed_successfully }
+      api: { condition: service_healthy }
+      web: { condition: service_started }
 
 volumes:
   postgres-data: {}

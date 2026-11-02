@@ -366,6 +366,7 @@ export function createQuickstartServer({
 			const origin = requestOrigin(req);
 			if (
 				!allowed(req.socket.remoteAddress) ||
+				(await setupHandler?.deniedPeer?.(req.socket.remoteAddress)) ||
 				!(await store.authenticate(bearer(req))) ||
 				(req.headers.origin && req.headers.origin !== origin)
 			)

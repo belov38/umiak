@@ -61,6 +61,28 @@ These are implementer decisions under Ilia's explicit delegation of technical de
     verifies exact filename checksum before install, defaults to ~/.local/bin and
     invokes `umiak login --api-url <origin>`. Chosen directory and CA are configurable.
 
+13. Initial remote bootstrap uses a DNS name (LAN DNS, mDNS or MagicDNS), or
+    localhost on the Docker host. Docker NAT cannot reveal every host IP to a
+    container before TLS. `/owner/tls` lets the claimed owner add raw IP SANs
+    immediately and persist them without an environment file. Dev CT IP SANs are
+    supplied by its existing infrastructure overlay. This is an explicit bootstrap
+    step for raw-IP-only installations, not an assumption that IPs send SNI.
+14. Fresh preparation fails closed when dnsmasq, host IPv4 forwarding or an enabled
+    cluster firewall are missing. Enabling shared global host policy can affect
+    unrelated guests and cannot be safely automated under the host constraints.
+    The generated script reports these prerequisites before applying changes;
+    administrator host preparation remains a documented fresh-host gap.
+15. Owner recovery is a Docker-console command only: it atomically revokes all
+    browser/CLI credentials and prints a new one-time code without changing wizard
+    or VM state. There is no network recovery endpoint.
+16. Ship only template-builder/database production dependencies in the owner image;
+    CLI build dependencies stay in a separate stage. CT590 has a 30 GiB disk, and
+    shipping all monorepo dependencies exceeded free unpack space during live build.
+17. Adoption verifies deny IPSet coverage and rule precedence, including the existing
+    S10 TURN UDP3478 gateway exception; neither any nonempty rule list nor CIDR
+    membership is evidence of isolation. Referenced node IPs are denied dynamically
+    for HTTP and WebSockets; only one-time preparation capabilities bypass that deny.
+
 ## Live stand constraints
 
 Only pve / CT590; no pve2 or ip-hub-pve. Sandbox VMIDs 500–589, total sandbox RAM

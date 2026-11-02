@@ -50,3 +50,16 @@ test("pair and session expiration are enforced", async () => {
 	now = 101;
 	assert.equal(await store.authenticate(token), false);
 });
+
+test("console recovery invalidates every existing session and pairing", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	const first = await store.init();
+	const session = await store.claim(first);
+	const pair = await store.pairStart();
+	const code = await store.recover();
+	assert.equal(await store.authenticate(session), false);
+	await assert.rejects(() => store.pairPoll(pair.id, pair.secret));
+	assert.equal(await store.claimed(), false);
+	assert.ok(await store.claim(code));
+	await assert.rejects(() => store.claim(code));
+});

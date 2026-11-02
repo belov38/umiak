@@ -1,5 +1,11 @@
 # Getting started
 
+For the zero-config S16 path, run `docker compose up -d --build` from the repository
+root and follow [the quickstart guide](../deploy/compose/quickstart/README.md).
+It uses an owner claim and CLI pairing, with dashboard help at `/app/help`.
+The S15 addresses and tokenless instructions below describe the previous deployment
+mode; use them only after explicitly rolling the stand back to S15.
+
 Umiak gives you throwaway virtual machines (sandboxes) on Proxmox that you drive from a dashboard, a CLI, an SDK or an AI agent over MCP. This guide walks you through the dev stand from zero to a sandbox your agent can use.
 
 ## The model in one minute

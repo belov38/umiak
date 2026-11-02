@@ -8,10 +8,21 @@ services:
       context: .
       dockerfile: services/gateway/Dockerfile
     entrypoint: [/umiak-gateway]
-    command: [dev-secrets, '-dir=/secrets', '-domain=${UMIAK_PORT_DOMAIN}', '-tunnel-host=${UMIAK_DEVCP_TUNNEL_HOST}', '-ssh-host=${UMIAK_DEVCP_SSH_HOST}', '-owner=65532:65532', '-worker-owner=1000:1000']
+    command:
+      [
+        dev-secrets,
+        "-dir=/secrets",
+        "-domain=${UMIAK_PORT_DOMAIN}",
+        "-tunnel-host=${UMIAK_DEVCP_TUNNEL_HOST}",
+        "-ssh-host=${UMIAK_DEVCP_SSH_HOST}",
+        "-owner=65532:65532",
+        "-worker-owner=1000:1000",
+      ]
     volumes: !override
       - /home/umiak/umiak/deploy/compose/secrets/gateway:/secrets
   quickstart:
+    volumes:
+      - /home/umiak/umiak/deploy/compose/quickstart:/app/deploy/compose/quickstart:ro
     environment:
       UMIAK_QUICKSTART_TLS_NAMES: 192.168.68.90,100.64.10.7,umiak-dev-cp,umiak-dev-cp.tail0000.ts.net
       UMIAK_LOCAL_DENIED_CIDRS: 192.168.68.116/32,100.64.10.2/32,10.88.0.0/24
@@ -28,7 +39,7 @@ services:
     environment:
       UMIAK_PREVIEW_DOMAIN: ${UMIAK_PORT_DOMAIN}
       UMIAK_SSH_HOST: ${UMIAK_DEVCP_SSH_HOST}
-      UMIAK_SSH_PORT: '2222'
+      UMIAK_SSH_PORT: "2222"
   web:
     environment:
       UMIAK_PREVIEW_DOMAIN: ${UMIAK_PORT_DOMAIN}

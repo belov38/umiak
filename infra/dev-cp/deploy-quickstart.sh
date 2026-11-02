@@ -23,7 +23,7 @@ sha256sum deploy/compose/secrets/gateway/{ca,tunnel,umiak}.pem >deploy/compose/s
 cp -n deploy/compose/.env deploy/compose/secrets/devcp/s15.env
 compose=(docker compose --env-file deploy/compose/.env -f compose.yaml -f infra/dev-cp/compose.quickstart.yaml)
 "${compose[@]}" config --quiet
-"${compose[@]}" build
+"${compose[@]}" build migrate web-migrate api mcp gateway-secrets quickstart
 # Prevent the old unauthenticated ingress from bypassing owner gate.
 (cd deploy/compose && docker compose stop local-ingress)
 "${compose[@]}" up -d

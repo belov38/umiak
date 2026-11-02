@@ -74,6 +74,14 @@ export class OwnerStore {
 			return code;
 		});
 	}
+	/** Console-only recovery; deliberately has no HTTP route. */
+	async recover() {
+		return this.repo.transaction((state) => {
+			const code = random();
+			Object.assign(state, empty(), { claim: digest(code) });
+			return code;
+		});
+	}
 	async claimed() {
 		return this.repo.transaction((state) => state.claimed);
 	}
