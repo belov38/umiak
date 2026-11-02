@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -68,6 +68,54 @@ test("local dashboard/admin, tokenless CLI create/exec/delete and blocked CIDR",
 			timeout: 90_000,
 		});
 	cli("login", "--api-url", api);
+	const stdio = spawn("bun", [join(root, "apps/cli/src/main.ts"), "mcp"], {
+		cwd: dir,
+		env: {
+			...process.env,
+			XDG_CONFIG_HOME: dir,
+			XDG_STATE_HOME: dir,
+			UMIAK_API_KEY: "",
+			UMIAK_API_URL: "",
+		},
+	});
+	try {
+		const initialized = new Promise<string>((resolve, reject) => {
+			let output = "";
+			const timer = setTimeout(
+				() => reject(new Error("stdio initialize timed out")),
+				15000,
+			);
+			timer.unref();
+			stdio.stdout.on("data", (data) => {
+				output += data;
+				if (output.includes('"id":1')) {
+					clearTimeout(timer);
+					resolve(output);
+				}
+			});
+			stdio.on("error", reject);
+			stdio.on("exit", (code) => {
+				if (code) reject(new Error(`stdio MCP exited ${code}`));
+			});
+		});
+		stdio.stdin.write(
+			`${JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "initialize",
+				params: {
+					protocolVersion: "2025-03-26",
+					capabilities: {},
+					clientInfo: { name: "s15", version: "1" },
+				},
+			})}\n`,
+		);
+		expect(await initialized).toContain('"serverInfo"');
+	} finally {
+		stdio.stdin.end();
+		stdio.kill();
+	}
+
 	const slug = `local-e2e-${Date.now().toString(36)}x`;
 	let created = false;
 	try {

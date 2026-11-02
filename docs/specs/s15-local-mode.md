@@ -1,6 +1,6 @@
 # S15: local single-user mode
 
-Status: implementation in progress. Decision: Ilia, 2026-11-02.
+Status: done-awaiting-acceptance. Decision: Ilia, 2026-11-02.
 
 ## Contract
 

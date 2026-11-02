@@ -21,7 +21,7 @@
 | S12 | Эксплуатация | Деплой в Kubernetes (Helm, ingress, oauth2-proxy, Postgres), метрики, логи, несколько нод, PBS | S6 | фаза 2 (решение Ильи 2026-11-01), в MVP не реализуем |
 | S13 | Git и приватные зависимости | Репозитории в environment, клон при claim, доступ к приватным репо (GitHub App: токен установки на sandbox с минимальными правами через credential helper агента; позже git-прокси в gateway без токена в VM), политика push, приватные registry (npm, pip, Docker) | S3, S6 | фаза 2, в MVP не реализуем |
 | S14 | Внешний провайдер boat.dev | Когда своих ресурсов не хватает (квоты нод, `out_of_capacity`), sandbox создаётся в оригинальном boat.dev через его API: провайдер-адаптер рядом с Proxmox, тот же публичный API и UI для клиента, учёт и квоты по командам, кто платит и какие данные можно выносить в чужое облако | S6, S7 | фаза 2 (идея Ильи 2026-11-01), спецификации нет |
-| S15 | Local single-user mode | UMIAK_AUTH_MODE=none, CIDR allowlist, HTTP LAN web, tokenless CLI/SDK/MCP, separate compose | S7, S8, S11 | 🚧 in progress; `docs/specs/s15-local-mode.md`, `docs/plans/s15-local-mode.md` |
+| S15 | Local single-user mode | UMIAK_AUTH_MODE=none, CIDR allowlist, HTTP LAN web, tokenless CLI/SDK/MCP, separate compose | S7, S8, S11 | ✅ done-awaiting-acceptance; `docs/specs/s15-local-mode.md`, `docs/plans/s15-local-mode.md` |
 
 Порядок: S1 → S2 → S3/S4 → S5 → S6 → S7 → S8 → S9 → S10 → S11. S12, S13 и S14 — фаза 2; MVP разворачивается через docker compose (`deploy/compose`).
 

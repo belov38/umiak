@@ -43,6 +43,7 @@ export function startIngress() {
 		"x-forwarded-for": req.socket.remoteAddress,
 		"x-umiak-client-ip": req.socket.remoteAddress,
 		"x-forwarded-proto": "http",
+		"x-forwarded-host": expectedHost,
 	});
 	const server = http.createServer((req, res) => {
 		if (!validHost(req)) {
