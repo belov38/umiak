@@ -197,6 +197,10 @@ test("dashboard navigation, appearance, responsive layout and page captures", as
 
 	await page.goto(base);
 	await expect(page.getByTestId("sandbox-table")).toBeVisible();
+	await expect(page.getByTestId("sandbox-creator").first()).toBeVisible();
+	await expect(page.getByTestId("sandbox-creator").first()).toContainText(
+		"by ",
+	);
 	await capture("sandboxes");
 	await page.setViewportSize({ width: 800, height: 600 });
 	await capture("tablet");
