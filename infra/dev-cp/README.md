@@ -283,8 +283,9 @@ run; master restores main after merges.
 Set `UMIAK_DESKTOP_TURN_TRANSPORTS=udp,tcp,tls` to run a separate relay-only media check
 per client-to-TURN transport. Each check filters the browser's ICE URLs, verifies the
 selected relay protocol and requires a changed live frame. UDP is the default; the long
-idle hold applies to the first selected transport only, and that transport is closed
-naturally (no EndStreams) so idle-stop is measured from a real page close.
+idle hold applies to the first selected transport only. When a hold is requested, the last
+selected transport is closed naturally (no EndStreams), so idle-stop is measured from a real
+page close; with UDP/TCP/TLS that final viewer uses TLS.
 
 VM egress to TURN is UDP 3478 only. The E2E checks STUN reachability and blocked TCP/TLS
 from the guest before media; browser TCP/TLS access is checked separately.
