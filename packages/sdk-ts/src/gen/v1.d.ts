@@ -2144,6 +2144,8 @@ export interface components {
              * @example https://app.example.com
              */
             appUrl: string;
+            /** @enum {string} */
+            authMode?: "oidc" | "none";
             /**
              * @description Build of the api
              * @example 1.4.0+3f2c1a9

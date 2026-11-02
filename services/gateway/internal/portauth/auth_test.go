@@ -451,7 +451,7 @@ func TestIsNavigation(t *testing.T) {
 func TestLocalModeRejectsSSOPreview(t *testing.T) {
 	a := New(Config{AuthMode: "none"})
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "https://preview.example/", nil)
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "https://preview.example/", nil)
 	res := a.Check(w, r, routes.Label{}, cpapi.Route{Access: AccessSSO}, clientIP, "test")
 	if res.Proceed || w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "sso_unavailable_in_local_mode") {
 		t.Fatalf("unexpected local SSO response: %+v %d %s", res, w.Code, w.Body.String())

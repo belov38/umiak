@@ -17,7 +17,7 @@ services:
     environment:
       <<: *local-env
       UMIAK_LOCAL_ALLOWED_HOSTS: api:8080
-      UMIAK_API_TRUSTED_PROXY_CIDRS: 172.29.115.10/32,172.29.115.11/32
+      UMIAK_API_TRUSTED_PROXY_CIDRS: 172.29.115.10/32,172.29.115.11/32,${UMIAK_API_TRUSTED_PROXY_CIDRS:-}
     ports: !override
       - "${UMIAK_LOCAL_BIND:-0.0.0.0}:${UMIAK_LOCAL_API_PORT:-8080}:8080"
     depends_on: !override
@@ -46,6 +46,7 @@ services:
         ipv4_address: 172.29.115.11
     environment:
       <<: *local-env
+      UMIAK_API_TRUSTED_PROXY_CIDRS: ${UMIAK_MCP_TRUSTED_PROXY_CIDRS:-}
     ports: !override
       - "${UMIAK_LOCAL_BIND:-0.0.0.0}:${UMIAK_LOCAL_MCP_PORT:-8090}:8080"
   gateway:

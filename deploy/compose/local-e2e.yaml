@@ -8,12 +8,21 @@ services:
   gateway:
     profiles: [no-gateway-in-e2e]
   mcp:
-    profiles: [no-mcp-in-e2e]
+    profiles: !reset []
+    environment:
+      UMIAK_MCP_PUBLIC_URL: http://localhost:18090/mcp
+      UMIAK_MCP_ALLOWED_HOSTS: localhost:18090
+    ports: !override
+      - "127.0.0.1:18090:8080"
+    depends_on: !override
+      e2e-backend:
+        condition: service_healthy
   e2e-backend:
     environment:
       UMIAK_AUTH_MODE: none
       UMIAK_LOCAL_ALLOWED_CIDRS: ${UMIAK_LOCAL_ALLOWED_CIDRS-127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7}
-      UMIAK_API_TRUSTED_PROXY_CIDRS: 172.29.115.10/32
+      UMIAK_LOCAL_ALLOWED_HOSTS: api:8080
+      UMIAK_API_TRUSTED_PROXY_CIDRS: 172.29.115.10/32,172.29.115.11/32
     depends_on: !override
       web-migrate:
         condition: service_completed_successfully

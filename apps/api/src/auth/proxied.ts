@@ -100,7 +100,7 @@ function checkRequest(deps: ApiDeps, c: Context<ApiEnv>): void {
 }
 
 /** Team of the request: Umiak-Team, or `?team=` on GET/HEAD/upgrade (C4). */
-function requestedTeam(c: Context<ApiEnv>): string | null {
+export function requestedTeam(c: Context<ApiEnv>): string | null {
 	const header = c.req.header(TEAM_HEADER);
 	const query = c.req.query("team");
 	const fromHeader =

@@ -9,6 +9,34 @@ test("local dashboard/admin, tokenless CLI create/exec/delete and blocked CIDR",
 	request,
 }) => {
 	const api = "http://localhost:18080";
+	const services = execFileSync(
+		"docker",
+		[
+			"ps",
+			"--filter",
+			"label=com.docker.compose.project=umiak-local-e2e",
+			"--format",
+			'{{.Label "com.docker.compose.service"}}',
+		],
+		{ encoding: "utf8" },
+	);
+	expect(services).not.toMatch(/keycloak|oauth2-proxy/);
+	const mcp = await request.post("http://localhost:18090/mcp", {
+		headers: { accept: "application/json, text/event-stream" },
+		data: {
+			jsonrpc: "2.0",
+			id: 1,
+			method: "initialize",
+			params: {
+				protocolVersion: "2025-03-26",
+				capabilities: {},
+				clientInfo: { name: "s15-e2e", version: "1" },
+			},
+		},
+	});
+	expect(mcp.status()).toBe(200);
+	expect(mcp.headers()["www-authenticate"]).toBeUndefined();
+
 	expect((await (await request.get(`${api}/v1/meta`)).json()).authMode).toBe(
 		"none",
 	);
@@ -19,6 +47,11 @@ test("local dashboard/admin, tokenless CLI create/exec/delete and blocked CIDR",
 	await page.goto("/admin");
 	await expect(page).toHaveURL(/\/admin/);
 	await expect(page.locator("body")).not.toContainText("Sign in");
+	expect(
+		(
+			await request.get("/app", { headers: { host: "attacker.example:14180" } })
+		).status(),
+	).toBe(421);
 	const dir = mkdtempSync(join(tmpdir(), "umiak-local-e2e-"));
 	const root = resolve(import.meta.dirname, "../../../..");
 	const cli = (...args: string[]) =>
@@ -27,6 +60,7 @@ test("local dashboard/admin, tokenless CLI create/exec/delete and blocked CIDR",
 			env: {
 				...process.env,
 				XDG_CONFIG_HOME: dir,
+				XDG_STATE_HOME: dir,
 				UMIAK_API_KEY: "",
 				UMIAK_API_URL: "",
 			},
@@ -34,7 +68,8 @@ test("local dashboard/admin, tokenless CLI create/exec/delete and blocked CIDR",
 			timeout: 90_000,
 		});
 	cli("login", "--api-url", api);
-	const slug = `local-e2e-${Date.now()}`;
+	const slug = `local-e2e-${Date.now().toString(36)}x`;
+	let created = false;
 	try {
 		cli(
 			"create",
@@ -46,11 +81,12 @@ test("local dashboard/admin, tokenless CLI create/exec/delete and blocked CIDR",
 			"2gb",
 			"--wait",
 		);
+		created = true;
 		expect(cli("exec", slug, "--", "printf", "s15-local-ok")).toContain(
 			"s15-local-ok",
 		);
 	} finally {
-		cli("rm", slug, "--yes");
+		if (created) cli("rm", slug, "--yes");
 	}
 	const config = readFileSync(join(dir, "umiak/config.json"), "utf8");
 	expect(config).not.toMatch(/accessToken|refreshToken/);

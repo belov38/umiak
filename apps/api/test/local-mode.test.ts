@@ -27,7 +27,14 @@ function setup(
 			{
 				sub: LOCAL_USER_SUB,
 				isOperator: true,
-				teams: [{ teamId: TEST_TEAM_ID, name: "Local", role: "owner" }],
+				teams: [
+					{ teamId: TEST_TEAM_ID, name: "Local", role: "owner" },
+					{
+						teamId: "00000000-0000-7000-8000-000000000002",
+						name: "Second",
+						role: "owner",
+					},
+				],
 			},
 		],
 	});
@@ -169,4 +176,20 @@ describe("local API", () => {
 			).status,
 		).toBe(401);
 	});
+});
+
+it("local public GET honors team query and rejects conflicting header", async () => {
+	const { request } = setup();
+	const { encodeUuid } = await import("@umiak/auth");
+	const team = encodeUuid("team", "00000000-0000-7000-8000-000000000002");
+	const res = await request(`/v1/me?team=${team}`);
+	expect(res.status).toBe(200);
+	expect((await res.json()).team.id).toBe(team);
+	expect(
+		(
+			await request(`/v1/me?team=${team}`, undefined, {
+				"umiak-team": "team_00000000000000000000000000",
+			})
+		).status,
+	).toBe(400);
 });
