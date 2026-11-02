@@ -111,3 +111,38 @@ it.each(["none", "oidc"] as const)(
 		expect(response.headers.has("www-authenticate")).toBe(mode === "oidc");
 	},
 );
+
+it.each(["", "Basic abc", "Bearer", "Bearer umiak_first, Bearer umiak_second"])(
+	"rejects malformed Authorization %j without falling back to the local owner",
+	async (authorization) => {
+		let apiCalls = 0;
+		app = createHttpApp({
+			apiUrl: "http://api",
+			publicUrl: "http://localhost/mcp",
+			issuer: null,
+			log: createLogger({ level: "silent" }),
+			localEnv: { UMIAK_AUTH_MODE: "none" },
+			fetch: (async () => {
+				apiCalls++;
+				throw new Error("must not reach API");
+			}) as typeof fetch,
+		});
+		const response = await app.app.request(
+			"http://localhost/mcp",
+			{
+				method: "POST",
+				headers: {
+					host: "localhost",
+					authorization,
+					"content-type": "application/json",
+					accept: "application/json, text/event-stream",
+				},
+				body: "{}",
+			},
+			{ incoming: { socket: { remoteAddress: "127.0.0.1" } } },
+		);
+		expect(response.status).toBe(401);
+		expect(response.headers.has("www-authenticate")).toBe(false);
+		expect(apiCalls).toBe(0);
+	},
+);

@@ -220,8 +220,18 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 		team: string | undefined,
 	): Promise<Principal | Response> {
 		if (o.authenticate !== undefined) return o.authenticate(req, team);
-		const token =
-			bearerOf(req) ?? (authMode(o.localEnv ?? {}) === "none" ? "" : null);
+		const bearer = bearerOf(req);
+		const local = authMode(o.localEnv ?? {}) === "none";
+		if (local && req.headers.has("authorization") && bearer === null) {
+			return refuse({
+				status: 401,
+				reason: "malformed_authorization",
+				code: "unauthorized",
+				message:
+					"send one Authorization: Bearer <token> header or omit it in local mode",
+			});
+		}
+		const token = bearer ?? (local ? "" : null);
 		if (token === null) {
 			o.metrics?.authRejections.inc({ status: 401, reason: "no_bearer" });
 			return Response.json(
