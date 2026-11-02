@@ -5,6 +5,7 @@
 import { apiKeyHash, classifyBearer, isWellFormedApiKey } from "@umiak/auth";
 import type { Context, MiddlewareHandler } from "hono";
 import type { ApiDeps, ApiEnv } from "../deps.ts";
+import { localAuthenticate } from "./local.ts";
 import {
 	type AuthContext,
 	authRequired,
@@ -70,6 +71,8 @@ async function authenticate(
 	c: Context<ApiEnv>,
 ): Promise<AuthContext> {
 	const token = bearerOf(c);
+	if (token === null && deps.settings.authMode === "none")
+		return localAuthenticate(deps, c);
 	if (token === null) {
 		throw authRequired(
 			"authentication required: send `Authorization: Bearer <token>` with a team API key or a Keycloak access token (`umiak login`)",

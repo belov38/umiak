@@ -98,6 +98,10 @@ const optionalHttpUrl = z.preprocess(
 
 const workerSchema = z
 	.object({
+		UMIAK_AUTH_MODE: z.preprocess(
+			unsetEmpty,
+			z.enum(["oidc", "none"]).default("oidc"),
+		),
 		DATABASE_URL: databaseUrl,
 		// Templates, sizes, quotas and defaults come from Payload (S8 plan
 		// decision 5); UMIAK_CONFIG_FILE is read only by `umiak-admin bootstrap`.
@@ -128,6 +132,7 @@ const workerSchema = z
 	})
 	.superRefine((e, ctx) => {
 		if (
+			e.UMIAK_AUTH_MODE !== "none" &&
 			e.UMIAK_IDP_SYNC_KEYCLOAK_URL !== undefined &&
 			e.UMIAK_IDP_SYNC_CLIENT_SECRET_FILE === undefined
 		) {
@@ -245,6 +250,7 @@ export function parseWorkerEnv(env: Env = process.env): WorkerEnv {
 		dbPoolMax: e.UMIAK_DB_POOL_MAX,
 		idpSyncIntervalMs: e.UMIAK_IDP_SYNC_INTERVAL * 1000,
 		idpSync:
+			e.UMIAK_AUTH_MODE === "none" ||
 			e.UMIAK_IDP_SYNC_KEYCLOAK_URL === undefined ||
 			e.UMIAK_IDP_SYNC_CLIENT_SECRET_FILE === undefined
 				? undefined

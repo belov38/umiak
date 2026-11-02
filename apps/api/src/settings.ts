@@ -2,7 +2,14 @@
 // environment is a fatal error that lists every problem.
 import { readFileSync } from "node:fs";
 import { isIP } from "node:net";
-import { loadSshCa, loadSshHostKeys, type SshCa } from "@umiak/auth";
+import {
+	authMode,
+	LOCAL_OPERATOR_GROUP,
+	loadSshCa,
+	loadSshHostKeys,
+	localAllowedCidrs,
+	type SshCa,
+} from "@umiak/auth";
 import { z } from "zod";
 
 export class SettingsError extends Error {
@@ -33,6 +40,8 @@ export interface OidcSettings {
 }
 
 export interface Settings {
+	authMode: "oidc" | "none";
+	localAllowedCidrs: string[];
 	publicPort: number;
 	proxiedPort: number;
 	internalPort: number;
@@ -239,6 +248,8 @@ const schema = z.object({
 export function loadSettings(
 	env: Record<string, string | undefined>,
 ): Settings {
+	const mode = authMode(env);
+	const allowed = localAllowedCidrs(env);
 	const r = schema.safeParse(env);
 	const lines = r.success
 		? []
@@ -259,6 +270,8 @@ export function loadSettings(
 	const e = r.data;
 	const issuer = e.UMIAK_OIDC_ISSUER?.replace(/\/+$/, "");
 	return {
+		authMode: mode,
+		localAllowedCidrs: allowed,
 		publicPort: e.UMIAK_API_PUBLIC_PORT,
 		proxiedPort: e.UMIAK_API_PROXIED_PORT,
 		internalPort: e.UMIAK_API_INTERNAL_PORT,
@@ -271,9 +284,12 @@ export function loadSettings(
 		serviceTokensFile: e.UMIAK_API_SERVICE_TOKENS_FILE,
 		gatewayTokenFile: e.UMIAK_API_GATEWAY_TOKEN_FILE ?? null,
 		identityFile: e.UMIAK_IDENTITY_FILE ?? null,
-		operatorGroups: e.UMIAK_OPERATOR_GROUPS,
+		operatorGroups:
+			mode === "none"
+				? [...e.UMIAK_OPERATOR_GROUPS, LOCAL_OPERATOR_GROUP]
+				: e.UMIAK_OPERATOR_GROUPS,
 		oidc:
-			issuer === undefined
+			mode === "none" || issuer === undefined
 				? null
 				: {
 						issuer,

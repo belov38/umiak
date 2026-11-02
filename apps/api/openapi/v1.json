@@ -2411,6 +2411,13 @@
 						"format": "uri",
 						"type": "string"
 					},
+					"authMode": {
+						"enum": [
+							"oidc",
+							"none"
+						],
+						"type": "string"
+					},
 					"build": {
 						"description": "Build of the api",
 						"example": "1.4.0+3f2c1a9",

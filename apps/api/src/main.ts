@@ -20,6 +20,10 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 	const log = createApiLogger({ level: settings.logLevel });
+	if (settings.authMode === "none")
+		process.stderr.write(
+			"WARNING: UMIAK_AUTH_MODE=none: ANY ALLOWED NETWORK CLIENT HAS FULL VM AND PLATFORM CONTROL. No login is required. Restrict UMIAK_LOCAL_ALLOWED_CIDRS.\n",
+		);
 	process.on("unhandledRejection", (reason) => {
 		log.error(
 			{ err: reason instanceof Error ? reason.message : String(reason) },
