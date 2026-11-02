@@ -41,6 +41,7 @@ arch=$(uname -m)
 UMIAK="${UMIAK_E2E_UMIAK:-$REPO/apps/cli/dist/umiak-$os-$arch}"
 
 W=$(mktemp -d "${TMPDIR:-/tmp}/umiak-e2e.XXXXXX")
+SNAP_NAME="e2e-$(openssl rand -hex 6)"
 # mise keeps its config and trust records under the XDG dirs; pin them before the override, or the
 # python3/node shims stop working ("config files are not trusted").
 export MISE_CONFIG_DIR="${MISE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/mise}"
@@ -54,7 +55,7 @@ die() {
 	exit 1
 }
 
-[[ -s "$E2E_PW" ]] || die "$E2E_PW is missing: run infra/dev-cp/dev-users.sh"
+[[ "$AUTH_MODE" = none || -s "$E2E_PW" ]] || die "$E2E_PW is missing: run infra/dev-cp/dev-users.sh"
 [[ -s "$CA" ]] || die "$CA is missing: run infra/dev-cp/deploy.sh"
 if [[ ! -x "$UMIAK" ]]; then
 	log "building the CLI"
@@ -94,7 +95,7 @@ cleanup() {
 	for s in ${CREATED[@]+"${CREATED[@]}"}; do
 		"$UMIAK" rm "$s" --yes >/dev/null 2>&1 || true
 	done
-	"$UMIAK" snapshot rm e2e-snap --yes >/dev/null 2>&1 || true
+	"$UMIAK" snapshot rm "$SNAP_NAME" --yes >/dev/null 2>&1 || true
 	[[ -n "${SSHK_ID:-}" ]] && "$UMIAK" ssh-keys rm "$SSHK_ID" >/dev/null 2>&1
 	return 0
 }
@@ -112,7 +113,7 @@ finish() {
 	if [[ "${UMIAK_E2E_KEEP_WORKDIR:-0}" == 1 ]]; then
 		printf '\nwork dir (tokens, SSH key): %s\n' "$W"
 	else
-		rm -rf "$W"
+		python3 -c 'import shutil,sys; shutil.rmtree(sys.argv[1])' "$W"
 	fi
 	exit "$FAILED"
 }
@@ -120,9 +121,21 @@ trap 'finish' INT TERM HUP
 # Unexpected exits (set -u, a crash) still delete the sandboxes and the work dir.
 trap '((FINISHED)) || { FAILED=1; finish; }' EXIT
 
+# Wait for deletions to finish before starting the next VM.
+wait_empty_budget() {
+ local used
+ for _ in $(seq 1 60); do
+  used=$(ssh -o BatchMode=yes "$PVE_SSH" 'qm list | awk "\$1 >= 500 && \$1 <= 589 && \$3 == \"running\" {sum += \$4} END {print sum+0}"') || return 1
+  [[ "$used" == 0 ]] && return 0
+  sleep 1
+ done
+ die "Sequential VM budget did not become free"
+}
+
 # create_sb <args...>: create --wait; sets SB to the slug and remembers it for cleanup. Not in
 # $(...): CREATED must be set in this shell.
 create_sb() {
+ wait_empty_budget || return 1
 	local out
 	SB=""
 	out=$("$UMIAK" create --wait --json "$@") || return 1
@@ -140,10 +153,17 @@ vms_in_range() {
 }
 
 step "preflight"
+usage=$(ssh -o BatchMode=yes "$PVE_SSH" 'qm list | awk "\$1 >= 500 && \$1 <= 589 && \$3 == \"running\" {sum += \$4} END {print sum+0}"')
+[[ "$usage" == 0 ]] || die "Sequential acceptance requires no running sandbox VMs; found RAM $usage MB"
 BASE_VMS=$(vms_in_range) || die "ssh $PVE_SSH failed"
 [[ -z "$BASE_VMS" ]] || log "note: VMs already in 500-589: $BASE_VMS"
 "$UMIAK" version >/dev/null && pass "umiak $("$UMIAK" version 2>/dev/null | head -1); pve VMs before: ${BASE_VMS:-none}"
 
+if [[ "$AUTH_MODE" = none ]]; then
+ step "login (local)"
+ "$UMIAK" login --api-url "$API_URL" --credential-store file >"$W/login.out" 2>"$W/login.err" || fail "local login"
+ "$UMIAK" whoami --json >"$W/whoami.json" && pass "tokenless owner"
+else
 step "login (device grant)"
 "$UMIAK" login --no-browser --credential-store file --api-url "$API_URL" >"$W/login.out" 2>"$W/login.err" &
 lp=$!
@@ -161,9 +181,11 @@ else
 	fail "$(cat "$W/login.err" | xargs)"
 fi
 
+fi
+
 step "create --wait"
 t0=$(date +%s)
-create_sb --template linux --env FOO=bar --secret TOKEN=s3cret || {
+create_sb --template linux --size 2gb --env FOO=bar --secret TOKEN=s3cret || {
 	KEEP_GOING=0
 	fail "create"
 }
@@ -252,6 +274,20 @@ done
 r="$(cc "$url/") $(cc "$url/?_token=umiakp_bad") $(cc -H "Umiak-Port-Token: $tok" "$url/") $(cc -H 'Accept: text/html' -c "$W/jar" "$url/?_token=$tok") $(cc -b "$W/jar" "$url/")"
 [[ "$r" == "401 401 200 302 200" ]] && pass "$url: none 401, bad 401, header 200, browser 302+cookie, cookie 200" || fail "codes $r"
 
+if [[ "$AUTH_MODE" = none ]]; then
+ step "preview public"
+ "$UMIAK" port "$S" 3000 --public >/dev/null
+ [[ "$(cc "$url/")" == 200 ]] && pass "public 200" || fail "public preview"
+ step "guest control plane isolation"
+ "$UMIAK" exec "$S" -- python3 -c 'import socket
+for port in (4180,8080,8090):
+ s=socket.socket(); s.settimeout(3)
+ try:
+  s.connect(("192.168.68.90",port)); s.sendall(b"GET /v1/meta HTTP/1.1\r\nHost: 192.168.68.90:8080\r\nConnection: close\r\n\r\n"); data=s.recv(1024); assert b"403" in data.split(b"\r\n")[0],data
+ except (TimeoutError,ConnectionRefusedError,OSError): pass
+ finally: s.close()
+print("app/API/MCP blocked or denied")' && pass "all three ports" || fail "guest can reach control plane"
+else
 step "preview sso"
 "$UMIAK" port "$S" 3000 --sso >/dev/null
 r1=$(cc "$url/")
@@ -260,6 +296,8 @@ if [[ "$r1" == 401 ]] && grep -q 'status 200' <<<"$r" && grep -q '__Host-umiak_a
 	pass "non-browser 401; browser: Keycloak login -> /umiak-auth -> callback -> 200 with __Host-umiak_auth"
 else
 	fail "non-browser $r1; $(head -3 <<<"$r" | xargs)"
+fi
+
 fi
 
 step "umiak ssh"
@@ -278,6 +316,7 @@ r=$(ssh -p 2222 -i "$W/id_e2e" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictH
 step "fork"
 "$UMIAK" exec "$S" -- sh -c 'echo fork-marker > marker.txt'
 src=$("$UMIAK" exec "$S" -- cat /etc/machine-id)
+"$UMIAK" stop "$S" --wait >/dev/null
 F1=$("$UMIAK" fork "$S" --wait --json | tail -1 | json 'd["sandbox"]["slug"] if d.get("event") == "ready" else ""')
 if [[ -n "$F1" ]]; then
 	CREATED+=("$F1")
@@ -289,19 +328,22 @@ else
 fi
 
 step "snapshot + create --from"
-ss=$("$UMIAK" snapshot save "${F1:-$S}" e2e-snap --wait --json | tail -1 |
+ss=$("$UMIAK" snapshot save "${F1:-$S}" "$SNAP_NAME" --wait --json | tail -1 |
 	json "d['snapshot']['state'] + ':' + str(d['snapshot']['consistency']) if d['event'] == 'ready' else 'failed:' + d['code']")
 [[ -n "${F1:-}" ]] && "$UMIAK" rm "$F1" --yes >/dev/null
 S2=""
-create_sb --from e2e-snap && S2=$SB
+create_sb --from "$SNAP_NAME" && S2=$SB
 r=$([[ -n "$S2" ]] && "$UMIAK" exec "$S2" -- cat marker.txt)
 [[ "$ss" == ready:* && "$r" == fork-marker ]] && pass "snapshot $ss; $S2 has the marker" || fail "snapshot $ss, marker '$r'"
 [[ -n "$S2" ]] && "$UMIAK" rm "$S2" --yes >/dev/null
-"$UMIAK" snapshot rm e2e-snap --yes >/dev/null
+"$UMIAK" snapshot rm "$SNAP_NAME" --yes >/dev/null
 
 step "stop/resume"
-"$UMIAK" stop "$S" --wait --json >/dev/null
+if [[ "$("$UMIAK" info "$S" --json | json 'd["state"]')" != stopped ]]; then
+ "$UMIAK" stop "$S" --wait --json >/dev/null || fail "stop"
+fi
 st=$("$UMIAK" info "$S" --json | json 'd["state"]')
+wait_empty_budget || fail "VM budget"
 t0=$(date +%s)
 "$UMIAK" resume "$S" --wait --json >/dev/null
 t=$(($(date +%s) - t0))
@@ -320,11 +362,13 @@ done
 [[ "$st" == deleted || -z "$st" ]] && pass "state ${st:-not found}" || fail "state $st"
 
 step "sdk ts"
+wait_empty_budget || fail "VM budget"
 r=$(cd "$REPO" && mise exec -- node packages/sdk-ts/e2e/devcp.ts 2>&1)
 grep -q '^ok delete' <<<"$r" && ! grep -q 'check failed\|Error' <<<"$r" &&
 	pass "$(grep -c '^ok' <<<"$r") checks" || fail "$(tail -3 <<<"$r" | xargs)"
 
 step "sdk python"
+wait_empty_budget || fail "VM budget"
 r=$(cd "$REPO/packages/sdk-py" && mise exec -- uv run --locked --quiet python e2e/devcp.py 2>&1)
 grep -q '^ok delete' <<<"$r" && ! grep -q 'check failed\|Error' <<<"$r" &&
 	pass "$(grep -c '^ok' <<<"$r") checks" || fail "$(tail -3 <<<"$r" | xargs)"

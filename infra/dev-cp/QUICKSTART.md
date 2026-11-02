@@ -1,30 +1,38 @@
 # Быстрый старт: dev-стенд Umiak
 
-Стенд работает в CT 590 на `pve`. С Mac он доступен через tailnet; VPN и прочие туннели не нужны.
+Стенд работает в CT 590 на `pve`. С Mac dashboard, API и MCP доступны по LAN HTTP без входа (режим none).
 
 | Что | Адрес |
 |---|---|
-| API (CLI, SDK) | `https://umiak-dev-cp.tail0000.ts.net:8443` |
-| Дашборд | `https://umiak-dev-cp.tail0000.ts.net:8443/app` |
-| Keycloak (смена пароля, админка `/admin`) | `https://umiak-dev-cp.tail0000.ts.net:10000/` |
+| API (CLI, SDK) | `http://192.168.68.90:8080` |
+| Дашборд | `http://192.168.68.90:4180/app` |
+| MCP | `http://192.168.68.90:4180/mcp` |
 | Превью портов | `https://<slug>-<port>.umiak.100-64-10-7.sslip.io` |
 | SSH | `ssh -p 2222 <slug>@umiak-dev-cp.tail0000.ts.net` |
 
 ## Вход
 
-Логин — `ilia@example.com`. Временный пароль лежит в `~/.config/umiak/dev-cp/ilia-initial-password`; при первом входе Keycloak попросит задать свой. Команда — личная, роль owner.
+Логин и OAuth-токены не нужны. Все разрешённые LAN-клиенты имеют полный контроль.
 
 ```sh
-pnpm --filter @umiak/cli build            # один раз: apps/cli/dist/umiak-darwin-arm64
+mise exec -- pnpm --filter @umiak/cli build
 alias umiak="$PWD/apps/cli/dist/umiak-darwin-arm64"
-
-umiak login --api-url https://umiak-dev-cp.tail0000.ts.net:8443
+umiak login --api-url http://192.168.68.90:8080
 umiak whoami
 ```
 
-`umiak login` откроет браузер со страницей Keycloak: войти, подтвердить код и доступ. Токены хранятся в Keychain.
+В браузере: `http://192.168.68.90:4180/app`; операторская панель — `/admin`.
 
-В браузере: `https://umiak-dev-cp.tail0000.ts.net:8443/app` → вход в Keycloak → дашборд личной команды (sandbox, снапшоты, ключи, окружения).
+Переключение и откат с Mac:
+
+```sh
+UMIAK_DEVCP_AUTH_MODE=none mise exec -- bash infra/dev-cp/deploy.sh
+UMIAK_DEVCP_AUTH_MODE=oidc mise exec -- bash infra/dev-cp/deploy.sh
+```
+
+После OIDC-отката dashboard/API снова доступны через
+`https://umiak-dev-cp.tail0000.ts.net:8443`, Keycloak — `:10000`.
+Сертификаты gateway и CA не меняются; Keycloak volume сохраняется.
 
 ## Sandbox
 
@@ -33,20 +41,22 @@ umiak create --wait                       # Linux 2 GB, готова за ~15 s;
 umiak exec <slug> -- uname -a
 umiak shell <slug>                        # терминал
 umiak cp ./file <slug>:file               # и обратно: umiak cp <slug>:file ./file; каталог: -r
-umiak stop <slug> / umiak resume <slug> --wait
+umiak stop <slug> --wait
+umiak resume <slug> --wait
 umiak fork <slug> --wait
-umiak snapshot save <slug> my-snap --wait ; umiak create --from my-snap --wait
+umiak snapshot save <slug> my-snap --wait
+umiak create --from my-snap --wait
 umiak rm <slug> --yes
 ```
 
-Без активности sandbox останавливается сама через 15 min (`--idle` у `create`), `umiak resume` её поднимает. Лимит стенда: 3 активные sandbox на команду, но на `pve` одновременно держим не больше двух (2 × 2 GB).
+Без активности sandbox останавливается сама через 15 min (`--idle` у `create`), `umiak resume` её поднимает. Лимит стенда: 3 активные sandbox на команду, общий предел sandbox RAM на `pve` — 8 GB. При проверках запускайте VM последовательно; перед fork остановите источник.
 
 ## Превью порта
 
 ```sh
 umiak exec <slug> --detach -- python3 -m http.server 3000
 umiak port <slug> 3000                    # token: печатает ссылку с ?_token=...
-umiak port <slug> 3000 --sso              # вход через Keycloak
+# sso недоступен в none; используйте token или public
 umiak port <slug> 3000 --public           # без авторизации
 ```
 
@@ -72,7 +82,7 @@ Host key gateway CLI кладёт в `~/.config/umiak/known_hosts`; для об�
 
 ## Если что-то не так
 
-- Проверить стенд целиком: `infra/dev-cp/e2e.sh` (~5 мин, своя учётка `e2e@example.com`, за собой убирает).
-- Перевыкатить: `infra/dev-cp/deploy.sh`. Пользователи: `infra/dev-cp/dev-users.sh`.
+- Проверить стенд целиком: `UMIAK_DEVCP_AUTH_MODE=none mise exec -- bash infra/dev-cp/e2e.sh` (~4 мин, локальная команда, за собой убирает).
+- Перевыкатить в none: `UMIAK_DEVCP_AUTH_MODE=none mise exec -- bash infra/dev-cp/deploy.sh`. Пользователи Keycloak нужны только после OIDC-отката.
 - Логи: `ssh umiak@192.168.68.90`, `cd ~/umiak/deploy/compose && docker compose logs -f api worker gateway`.
 - Подробности: `infra/dev-cp/README.md`.

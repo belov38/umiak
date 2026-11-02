@@ -1,6 +1,7 @@
 # S15 implementation plan and evidence
 
-Spec: ../specs/s15-local-mode.md. Branch: s15-local-mode. No merge into main.
+Spec: ../specs/s15-local-mode.md. Original branch: s15-local-mode; follow-up: s15-fix.
+No merge into main. The follow-up rulings/evidence below supersede historical stand status.
 
 ## Rulings
 
@@ -145,3 +146,86 @@ Status: **done-awaiting-acceptance**. Independent master acceptance and merge
 remain outside this branch. OIDC stand remains unchanged. Home procedure is
 `deploy/compose/README.local.ru.md`; direct LAN HTTP ingress is supported,
 external ingress reverse proxies require an explicit trust design.
+
+## S15 follow-up rulings (Ilia, 2026-11-02)
+
+- The new explicit instruction supersedes ruling 8 and the spec's no-replacement live fallback:
+  deploy CT590 in none mode, keep the existing gateway on 443 and its CA/cert names.
+- Default local compose bind is 127.0.0.1: Docker NAT cannot distinguish clients reliably.
+  LAN publication requires explicit bind and host firewall; no network/firewall changes planned.
+- Deny wins over allow, even for API keys. Default deny is the product sandbox subnet
+  10.88.0.0/24, augmented by literal configured PVE/SSH node addresses. Hostnames cannot
+  safely be resolved once for a permanent security policy; explicitly list their addresses.
+- CT preflight confirmed LAN 192.168.68.90, node/SNAT 192.168.68.116, sandbox
+  10.88.0.0/24, existing Docker network 172.18.0.0/16. No running 500–589 VMs.
+  Stand allows LAN and internal Docker peers; denies node /32 and sandbox /24.
+  Fixed proxy addresses 172.18.255.10/.11 retain the existing Docker network; product
+  compose reserves its dynamic allocation range. Do not recreate the stand's networks.
+- Remove Tailscale Serve mappings in none mode (reset existing Serve config); preserve
+  gateway preview DNS/certificates and SSH. OIDC remains a single-command redeploy.
+- Disable CDN-backed /v1/docs in none; retain OpenAPI JSON. Hide SSO controls and
+  reject its ingress endpoint. Clipboard uses a selection-based fallback on HTTP.
+
+Live finding: LAN 8090 is blocked by the existing firewall. Preserve firewall rules;
+serve MCP on the existing local ingress at :4180/mcp instead, trusting only the
+fixed ingress IP for forwarded peers. Direct :8090 remains a blocked alternative.
+
+Follow-up gate evidence:
+- Installed frozen-lockfile dependencies in the fresh worktree after initial missing-module failures.
+- Full build, lint, typecheck: exit 0 (same pre-existing informational lint suggestion).
+- Sequential workspace tests: exit 0, Python 83 passed; shared auth now 139 passed.
+- All five Go modules build/vet/test -p 1: exit 0; four golangci-lint runs: 0 issues.
+- OIDC Playwright: 21/21 passed (1.5 min); local fake compose: 1/1 passed (4.9 s).
+- Real socket ingress regression uses IPv4 loopback vs IPv6 loopback; deny wins even
+  with spoofed X-Forwarded-For. Default sandbox deny and invalid deny parsing tested.
+- CT590 deployed none; all runtime services healthy; Keycloak/oauth2-proxy exited,
+  no Tailscale Serve config. Existing gateway :443, certificate names and CA retained.
+- Mac socket peer observed as 192.168.68.121 (not Docker NAT on this Linux CT).
+  PVE source .116 gets 403 on app/API/MCP; Mac gets tokenless MCP initialize success.
+- Initial live runner attempts exposed a test ordering error (marker after stop),
+  then editing a running Bash file interrupted parsing. Both cleaned their VMs.
+  Final acceptance runs an immutable copy of the corrected runner.
+
+Independent follow-up code review found and fixed:
+- Product compose must propagate literal PVE/SSH node env to API/MCP/ingress, not
+  only worker/migrate; ingress now derives the same node denies. Its regression
+  covers IPv4 PVE URL and IPv6 SSH address (5 socket/policy tests pass).
+- Preserve the worker's default SSH hostname `pve` in shared compose env.
+- Reuse HTTP clipboard fallback for Copy SSH as well as CopyButton.
+Targeted web tests 237/237 and typecheck/lint passed after these fixes.
+
+Final live Linux acceptance: 21/21 steps passed from Mac over LAN, 2026-11-02.
+Create linux/2gb from 597: 15 s; exec codes/signal/timeout/stdin, streaming,
+detached logs, PTY resize, 80 MB cp each direction with matching SHA256, token
+preview 401/401/200/302/200, public 200, guest isolation all app/API/MCP ports,
+SSH cert and plain SSH, sequential fork, quiesced snapshot/create-from, resume
+11 s with env/secrets/files/SSH intact, delete, TS SDK 6 checks, Python SDK 5,
+idle-stop 71 s, no remaining VMs 500–589, no snapshot LVs, no team sandboxes.
+
+Linux desktop acceptance: exactly one 4 GiB VM500 from template596/version
+20261101.3, 15 s to ready. Opened Desktop tab in the actual LAN dashboard with
+local identity. Embedded viewer connected (video/audio pipelines selected,
+`Connection Complete` in iframe console). Access options are Secret link/Public,
+without Team members. Closed viewer/tab and issued scoped `umiak rm <slug> --yes`.
+No templates rebuilt, no firewall/SDN/host-network edits, no Ilia login/account edits.
+MCP HTTP through local ingress: initialize, 38 tools listed, limits_get PASS.
+
+The final live runner also uses a random snapshot name (shared local identity must
+never delete a pre-existing generic `e2e-snap`) and waits for zero running sandbox
+RAM between the TS/Python SDK scenarios. Repeated that exact immutable script:
+21/21 PASS, create16s, resume10s, idle-stop83s, final zero VMs/snapshot LVs/sandboxes.
+Final reviewed browser gates: local Playwright1/1 (3.5s), OIDC21/21 (1.6min).
+Final build, full typecheck and lint exit0; shellcheck deploy/e2e/names exit0.
+Final CT redeploy succeeded; runtime health checks passed; Serve config absent.
+MCP initialize/list(38)/limits_get passed again on the final deployed tree.
+PVE-source app/API/MCP requests still all return403. Desktop deletion confirmed:
+empty local-team sandbox list and no VM500–589. Final source/template slot config
+continues to limit sandbox VMIDs to500–589; no template writes or guest rebuilds.
+
+Final complete sequential workspace rerun on the reviewed tree: exit0, 4512
+Vitest tests and83 Python tests passed;8 existing skips. Final status:
+**done-awaiting-acceptance** on s15-fix. CT590 remains healthy in none mode.
+Final URLs: dashboard http://192.168.68.90:4180/app, API http://192.168.68.90:8080,
+MCP http://192.168.68.90:4180/mcp. Gateway remains443 with the original CA.
+Rollback: `UMIAK_DEVCP_AUTH_MODE=oidc mise exec -- bash infra/dev-cp/deploy.sh`.
+No open implementation findings; independent acceptance/merge remains with master.

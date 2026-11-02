@@ -46,6 +46,12 @@ Acceptance: targeted unit tests, fake-backend local compose + Playwright + CLI
 (create/exec/delete and disallowed client), existing OIDC Playwright suite,
 sequential TS build/lint/typecheck/tests and all Go build/vet/test/lint.
 
-Live pve check must not replace the OIDC stack. At most one 2 GiB sandbox in
-500–589 from read-only template 597; total sandbox budget 8 GiB. No network or
-firewall changes. If an independent tunnel cannot be reached, stop at fake E2E.
+Follow-up decision by Ilia (2026-11-02): replace CT590 with local mode, preserving
+gateway :443 and its certificates/CA; retain one-command OIDC rollback.
+Live checks use sequential sandbox VMs in 500–589: Linux 2 GiB from read-only
+597, then Linux desktop 4 GiB from read-only 596. Total sandbox RAM cap is
+8 GiB. Do not change firewall/SDN or rebuild templates. Remove every created
+sandbox; leave CT590 healthy in none mode.
+
+Follow-up: deny CIDRs win over allow, including node SNAT addresses and sandbox subnet.
+Empty allowlist fails startup; default bind is loopback; Docker NAT requires host isolation.
