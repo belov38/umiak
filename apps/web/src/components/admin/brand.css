@@ -1,0 +1,16 @@
+.umiak-admin-logo {
+	display: block;
+	width: 178px;
+	height: 40px;
+	background: url("/brand/lockup-inter-light.svg") center / contain no-repeat;
+}
+[data-theme="dark"] .umiak-admin-logo {
+	background-image: url("/brand/lockup-inter-dark.svg");
+}
+.umiak-admin-icon {
+	display: block;
+	width: 32px;
+	height: 32px;
+	background-color: var(--theme-text);
+	mask: url("/brand/mark-square.svg") center / contain no-repeat;
+}

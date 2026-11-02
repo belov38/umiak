@@ -74,6 +74,7 @@ COPY packages/payload/src packages/payload/src
 WORKDIR /app/web
 COPY --from=build /app/apps/web/.next/standalone ./
 COPY --from=build /app/apps/web/.next/static apps/web/.next/static
+COPY apps/web/public apps/web/public
 COPY apps/web/healthcheck.js apps/web/
 WORKDIR /app/web/apps/web
 USER node

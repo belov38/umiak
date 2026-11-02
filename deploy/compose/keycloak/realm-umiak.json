@@ -1,5 +1,6 @@
 {
 	"realm": "umiak",
+	"loginTheme": "umiak",
 	"displayName": "Umiak (local dev)",
 	"enabled": true,
 	"sslRequired": "external",

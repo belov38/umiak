@@ -28,11 +28,36 @@ test("non-operators get 403 on the operator screens and allTeams", async ({
 	const r = await alice.page.goto("/app/operator");
 	expect(r?.status()).toBe(403);
 	// The proxy refuses /admin before Payload renders its config.
+	await alice.page.evaluate(() => localStorage.setItem("umiak-theme", "dark"));
+	await alice.page.reload();
+	await expect(alice.page.locator("html")).toHaveClass("dark");
+	await expect(
+		alice.page.getByRole("link", { name: "Umiak", exact: true }),
+	).toBeVisible();
 	const adminR = await alice.page.goto("/admin");
 	expect(adminR?.status()).toBe(403);
 	await expect(
 		alice.page.getByRole("heading", { name: "Operators only" }),
 	).toBeVisible();
+	await expect(alice.page.locator("html")).toHaveClass("dark");
+	await expect(alice.page.locator("body")).toHaveCSS(
+		"background-color",
+		"rgb(6, 6, 6)",
+	);
+	await expect(
+		alice.page.getByRole("link", { name: "Umiak", exact: true }),
+	).toBeVisible();
+	await op.page.goto("/admin");
+	await expect(op.page.locator(".umiak-admin-icon")).toBeVisible();
+	for (const file of [
+		"lockup-inter-light.svg",
+		"lockup-inter-dark.svg",
+		"mark-square.svg",
+	]) {
+		const asset = await op.request.get(`/brand/${file}`);
+		expect(asset.status()).toBe(200);
+		expect(asset.headers()["content-type"]).toContain("image/svg+xml");
+	}
 	const team = await personalTeam(alice);
 	const all = await alice.request.get(
 		`/api/v1/sandboxes?allTeams=true&team=${team}`,

@@ -276,6 +276,7 @@ services:
         && { [ -z "$$UMIAK_KEYCLOAK_PROXY_TRUSTED_ADDRESSES" ]
         || export KC_PROXY_TRUSTED_ADDRESSES="$$UMIAK_KEYCLOAK_PROXY_TRUSTED_ADDRESSES"; }
         && exec /opt/keycloak/bin/kc.sh start-dev --import-realm
+        --spi-theme--static-max-age=-1 --spi-theme--cache-themes=false --spi-theme--cache-templates=false
     environment:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
@@ -303,6 +304,7 @@ services:
       UMIAK_APP_ORIGIN: *app-origin
       UMIAK_OAUTH2_PROXY_REDIRECT_URL: *oauth2-proxy-redirect-url
     volumes:
+      - ./keycloak/themes/umiak:/opt/keycloak/themes/umiak:ro
       - ./keycloak/realm-umiak.json:/opt/keycloak/data/import/realm-umiak.json:ro
       - ./secrets/keycloak:/run/umiak-secrets:ro
     ports:

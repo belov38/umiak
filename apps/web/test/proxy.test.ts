@@ -1,7 +1,7 @@
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { NextRequest } from "next/server";
 import { beforeAll, describe, expect, it } from "vitest";
-import { guard } from "../src/lib/guard.ts";
+import { guard, page } from "../src/lib/guard.ts";
 
 const ORIGIN = "https://app.umiak.example.com";
 const ENV = {
@@ -201,4 +201,12 @@ describe("proxy config.matcher", () => {
 		expect(matches("/_next/static/chunks/a.js")).toBe(false);
 		expect(matches("/_next/static/css/app.css")).toBe(false);
 	});
+});
+
+it("denial HTML carries branding and follows the persisted or system appearance", () => {
+	const html = page("Forbidden", "No access");
+	expect(html).toContain("umiak-theme");
+	expect(html).toContain("prefers-color-scheme: dark");
+	expect(html).toContain('aria-label="Umiak"');
+	expect(html).toContain("color-scheme");
 });

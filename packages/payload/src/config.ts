@@ -121,7 +121,21 @@ export async function buildUmiakConfig(
 		cookiePrefix: "__Host-payload",
 		// avatar "default": no Gravatar request (an external origin, and it
 		// would hand every user's email hash to a third party).
-		admin: { user: "users", avatar: "default" },
+		admin: {
+			user: "users",
+			avatar: "default",
+			components: {
+				beforeNavLinks: ["/src/components/admin/brand#Logo"],
+				graphics: {
+					Logo: "/src/components/admin/brand#Logo",
+					Icon: "/src/components/admin/brand#Icon",
+				},
+			},
+			meta: {
+				titleSuffix: " — Umiak",
+				icons: [{ rel: "icon", type: "image/svg+xml", url: "/icon.svg" }],
+			},
+		},
 		typescript: { autoGenerate: false },
 		collections: [
 			Users,

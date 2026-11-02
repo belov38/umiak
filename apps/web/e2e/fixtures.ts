@@ -175,6 +175,11 @@ export class ResponseAudit {
 /** Signs in through oauth2-proxy and the Keycloak login page. */
 export async function signIn(page: Page, user: KcUser): Promise<void> {
 	await page.goto("/app");
+	await expect(page.locator("#kc-header-wrapper")).toHaveCSS("height", "40px");
+	await expect(page.locator("#kc-header-wrapper")).toHaveCSS(
+		"background-image",
+		/lockup-inter-dark.svg/,
+	);
 	await page.getByRole("textbox", { name: "Email" }).fill(user.email);
 	await page.getByRole("textbox", { name: "Password" }).fill(user.password);
 	await page.getByRole("button", { name: "Sign In" }).click();
