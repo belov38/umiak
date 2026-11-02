@@ -16,7 +16,8 @@ services:
   api:
     environment:
       <<: *local-env
-      UMIAK_API_TRUSTED_PROXY_CIDRS: 172.29.115.10/32
+      UMIAK_LOCAL_ALLOWED_HOSTS: api:8080
+      UMIAK_API_TRUSTED_PROXY_CIDRS: 172.29.115.10/32,172.29.115.11/32
     ports: !override
       - "${UMIAK_LOCAL_BIND:-0.0.0.0}:${UMIAK_LOCAL_API_PORT:-8080}:8080"
     depends_on: !override
@@ -27,6 +28,7 @@ services:
   worker:
     environment:
       <<: *local-env
+      UMIAK_TUNNEL_URL: ${UMIAK_TUNNEL_URL:-}
     depends_on: !override
       web-migrate:
         condition: service_completed_successfully
@@ -39,6 +41,9 @@ services:
       <<: *local-env
     networks: !override [web-internal]
   mcp:
+    networks:
+      umiak:
+        ipv4_address: 172.29.115.11
     environment:
       <<: *local-env
     ports: !override
@@ -46,6 +51,9 @@ services:
   gateway:
     environment:
       UMIAK_AUTH_MODE: none
+      UMIAK_GATEWAY_PREVIEW_DOMAIN: ${UMIAK_PREVIEW_DOMAIN:-umiak.localhost}
+      UMIAK_GATEWAY_TUNNEL_HOST: ${UMIAK_TUNNEL_HOST:-tunnel.localhost}
+      UMIAK_GATEWAY_SSH_HOST: ${UMIAK_SSH_HOST:-ssh.localhost}
     ports: !override
       - "${UMIAK_LOCAL_BIND:-0.0.0.0}:${GATEWAY_HTTPS_PORT:-8443}:8443"
       - "${UMIAK_LOCAL_BIND:-0.0.0.0}:${GATEWAY_SSH_PORT:-2222}:2222"
@@ -58,6 +66,7 @@ services:
     command: [node, /ingress.mjs]
     environment:
       <<: *local-env
+      UMIAK_APP_ORIGIN: ${UMIAK_APP_ORIGIN:-http://localhost:4180}
     volumes:
       - ./local/ingress.mjs:/ingress.mjs:ro
     networks:

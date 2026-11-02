@@ -27,3 +27,14 @@ services:
         condition: service_started
     ports: !override
       - "127.0.0.1:14180:4180"
+  denied-ingress:
+    image: node:26.13.0-bookworm-slim
+    command: [node, /ingress.mjs]
+    environment:
+      UMIAK_APP_ORIGIN: http://localhost:14181
+      UMIAK_LOCAL_ALLOWED_CIDRS: 203.0.113.0/24
+    volumes:
+      - ./local/ingress.mjs:/ingress.mjs:ro
+    networks: [umiak, web-internal]
+    ports:
+      - "127.0.0.1:14181:4180"

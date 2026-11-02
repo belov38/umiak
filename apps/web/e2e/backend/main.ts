@@ -217,10 +217,13 @@ async function main(): Promise<void> {
 		);
 	}
 
-	const kcSecret = process.env.UMIAK_AUTH_MODE === "none" ? "unused-local-mode" : readFileSync(
-		required("UMIAK_IDP_SYNC_CLIENT_SECRET_FILE"),
-		"utf8",
-	).trim();
+	const kcSecret =
+		process.env.UMIAK_AUTH_MODE === "none"
+			? "unused-local-mode"
+			: readFileSync(
+					required("UMIAK_IDP_SYNC_CLIENT_SECRET_FILE"),
+					"utf8",
+				).trim();
 	const keycloak = new SwitchableKeycloak(
 		new KeycloakAdminClient({
 			baseUrl: required("UMIAK_IDP_SYNC_KEYCLOAK_URL"),
