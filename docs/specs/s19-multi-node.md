@@ -1,7 +1,6 @@
 # S19: multi-node sandboxes
 
-Status: design proposal, 2026-11-04. Implementation awaits design approval
-through the S18 coordinator. Scope owner: Ilia. Depends on S18
+Status: approved by Ilia through the S18 coordinator, 2026-11-04. Scope owner: Ilia. Depends on S18
 (`s18-onboarding.md`); this does not restore browser Connect/Prepare.
 
 ## Intent
@@ -23,11 +22,11 @@ Alternative: expose node pinning in create, SDKs and dashboard. Useful for
 operator placement policies, but expands the user contract beyond enabling
 the existing scheduler. Another alternative, template replication/shared
 storage, requires a disk transfer/storage design and is outside the stated
-node-local build requirement. Choice of the proposed approach is pending
-Ilia's answer through the coordinator; these are not recorded as approved.
+node-local build requirement. Ilia approved the proposed automatic-placement approach through the
+coordinator on 2026-11-04.
 
-Live preparation of `pve2` is separately pending explicit permission. No
-host changes are authorized by approval of this document alone.
+Ilia separately authorized preparing all ms02 nodes, including `pve2`,
+on 2026-11-04 through the coordinator, subject to the live restrictions below.
 
 ## Goals and boundaries
 
@@ -212,8 +211,7 @@ acceptance subagent receives this spec and the diff, without implementer
 conclusions. Fix blockers before merging main, pushing, updating roadmap
 and reporting merged SHA/live evidence/open items to the coordinator.
 
-Live: `ms02`, root SSH aliases `pve` and `pve2-lan`. No changes to pve2 until
-Ilia confirms through coordinator. Sandbox VMIDs 500–589; templates use
+Live: `ms02`, root SSH aliases `pve` and `pve2-lan`. Preparation of pve2 is authorized; coordinate the live window with S18. Sandbox VMIDs 500–589; templates use
 configured separate range. VM 590 and guests below 500, 9000/9001, CT 110/111,
 VMs 102/103/108 are off limits. Total live sandbox/test RAM <=8 GiB (e.g.
 4+4), confirmed by coordinator. Build one Linux template per node, create
