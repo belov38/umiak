@@ -109,3 +109,50 @@ test("public listener ignores forwarding even from loopback or configured Docker
 		);
 	}
 });
+
+test("proxy socket requires an expected peer, regardless of forwarding chain trust", () => {
+	for (const peer of [
+		"172.29.116.128",
+		"172.29.116.11",
+		"172.30.116.13",
+		"192.168.1.5",
+	]) {
+		assert.deepEqual(
+			requestContext(
+				req(
+					"localhost:4181",
+					{
+						"x-forwarded-proto": "https",
+						"x-forwarded-host": "evil.example",
+						"x-forwarded-for": "8.8.8.8",
+					},
+					peer,
+				),
+				{ UMIAK_TRUSTED_PROXY_CIDRS: "0.0.0.0/0" },
+				true,
+			),
+			{ origin: "http://localhost:4181", clientAddress: peer, proxied: false },
+		);
+	}
+	for (const peer of [
+		"127.0.0.1",
+		"::1",
+		"::ffff:127.0.0.1",
+		"172.29.116.1",
+		"172.30.116.1",
+		"172.30.116.12",
+	]) {
+		assert.equal(
+			requestContext(
+				req(
+					"localhost:4181",
+					{ "x-forwarded-proto": "https", "x-forwarded-host": "lab.example" },
+					peer,
+				),
+				{},
+				true,
+			).origin,
+			"https://lab.example",
+		);
+	}
+});

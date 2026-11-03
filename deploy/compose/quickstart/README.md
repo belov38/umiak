@@ -48,12 +48,12 @@ proxy access uses the Secure, host-only `__Host-umiak_owner` cookie.
    Terminate HTTPS at your proxy and forward to `http://127.0.0.1:4181`, including
    WebSocket upgrades. Configure `UMIAK_PUBLIC_URL=https://your-hostname`. The proxy
    must restrict accepted Hosts and overwrite `X-Forwarded-Proto`,
-   `X-Forwarded-Host` and `X-Forwarded-For`. Port4181 is a trusted listener published
+   `X-Forwarded-Host` and `X-Forwarded-For`. Port 4181 is a trusted listener published
    only on host loopback: never publish it on a wildcard/LAN/tailnet address.
-   Public port4180 ignores every forwarded header, including connections arriving
-   from Docker NAT or loopback. No gateway/NAT CIDR is trusted. The optional
-   sidecar uses port4181 on its isolated network. Extra proxy-chain hops can be
-   listed in `UMIAK_TRUSTED_PROXY_CIDRS`; this never enables forwarding on4180.
+   Public port 4180 ignores every forwarded header, including connections arriving
+   from Docker NAT or loopback. Only fixed bridge gateway addresses are admitted on the proxy socket; application container addresses are not. The optional
+   sidecar uses port 4181 on its isolated network. Extra proxy-chain hops can be
+   listed in `UMIAK_TRUSTED_PROXY_CIDRS`; this never enables forwarding on 4180.
 
 For host-run Tailscale Serve:
 
@@ -329,3 +329,29 @@ build is part of validation-only checks.
 The selected ISO storage is resolved by the restricted node-agent's read-only
 `media.sha256` operation through `pvesm path <storage>:iso/<name>`. Update the
 node-agent when using this new optional storage argument on an existing host.
+
+## Proxy isolation and upgrade notes
+
+Docker Engine **28 or newer** is required for loopback-publish isolation from
+other hosts on the same layer-2 network. Port 4181 also checks its socket peer:
+loopback, the fixed Compose bridge gateways (172.29.116.1 / 172.30.116.1), or
+the Serve sidecar (172.30.116.12). `UMIAK_TRUSTED_PROXY_CIDRS` controls forwarding
+chain traversal only; it cannot admit another socket peer. Port 4180 ignores
+forwarding headers from every peer.
+
+Docker Desktop caveat: containers reaching a loopback publish through
+`host.docker.internal` can be translated to the same bridge gateway as host
+traffic. The server cannot distinguish these peers. Treat containers on that
+Docker host as trusted operators, restrict accepted proxy Hosts with
+`UMIAK_PUBLIC_URL`, and do not present loopback publishing as container isolation.
+Direct container peers on control do not gain forwarding trust. Existing networks
+are retained; this polish makes no host firewall or network changes.
+
+After upgrading from instructions pointing host-run Serve at `localhost:4180`,
+run `tailscale serve --bg --https=8443 http://localhost:4181`. The old target
+silently loses the HTTPS origin and Secure `__Host-` owner cookie selection.
+Owner state and sessions remain stored; use the same HTTPS hostname and new target.
+
+The two fixed `/quickstart/ui/*.woff2` font routes intentionally remain public,
+before CIDR, deny and owner checks. They contain only bundled presentation assets;
+no deployment settings, owner state or arbitrary paths are exposed.

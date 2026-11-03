@@ -117,6 +117,7 @@ export function createQuickstartServer({
 		env,
 	);
 	const appOrigin = env.UMIAK_APP_ORIGIN ?? "http://localhost:4180";
+	let warnedServe = false;
 	const buckets = new Map();
 	function rate(req, authenticated = false) {
 		const key = `${req.umiakClientAddress ?? req.socket.remoteAddress}:${authenticated ? "owner" : "public"}`;
@@ -138,6 +139,14 @@ export function createQuickstartServer({
 		try {
 			const { origin, clientAddress } = requestContext(req, env, proxyListener);
 			req.umiakClientAddress = clientAddress;
+			if (
+				!proxyListener &&
+				!warnedServe &&
+				/\.ts\.net(?::\d+)?$/i.test(req.headers.host ?? "")
+			) {
+				warnedServe = true;
+				console.warn("Tailscale Host arriving on :4180: point Serve at :4181");
+			}
 			const url = new URL(req.url, origin);
 			const path = url.pathname;
 			if (req.method === "GET" && uiAsset(path, res, assetsDir)) return;

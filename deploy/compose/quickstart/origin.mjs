@@ -27,8 +27,18 @@ export function requestContext(req, env = process.env, proxyListener = false) {
 		"",
 		{ UMIAK_LOCAL_DENIED_CIDRS: "" },
 	);
+	// Socket admission is independent of configurable forwarding-chain trust.
+	// Docker Desktop may NAT host-published traffic to the bridge gateway;
+	// see README for the limit this places on container isolation.
+	const proxyPeer = clientGuard(
+		"127.0.0.0/8,::1/128,172.29.116.1/32,172.30.116.1/32,172.30.116.12/32",
+		"",
+		{ UMIAK_LOCAL_DENIED_CIDRS: "" },
+	);
 	const proxied =
-		proxyListener && req.headers["x-forwarded-proto"] !== undefined;
+		proxyListener &&
+		proxyPeer(req.socket?.remoteAddress) &&
+		req.headers["x-forwarded-proto"] !== undefined;
 	const proto = proxied ? req.headers["x-forwarded-proto"] || "http" : "http";
 	if (!["http", "https"].includes(proto)) throw Error("invalid_proxy_protocol");
 	const host = proxied

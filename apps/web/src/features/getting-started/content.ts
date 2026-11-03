@@ -309,7 +309,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 					"TS_AUTHKEY=... TS_HOSTNAME=umiak docker compose -f compose.yaml -f deploy/compose/quickstart/compose.tailscale.yaml up -d --build",
 				),
 				text(
-					"Serve covers this dashboard hostname. It cannot serve wildcard preview hostnames: quickstart previews still use the guest gateway HTTP listener on port 8085 by default, with their own DNS configuration.",
+					"Upgrade note: if host-run Serve still targets localhost:4180, run tailscale serve --bg --https=8443 http://localhost:4181 to preserve HTTPS origin and Secure __Host- owner cookies. Docker Engine 28 or newer is required for loopback publish isolation; Docker Desktop can NAT other containers to the host gateway, so trust containers on that Docker host. Serve covers this dashboard hostname. It cannot serve wildcard preview hostnames: quickstart previews still use the guest gateway HTTP listener on port 8085 by default, with their own DNS configuration.",
 				),
 			],
 		});
