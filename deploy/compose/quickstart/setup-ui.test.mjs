@@ -134,3 +134,28 @@ test("setup offers three recipes and one Windows desktop with ISO URL inputs", (
 	assert.doesNotMatch(select, /windows-desktop/);
 	assert.match(html, /id="build-iso-url"/);
 });
+
+test("progress counts only visible steps and warns until the installer has bootstrapped", () => {
+	const ready = { status: "ready" };
+	const boot = { connection: ready, host: ready };
+	const none = renderSetup({ steps: boot });
+	assert.match(none, /0 of 4 steps verified/);
+	assert.match(none, /aria-valuenow="0"/);
+	assert.doesNotMatch(none, /installer has not finished/);
+	const all = renderSetup({
+		steps: {
+			...boot,
+			limits: ready,
+			network: ready,
+			templates: ready,
+			smoke: ready,
+		},
+	});
+	assert.match(all, /4 of 4 steps verified/);
+	assert.match(all, /aria-valuenow="4"/);
+	assert.match(all, /width:100%/);
+	assert.match(
+		renderSetup({ steps: {} }),
+		/The installer has not finished setting up this deployment\. Re-run the installer on your Proxmox node\./,
+	);
+});

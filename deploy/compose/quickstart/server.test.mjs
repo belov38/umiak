@@ -641,3 +641,42 @@ test("sign-in limits have retry metadata; JSON owner gate and self revoke behave
 		await new Promise((r) => server.close(r));
 	}
 });
+
+test("the 4180 Host gate also covers WebSocket upgrades", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	const token = await store.claim(await store.init());
+	const server = createQuickstartServer({
+		store,
+		env: { UMIAK_LOCAL_DENIED_CIDRS: "10.88.0.0/24" },
+	});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const port = server.address().port;
+	const upgrade = (host) =>
+		new Promise((resolve) => {
+			const req = http.request({
+				host: "127.0.0.1",
+				port,
+				path: "/v1/ptys/test/ws",
+				headers: {
+					host,
+					connection: "Upgrade",
+					upgrade: "websocket",
+					cookie: `__Host-umiak_owner=${token}`,
+				},
+			});
+			req.on("response", (res) => {
+				resolve(res.statusCode);
+				res.resume();
+			});
+			req.on("error", () => resolve("closed"));
+			req.end();
+		});
+	try {
+		assert.equal(await upgrade("192.168.68.50:4180"), 401);
+		// Loopback Host passes the gate and fails later only because no upstream exists.
+		const served = await upgrade(`127.0.0.1:${port}`);
+		assert.notEqual(served, 401);
+	} finally {
+		await new Promise((resolve) => server.close(resolve));
+	}
+});

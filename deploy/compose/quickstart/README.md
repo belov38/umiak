@@ -23,7 +23,7 @@ is `localhost`, `127.0.0.1` or `[::1]`. Any other Host receives HTTP 403
 ssh -L 4180:<control-plane-ip>:4180 root@<pve-host>
 ```
 
-then open `http://localhost:4180`. Browsers treat localhost as a secure context.
+then open `http://localhost:4180`. Browsers treat localhost as a secure context. The emergency login relies on the browser accepting the Secure `__Host-` cookie on `http://localhost`: Chrome and Firefox do, so use one of them.
 
 Owner sessions use one cookie, `__Host-umiak_owner` (`Secure; HttpOnly; Path=/;
 SameSite=Strict`), on both listeners. A plain `umiak_owner` cookie is neither set

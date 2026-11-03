@@ -179,6 +179,7 @@ test("failed steps persist an error and cannot complete setup; retry clears erro
 	assert.equal(state.steps.limits.error, undefined);
 });
 test("browser steps wait for the installer-recorded connection and host", async () => {
+	const { createSetupHandler } = await import("./setup.mjs");
 	let state = { steps: {} };
 	const wizard = new SetupWizard({
 		store: {
@@ -191,6 +192,32 @@ test("browser steps wait for the installer-recorded connection and host", async 
 	});
 	await assert.rejects(() => wizard.run("limits", {}), /installer/);
 	assert.equal(state.steps.limits, undefined);
+	const { Readable } = await import("node:stream");
+	const handler = createSetupHandler({
+		pool: {},
+		store: {
+			read: async () => structuredClone(state),
+			write: async () => {},
+		},
+	});
+	const req = Readable.from(["{}"]);
+	req.url = "/quickstart/setup/limits";
+	req.method = "POST";
+	let status, data;
+	await handler(
+		req,
+		{
+			writeHead: (s) => {
+				status = s;
+			},
+			end: (x) => {
+				data = x;
+			},
+		},
+		{ owner: true, origin: "https://stack.example" },
+	);
+	assert.equal(status, 400);
+	assert.match(JSON.parse(data).error, /installer has not recorded connection/);
 });
 test("help substitutes origin and escapes hostile text with copy controls", () => {
 	const html = renderHelp("https://pve.example:8443");
@@ -309,7 +336,7 @@ test("legacy browser Connect, Prepare and callback routes are gone; PVE addresse
 	assert.equal((await request("/quickstart/setup/host", {})).status, 404);
 	assert.equal((await request("/quickstart/setup/prepare", {})).status, 404);
 	assert.equal((await request("/quickstart/setup/callback", {})).status, 404);
-	assert.equal((await request("/pve-setup.sh?token=x")).status, 404);
+	assert.equal((await request("/pve-setup.sh?token=x")).status, undefined);
 	assert.equal(state.preparation, undefined);
 	assert.equal(await handler.deniedPeer("::ffff:192.168.68.116"), true);
 	assert.equal(await handler.deniedPeer("192.168.68.50"), false);

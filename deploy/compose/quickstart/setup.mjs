@@ -745,9 +745,7 @@ export function createSetupHandler({
 	const handler = async (req, res, context) => {
 		const path = new URL(req.url, context.origin).pathname;
 		if (
-			!["/setup", "/app/help", "/help", "/app", "/pve-setup.sh"].includes(
-				path,
-			) &&
+			!["/setup", "/app/help", "/help", "/app"].includes(path) &&
 			!path.startsWith("/quickstart/setup/")
 		)
 			return false;
