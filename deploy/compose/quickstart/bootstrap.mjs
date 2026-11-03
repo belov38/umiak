@@ -111,7 +111,6 @@ export async function bootstrapFromInstall({
 			denySets: report.denySets ?? {},
 			reportAt: stamp,
 		});
-		const previous = state.steps ?? {};
 		// The limits step upserts the installer node's SQL rows before the state
 		// write. That is safe: the upsert is idempotent, touches only the installer
 		// node, and a failure leaves the digest unsaved so the next start retries.
