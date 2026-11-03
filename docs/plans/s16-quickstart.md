@@ -157,7 +157,7 @@ parallel sandbox VMs, broad cleanup or unrelated PVE modifications occurred.
 ### Final LAN exposure correction
 
 Read-only inspection of CT590's PVE firewall confirmed that8444 is not admitted on
-the LAN, while the old S15 port4180 already is. Added a CT-only HTTPS4180 alias to
+the LAN, while the old S15 port 4180 already is. Added a CT-only HTTPS 4180 alias to
 the same owner ingress, retaining the verified tailnet8444 URL. No firewall or bridge
 configuration changed. From PVE over the LAN, the HTTPS request now reaches ingress
 and returns403 for the denied node source. From the Mac over tailnet, the4180 alias
@@ -653,3 +653,18 @@ real ISO downloads and template builds remain deliberately unperformed under the
 read-only PVE constraint. Existing adopted hosts need read-only root Sys.Audit for
 URL-media proxy discovery; adoption itself remains available without it and no
 live ACL was changed.
+
+
+## S16 final polish acceptance — 2026-11-03
+
+See [final polish evidence and rulings](s16-polish.md) for the complete security,
+policy, UI and live results. Proxy forwarding now requires an expected socket
+peer, including the observed CT 590 bridge gateway 172.29.116.128. Public :4180
+still ignores every forwarded header. Docker >=28 and Desktop NAT limits, Serve
+migration and public static font routing are documented. Owner renderer parity,
+primitive variants and fixture-backed policy gaps are resolved.
+
+Evidence: `/tmp/umiak-s16-polish-9fDNWP/`; screenshot manifest
+`screenshots.txt`, forty before/after side-by-side comparisons in `comparisons/`.
+Final anonymous live verification preserves owner/session state and guest TLS;
+no login, pairing, approval, PVE mutation, firewall or network change occurred.

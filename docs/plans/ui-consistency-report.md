@@ -235,3 +235,29 @@ Per-domain decisions: [dashboard](s16-ui-followup-ui.md),
 [security](s16-ui-followup-security.md).
 Final gates and live evidence are recorded in [the S16 plan](s16-quickstart.md).
 Screenshots (outside git): `/tmp/umiak-s16-evidence-HumwBq/{before,after,quickstart-before,quickstart-after}`.
+
+
+## S16 final polish — 2026-11-03
+
+The independent acceptance follow-up is implemented. Owner headings now match
+400/2rem with dashboard tracking, navigation grouping/current-page state and
+footer, brand divider and segmented icon appearance controls. Mobile navigation
+collapses at the dashboard breakpoint; short desktop sidebars scroll. Setup uses
+a square token progress bar with progressbar semantics. Dashboard appearance is
+hidden until its persisted state is known. Terminal tabs, theme controls, inline
+Buttons and warning Badges use primitive variants; Payload inline colours moved
+to its host CSS without changing the host theme.
+
+The policy scans all source CSS for every data-slot selector operator; JSX
+arbitrary slot variants, local class bindings and cn/clsx/cva factories; inline
+colour/background/border/shadow; variant shadows, dynamic radii and black/white
+palette escapes. Quickstart classes/styles/CSS receive applicable checks. Fixtures
+cover each reported escape and preserve prose such as Build: #123 and shadow copy.
+The rule remains lexical rather than a complete semantic analyser.
+
+Evidence and exact gates: [S16 polish](s16-polish.md). Screenshots are outside git
+in `/tmp/umiak-s16-polish-9fDNWP/`: before/after owner pages and fresh baseline/
+current dashboard captures, light/dark at 1440/390 px; forty side-by-side PNGs
+in `comparisons/`, absolute manifest in `screenshots.txt`. Reviewed visually in
+both themes/mobile. The baseline dashboard uses the previously accepted image;
+all owner scenes and current dashboard use isolated test stores, not live users.
