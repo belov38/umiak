@@ -20,6 +20,8 @@ describe("parseWebEnv (S8 §14.1)", () => {
 			appOrigin: "https://app.umiak.example.com",
 			operatorGroups: ["umiak-operators", "admins"],
 			umiakDomain: "umiak.example.com",
+			previewScheme: "https",
+			previewPort: 443,
 			apiPublicUrl: "https://api.umiak.example.com",
 			logoutUrl: null,
 		});
@@ -55,6 +57,26 @@ describe("parseWebEnv (S8 §14.1)", () => {
 		}
 		// An empty optional value is absent, not invalid.
 		expect(issues).not.toContain("UMIAK_LOGOUT_URL");
+	});
+
+	it("validates preview scheme and port before constructing frame origins", () => {
+		expect(
+			parseWebEnv({
+				...OK,
+				UMIAK_PREVIEW_SCHEME: "http",
+				UMIAK_PREVIEW_PORT: "8085",
+			}),
+		).toMatchObject({ previewScheme: "http", previewPort: 8085 });
+		expect(parseWebEnv({ ...OK, UMIAK_PREVIEW_SCHEME: "http" })).toMatchObject({
+			previewScheme: "http",
+			previewPort: 80,
+		});
+		expect(() =>
+			parseWebEnv({ ...OK, UMIAK_PREVIEW_SCHEME: "javascript" }),
+		).toThrow("UMIAK_PREVIEW_SCHEME");
+		expect(() => parseWebEnv({ ...OK, UMIAK_PREVIEW_PORT: "65536" })).toThrow(
+			"UMIAK_PREVIEW_PORT",
+		);
 	});
 });
 

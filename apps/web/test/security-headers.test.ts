@@ -49,4 +49,25 @@ describe("securityHeaders (S8 §5.6)", () => {
 		expect(h["X-Content-Type-Options"]).toBe("nosniff");
 		expect(h["Referrer-Policy"]).toBe("same-origin");
 	});
+
+	it("allows configured HTTP preview frames only on their published domain and port", () => {
+		const csp = directives(
+			contentSecurityPolicy({
+				umiakDomain: "umiak.example.com",
+				previewScheme: "http",
+				previewPort: 8085,
+			}),
+		);
+		expect(csp.get("frame-src")).toEqual(["http://*.umiak.example.com:8085"]);
+		const https = directives(
+			contentSecurityPolicy({
+				umiakDomain: "umiak.example.com",
+				previewScheme: "https",
+				previewPort: 8443,
+			}),
+		);
+		expect(https.get("frame-src")).toEqual([
+			"https://*.umiak.example.com:8443",
+		]);
+	});
 });

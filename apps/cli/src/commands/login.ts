@@ -16,6 +16,7 @@
 
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { isIP } from "node:net";
 import { join } from "node:path";
 import { isWellFormedApiKey } from "@umiak/auth/api-key";
 import { Umiak } from "@umiak/sdk";
@@ -146,6 +147,27 @@ export function keyFromStdin(text: string): string {
 	return key;
 }
 
+/** Literal local/private addresses, including tailnet addresses need no public-HTTP warning. */
+function localLoginHost(hostname: string): boolean {
+	const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+	if (host === "localhost" || host.endsWith(".localhost")) return true;
+	if (isIP(host) === 4) {
+		const [a = 0, b = 0] = host.split(".").map(Number);
+		return (
+			a === 127 ||
+			a === 10 ||
+			(a === 172 && b >= 16 && b <= 31) ||
+			(a === 192 && b === 168) ||
+			(a === 169 && b === 254) ||
+			(a === 100 && b >= 64 && b <= 127)
+		);
+	}
+	return (
+		isIP(host) === 6 &&
+		(host === "::1" || /^(fc|fd)/.test(host) || /^fe[89ab]/.test(host))
+	);
+}
+
 async function login(
 	ctx: Context,
 	opts: { browser?: boolean; keyStdin?: boolean },
@@ -155,6 +177,19 @@ async function login(
 		throw usageError("no API URL: pass --api-url <url> or set UMIAK_API_URL");
 	}
 	const apiUrl = r.apiUrl;
+	let url: URL;
+	try {
+		url = new URL(apiUrl);
+	} catch {
+		throw usageError("API URL must be an HTTP or HTTPS URL");
+	}
+	if (url.protocol !== "http:" && url.protocol !== "https:")
+		throw usageError("API URL must be an HTTP or HTTPS URL");
+	if (url.protocol === "http:" && !localLoginHost(url.hostname)) {
+		ctx.out.warn(
+			"HTTP login sends credentials and traffic unencrypted; use HTTPS outside a trusted local network or tailnet.",
+		);
+	}
 	let cred: StoredCredential | undefined;
 	let profile: Profile;
 	let meta: MetaOidc;

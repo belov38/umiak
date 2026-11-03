@@ -1,7 +1,7 @@
 // Package devsecrets creates the secrets a gateway needs for a local stack
 // (docker compose): a dev CA with the umiak wildcard and tunnel certificates,
 // the cookie keys, the SSH host keys and CAs, and the service tokens. It only
-// creates missing files, so it is safe to run on every start.
+// creates missing files and optionally renews TLS leaves, so it is safe to run daily.
 package devsecrets
 
 import (
@@ -11,6 +11,7 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
@@ -97,17 +98,25 @@ type Options struct {
 	WorkerOwner *Owner
 	// Now is the clock of the certificates; nil is time.Now.
 	Now func() time.Time
+	// RenewBefore renews existing TLS leaves expiring within this duration.
+	// Zero disables renewal. Enabled renewal also reconciles desired DNS names.
+	// The CA and leaf private keys are preserved.
+	RenewBefore time.Duration
 }
 
 // Generate creates the missing files of the set and returns the names of
 // the files it wrote. Existing keys, certificates and tokens are never
-// changed. The two derived files, login-ca-keys (from ssh_login_ca) and
+// changed unless RenewBefore enables leaf certificate renewal. The two derived
+// files, login-ca-keys (from ssh_login_ca) and
 // worker-gateway-token (from service-tokens.json), are rewritten whenever
 // they differ from their source, so a recreated source never leaves them
 // stale. A key pair with one half missing is an error naming the missing
 // file: a new half would not match the old one. With Owner or WorkerOwner
 // set, existing files of the set are handed to them too.
 func Generate(o Options) ([]string, error) {
+	if o.RenewBefore < 0 {
+		return nil, errors.New("devsecrets: renew-before must not be negative")
+	}
 	if o.Dir == "" {
 		return nil, errors.New("devsecrets: no directory")
 	}
@@ -319,7 +328,7 @@ func (g *gen) tls() error {
 		return fmt.Errorf("%s and %s are missing while certificates of the old CA exist: remove %s, %s, %s and %s too",
 			FileCACert, FileCAKey, FileUmiakCert, FileUmiakKey, FileTunnelCert, FileTunnelKey)
 	}
-	if haveUmiak && haveTunnel {
+	if haveUmiak && haveTunnel && g.o.RenewBefore == 0 {
 		return nil
 	}
 	if haveCA {
@@ -339,6 +348,15 @@ func (g *gen) tls() error {
 			return err
 		}
 	}
+	if g.o.RenewBefore > 0 {
+		if err := g.renewLeaf(FileUmiakCert, FileUmiakKey, []string{"*." + g.o.Domain, g.o.Domain}); err != nil {
+			return err
+		}
+		if err := g.renewLeaf(FileTunnelCert, FileTunnelKey, []string{g.o.TunnelHost}); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -443,6 +461,52 @@ func (g *gen) leaf(certName, keyName string, names []string) error {
 	}
 	if err := g.write(keyName, keyPEM, modeSecret); err != nil {
 		return err
+	}
+	return g.write(certName, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), modePublic)
+}
+
+// renewLeaf preserves the private key, so one atomic certificate rename publishes
+// a complete matching pair even if the process stops during renewal.
+func (g *gen) renewLeaf(certName, keyName string, names []string) error {
+	pair, err := tls.LoadX509KeyPair(g.path(certName), g.path(keyName))
+	if err != nil {
+		return fmt.Errorf("%s: %w", certName, err)
+	}
+	leaf := pair.Leaf
+	now := g.o.Now()
+	if leaf.NotAfter.After(now.Add(g.o.RenewBefore)) && slices.Equal(leaf.DNSNames, names) {
+		return nil
+	}
+	if err := leaf.CheckSignatureFrom(g.ca); err != nil {
+		return fmt.Errorf("%s: does not chain to the existing CA: %w", certName, err)
+	}
+	if !g.ca.NotAfter.After(now) {
+		return fmt.Errorf("%s: CA expired; renew the CA explicitly", FileCACert)
+	}
+	notAfter := now.Add(leafValidity)
+	if g.ca.NotAfter.Before(notAfter) {
+		notAfter = g.ca.NotAfter
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: serial(), Subject: leaf.Subject,
+		NotBefore: now.Add(-clockSkewAllowance), NotAfter: notAfter,
+		KeyUsage: leaf.KeyUsage, ExtKeyUsage: leaf.ExtKeyUsage,
+		DNSNames: names, IPAddresses: leaf.IPAddresses,
+		EmailAddresses: leaf.EmailAddresses, URIs: leaf.URIs,
+	}
+	tmpl.Subject.CommonName = names[0]
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, g.ca, leaf.PublicKey, g.caKey)
+	if err != nil {
+		return fmt.Errorf("%s: %w", certName, err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		return err
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(g.ca)
+	if _, err := cert.Verify(x509.VerifyOptions{Roots: roots, CurrentTime: now}); err != nil {
+		return fmt.Errorf("%s: renewed certificate violates CA constraints: %w", certName, err)
 	}
 	return g.write(certName, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), modePublic)
 }

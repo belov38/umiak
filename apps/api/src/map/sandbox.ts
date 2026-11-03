@@ -9,6 +9,7 @@ import { isUuid, type Sandbox } from "@umiak/core";
 import type pg from "pg";
 import { notFoundError } from "../http/errors.ts";
 import { isPublicOperation } from "../http/wait.ts";
+import { type PreviewSettings, previewUrl } from "../preview-url.ts";
 import type { SandboxResource } from "../schemas/sandbox.ts";
 import type { Settings } from "../settings.ts";
 import { iso, isoOrNull, toOperationResource } from "./operation.ts";
@@ -23,7 +24,7 @@ export interface SandboxExtras {
 }
 
 export interface SandboxMapContext {
-	settings: Pick<Settings, "umiakDomain" | "sshHost" | "sshPort">;
+	settings: Pick<Settings, "sshHost" | "sshPort"> & PreviewSettings;
 	extras: SandboxExtras | undefined;
 }
 
@@ -48,7 +49,7 @@ export function sandboxEndpoints(
 ): SandboxResource["endpoints"] {
 	const port = s.sshPort === 22 ? "" : ` -p ${s.sshPort}`;
 	return {
-		portUrlTemplate: `https://${slug}-{port}.${s.umiakDomain}`,
+		portUrlTemplate: previewUrl(`${slug}-{port}`, s),
 		ssh: `ssh${port} ${slug}@${s.sshHost}`,
 	};
 }
@@ -172,7 +173,7 @@ export async function sandboxResources(
 					"desktop",
 				)
 			)
-				resource.endpoints.desktop = `https://${s.slug}-desktop.${deps.settings.umiakDomain}/`;
+				resource.endpoints.desktop = `${previewUrl(`${s.slug}-desktop`, deps.settings)}/`;
 			return resource;
 		}),
 	);

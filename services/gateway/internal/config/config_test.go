@@ -55,6 +55,33 @@ type fixture struct {
 
 func (f *fixture) getenv(k string) string { return f.env[k] }
 
+func TestHTTPPreviewsKeepTunnelTLSWithoutPreviewCertificate(t *testing.T) {
+	f := newFixture(t)
+	f.env["UMIAK_GATEWAY_PREVIEW_SCHEME"] = "http"
+	f.env["UMIAK_GATEWAY_HTTP_LISTEN"] = ":8085"
+	delete(f.env, "UMIAK_GATEWAY_TLS_PREVIEW_CERT_FILE")
+	delete(f.env, "UMIAK_GATEWAY_TLS_PREVIEW_KEY_FILE")
+	cfg, err := FromEnv(f.getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TLSListen == "" || cfg.TunnelCertFile == "" || cfg.TunnelKeyFile == "" {
+		t.Fatal("HTTP previews must preserve the guest tunnel TLS listener and certificate")
+	}
+	delete(f.env, "UMIAK_GATEWAY_TLS_TUNNEL_CERT_FILE")
+	if _, err := FromEnv(f.getenv); err == nil || !strings.Contains(err.Error(), "TLS_TUNNEL_CERT_FILE") {
+		t.Fatalf("missing tunnel certificate: %v", err)
+	}
+}
+
+func TestPreviewSchemeValidation(t *testing.T) {
+	f := newFixture(t)
+	f.env["UMIAK_GATEWAY_PREVIEW_SCHEME"] = "ftp"
+	if _, err := FromEnv(f.getenv); err == nil || !strings.Contains(err.Error(), "PREVIEW_SCHEME") {
+		t.Fatalf("invalid preview scheme: %v", err)
+	}
+}
+
 // newFixture returns a complete valid environment.
 func newFixture(t *testing.T) *fixture {
 	t.Helper()

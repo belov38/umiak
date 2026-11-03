@@ -35,7 +35,7 @@ if scenario.startswith("pending-state-"):
         objects["/cluster/sdn/vnets/foreign/subnets"] = [{"subnet":"foreign-10.9.0.0-24", "state":state}]
 agent = b"fake-node-agent"
 report = {}
-config = {"origin": "https://stack.example:8443", "token": "a" * 64, "node": "pve", "gateway": "192.168.68.90", "publicKey": "ssh-ed25519 AAAA test", "tokenId": "developer@pve!quickstart", "nodeSha256": hashlib.sha256(agent).hexdigest(), "storage": "fast", "templateVmidMin": 700, "templateVmidMax": 704}
+config = {"origin": "http://stack.example:4180", "token": "a" * 64, "node": "pve", "gateway": "192.168.68.90", "publicKey": "ssh-ed25519 AAAA test", "tokenId": "developer@pve!quickstart", "nodeSha256": hashlib.sha256(agent).hexdigest(), "storage": "fast", "templateVmidMin": 700, "templateVmidMax": 704}
 
 
 def mapped(value="."):
@@ -46,7 +46,7 @@ def mapped(value="."):
 for name, value in {
     "/usr/sbin/dnsmasq": "fake",
     "/sys/class/net/vmbr0/bridge/mcast_hash_max": "1024",
-    "/root/.config/umiak/quickstart-ca.pem": "fake-ca",
+    "/etc/ssl/certs/ca-certificates.crt": "fake-ca",
     "/etc/pve/pve-root-ca.pem": "fake-pve-ca",
     "/etc/pve/priv/authorized_keys": "existing-management-key\n",
     "/etc/ssh/ssh_host_ed25519_key.pub": "ssh-ed25519 AAAA host\n",

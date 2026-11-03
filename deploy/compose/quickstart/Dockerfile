@@ -46,8 +46,8 @@ COPY --from=node-build /out/umiak-node-linux-amd64 /app/quickstart-assets/umiak-
 COPY --from=guest-build /out/umiak-agent-linux-amd64 /app/quickstart-assets/umiak-agent-linux-amd64
 COPY --from=guest-build /out/umiak-agent-windows-amd64.exe /app/quickstart-assets/umiak-agent-windows-amd64.exe
 COPY --from=guest-build /out/umiak-release /umiak-release
-ENV NODE_ENV=production UMIAK_QUICKSTART_PORT=8444 UMIAK_QUICKSTART_ASSETS=/app/quickstart-assets UMIAK_QUICKSTART_TLS_DIR=/var/lib/umiak/owner/tls
+ENV NODE_ENV=production UMIAK_QUICKSTART_PORT=4180 UMIAK_QUICKSTART_ASSETS=/app/quickstart-assets
 USER node
-EXPOSE 8444
+EXPOSE 4180
 ENTRYPOINT ["node", "deploy/compose/quickstart/run.mjs"]
 CMD ["node", "deploy/compose/quickstart/server.mjs"]

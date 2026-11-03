@@ -25,6 +25,10 @@ const (
 func (a *Auth) ServeReserved(w http.ResponseWriter, r *http.Request, l routes.Label, rt *cpapi.Route, ip netip.Addr, requestID string) {
 	switch r.URL.Path {
 	case CallbackPath:
+		if a.cfg.PreviewScheme == "http" {
+			umiakerr.Write(w, r, umiakerr.Error{Status: http.StatusForbidden, Code: umiakerr.CodeAuthRequired, RequestID: requestID})
+			return
+		}
 		a.callback(w, r, l, rt, ip, requestID)
 	case LogoutPath:
 		a.logout(w, r)
@@ -36,7 +40,7 @@ func (a *Auth) ServeReserved(w http.ResponseWriter, r *http.Request, l routes.La
 // logout clears the auth cookie and every state cookie the request carries.
 func (a *Auth) logout(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
-	h.Add("Set-Cookie", a.cookie(AuthCookie, "", 0).String())
+	h.Add("Set-Cookie", a.cookie(a.authCookieName(), "", 0).String())
 	seen := map[string]bool{}
 	for _, c := range r.Cookies() {
 		if isStateCookie(c.Name) && !seen[c.Name] {

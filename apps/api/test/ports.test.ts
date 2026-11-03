@@ -56,6 +56,34 @@ describe.skipIf(skipPg())("hosted ports (S7 §11.2)", () => {
 		return r.rows[0]?.token_hash ?? null;
 	}
 
+	it("returns configured HTTP preview URLs for hosting, listing, token rotation and sandbox endpoints", async () => {
+		const s = await w.seed({ state: "ready" });
+		const local = w.harness({
+			deps: {
+				settings: {
+					...h.deps.settings,
+					previewScheme: "http",
+					previewPort: 8085,
+				},
+			},
+		});
+		const path = `/v1/sandboxes/${s.slug}`;
+		const url = `http://${s.slug}-3000.umiak.test:8085`;
+		const hosted = body(await local.request("PUT", `${path}/ports/3000`));
+		expect(hosted.url).toBe(url);
+		expect(hosted.urlWithToken).toBe(`${url}/?_token=${hosted.token}`);
+		expect(
+			body(await local.request("GET", `${path}/ports`)).hosted[0].url,
+		).toBe(url);
+		const rotated = body(
+			await local.request("POST", `${path}/ports/3000/rotate-token`),
+		);
+		expect(rotated.urlWithToken).toBe(`${url}/?_token=${rotated.token}`);
+		expect(
+			body(await local.request("GET", path)).endpoints.portUrlTemplate,
+		).toBe(`http://${s.slug}-{port}.umiak.test:8085`);
+	});
+
 	it("PUT issues the token once; GET /ports never returns it; the same settings again is 200 without a token", async () => {
 		const logs = captureLogs();
 		const lh = w.harness({ deps: { log: logs.log, config: h.deps.config } });

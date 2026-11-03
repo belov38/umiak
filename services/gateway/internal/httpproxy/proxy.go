@@ -1,5 +1,5 @@
 // Package httpproxy is the public HTTP proxy of published ports (spec 7):
-// https://<slug>-<port>.<umiak-domain> → limits, host, reserved /__umiak/ paths,
+// http(s)://<slug>-<port>.<umiak-domain> → limits, host, reserved /__umiak/ paths,
 // route, sandbox state, access check, the header policy and the stream to
 // the application, with an access log line and metrics per request.
 package httpproxy
@@ -30,13 +30,15 @@ const accessPublic = "public"
 
 // Config configures the proxy. Metrics and AccessLog may be nil.
 type Config struct {
-	UmiakDomain string
-	Grammar     routes.Grammar
-	Routes      *routes.Cache
-	Auth        *portauth.Auth
-	Limits      *ratelimit.Limits
-	Upstream    *upstream.Dialer
-	Transports  *upstream.AppTransports
+	UmiakDomain   string
+	PreviewScheme string
+	PreviewPort   int
+	Grammar       routes.Grammar
+	Routes        *routes.Cache
+	Auth          *portauth.Auth
+	Limits        *ratelimit.Limits
+	Upstream      *upstream.Dialer
+	Transports    *upstream.AppTransports
 	// TrustedProxies are the peers whose X-Forwarded-For is believed
 	// (plain mode behind an ingress, spec 5.2). They are ignored for
 	// requests that arrived over TLS: the gateway is the edge there.
@@ -64,6 +66,15 @@ type handler struct {
 
 // New returns the proxy handler.
 func New(cfg Config) http.Handler {
+	if cfg.PreviewScheme == "" {
+		cfg.PreviewScheme = "https"
+	}
+	if cfg.PreviewPort == 0 {
+		cfg.PreviewPort = 443
+		if cfg.PreviewScheme == "http" {
+			cfg.PreviewPort = 80
+		}
+	}
 	if cfg.Streams == nil {
 		cfg.Streams = NewStreamTracker()
 	}
@@ -111,6 +122,9 @@ func (h *handler) serve(x *exchange, trusted []netip.Prefix) {
 		return
 	}
 	l, ok := routes.ParseHost(r.Host, h.cfg.UmiakDomain, h.cfg.Grammar)
+	if _, port, err := net.SplitHostPort(r.Host); err == nil && port != strconv.Itoa(h.cfg.PreviewPort) {
+		ok = false
+	}
 	if !ok {
 		x.fail(notFound())
 		return
@@ -258,10 +272,10 @@ func (h *handler) rewrite(x *exchange, pr *httputil.ProxyRequest, rt cpapi.Route
 	if xff := forwardedFor(in, trusted); xff != "" {
 		hd.Set("X-Forwarded-For", xff)
 	}
-	hd.Set("X-Forwarded-Proto", "https")
+	hd.Set("X-Forwarded-Proto", h.cfg.PreviewScheme)
 	hd.Set("X-Forwarded-Host", in.Host)
-	hd.Set("X-Forwarded-Port", "443")
-	hd.Set("Forwarded", forwardedHeader(x.ip, in.Host))
+	hd.Set("X-Forwarded-Port", strconv.Itoa(h.cfg.PreviewPort))
+	hd.Set("Forwarded", forwardedHeader(x.ip, in.Host, h.cfg.PreviewScheme))
 	hd.Set("X-Request-Id", x.rid)
 	if rt.Kind == cpapi.KindDesktop {
 		hd.Set("X-Umiak-Desktop-User", "umiak")

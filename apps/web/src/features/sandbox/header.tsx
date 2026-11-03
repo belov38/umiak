@@ -34,6 +34,7 @@ import { useSingleOwner } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useUmiak } from "@/lib/api";
+import { copyFailureGuidance } from "@/lib/browser-guidance";
 import { useAttempt } from "@/lib/client-call";
 import { copyText } from "@/lib/clipboard";
 import { slugProblem } from "@/lib/create-form";
@@ -136,8 +137,12 @@ export function SandboxHeader({
 						disabled={s.state !== "ready" || s.blocked}
 						onClick={() =>
 							void attempt(async () => {
-								await copyText(s.endpoints.ssh);
-								toast.success("SSH command copied");
+								try {
+									await copyText(s.endpoints.ssh);
+									toast.success("SSH command copied");
+								} catch {
+									toast.error(copyFailureGuidance(window.isSecureContext));
+								}
 							})
 						}
 					>

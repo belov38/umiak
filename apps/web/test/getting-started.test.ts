@@ -12,10 +12,12 @@ const deployment: GuideDeployment = {
 	previewDomain: "preview.example.com",
 };
 describe("Getting started", () => {
-	it("uses this deployment's URLs and owner CA installer", () => {
+	it("uses this deployment's URLs without an owner CA installer", () => {
 		const text = JSON.stringify(guideSections(deployment));
 		expect(text).toContain("https://api.example.com/install.sh");
-		expect(text).toContain("--cacert");
+		expect(text).not.toContain("--cacert");
+		expect(text).not.toContain("owner/tls");
+		expect(text).not.toContain("UMIAK_CA_CERT");
 		expect(text).toContain("https://app.example.com/mcp");
 		expect(text).not.toContain("192.168.68.90");
 	});
@@ -29,11 +31,11 @@ describe("Getting started", () => {
 			);
 		}
 	});
-	it("uses the trusted Serve origin without private CA flags", () => {
+	it("supports the default LAN HTTP origin and optional HTTPS", () => {
 		const text = JSON.stringify(
-			guideSections({ ...deployment, ownerPrivateCA: false }),
+			guideSections({ ...deployment, apiUrl: "http://192.168.1.20:8080" }),
 		);
-		expect(text).toContain("https://api.example.com/install.sh");
+		expect(text).toContain("http://192.168.1.20:8080/install.sh");
 		expect(text).not.toContain("--cacert");
 		expect(text).not.toContain("UMIAK_CA_CERT");
 		expect(text).toContain("compose.tailscale.yaml");
@@ -45,9 +47,7 @@ describe("Getting started", () => {
 			"utf8",
 		);
 		for (const mode of ["owner", "none", "oidc"] as const) {
-			for (const section of [true, false].flatMap((ownerPrivateCA) =>
-				guideSections({ ...deployment, mode, ownerPrivateCA }),
-			)) {
+			for (const section of guideSections({ ...deployment, mode })) {
 				for (const block of section.blocks) {
 					if (block.kind === "code")
 						expect(docs, `${mode}: ${block.label}`).toContain(block.text);
@@ -55,4 +55,29 @@ describe("Getting started", () => {
 			}
 		}
 	});
+});
+
+it("uses metadata preview scheme and nondefault port in the published URL", () => {
+	const text = JSON.stringify(
+		guideSections({ ...deployment, previewScheme: "http", previewPort: 8085 }),
+	);
+	expect(text).toContain("http://<slug>-<port>.preview.example.com:8085");
+	expect(
+		JSON.stringify(
+			guideSections({
+				...deployment,
+				previewScheme: "https",
+				previewPort: 443,
+			}),
+		),
+	).toContain("https://<slug>-<port>.preview.example.com");
+	expect(
+		JSON.stringify(
+			guideSections({
+				...deployment,
+				previewScheme: "https",
+				previewPort: 443,
+			}),
+		),
+	).not.toContain("preview.example.com:443");
 });

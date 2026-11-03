@@ -25,6 +25,28 @@ function errorOf(env: Record<string, string | undefined>): string {
 }
 
 describe("loadSettings", () => {
+	it("configures HTTP preview URLs with a custom port and validates their scheme", () => {
+		expect(
+			loadSettings({
+				...TEST_ENV,
+				UMIAK_PREVIEW_SCHEME: "http",
+				UMIAK_PREVIEW_PORT: "8085",
+			}),
+		).toMatchObject({ previewScheme: "http", previewPort: 8085 });
+		expect(
+			loadSettings({ ...TEST_ENV, UMIAK_PREVIEW_SCHEME: "http" }),
+		).toMatchObject({ previewScheme: "http", previewPort: 80 });
+		expect(loadSettings(TEST_ENV)).toMatchObject({
+			previewScheme: "https",
+			previewPort: 443,
+		});
+		expect(errorOf({ ...TEST_ENV, UMIAK_PREVIEW_SCHEME: "ftp" })).toContain(
+			"UMIAK_PREVIEW_SCHEME",
+		);
+		expect(errorOf({ ...TEST_ENV, UMIAK_PREVIEW_PORT: "65536" })).toContain(
+			"UMIAK_PREVIEW_PORT",
+		);
+	});
 	it("applies the defaults of the brief", () => {
 		const s = loadSettings(TEST_ENV);
 		expect(s).toMatchObject({

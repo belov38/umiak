@@ -17,7 +17,7 @@ export function renderPreparation(config) {
 	)
 		throw new Error("Invalid preparation token ID");
 	if (
-		!/^https:\/\/[a-zA-Z0-9.:[\]-]+$/.test(config.origin) ||
+		!/^https?:\/\/[a-zA-Z0-9.:[\]-]+$/.test(config.origin) ||
 		!/^[a-f0-9]{64}$/.test(config.token) ||
 		!/^ssh-ed25519 [a-zA-Z0-9+/=]+(?: [a-zA-Z0-9_-]+)?$/.test(
 			config.publicKey,
@@ -35,7 +35,7 @@ export function renderPreparation(config) {
 }
 export function renderAdoption(config) {
 	if (
-		!/^https:\/\/[a-zA-Z0-9.:[\]-]+$/.test(config.origin) ||
+		!/^https?:\/\/[a-zA-Z0-9.:[\]-]+$/.test(config.origin) ||
 		!/^[a-f0-9]{64}$/.test(config.token) ||
 		!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(config.node)
 	)

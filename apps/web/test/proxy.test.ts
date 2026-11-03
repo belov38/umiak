@@ -10,6 +10,8 @@ const ENV = {
 	UMIAK_APP_ORIGIN: ORIGIN,
 	UMIAK_OPERATOR_GROUPS: "umiak-operators",
 	UMIAK_PREVIEW_DOMAIN: "umiak.example.com",
+	UMIAK_PREVIEW_SCHEME: "http",
+	UMIAK_PREVIEW_PORT: "8085",
 	UMIAK_API_PUBLIC_URL: "https://api.umiak.example.com",
 };
 const SIGNED_IN = { "x-auth-request-email": "a@b.com" };
@@ -138,6 +140,9 @@ describe("proxy", () => {
 		expect(await res.text()).toContain("Not signed in");
 		expect(res.headers.get("content-security-policy")).toContain(
 			"frame-ancestors 'self'",
+		);
+		expect(res.headers.get("content-security-policy")).toContain(
+			"frame-src http://*.umiak.example.com:8085",
 		);
 	});
 

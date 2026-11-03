@@ -7,11 +7,13 @@ x-app-env: &app-env
   UMIAK_QUICKSTART: "1"
   UMIAK_LOCAL_ALLOWED_CIDRS: 127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,fc00::/7
   UMIAK_LOCAL_DENIED_CIDRS: ${UMIAK_LOCAL_DENIED_CIDRS:-10.88.0.0/24}
-  UMIAK_APP_ORIGIN: https://localhost:8444
-  UMIAK_APP_URL: https://localhost:8444
-  UMIAK_API_URL: https://localhost:8444
-  UMIAK_API_PUBLIC_URL: https://localhost:8444
+  UMIAK_APP_ORIGIN: http://localhost:4180
+  UMIAK_APP_URL: http://localhost:4180
+  UMIAK_API_URL: http://localhost:4180
+  UMIAK_API_PUBLIC_URL: http://localhost:4180
   UMIAK_PREVIEW_DOMAIN: umiak.localhost
+  UMIAK_PREVIEW_SCHEME: http
+  UMIAK_PREVIEW_PORT: ${UMIAK_PREVIEW_PORT:-8085}
   UMIAK_OPERATOR_GROUPS: umiak-local-operator
   UMIAK_DATABASE_PASSWORD_FILE: /quickstart-db/password
   UMIAK_QUICKSTART_NETWORK_FILE: /network-config/quickstart-network.json
@@ -83,7 +85,6 @@ services:
       - secrets:/secrets
       - gateway-secrets:/secrets/gateway
       - database-secret:/secrets/database
-      - owner-data:/secrets/owner
       - pve-secrets:/secrets/pve
     depends_on:
       gateway-secrets: { condition: service_completed_successfully }
@@ -268,8 +269,8 @@ services:
     environment:
       <<: *app-env
       UMIAK_MCP_API_URL: http://api:8080
-      UMIAK_MCP_PUBLIC_URL: https://localhost:8444/mcp
-      UMIAK_MCP_ALLOWED_HOSTS: localhost:8444
+      UMIAK_MCP_PUBLIC_URL: ${UMIAK_PUBLIC_URL:-http://localhost:4180}/mcp
+      UMIAK_MCP_ALLOWED_HOSTS: ${UMIAK_QUICKSTART_ALLOWED_HOSTS:-localhost:4180}
       UMIAK_API_TRUSTED_PROXY_CIDRS: 172.29.116.10/32
     networks:
       control: { ipv4_address: 172.29.116.11 }
@@ -289,6 +290,9 @@ services:
       UMIAK_RUN_GID: "65532"
       UMIAK_GATEWAY_INTERNAL_URL: http://gateway:7000
       UMIAK_GATEWAY_PREVIEW_DOMAIN: umiak.localhost
+      UMIAK_GATEWAY_PREVIEW_SCHEME: http
+      UMIAK_GATEWAY_PREVIEW_PORT: ${UMIAK_PREVIEW_PORT:-8085}
+      UMIAK_GATEWAY_HTTP_LISTEN: :8085
       UMIAK_GATEWAY_TUNNEL_HOST: tunnel.localhost
       UMIAK_GATEWAY_SSH_HOST: ssh.localhost
       UMIAK_GATEWAY_API_URL: http://api:8082
@@ -298,11 +302,12 @@ services:
       UMIAK_GATEWAY_TLS_PREVIEW_CERT_FILE: /gateway-secrets/umiak.pem
       UMIAK_GATEWAY_TLS_PREVIEW_KEY_FILE: /gateway-secrets/umiak.key
       UMIAK_GATEWAY_TLS_TUNNEL_CERT_FILE: /gateway-secrets/tunnel.pem
+      UMIAK_GATEWAY_TLS_CA_FILE: /gateway-secrets/ca.pem
       UMIAK_GATEWAY_TLS_TUNNEL_KEY_FILE: /gateway-secrets/tunnel.key
       UMIAK_GATEWAY_SSH_HOST_KEY_FILES: /gateway-secrets/ssh_host_ed25519_key,/gateway-secrets/ssh_host_ecdsa_key
       UMIAK_GATEWAY_SSH_USER_CA_KEY_FILE: /gateway-secrets/ssh_user_ca
       UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS_FILE: /gateway-secrets/login-ca-keys
-    # Gateway secrets are owned by its existing uid; read-only, never the owner CA.
+    # Gateway reads its tunnel certificate, public CA and auth secrets.
     user: "0:0"
     volumes:
       - network-config:/network-config:ro
@@ -310,6 +315,7 @@ services:
       - gateway-secrets:/gateway-secrets:ro
     ports:
       - "${UMIAK_GATEWAY_BIND:-0.0.0.0}:${UMIAK_GATEWAY_HTTPS_PORT:-443}:8443"
+      - "${UMIAK_GATEWAY_BIND:-0.0.0.0}:${UMIAK_PREVIEW_PORT:-8085}:8085"
       - "${UMIAK_GATEWAY_BIND:-0.0.0.0}:${UMIAK_GATEWAY_SSH_PORT:-2222}:2222"
     networks: [control]
     depends_on:
@@ -322,24 +328,40 @@ services:
       retries: 20
     stop_grace_period: 960s
 
+  gateway-renewal:
+    <<: *restart
+    image: umiak-quickstart:dev
+    build: *quickstart-build
+    user: "0:0"
+    entrypoint: [node, deploy/compose/quickstart/gateway-init.mjs]
+    command: [--watch]
+    environment:
+      UMIAK_QUICKSTART_NETWORK_FILE: /network-config/quickstart-network.json
+    volumes:
+      - network-config:/network-config:ro
+      - gateway-secrets:/gateway-secrets
+    network_mode: none
+    depends_on:
+      gateway-secrets: { condition: service_completed_successfully }
+
   quickstart:
     <<: *restart
     image: umiak-quickstart:dev
     build: *quickstart-build
     environment:
       <<: *app-env
-      UMIAK_QUICKSTART_PORT: "8444"
-      UMIAK_QUICKSTART_TLS_NAMES: ${UMIAK_QUICKSTART_TLS_NAMES:-}
+      UMIAK_QUICKSTART_PORT: "4180"
+      UMIAK_PUBLIC_URL: ${UMIAK_PUBLIC_URL:-}
+      UMIAK_TRUSTED_PROXY_CIDRS: ${UMIAK_TRUSTED_PROXY_CIDRS:-127.0.0.0/8,::1/128,172.29.116.1/32,172.29.116.128/32}
+      UMIAK_QUICKSTART_ALLOWED_HOSTS: ${UMIAK_QUICKSTART_ALLOWED_HOSTS:-}
       UMIAK_QUICKSTART_ASSETS: /app/quickstart-assets
-      UMIAK_QUICKSTART_TLS_DIR: /var/lib/umiak/owner/tls
     volumes:
       - network-config:/network-config
       - database-secret:/quickstart-db:ro
-      - owner-data:/var/lib/umiak/owner
       - pve-secrets:/pve-secrets
       - gateway-secrets:/gateway-secrets:ro
     ports:
-      - "${UMIAK_QUICKSTART_BIND:-0.0.0.0}:${UMIAK_QUICKSTART_PORT:-8444}:8444"
+      - "${UMIAK_QUICKSTART_BIND:-0.0.0.0}:${UMIAK_QUICKSTART_PORT:-4180}:4180"
     networks:
       control: { ipv4_address: 172.29.116.10 }
       web-internal: {}
@@ -354,7 +376,6 @@ volumes:
   secrets: {}
   gateway-secrets: {}
   network-config: {}
-  owner-data: {}
   pve-secrets: {}
 
 networks:

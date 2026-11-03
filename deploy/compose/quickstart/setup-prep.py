@@ -117,10 +117,12 @@ storage = get("/storage/" + storage_name)
 if storage.get("type") != "lvmthin" or not storage.get("vgname") or not storage.get("thinpool"):
     raise SystemExit("Selected storage must be an existing LVM-thin storage with VG and thinpool")
 guest_dns = str(ipaddress.ip_address(config.get("guestDns", "1.1.1.1")))
-ca = Path(config.get("caPath", "/root/.config/umiak/quickstart-ca.pem"))
-if not ca.exists():
-    raise SystemExit("Copy the verified quickstart CA to " + str(ca))
-context = ssl.create_default_context(cafile=str(ca))
+ca = Path(config.get("caPath", "/etc/ssl/certs/ca-certificates.crt"))
+context = None
+if config["origin"].startswith("https://"):
+    if not ca.exists():
+        raise SystemExit("HTTPS proxy trust store is missing: " + str(ca))
+    context = ssl.create_default_context(cafile=str(ca))
 binary = urllib.request.urlopen(config["origin"] + "/pve-setup.sh?token=" + config["token"] + "&asset=node-agent", context=context, timeout=30).read()
 if not config.get("nodeSha256") or hashlib.sha256(binary).hexdigest() != config["nodeSha256"]:
     raise SystemExit("Node-agent checksum mismatch or unavailable manifest")

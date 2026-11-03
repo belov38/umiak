@@ -2487,6 +2487,20 @@
 							"null"
 						]
 					},
+					"previewPort": {
+						"description": "Public preview listener port; omit from URLs when it is the scheme default",
+						"maximum": 65535,
+						"minimum": 1,
+						"type": "integer"
+					},
+					"previewScheme": {
+						"description": "Scheme of published port URLs; absent on older servers means https",
+						"enum": [
+							"http",
+							"https"
+						],
+						"type": "string"
+					},
 					"ssh": {
 						"properties": {
 							"host": {
@@ -2522,7 +2536,7 @@
 						"type": "string"
 					},
 					"umiakDomain": {
-						"description": "Domain of published ports: https://<slug>-<port>.<umiakDomain>",
+						"description": "Domain of published ports: <previewScheme>://<slug>-<port>.<umiakDomain>[:previewPort]",
 						"example": "umiak.example.com",
 						"type": "string"
 					}
@@ -10024,7 +10038,7 @@
 				]
 			},
 			"put": {
-				"description": "Publishes the guest port at `https://<slug>-<port>.<umiakDomain>` with the given settings (PUT: omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1). 201 for a new port, 200 for a change or the same settings. A new token port or a switch to token returns `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links and cookies. Allowed in any state but deleting and deleted.",
+				"description": "Publishes the guest port at the configured preview scheme, domain and port with the given settings (PUT: omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1). 201 for a new port, 200 for a change or the same settings. A new token port or a switch to token returns `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links and cookies. Allowed in any state but deleting and deleted.",
 				"operationId": "ports.put",
 				"parameters": [
 					{

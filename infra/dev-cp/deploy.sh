@@ -128,7 +128,7 @@ ts=$(tailscale status --json | python3 -c 'import json, sys; print(json.load(sys
 cd deploy/compose
 mkdir -p secrets/gateway secrets/devcp
 # The gateway's dev-secrets issues the tunnel and *.umiak. certificates with the dev CA when they
-# are missing. Start over when the CA or the names change, and renew within 30 days of expiry.
+# are missing. A renewal sidecar reissues leaves within 30 days of expiry daily.
 # The files belong to the gateway user after the first run; the directory is ours, so rm works.
 gw=secrets/gateway
 stamp="$(sha256sum ~/.config/umiak/dev-ca/ca.pem | cut -d' ' -f1) $TUNNEL_HOST $PORT_DOMAIN"
@@ -139,12 +139,6 @@ if [ "$(cat secrets/devcp/gateway-tls.stamp 2>/dev/null)" != "$stamp" ]; then
 	install -m 600 ~/.config/umiak/dev-ca/ca.key "$gw/ca.key"
 	printf '%s\n' "$stamp" >secrets/devcp/gateway-tls.stamp
 fi
-for c in umiak tunnel; do
-	if [ -s "$gw/$c.pem" ] && ! openssl x509 -in "$gw/$c.pem" -noout -checkend $((30 * 86400)) >/dev/null; then
-		echo "gateway TLS: $c.pem expires within 30 days, renewing"
-		python3 -c 'from pathlib import Path; import sys; [Path(p).unlink(missing_ok=True) for p in sys.argv[1:]]' "$gw/$c.pem" "$gw/$c.key"
-	fi
-done
 sed -E "s#^( *apiUrl:).*#\1 https://$PVE_LAN_IP:8006#" config/umiak.yaml >secrets/devcp/umiak.yaml
 grep -q "apiUrl: https://$PVE_LAN_IP:8006" secrets/devcp/umiak.yaml
 if [ ! -s secrets/data-keys.json ]; then

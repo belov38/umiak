@@ -1,12 +1,11 @@
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import http from "node:http";
-import https from "node:https";
 import net from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { clientGuard } from "../local/ingress.mjs";
+import { requestContext } from "./origin.mjs";
 import { OwnerStore, PgOwnerRepository } from "./owner.mjs";
-import { quickstartTls } from "./tls.mjs";
 
 const COOKIE = "__Host-umiak_owner";
 const esc = (value) =>
@@ -47,28 +46,21 @@ async function body(req) {
 	}
 	return JSON.parse(Buffer.concat(chunks).toString() || "{}");
 }
-function bearer(req) {
+function bearer(req, origin) {
 	const a = req.headers.authorization;
 	if (a?.startsWith("Bearer ")) return a.slice(7);
 	return req.headers.cookie
 		?.split(";")
 		.map((x) => x.trim())
-		.find((x) => x.startsWith(`${COOKIE}=`))
-		?.slice(COOKIE.length + 1);
+		.find((x) =>
+			x.startsWith(`${origin?.startsWith("https:") ? COOKIE : "umiak_owner"}=`),
+		)
+		?.split("=")
+		.slice(1)
+		.join("=");
 }
-export function requestOrigin(req) {
-	const host = req.headers.host;
-	if (typeof host !== "string" || !host || /[\s/@\\#?]/.test(host))
-		throw new Error("invalid_host");
-	const url = new URL(`https://${host}`);
-	if (url.host !== host.toLowerCase()) throw new Error("invalid_host");
-	const hostname = url.hostname.replace(/^\[|\]$/g, "");
-	if (
-		!net.isIP(hostname) &&
-		!/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/i.test(hostname)
-	)
-		throw new Error("invalid_host");
-	return url.origin;
+export function requestOrigin(req, env = process.env) {
+	return requestContext(req, env).origin;
 }
 export function upstreamHeaders(req, appOrigin) {
 	const out = {};
@@ -85,6 +77,7 @@ export function upstreamHeaders(req, appOrigin) {
 	out.host = app.host;
 	out["x-forwarded-host"] = app.host;
 	out["x-forwarded-proto"] = app.protocol.slice(0, -1);
+	// Upstreams accept only this admitted ingress peer; external identity is owned here.
 	out["x-forwarded-for"] = req.socket.remoteAddress;
 	out["x-umiak-client-ip"] = req.socket.remoteAddress;
 	if (req.headers.origin) out.origin = app.origin;
@@ -108,9 +101,7 @@ export function createQuickstartServer({
 	setupHandler,
 	assetsDir,
 	env = process.env,
-	tls = {},
-	transport = https,
-	renewIntervalMs = 60000,
+	transport = http,
 }) {
 	const allowed = clientGuard(
 		env.UMIAK_LOCAL_ALLOWED_CIDRS ??
@@ -118,10 +109,15 @@ export function createQuickstartServer({
 		env.UMIAK_LOCAL_DENIED_CIDRS ?? "10.88.0.0/24",
 		env,
 	);
+	const clientNotDenied = clientGuard(
+		"0.0.0.0/1,128.0.0.0/1,::/1,8000::/1",
+		env.UMIAK_LOCAL_DENIED_CIDRS ?? "10.88.0.0/24",
+		env,
+	);
 	const appOrigin = env.UMIAK_APP_ORIGIN ?? "http://localhost:4180";
 	const buckets = new Map();
 	function rate(req, authenticated = false) {
-		const key = `${req.socket.remoteAddress}:${authenticated ? "owner" : "public"}`;
+		const key = `${req.umiakClientAddress ?? req.socket.remoteAddress}:${authenticated ? "owner" : "public"}`;
 		const now = Date.now();
 		const old = buckets.get(key);
 		const next =
@@ -133,14 +129,18 @@ export function createQuickstartServer({
 		buckets.set(key, next);
 		return next.count <= 60;
 	}
-	const server = transport.createServer(tls, async (req, res) => {
+	const server = transport.createServer(async (req, res) => {
 		res.setHeader("x-content-type-options", "nosniff");
 		res.setHeader("referrer-policy", "no-referrer");
 		res.setHeader("x-frame-options", "DENY");
 		try {
-			const origin = requestOrigin(req);
+			const { origin, clientAddress } = requestContext(req, env);
+			req.umiakClientAddress = clientAddress;
 			const url = new URL(req.url, origin);
 			const path = url.pathname;
+			const publicOrigin = env.UMIAK_PUBLIC_URL
+				? new URL(env.UMIAK_PUBLIC_URL).origin
+				: origin;
 			if (url.origin !== origin) return fail(res, 400, "invalid_path");
 			// Host preparation uses an expiring capability, never network ownership.
 			const preparation =
@@ -150,20 +150,13 @@ export function createQuickstartServer({
 			if (
 				!preparation &&
 				(!allowed(req.socket.remoteAddress) ||
-					(await setupHandler?.deniedPeer?.(req.socket.remoteAddress)))
+					!clientNotDenied(req.umiakClientAddress) ||
+					(await setupHandler?.deniedPeer?.(req.umiakClientAddress)))
 			)
 				return fail(res, 403, "local_network_forbidden");
 			if (preparation && !rate(req)) return fail(res, 429, "rate_limited");
-			const publicUrl = new URL(origin);
-			const ownerPrivateCA = !(
-				(env.UMIAK_QUICKSTART_SERVE_PEERS ?? "")
-					.split(",")
-					.includes(req.socket.remoteAddress?.replace(/^::ffff:/, "")) &&
-				publicUrl.hostname.endsWith(".ts.net") &&
-				(publicUrl.port || "443") === (env.UMIAK_QUICKSTART_SERVE_PORT ?? "443")
-			);
 			const safe = ["GET", "HEAD", "OPTIONS"].includes(req.method);
-			const token = bearer(req);
+			const token = bearer(req, origin);
 			const owner = token ? await store.authenticate(token) : false;
 			const browser = !!req.headers.cookie;
 			if (req.headers.origin && req.headers.origin !== origin)
@@ -188,29 +181,15 @@ export function createQuickstartServer({
 					authMode: "owner",
 					tenancy: "single",
 					oidc: null,
-					apiUrl: origin,
-					appUrl: origin,
+					apiUrl: publicOrigin,
+					appUrl: publicOrigin,
 					ownerClaimed: await store.claimed(),
-					ownerPrivateCA,
 				});
 			}
 			if (
 				["GET", "HEAD"].includes(req.method) &&
-				(path === "/install.sh" ||
-					path.startsWith("/downloads/") ||
-					path === "/ca.pem")
+				(path === "/install.sh" || path.startsWith("/downloads/"))
 			) {
-				if (path === "/ca.pem") {
-					res.setHeader("content-type", "application/x-pem-file");
-					return res.end(
-						readFileSync(
-							join(
-								env.UMIAK_QUICKSTART_TLS_DIR ?? "/var/lib/umiak/owner/tls",
-								"ca.pem",
-							),
-						),
-					);
-				}
 				const file =
 					path === "/install.sh"
 						? "install.sh"
@@ -233,7 +212,7 @@ export function createQuickstartServer({
 				if (file === "install.sh") {
 					const script = readFileSync(asset, "utf8").replaceAll(
 						"__UMIAK_ORIGIN__",
-						origin,
+						publicOrigin,
 					);
 					res.setHeader("content-length", Buffer.byteLength(script));
 					return res.end(req.method === "HEAD" ? undefined : script);
@@ -249,7 +228,7 @@ export function createQuickstartServer({
 				const credential = await store.claim(input.code);
 				res.setHeader(
 					"set-cookie",
-					`${COOKIE}=${credential}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=15552000`,
+					`${origin.startsWith("https:") ? COOKIE : "umiak_owner"}=${credential}; Path=/; HttpOnly; ${origin.startsWith("https:") ? "Secure; " : ""}SameSite=Strict; Max-Age=15552000`,
 				);
 				return json(res, 200, { claimed: true });
 			}
@@ -258,7 +237,7 @@ export function createQuickstartServer({
 					res,
 					200,
 					await store.pairStart({
-						source: req.socket.remoteAddress,
+						source: req.umiakClientAddress,
 						userAgent: req.headers["user-agent"],
 					}),
 				);
@@ -275,8 +254,7 @@ export function createQuickstartServer({
 				(path === "/pve-setup.sh" || path === "/quickstart/setup/callback") &&
 				setupHandler
 			) {
-				if (await setupHandler(req, res, { origin, owner, ownerPrivateCA }))
-					return;
+				if (await setupHandler(req, res, { origin, owner })) return;
 			}
 			if (!owner) {
 				if (
@@ -304,29 +282,9 @@ export function createQuickstartServer({
 			}
 			if (
 				!(await store.canApprove(token)) &&
-				(path.startsWith("/quickstart/") ||
-					path === "/setup" ||
-					path.startsWith("/owner/tls"))
+				(path.startsWith("/quickstart/") || path === "/setup")
 			)
 				return fail(res, 403, "browser_session_required");
-			if (path === "/owner/tls/status" && req.method === "GET")
-				return json(res, 200, tls.status?.() ?? { warning: null });
-			if (path === "/owner/tls" && req.method === "GET")
-				return page(
-					res,
-					"HTTPS addresses",
-					`<p role="status">${esc(tls.status?.().warning ?? "")}</p><p>Current CA SHA256: <code>${esc(tls.status?.().caFingerprint ?? "")}</code></p><p>Open initially using localhost or a configured DNS name. Add LAN/tailnet IPs here for clients that connect by IP. Adding names rotates the constrained owner CA. Download and verify the new CA before using these addresses.</p><form id="tls"><input id="names" value="${esc(tls.status?.().pendingNames.join(",") ?? "")}" placeholder="192.168.1.10,100.100.1.10"><label><input id="rotate" type="checkbox" required> I understand that adding names rotates the CA and requires trusting the new fingerprint.</label><button>Save certificate names</button></form><pre id="result"></pre><p><a href="/setup">Setup</a></p><script>document.querySelector('#tls').onsubmit=async e=>{e.preventDefault();const r=await fetch('/owner/tls',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rotateCA:document.querySelector("#rotate").checked,names:document.querySelector('#names').value.split(',').map(x=>x.trim()).filter(Boolean)})});document.querySelector('#result').textContent=r.ok?'Saved. New CA SHA256: '+(await r.json()).caFingerprint+'. Replace old client trust with the new CA obtained through Docker.':'Invalid names';};</script>`,
-				);
-			if (path === "/owner/tls" && req.method === "POST") {
-				const input = await body(req);
-				if (!tls.updateNames) return fail(res, 400, "tls_not_configurable");
-				server.setSecureContext(
-					await tls.updateNames(input.names, {
-						rotateCA: input.rotateCA === true,
-					}),
-				);
-				return json(res, 200, { saved: true, ...tls.status?.() });
-			}
 			if (path === "/app/help" || path === "/help") {
 				res.writeHead(302, { location: "/app/getting-started" });
 				return res.end();
@@ -351,7 +309,7 @@ export function createQuickstartServer({
 				await store.revoke(token);
 				res.setHeader(
 					"set-cookie",
-					`${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`,
+					`${origin.startsWith("https:") ? COOKIE : "umiak_owner"}=; Path=/; HttpOnly; ${origin.startsWith("https:") ? "Secure; " : ""}SameSite=Strict; Max-Age=0`,
 				);
 				return json(res, 200, { loggedOut: true });
 			}
@@ -371,10 +329,7 @@ export function createQuickstartServer({
 					`<p>Approve only a login you started. Enter the short code printed in your terminal.</p><p>Source (possibly a Docker NAT address): ${esc(info.source)} · ${esc(new Date(info.created).toISOString())}</p><p>Client: ${esc(info.userAgent)}</p><form id="approval"><label>Pairing code <input id="pair-code" autocomplete="off" placeholder="ABCD-1234" required></label><button>Approve CLI</button></form><pre id="message" role="status"></pre><script>document.getElementById('approval').onsubmit=async e=>{e.preventDefault();const r=await fetch('/owner/pair/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:${JSON.stringify(id)},code:document.getElementById('pair-code').value})});document.getElementById('message').textContent=r.ok?'Approved. Return to your terminal.':'Approval failed. Check the code and expiry.';};</script>`,
 				);
 			}
-			if (
-				setupHandler &&
-				(await setupHandler(req, res, { origin, owner, ownerPrivateCA }))
-			)
+			if (setupHandler && (await setupHandler(req, res, { origin, owner })))
 				return;
 			if (path === "/") {
 				res.writeHead(302, { location: "/app" });
@@ -422,39 +377,17 @@ export function createQuickstartServer({
 			else res.end();
 		}
 	});
-	if (tls.renew) {
-		let renewing = false;
-		const renewal = setInterval(async () => {
-			if (renewing) return;
-			renewing = true;
-			try {
-				const credentials = await tls.renew();
-				if (credentials) {
-					server.setSecureContext(credentials);
-					console.log(
-						credentials.reloaded
-							? "Umiak owner TLS credentials reloaded after console rotation; replace client CA trust"
-							: "Umiak owner TLS leaf renewed without restart; CA trust unchanged",
-					);
-				}
-			} catch (error) {
-				console.warn("Umiak TLS leaf renewal failed:", error.message);
-			} finally {
-				renewing = false;
-			}
-		}, renewIntervalMs);
-		renewal.unref();
-		server.once("close", () => clearInterval(renewal));
-	}
 	server.requestTimeout = 30000;
 	server.headersTimeout = 15000;
 	server.on("upgrade", async (req, socket, head) => {
 		try {
-			const origin = requestOrigin(req);
+			const { origin, clientAddress } = requestContext(req, env);
+			req.umiakClientAddress = clientAddress;
 			if (
 				!allowed(req.socket.remoteAddress) ||
-				(await setupHandler?.deniedPeer?.(req.socket.remoteAddress)) ||
-				!(await store.authenticate(bearer(req))) ||
+				!clientNotDenied(req.umiakClientAddress) ||
+				(await setupHandler?.deniedPeer?.(req.umiakClientAddress)) ||
+				!(await store.authenticate(bearer(req, origin))) ||
 				(req.headers.origin && req.headers.origin !== origin)
 			)
 				throw new Error("denied");
@@ -481,20 +414,12 @@ export function createQuickstartServer({
 	return server;
 }
 
-export { quickstartTls } from "./tls.mjs";
-
 async function main() {
 	const { default: pg } = await import("pg");
 	const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 	const store = new OwnerStore(new PgOwnerRepository(pool));
 	const code = await store.init();
 	if (code) console.log(`Umiak one-time setup code: ${code}`);
-	const dir =
-		process.env.UMIAK_QUICKSTART_TLS_DIR ?? "/var/lib/umiak/owner/tls";
-	const tls = await quickstartTls(
-		dir,
-		(process.env.UMIAK_QUICKSTART_TLS_NAMES ?? "").split(",").filter(Boolean),
-	);
 	let setupHandler;
 	if (existsSync(fileURLToPath(new URL("./setup.mjs", import.meta.url)))) {
 		const { createSetupHandler } = await import("./setup.mjs");
@@ -505,12 +430,11 @@ async function main() {
 		store,
 		setupHandler,
 		assetsDir: process.env.UMIAK_QUICKSTART_ASSETS ?? "/app/quickstart-assets",
-		tls,
 	});
-	const port = Number(process.env.UMIAK_QUICKSTART_PORT ?? 8444);
-	server.listen(port, "0.0.0.0", () =>
+	const port = Number(process.env.UMIAK_QUICKSTART_PORT ?? 4180);
+	server.listen(port, process.env.UMIAK_QUICKSTART_LISTEN ?? "0.0.0.0", () =>
 		console.log(
-			`Umiak owner HTTPS ingress ready on :${port}; retrieve CA using docker compose cp quickstart:${dir}/ca.pem ./umiak-ca.pem`,
+			`Umiak owner HTTP ingress ready on :${port}; open http://localhost:${port}`,
 		),
 	);
 	const close = () =>

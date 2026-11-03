@@ -72,10 +72,12 @@ for vm in get("/nodes/" + config["node"] + "/qemu"):
             report["vmFirewallsValid"] = False
 node = subprocess.run(["/usr/local/bin/umiak-node", "--stdio"], input=json.dumps({"op": "version", "args": {}}), text=True, capture_output=True, check=True)
 report["nodeAgent"] = json.loads(node.stdout)
-ca = Path(config.get("caPath", "/root/.config/umiak/quickstart-ca.pem"))
-if not ca.exists():
-    raise SystemExit("Copy the verified quickstart CA to " + str(ca))
-context = ssl.create_default_context(cafile=str(ca))
+ca = Path(config.get("caPath", "/etc/ssl/certs/ca-certificates.crt"))
+context = None
+if config["origin"].startswith("https://"):
+    if not ca.exists():
+        raise SystemExit("HTTPS proxy trust store is missing: " + str(ca))
+    context = ssl.create_default_context(cafile=str(ca))
 request = urllib.request.Request(config["origin"] + "/quickstart/setup/callback", data=json.dumps({"token": config["token"], "report": report, "caPem": Path("/etc/pve/pve-root-ca.pem").read_text()}).encode(), headers={"Content-Type": "application/json"}, method="POST")
 with urllib.request.urlopen(request, context=context, timeout=30) as response:
     if response.status != 200:

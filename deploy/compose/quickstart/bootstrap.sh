@@ -3,13 +3,13 @@
 set -eu
 umask 077
 root=${UMIAK_SECRETS_ROOT:-/secrets}
-mkdir -p "$root/database" "$root/owner" "$root/pve"
+mkdir -p "$root/database" "$root/pve"
 if [ ! -s "$root/database/password" ]; then
  openssl rand -hex 32 > "$root/database/password.new"
  mv "$root/database/password.new" "$root/database/password"
 fi
-chown -R 1000:1000 "$root/database" "$root/owner" "$root/pve"
-chmod 700 "$root/database" "$root/owner" "$root/pve"
+chown -R 1000:1000 "$root/database" "$root/pve"
+chmod 700 "$root/database" "$root/pve"
 sh /legacy-init.sh
 # Only these consumers can read each generated copy.
 cp "$root/database/password" "$root/database/gateway-password"

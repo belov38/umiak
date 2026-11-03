@@ -1,3 +1,4 @@
+import { gatewayCertificates } from "./certificates.mjs";
 import { prepareWindowsMedia, validateWindowsMedia } from "./setup-iso.mjs";
 // Owner-only setup orchestration. PVE adoption never writes to the host API.
 
@@ -990,6 +991,20 @@ export function createSetupHandler({
 			json(res, 401, { error: "owner_required" });
 			return true;
 		}
+		if (path === "/quickstart/setup/certificates" && req.method === "GET") {
+			try {
+				json(
+					res,
+					200,
+					await gatewayCertificates(
+						process.env.UMIAK_GATEWAY_SECRETS_DIR || "/gateway-secrets",
+					),
+				);
+			} catch {
+				json(res, 503, { error: "Cannot read guest gateway certificates" });
+			}
+			return true;
+		}
 		if (path === "/app") {
 			const state = await store.read();
 			if (!state.complete) {
@@ -1180,10 +1195,7 @@ export function createSetupHandler({
 				});
 				state.preparation = {
 					...preparationRange,
-					caPath:
-						context.ownerPrivateCA === false
-							? "/etc/ssl/certs/ca-certificates.crt"
-							: "/root/.config/umiak/quickstart-ca.pem",
+					caPath: "/etc/ssl/certs/ca-certificates.crt",
 					mode,
 					storage,
 					guestDns:
@@ -1196,12 +1208,8 @@ export function createSetupHandler({
 				};
 				await store.write(state);
 				const url = `${context.origin}/pve-setup.sh?token=${token}`;
-				const privateCA = context.ownerPrivateCA !== false;
-				const curl = privateCA
-					? "curl --cacert /root/.config/umiak/quickstart-ca.pem"
-					: "curl";
 				json(res, 200, {
-					command: `${privateCA ? "# Copy the verified quickstart CA to /root/.config/umiak/quickstart-ca.pem on PVE first.\n" : ""}${curl} -fsSL '${url}' | bash -s -- --dry-run\n# After inspection, run without --dry-run:\n${curl} -fsSL '${url}' | bash`,
+					command: `curl -fsSL '${url}' | bash -s -- --dry-run\n# After inspection, run without --dry-run:\ncurl -fsSL '${url}' | bash`,
 					expiresIn: 900,
 				});
 			} catch (error) {

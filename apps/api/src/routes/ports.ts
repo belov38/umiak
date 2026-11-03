@@ -23,6 +23,7 @@ import {
 	jsonResponse,
 	optionalJsonBody,
 } from "../openapi/registry.ts";
+import { type PreviewSettings, previewUrl } from "../preview-url.ts";
 import { SandboxParams } from "../schemas/common.ts";
 import {
 	HostedPortSchema,
@@ -73,7 +74,7 @@ const hostPort = createRoute({
 	operationId: "ports.put",
 	summary: "Publish a port or change its access",
 	description:
-		"Publishes the guest port at `https://<slug>-<port>.<umiakDomain>` with the given settings " +
+		"Publishes the guest port at the configured preview scheme, domain and port with the given settings " +
 		"(PUT: omitted fields take their defaults: access token, hostRewrite preserve, " +
 		"appProtocol http1). 201 for a new port, 200 for a change or the same settings. A new " +
 		"token port or a switch to token returns `token` and `urlWithToken` once; keep them. " +
@@ -200,19 +201,15 @@ const unblockPortRoute = createRoute({
 	},
 });
 
-function portUrl(label: string, umiakDomain: string): string {
-	return `https://${label}.${umiakDomain}`;
-}
-
 function withToken(url: string, token: string): string {
 	return `${url}/?_token=${token}`;
 }
 
-function toHostedPort(p: HostedPort, umiakDomain: string) {
+function toHostedPort(p: HostedPort, settings: PreviewSettings) {
 	return {
 		port: p.port,
 		label: p.label,
-		url: portUrl(p.label, umiakDomain),
+		url: previewUrl(p.label, settings),
 		access: p.mode,
 		hostRewrite: p.hostRewrite,
 		appProtocol: p.appProtocol,
@@ -298,7 +295,7 @@ function publicDisabled(): ApiError {
 
 export function registerPortRoutes(app: ApiApp, deps: ApiDeps): void {
 	const svc = deps.svc;
-	const domain = () => deps.settings.umiakDomain;
+	const settings = deps.settings;
 
 	app.openapi(listPorts, async (c) => {
 		const p = authOf(c).principal;
@@ -307,7 +304,7 @@ export function registerPortRoutes(app: ApiApp, deps: ApiDeps): void {
 		const hosted = await svc.listHostedPorts(p, s.id);
 		return c.json(
 			{
-				hosted: hosted.map((h) => toHostedPort(h, domain())),
+				hosted: hosted.map((h) => toHostedPort(h, settings)),
 				...(await listening(deps, s)),
 			},
 			200,
@@ -336,7 +333,7 @@ export function registerPortRoutes(app: ApiApp, deps: ApiDeps): void {
 				? {}
 				: { appProtocol: body.appProtocol }),
 		});
-		const out = toHostedPort(r.hostedPort, domain());
+		const out = toHostedPort(r.hostedPort, settings);
 		const issued =
 			r.token === undefined
 				? {}
@@ -350,7 +347,7 @@ export function registerPortRoutes(app: ApiApp, deps: ApiDeps): void {
 		const s = await svc.get(p, resolveSandboxRef(sandbox));
 		const { token } = await svc.rotatePortToken(p, s.id, port);
 		// Labels follow the slug (a rename relabels every port).
-		const url = portUrl(portLabel(s.slug, port), domain());
+		const url = previewUrl(portLabel(s.slug, port), settings);
 		return c.json({ token, urlWithToken: withToken(url, token) }, 200);
 	});
 
@@ -370,7 +367,7 @@ export function registerPortRoutes(app: ApiApp, deps: ApiDeps): void {
 			port,
 			blockInput(c.req.valid("json")),
 		);
-		return c.json(toHostedPort(hp, domain()), 200);
+		return c.json(toHostedPort(hp, settings), 200);
 	});
 
 	app.openapi(unblockPortRoute, async (c) => {
@@ -382,6 +379,6 @@ export function registerPortRoutes(app: ApiApp, deps: ApiDeps): void {
 			port,
 			unblockInput(c.req.valid("json")),
 		);
-		return c.json(toHostedPort(hp, domain()), 200);
+		return c.json(toHostedPort(hp, settings), 200);
 	});
 }

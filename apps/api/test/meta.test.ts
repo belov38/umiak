@@ -23,6 +23,8 @@ describe("GET /v1/meta (S7 §13)", () => {
 			appUrl: settings.appUrl,
 			apiUrl: settings.apiUrl,
 			umiakDomain: settings.umiakDomain,
+			previewScheme: "https",
+			previewPort: 443,
 			oidc: {
 				issuer: "https://auth.example.test/realms/umiak",
 				clientId: "umiak-cli",
@@ -36,6 +38,19 @@ describe("GET /v1/meta (S7 §13)", () => {
 			minCliVersion: "0.4.0",
 			latestCliVersion: "0.5.1",
 		});
+	});
+
+	it("advertises configured HTTP preview scheme and port", async () => {
+		const h = createHarness({
+			deps: {
+				settings: testSettings({
+					UMIAK_PREVIEW_SCHEME: "http",
+					UMIAK_PREVIEW_PORT: "8085",
+				}),
+			},
+		});
+		const r = await h.request("GET", "/v1/meta");
+		expect(r.body).toMatchObject({ previewScheme: "http", previewPort: 8085 });
 	});
 
 	it("oidc is null without UMIAK_OIDC_ISSUER", async () => {

@@ -280,7 +280,7 @@ test("adoption callback token expires, is single use, and setup denies the confi
 		},
 	};
 	const handler = createSetupHandler({ pool: {}, store });
-	async function request(path, input, owner = true, ownerPrivateCA = true) {
+	async function request(path, input, owner = true) {
 		const req = Readable.from(
 			input === undefined ? [] : [JSON.stringify(input)],
 		);
@@ -297,7 +297,6 @@ test("adoption callback token expires, is single use, and setup denies the confi
 		};
 		await handler(req, res, {
 			owner,
-			ownerPrivateCA,
 			origin: "https://stack.example",
 		});
 		return { status, data: JSON.parse(data) };
@@ -322,11 +321,8 @@ test("adoption callback token expires, is single use, and setup denies the confi
 
 	const prepared = await request("/quickstart/setup/prepare", {});
 	assert.equal(prepared.status, 200);
-	assert.match(prepared.data.command, /--cacert/);
-	assert.equal(
-		state.preparation.caPath,
-		"/root/.config/umiak/quickstart-ca.pem",
-	);
+	assert.doesNotMatch(prepared.data.command, /--cacert/);
+	assert.equal(state.preparation.caPath, "/etc/ssl/certs/ca-certificates.crt");
 	const token = prepared.data.command.match(/token=([a-f0-9]{64})/)[1];
 	const report = { zone: { type: "simple" }, vnet: { zone: "umiak" } };
 	const accepted = await request(
@@ -376,11 +372,11 @@ test("host adoption cannot become ready without a valid mounted PVE root CA", as
 	assert.equal(state.steps.host.status, "error");
 	assert.equal(state.complete, false);
 });
-test("help copy examples contain actual newlines and link certificate settings", () => {
+test("help copy examples contain actual newlines without owner certificate settings", () => {
 	const html = renderHelp("https://stack.example");
 	assert.match(html, /umiak login[^<]*\numiak create/);
 	assert.doesNotMatch(html, /\\numiak create/);
-	assert.match(html, /href="\/owner\/tls"/);
+	assert.doesNotMatch(html, /href="\/owner\/tls"/);
 	assert.doesNotMatch(
 		renderSetup({ steps: {} }, "https://stack.example"),
 		/otherwise pin the leaf/,

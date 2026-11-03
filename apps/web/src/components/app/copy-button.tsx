@@ -4,6 +4,7 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { copyFailureGuidance } from "@/lib/browser-guidance";
 import { copyText } from "@/lib/clipboard";
 
 export function CopyButton({ text, label }: { text: string; label: string }) {
@@ -21,7 +22,7 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
 					setCopied(true);
 					setTimeout(() => setCopied(false), 1500);
 				} catch {
-					toast.error("Could not copy: select the text and copy it yourself.");
+					toast.error(copyFailureGuidance(window.isSecureContext));
 				}
 			}}
 		>

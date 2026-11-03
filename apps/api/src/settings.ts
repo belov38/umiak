@@ -75,6 +75,8 @@ export interface Settings {
 	apiUrl: string;
 	appUrl: string;
 	umiakDomain: string;
+	previewScheme: "http" | "https";
+	previewPort: number;
 	sshHost: string;
 	sshPort: number;
 	sshHostKeysFile: string | null;
@@ -244,6 +246,14 @@ const schema = z.object({
 		(v) => /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(v),
 		{ message: "must be a lower-case DNS name" },
 	),
+	UMIAK_PREVIEW_SCHEME: z.preprocess(
+		unsetEmpty,
+		z.enum(["http", "https"]).default("https"),
+	),
+	UMIAK_PREVIEW_PORT: z.preprocess(
+		unsetEmpty,
+		z.coerce.number().int().min(1).max(65535).optional(),
+	),
 	UMIAK_SSH_HOST: optional,
 	UMIAK_SSH_PORT: int(22, 1, 65535),
 	UMIAK_SSH_HOST_KEYS_FILE: optional,
@@ -335,6 +345,9 @@ export function loadSettings(
 		apiUrl: e.UMIAK_API_URL.replace(/\/+$/, ""),
 		appUrl: e.UMIAK_APP_URL.replace(/\/+$/, ""),
 		umiakDomain: e.UMIAK_PREVIEW_DOMAIN,
+		previewScheme: e.UMIAK_PREVIEW_SCHEME,
+		previewPort:
+			e.UMIAK_PREVIEW_PORT ?? (e.UMIAK_PREVIEW_SCHEME === "http" ? 80 : 443),
 		sshHost: e.UMIAK_SSH_HOST ?? `ssh.${e.UMIAK_PREVIEW_DOMAIN}`,
 		sshPort: e.UMIAK_SSH_PORT,
 		sshHostKeysFile: e.UMIAK_SSH_HOST_KEYS_FILE ?? null,

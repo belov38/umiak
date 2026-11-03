@@ -465,3 +465,95 @@ func TestServeSecondSignalDuringStartup(t *testing.T) {
 		t.Fatalf("took %s", took)
 	}
 }
+
+func TestDevSecretsRenewBeforeCommand(t *testing.T) {
+	bin := build(t)
+	dir := t.TempDir()
+	now := time.Now()
+	if _, err := devsecrets.Generate(devsecrets.Options{Dir: dir, Now: func() time.Time { return now.Add(-390 * 24 * time.Hour) }}); err != nil {
+		t.Fatal(err)
+	}
+	ca, err := os.ReadFile(filepath.Join(dir, "ca.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, code := runBin(t, bin, cleanEnv(), "dev-secrets", "-dir", dir, "-renew-before=720h")
+	if code != 0 || !strings.Contains(out, "wrote tunnel.pem") || !strings.Contains(out, "wrote umiak.pem") {
+		t.Fatalf("renewal code %d stdout %s stderr %s", code, out, errOut)
+	}
+	after, err := os.ReadFile(filepath.Join(dir, "ca.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, ca) {
+		t.Fatal("renewal changed the CA")
+	}
+	out, errOut, code = runBin(t, bin, cleanEnv(), "dev-secrets", "-dir", dir, "-renew-before=720h")
+	if code != 0 || strings.Contains(out, "wrote") {
+		t.Fatalf("repeated renewal code %d stdout %s stderr %s", code, out, errOut)
+	}
+	if _, _, code := runBin(t, bin, cleanEnv(), "dev-secrets", "-dir", dir, "-renew-before=-1h"); code != 2 {
+		t.Fatalf("negative renewal duration exit %d, want 2", code)
+	}
+}
+
+func TestDevSecretsRenewIntervalRetriesAndStops(t *testing.T) {
+	bin := build(t)
+	dir := t.TempDir()
+	// A partial CA makes startup fail; periodic mode must retry after repair.
+	if err := os.WriteFile(filepath.Join(dir, "ca.pem"), []byte("partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(t.Context(), bin, "dev-secrets", "-dir", dir, "-renew-before=720h", "-renew-interval=20ms")
+	cmd.Env = cleanEnv()
+	var out, errOut syncBuffer
+	cmd.Stdout, cmd.Stderr = &out, &errOut
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	exited := false
+	t.Cleanup(func() {
+		if !exited {
+			_ = cmd.Process.Kill()
+			if err := <-done; err != nil {
+				t.Logf("renewal process terminated during cleanup: %v", err)
+			}
+		}
+	})
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(errOut.String(), "ca.key is missing") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(errOut.String(), "ca.key is missing") {
+		t.Fatalf("initial renewal error not logged: %s", errOut.String())
+	}
+	if err := os.Remove(filepath.Join(dir, "ca.pem")); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for !strings.Contains(out.String(), "all files exist") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(out.String(), "wrote tunnel.pem") || !strings.Contains(out.String(), "all files exist") {
+		t.Fatalf("renewal did not retry after repair: %s stderr %s", out.String(), errOut.String())
+	}
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		exited = true
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("renewal loop did not stop on SIGTERM")
+	}
+	for _, args := range [][]string{{"-renew-interval=0"}, {"-renew-interval=-1h"}, {"-renew-interval=1h"}} {
+		if _, _, code := runBin(t, bin, cleanEnv(), append([]string{"dev-secrets", "-dir", dir}, args...)...); code != 2 {
+			t.Fatalf("invalid renewal interval %v exit %d, want 2", args, code)
+		}
+	}
+}
