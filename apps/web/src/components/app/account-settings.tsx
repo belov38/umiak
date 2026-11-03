@@ -238,7 +238,7 @@ export function SshKeys() {
 			description={
 				<>
 					For <code>ssh &lt;sandbox&gt;@&lt;ssh host&gt;</code> into sandboxes
-					{singleOwner ? "you own." : "of your teams."}
+					{singleOwner ? " you own." : " of your teams."}
 				</>
 			}
 		>

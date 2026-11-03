@@ -76,7 +76,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 										),
 									]),
 							text(
-								"The installer runs login. Open the pairing link on the hostname where you claimed this deployment, and compare the short code shown in your terminal before approving. The CLI saves the CA in its profile.",
+								"The installer runs login. Open the pairing link on the hostname where you claimed this deployment, and compare the short code shown in your terminal before approving. The CLI saves the deployment connection settings in its profile.",
 							),
 							code("Check CLI profile", "umiak whoami"),
 						]
