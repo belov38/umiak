@@ -80,9 +80,19 @@ test("optional proxy sidecar has no upstream network and uses HTTP ingress", asy
 			"--format",
 			"json",
 		],
-		{ env: { ...process.env, TS_AUTHKEY: "config-only" } },
+		{
+			env: {
+				...process.env,
+				TS_AUTHKEY: "config-only",
+				UMIAK_QUICKSTART_ALLOWED_HOSTS: "lab.example",
+			},
+		},
 	);
 	const config = JSON.parse(stdout);
+	assert.equal(
+		config.services.mcp.environment.UMIAK_MCP_ALLOWED_HOSTS,
+		"localhost:4180",
+	);
 	assert.deepEqual(Object.keys(config.services.tailscale.networks), [
 		"serve-internal",
 	]);

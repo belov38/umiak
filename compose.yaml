@@ -270,7 +270,7 @@ services:
       <<: *app-env
       UMIAK_MCP_API_URL: http://api:8080
       UMIAK_MCP_PUBLIC_URL: ${UMIAK_PUBLIC_URL:-http://localhost:4180}/mcp
-      UMIAK_MCP_ALLOWED_HOSTS: ${UMIAK_QUICKSTART_ALLOWED_HOSTS:-localhost:4180}
+      UMIAK_MCP_ALLOWED_HOSTS: localhost:4180
       UMIAK_API_TRUSTED_PROXY_CIDRS: 172.29.116.10/32
     networks:
       control: { ipv4_address: 172.29.116.11 }

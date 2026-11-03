@@ -35,6 +35,9 @@ services:
     environment:
       UMIAK_GATEWAY_PREVIEW_DOMAIN: ${UMIAK_PORT_DOMAIN}
       UMIAK_GATEWAY_TUNNEL_HOST: ${UMIAK_DEVCP_TUNNEL_HOST}
+  mcp:
+    environment:
+      UMIAK_MCP_PUBLIC_URL: https://umiak-dev-cp.tail0000.ts.net:8443/mcp
   worker:
     environment:
       UMIAK_TUNNEL_URL: ${UMIAK_TUNNEL_URL}
