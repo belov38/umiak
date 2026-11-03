@@ -71,25 +71,28 @@ test("dashboard navigation, appearance, responsive layout and page captures", as
 			animations: "disabled",
 		});
 		const original = await target.locator("html").getAttribute("class");
-		for (const theme of ["light", "dark"]) {
+		const selectTheme = async (name: string) => {
+			// A dialog makes the sidebar inert, and mobile keeps it offscreen.
+			// Invoke the actual appearance button handler so React and persistence
+			// follow the same path as the separately exercised visible controls.
 			await target
-				.getByRole("button", {
-					name: theme === "dark" ? "Dark" : "Light",
-					exact: true,
-				})
-				.click();
+				.locator(".dashboard-theme button")
+				.filter({ hasText: name })
+				.first()
+				.evaluate((button) => (button as HTMLButtonElement).click());
+		};
+		for (const theme of ["Light", "Dark"]) {
+			await selectTheme(theme);
+			await expect(target.locator("html")).toHaveClass(
+				theme === "Dark" ? "dark" : "",
+			);
 			await target.screenshot({
-				path: `${dir}/${name}-${theme}.png`,
+				path: `${dir}/${name}-${theme.toLowerCase()}.png`,
 				fullPage: true,
 				animations: "disabled",
 			});
 		}
-		await target
-			.getByRole("button", {
-				name: original?.split(" ").includes("dark") ? "Dark" : "Light",
-				exact: true,
-			})
-			.click();
+		await selectTheme(original?.split(" ").includes("dark") ? "Dark" : "Light");
 	};
 	const nav = page.getByRole("navigation", { name: "Team navigation" });
 	await expect(
@@ -192,9 +195,7 @@ test("dashboard navigation, appearance, responsive layout and page captures", as
 		.getByRole("combobox", { name: "TTL", exact: true })
 		.scrollIntoViewIfNeeded();
 	await capture("create");
-	await page.getByRole("button", { name: "Dark", exact: true }).click();
 	await capture("create-dark");
-	await page.getByRole("button", { name: "Light", exact: true }).click();
 	await ensureSandbox(session, team, `visual-${state.run}`);
 	await capture("sandbox-detail-ready");
 	for (const name of ["Terminal", "Commands", "Files", "Ports", "SSH", "Env"]) {

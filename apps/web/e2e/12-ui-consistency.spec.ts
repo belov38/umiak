@@ -143,7 +143,9 @@ test("UI hierarchy, geometry, contrast and captures in both themes", async ({
 	}
 	if (process.env.UMIAK_UI_BASELINE === "1") return;
 	await page.goto("/app/getting-started");
+	await session.context.grantPermissions(["clipboard-read", "clipboard-write"]);
 	await page.getByRole("button", { name: /Copy/ }).first().click();
+	await expect(page.getByText("Copied", { exact: true })).toBeVisible();
 	await page.getByRole("button", { name: "Light", exact: true }).click();
 	await expect(page.locator("[data-sonner-toaster]")).toHaveAttribute(
 		"data-sonner-theme",
