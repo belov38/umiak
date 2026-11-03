@@ -35,13 +35,13 @@
     {
       "name": "sandbox_create",
       "title": "Create a sandbox",
-      "description": "Creates a sandbox (VM) from a template or saved snapshot and waits until it is ready. Labels it created-via=mcp. If not ready in time, call sandbox_get with wait_for=ready and wait_seconds=50.",
+      "description": "Creates a VM from a template/snapshot; waits for ready. Adds created-via=mcp. On timeout: sandbox_get(wait_for=ready, wait_seconds=50).",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
           "template": {
-            "description": "Template slug (default linux); ignored with from_snapshot",
+            "description": "Slug: linux (default), linux-desktop, windows (desktop; alias windows-desktop). Ignored with from_snapshot",
             "type": "string"
           },
           "size": {
@@ -139,7 +139,7 @@
             }
           },
           "template": {
-            "description": "Only this template slug",
+            "description": "Template filter; windows-desktop aliases windows",
             "type": "string"
           },
           "query": {
