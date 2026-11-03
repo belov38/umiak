@@ -44,6 +44,20 @@ test("local dashboard/admin, tokenless CLI create/exec/delete and blocked CIDR",
 	await expect(page).toHaveURL(/\/app/);
 	await expect(page.locator("body")).not.toContainText("Sign in");
 	await expect(page.getByText("Sign out", { exact: true })).toHaveCount(0);
+	await expect(page.getByTestId("sandbox-onboarding")).toBeVisible();
+	await page
+		.getByRole("link", { name: "Getting started", exact: true })
+		.click();
+	await expect(
+		page.getByRole("heading", { name: "Getting started", exact: true }),
+	).toBeVisible();
+	await expect(page.locator("#install")).toContainText("No sign-in");
+	await expect(page.locator(".guide-addresses")).toContainText(api);
+	await page.getByRole("button", { name: "Dark", exact: true }).click();
+	await expect(page.locator("html")).toHaveClass("dark");
+	await page.getByRole("button", { name: "Light", exact: true }).click();
+	await page.goto("/app/help");
+	await expect(page).toHaveURL(/\/app\/getting-started$/);
 	await page.goto("/admin");
 	await expect(page).toHaveURL(/\/admin/);
 	await expect(page.locator("body")).not.toContainText("Sign in");

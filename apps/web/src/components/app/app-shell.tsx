@@ -2,6 +2,7 @@
 // Customer dashboard frame; team routes and authorization stay unchanged.
 import {
 	ArchiveIcon,
+	BookOpenIcon,
 	BoxIcon,
 	CheckIcon,
 	ChevronDownIcon,
@@ -160,6 +161,22 @@ export function AppShell({
 
 				<Button
 					asChild
+					variant={pathname === "/app/getting-started" ? "secondary" : "ghost"}
+					size="sm"
+				>
+					<Link
+						href="/app/getting-started"
+						onClick={() => setMobileOpen(false)}
+						aria-current={
+							pathname === "/app/getting-started" ? "page" : undefined
+						}
+					>
+						<BookOpenIcon />
+						Getting started
+					</Link>
+				</Button>
+				<Button
+					asChild
 					variant={pathname === "/app/account" ? "secondary" : "ghost"}
 					size="sm"
 				>
@@ -189,14 +206,9 @@ export function AppShell({
 			</nav>
 			<div className="dashboard-sidebar-footer">
 				{quickstart && (
-					<>
-						<Button asChild variant="ghost" size="sm">
-							<a href="/app/help">Help</a>
-						</Button>
-						<Button asChild variant="ghost" size="sm">
-							<a href="/setup">Setup</a>
-						</Button>
-					</>
+					<Button asChild variant="ghost" size="sm">
+						<a href="/setup">Setup</a>
+					</Button>
 				)}
 				{session.isOperator && (
 					<>

@@ -218,16 +218,36 @@ function EmptyState({
 			{filtered ? (
 				"No sandbox matches the filters."
 			) : (
-				<>
-					No sandboxes yet.{" "}
-					<Link
-						href={teamPath(teamId, "sandboxes/new")}
-						className="text-foreground underline"
-					>
-						Create one
-					</Link>{" "}
-					here, or with <code>umiak create</code>.
-				</>
+				<div className="space-y-4" data-testid="sandbox-onboarding">
+					<h2 className="text-xl font-semibold">
+						Your first sandbox starts here
+					</h2>
+					<p className="text-muted-foreground">
+						Create a VM for your project, then connect your tools.
+					</p>
+					<ol className="onboarding-checklist">
+						<li>
+							<span className="onboarding-number">1</span>
+							<Link href="/app/getting-started#install">Install the CLI</Link>
+						</li>
+						<li>
+							<span className="onboarding-number">2</span>
+							<Link href="/app/getting-started#first-sandbox">
+								Create a sandbox
+							</Link>
+						</li>
+						<li>
+							<span className="onboarding-number">3</span>
+							<Link href="/app/getting-started#agents">Connect an agent</Link>
+						</li>
+					</ol>
+					<Button asChild>
+						<Link href={teamPath(teamId, "sandboxes/new")}>
+							<PlusIcon />
+							New sandbox
+						</Link>
+					</Button>
+				</div>
 			)}
 		</DashboardEmpty>
 	);
