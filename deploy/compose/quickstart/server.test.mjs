@@ -684,3 +684,30 @@ test("the 4180 Host gate also covers WebSocket upgrades", async () => {
 		await new Promise((resolve) => server.close(resolve));
 	}
 });
+
+test("GET /claim serves a hash-reading claim page when unclaimed and redirects to sign in once claimed", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	const code = await store.init();
+	const server = createQuickstartServer({ store, env: {}, transport: http });
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const base = `http://127.0.0.1:${server.address().port}`;
+	try {
+		const res = await fetch(`${base}/claim`, {
+			headers: { accept: "text/html" },
+		});
+		assert.equal(res.status, 200);
+		const html = await res.text();
+		assert.match(html, /location\.hash/);
+		assert.match(html, /\/owner\/claim/);
+		assert.match(html, /history\.replaceState/);
+		assert.match(html, /\/setup/);
+		assert.match(html, /id="claim"/);
+		assert.doesNotMatch(html, new RegExp(code));
+		await store.claim(code);
+		const after = await fetch(`${base}/claim`, { redirect: "manual" });
+		assert.equal(after.status, 302);
+		assert.equal(after.headers.get("location"), "/");
+	} finally {
+		server.close();
+	}
+});

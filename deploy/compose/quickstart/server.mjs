@@ -4,6 +4,7 @@ import net from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalFetch } from "../canonical-fetch.mjs";
+import { claimContent } from "./claim-ui.mjs";
 import { clientGuard } from "./client-guard.mjs";
 import { requestContext } from "./origin.mjs";
 import { OwnerStore, PgOwnerRepository } from "./owner.mjs";
@@ -287,6 +288,15 @@ export function createQuickstartServer({
 					credential ? { token: credential } : { pending: true },
 				);
 			}
+			if (path === "/claim" && req.method === "GET") {
+				// Signed-in or already-claimed deployments have nothing to claim.
+				const claimed = owner || (await store.claimed());
+				if (claimed) {
+					res.writeHead(302, { location: owner ? "/app" : "/" });
+					return res.end();
+				}
+				return page(res, "Claim this Umiak deployment", claimContent(), false);
+			}
 			if (!owner) {
 				if (req.headers.accept?.includes("application/json"))
 					return fail(res, 401, "owner_required");
@@ -305,7 +315,7 @@ export function createQuickstartServer({
 					return page(
 						res,
 						"Claim this Umiak deployment",
-						`<p>Enter the one-time setup code printed by the installer. Network access alone grants no control.</p><form id="claim"><label>Setup code<input id="code" type="password" autocomplete="off" required placeholder="Setup code"></label><button>Claim deployment</button></form><pre id="message" role="status"></pre><script>document.getElementById('claim').onsubmit=async e=>{e.preventDefault();const r=await fetch('/owner/claim',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:document.getElementById('code').value})});if(r.ok)location.reload();else document.getElementById('message').textContent='Claim failed. Check the setup code; it can only be used once.';};</script>`,
+						claimContent(),
 						false,
 					);
 				}

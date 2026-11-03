@@ -356,3 +356,7 @@ export class OwnerStore {
 		});
 	}
 }
+
+/** One-click claim URL; the code lives in the fragment so it never reaches server logs. */
+export const claimLink = (origin, code) =>
+	`${origin.replace(/\/+$/, "")}/claim#${encodeURIComponent(code)}`;
