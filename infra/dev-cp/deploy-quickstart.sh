@@ -28,7 +28,7 @@ compose=(docker compose --env-file deploy/compose/.env -f compose.yaml -f infra/
 (cd deploy/compose && docker compose stop local-ingress)
 "${compose[@]}" up -d
 sha256sum -c deploy/compose/secrets/devcp/s16-tls-before.sha256
-tailscale serve --bg --https=8443 http://localhost:4180
+tailscale serve --bg --https=8443 http://localhost:4181
 "${compose[@]}" ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
 echo 'Retrieve setup code privately with: docker compose --env-file deploy/compose/.env -f compose.yaml -f infra/dev-cp/compose.quickstart.yaml logs quickstart'
 echo 'Owner URL: https://umiak-dev-cp.tail0000.ts.net:8443 (publicly trusted Serve TLS)'

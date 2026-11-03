@@ -1,0 +1,44 @@
+# S16 follow-up security rulings
+
+## Ingress boundary
+
+The public 4180 server ignores all forwarded headers, including connections from
+loopback and Docker NAT peers and even if proxy-chain CIDRs are configured. A
+second server on container port 4181 shares the owner store and setup handler.
+Compose publishes it only as `127.0.0.1:4181:4181`. Host-run Serve/Caddy/nginx must
+use that listener; it is an explicit trusted origin boundary. Do not publish it
+on a LAN/tailnet wildcard. Docker internal peers with access to that port are
+part of the deployment trust boundary. No Docker NAT/gateway address is trusted.
+The optional Tailscale sidecar retains its isolated network and now targets 4181.
+`UMIAK_TRUSTED_PROXY_CIDRS` only controls additional trusted hops inside XFF chains;
+it cannot enable forwarding on 4180. The first untrusted client from the right is
+used for rate limits and S15 denied CIDRs. Origin/Host checks, owner credentials,
+claim capabilities, browser and CLI session records are unchanged.
+
+## Host preparation transport and integrity
+
+For non-loopback HTTP the command panel explicitly warns that root script
+execution and the callback's API token secret, CA and host key use unencrypted
+HTTP, and recommends Serve/HTTPS. Ruling: replace piping curl into bash with a
+downloaded script, display its SHA256, verify it with `sha256sum -c` before both
+dry-run and execution. This pins the exact script shown by the authenticated UI;
+it does not authenticate an HTTP-delivered page or protect the callback. HTTPS
+remains the recommendation. The hash covers the exact rendered capability-bound
+script and the endpoint regenerates it using the same parameters.
+
+## Media
+
+VirtIO uses the immutable 0.1.271 archive filename matching the existing SHA256,
+rather than the moving stable alias. PVE download auditing reads `http_proxy`
+from `/cluster/options` and exempts only wget resolution/connection records for
+that configured transport endpoint. All redirect URLs and all other resolved or
+connected targets remain subject to the original HTTPS/private-address checks.
+Failure to read cluster options fails closed before starting a download.
+
+## Verification
+
+Focused regression tests cover NAT/loopback spoofing, public cookie selection,
+client address, proxy origin/secure cookies, denied forwarded clients, unchanged
+owner/CLI bearer sessions, isolated sidecar configuration, preparation warning,
+command integrity hash and proxy-log exemptions with malicious redirects/targets.
+Final aggregate gates and live evidence are recorded in the S16 implementation plan.

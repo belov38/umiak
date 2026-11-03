@@ -36,19 +36,26 @@ test("trusted generic proxy supplies HTTPS origin and client, public URL pins or
 		},
 		"127.0.0.1",
 	);
-	assert.deepEqual(requestContext(request, {}), {
+	assert.deepEqual(requestContext(request, {}, true), {
 		origin: "https://lab.example:8443",
 		clientAddress: "203.0.113.10",
 		proxied: true,
 	});
 	assert.throws(
 		() =>
-			requestContext(request, { UMIAK_PUBLIC_URL: "https://other.example" }),
+			requestContext(
+				request,
+				{ UMIAK_PUBLIC_URL: "https://other.example" },
+				true,
+			),
 		/host/,
 	);
 	assert.equal(
-		requestContext(request, { UMIAK_PUBLIC_URL: "https://lab.example:8443" })
-			.origin,
+		requestContext(
+			request,
+			{ UMIAK_PUBLIC_URL: "https://lab.example:8443" },
+			true,
+		).origin,
 		"https://lab.example:8443",
 	);
 });
@@ -57,6 +64,7 @@ test("invalid forwarded protocol and malformed host fail closed", () => {
 		requestContext(
 			req("localhost", { "x-forwarded-proto": "https,http" }, "127.0.0.1"),
 			{},
+			true,
 		),
 	);
 	for (const host of ["evil/path", "user@localhost", "localhost#x"])
@@ -74,7 +82,30 @@ test("trusted forwarding still rejects shell and URL authority metacharacters", 
 						"127.0.0.1",
 					),
 					{},
+					true,
 				),
 			/host/,
 		);
+});
+
+test("public listener ignores forwarding even from loopback or configured Docker NAT", () => {
+	for (const peer of ["127.0.0.1", "172.29.116.128", "172.29.116.1"]) {
+		const request = req(
+			"192.168.1.10:4180",
+			{
+				"x-forwarded-proto": "https",
+				"x-forwarded-host": "evil.example",
+				"x-forwarded-for": "8.8.8.8",
+			},
+			peer,
+		);
+		assert.deepEqual(
+			requestContext(request, { UMIAK_TRUSTED_PROXY_CIDRS: "0.0.0.0/0" }),
+			{
+				origin: "http://192.168.1.10:4180",
+				clientAddress: peer,
+				proxied: false,
+			},
+		);
+	}
 });

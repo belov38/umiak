@@ -207,7 +207,6 @@ services:
       UMIAK_API_GATEWAY_TOKEN_FILE: /all-secrets/gateway-token
       UMIAK_SSH_LOGIN_CA_KEY_FILE: /all-secrets/ssh-login-ca
       UMIAK_SSH_HOST_KEYS_FILE: /all-secrets/ssh-host-keys.pub
-      UMIAK_LOCAL_ALLOWED_HOSTS: api:8080,localhost:8444
       UMIAK_API_TRUSTED_PROXY_CIDRS: 172.29.116.10/32,172.29.116.11/32
       UMIAK_SSH_HOST: localhost
       UMIAK_SSH_PORT: "2222"
@@ -352,7 +351,7 @@ services:
       <<: *app-env
       UMIAK_QUICKSTART_PORT: "4180"
       UMIAK_PUBLIC_URL: ${UMIAK_PUBLIC_URL:-}
-      UMIAK_TRUSTED_PROXY_CIDRS: ${UMIAK_TRUSTED_PROXY_CIDRS:-127.0.0.0/8,::1/128,172.29.116.1/32,172.29.116.128/32}
+      UMIAK_TRUSTED_PROXY_CIDRS: ${UMIAK_TRUSTED_PROXY_CIDRS:-127.0.0.0/8,::1/128}
       UMIAK_QUICKSTART_ALLOWED_HOSTS: ${UMIAK_QUICKSTART_ALLOWED_HOSTS:-}
       UMIAK_QUICKSTART_ASSETS: /app/quickstart-assets
     volumes:
@@ -362,6 +361,7 @@ services:
       - gateway-secrets:/gateway-secrets:ro
     ports:
       - "${UMIAK_QUICKSTART_BIND:-0.0.0.0}:${UMIAK_QUICKSTART_PORT:-4180}:4180"
+      - "127.0.0.1:${UMIAK_QUICKSTART_PROXY_PORT:-4181}:4181"
     networks:
       control: { ipv4_address: 172.29.116.10 }
       web-internal: {}

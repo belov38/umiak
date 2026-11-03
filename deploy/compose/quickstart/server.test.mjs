@@ -330,6 +330,7 @@ test("HTTPS proxy claim retains __Host cookie and direct HTTP ignores forwarded 
 	const code = await store.init();
 	const server = createQuickstartServer({
 		store,
+		proxyListener: true,
 		env: {
 			UMIAK_TRUSTED_PROXY_CIDRS: "127.0.0.0/8",
 			UMIAK_PUBLIC_URL: "https://lab.example",
@@ -365,6 +366,7 @@ test("trusted proxies cannot bypass denied client CIDRs", async () => {
 	await store.init();
 	const server = createQuickstartServer({
 		store,
+		proxyListener: true,
 		env: { UMIAK_LOCAL_DENIED_CIDRS: "10.88.0.0/24" },
 	});
 	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));

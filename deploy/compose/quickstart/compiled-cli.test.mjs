@@ -33,6 +33,7 @@ for (const httpsProxy of [false, true])
 			const store = new OwnerStore(repo);
 			await store.claim(await store.init());
 			server = createQuickstartServer({
+				proxyListener: httpsProxy,
 				store,
 				env: { UMIAK_LOCAL_DENIED_CIDRS: "10.88.0.0/24" },
 			});

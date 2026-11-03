@@ -45,12 +45,54 @@ proxy access uses the Secure, host-only `__Host-umiak_owner` cookie.
 3. **Funnel or your own HTTPS reverse proxy:** if you use Funnel, this is public.
    An Internet-facing reverse proxy also publishes the deployment to the Internet;
    owner authorization remains required. Prefer Serve for private remote access.
-   Terminate HTTPS at your proxy and forward to the owner HTTP ingress, including
-   WebSocket upgrades. Configure `UMIAK_PUBLIC_URL=https://your-hostname` and trust
-   only the proxy's socket address via `UMIAK_TRUSTED_PROXY_CIDRS`. The proxy must
-   overwrite `X-Forwarded-Proto`, `X-Forwarded-Host` and `X-Forwarded-For`. The
-   ingress uses these headers only from configured trusted proxy addresses; direct
-   clients cannot select their scheme, origin or client identity this way.
+   Terminate HTTPS at your proxy and forward to `http://127.0.0.1:4181`, including
+   WebSocket upgrades. Configure `UMIAK_PUBLIC_URL=https://your-hostname`. The proxy
+   must restrict accepted Hosts and overwrite `X-Forwarded-Proto`,
+   `X-Forwarded-Host` and `X-Forwarded-For`. Port4181 is a trusted listener published
+   only on host loopback: never publish it on a wildcard/LAN/tailnet address.
+   Public port4180 ignores every forwarded header, including connections arriving
+   from Docker NAT or loopback. No gateway/NAT CIDR is trusted. The optional
+   sidecar uses port4181 on its isolated network. Extra proxy-chain hops can be
+   listed in `UMIAK_TRUSTED_PROXY_CIDRS`; this never enables forwarding on4180.
+
+For host-run Tailscale Serve:
+
+```sh
+tailscale serve --bg --https=8443 http://localhost:4181
+```
+
+For host-run Caddy (the site name restricts Host):
+
+```caddyfile
+umiak.example.com {
+    reverse_proxy 127.0.0.1:4181 {
+        header_up X-Forwarded-Host umiak.example.com
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-For {remote_host}
+    }
+}
+```
+
+For nginx, use a TLS server with `server_name umiak.example.com` (and reject
+unknown names in the default server). Inside its `location /`:
+
+```nginx
+proxy_pass http://127.0.0.1:4181;
+proxy_set_header Host umiak.example.com;
+proxy_set_header X-Forwarded-Host umiak.example.com;
+proxy_set_header X-Forwarded-Proto https;
+proxy_set_header X-Forwarded-For $remote_addr;
+proxy_http_version 1.1;
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection "upgrade";
+```
+
+When generating PVE host preparation over non-loopback HTTP, setup warns next to
+the command: the downloaded script runs as root, and the callback sends the PVE
+API token secret, CA and host key unencrypted. Generate and run preparation through
+Serve/HTTPS. The command downloads a file, displays its SHA256 and checks it before
+dry-run and execution. This detects a changed script but cannot authenticate an
+HTTP-delivered page or protect its callback.
 
 Setup and Settings show the warning **if you use Funnel, this is public** whenever
 the current origin hostname ends in `.ts.net`; the hostname alone cannot establish
@@ -254,11 +296,11 @@ reuse checks the file name and the source's HEAD Content-Length against the stor
 size and remains explicitly unverified. Mismatches never overwrite an existing ISO.
 
 Obtain the Windows SHA256 from the Microsoft or licensed vendor download portal.
-VirtIO defaults to Fedora's official stable alias:
-<https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso>.
+VirtIO defaults to Fedora's versioned 0.1.271 archive:
+<https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.271-1/virtio-win-0.1.271.iso>.
 Its checksum field starts with the recipe-pinned SHA256. Leaving VirtIO empty uses
-the builder's pinned, checksum-verified download. The stable alias can move; a
-checksum mismatch must be resolved by confirming a new trusted digest. Fedora's
+the builder's pinned, checksum-verified download. The archive version and checksum
+must be updated together after confirming a new trusted digest. Fedora's
 `CHECKSUM` currently lists RPM MD5s, not an ISO SHA256. Download the ISO on a
 trusted workstation and compute `sha256sum virtio-win.iso` (Linux),
 `shasum -a 256 virtio-win.iso` (macOS), or `Get-FileHash virtio-win.iso -Algorithm
@@ -276,7 +318,7 @@ URLs reject credentials, non-HTTPS schemes, and internal/loopback DNS answers
 unless the owner explicitly checks the internal URL permission. HEAD preflight
 checks redirects returned to HEAD before handing the final HTTPS URL to PVE. Fedora's
 same-host HTTP redirect is upgraded to HTTPS. PVE performs its own later DNS
-lookup and GET. PVE offers no redirect-disable option for this API. Umiak audits the complete wget task log after download: every Location must remain HTTPS and every reported resolved/connecting address must satisfy the URL address policy. A violation fails the job and deletes the downloaded volume. This post-download control cannot prevent the request itself; the administrator must trust the source and DNS. Umiak does not
+lookup and GET. PVE offers no redirect-disable option for this API. Umiak audits the complete wget task log after download: every Location must remain HTTPS and every reported resolved/connecting target address must satisfy the URL address policy. Only resolution/connection lines for the exact datacenter `http_proxy` endpoint read from `/cluster/options` are exempt; redirect destinations remain validated. A violation fails the job and deletes the downloaded volume. This post-download control cannot prevent the request itself; the administrator must trust the source and DNS. Umiak does not
 proxy the bytes or control a source that changes between preflight and download.
 Progress and failures are taken from the PVE task log. No ISO download or Windows
 build is part of validation-only checks.
