@@ -26,7 +26,7 @@ requests expire after five minutes. Credentials and claim state survive containe
 
 For raw LAN/tailnet IP URLs, first open by localhost or a DNS name and visit
 `/owner/tls` to add the IPs to the certificate. This takes effect immediately and is
-persisted without an `.env` file. Only configured names are accepted. Adding names requires explicit CA rotation and renewed trust; unknown SNI is rejected. The CA expires after one year; rotate it before expiry.
+persisted without an `.env` file. Only configured names are accepted. Adding names requires explicit CA rotation and renewed trust; unknown SNI is rejected. New CAs expire after ten years; existing CAs keep their original expiry. Rotate explicitly before expiry.
 The CA has critical DNS-only permitted subtrees, with configured IPs as leaf SANs.
 Bun 1.4.4 (latest stable checked on 2026-11-03) rejects any IP name constraints;
 TLS verification stays enabled. This CA is **unconstrained for IP names**. Ingress
@@ -48,9 +48,9 @@ openssl x509 -in umiak-ca.pem -noout -fingerprint -sha256
 
 The command prints the new fingerprint. Replace the old CA in browser trust and
 CLI CA files; existing sessions, database and guest gateway trust survive. Do not
-run console rotation concurrently with an owner UI rotation. Leaves renew daily
+run console rotation concurrently with an owner UI rotation. Ingress checks the atomic credential pointer every minute. Leaves renew
 when less than seven days remain, without restarting the ingress or changing CA
-trust. The one-year CA itself requires an explicit owner rotation before expiry.
+trust. The CA itself requires explicit owner rotation before expiry. Leaf expiry is capped at the CA expiry, and a warning appears in Setup, `/owner/tls`, `/owner/tls/status`, and logs within thirty days of CA expiry.
 
 ## Wizard
 
@@ -247,3 +247,21 @@ build is part of validation-only checks.
 The selected ISO storage is resolved by the restricted node-agent's read-only
 `media.sha256` operation through `pvesm path <storage>:iso/<name>`. Update the
 node-agent when using this new optional storage argument on an existing host.
+
+
+### TLS rotation durability
+
+CA rotation and leaf renewal write a complete private generation directory and
+publish it by atomically renaming the `current` symlink. Compatibility paths such
+as `ca.pem` point through that single pointer. Startup ignores abandoned staging
+directories; it migrates an intact older flat layout without changing its CA.
+A running ingress detects a console-published generation before renewing any leaf
+and reloads the matching CA policy, key and leaf together. Console rotation no
+longer emits the obsolete pre-rotation warning. Restart quickstart after console
+rotation for immediate activation; otherwise the running ingress reloads within
+one minute. Replace client trust with the newly printed CA fingerprint. Existing
+owner sessions and the independent guest gateway CA are preserved.
+
+Decision: new owner CAs last ten years to avoid routine trust redistribution;
+90-day leaves still rotate automatically. Existing roots are never extended or
+silently replaced. Explicit CA renewal remains an owner operation.

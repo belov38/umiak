@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { X509Certificate } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	readlink,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import https from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -225,6 +232,88 @@ test("ingress daily renewal check replaces its TLS context without a restart", a
 		await tls.renew();
 	} finally {
 		if (server) await new Promise((resolve) => server.close(resolve));
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test("short-lived CA caps both initial and renewed leaf and warns thirty days ahead", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "umiak-tls-expiry-"));
+	try {
+		let now = Date.now();
+		const tls = await quickstartTls(dir, [], {
+			caDays: 2,
+			leafDays: 90,
+			now: () => now,
+			warnings: false,
+		});
+		const ca = new X509Certificate(await readFile(join(dir, "ca.pem")));
+		assert.ok(
+			new Date(new X509Certificate(tls.cert).validTo) <= new Date(ca.validTo),
+		);
+		assert.match(tls.status().warning, /Owner CA expires/);
+		assert.equal(tls.status().caExpiresAt, ca.validTo);
+		now += 86400000;
+		assert.equal(await tls.renew(), null); // A leaf already capped at CA expiry needs explicit CA rotation.
+		now += 2 * 86400000;
+		await assert.rejects(tls.renew(), /owner_ca_expired_rotate_required/);
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test("atomic generation pointer ignores interrupted staging and reloads external CA before renewal", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "umiak-tls-atomic-"));
+	try {
+		let now = Date.now();
+		const serving = await quickstartTls(dir, [], {
+			leafDays: 1,
+			now: () => now,
+		});
+		const before = await readlink(join(dir, "current"));
+		await mkdir(join(dir, "rotate-interrupted"));
+		await writeFile(join(dir, "rotate-interrupted", "ca.pem"), "half-written");
+		const restarted = await quickstartTls(dir, [], {
+			warnings: false,
+			renewOnStart: false,
+		});
+		assert.equal(restarted.caFingerprint, serving.caFingerprint);
+		const next = await restarted.updateNames(["new.example.test"], {
+			rotateCA: true,
+		});
+		assert.notEqual(await readlink(join(dir, "current")), before);
+		now += 23 * 3600000;
+		const reloaded = await serving.renew();
+		assert.ok(reloaded.reloaded);
+		assert.equal(reloaded.caFingerprint, next.caFingerprint);
+		const ca = new X509Certificate(await readFile(join(dir, "ca.pem")));
+		assert.ok(new X509Certificate(reloaded.cert).verify(ca.publicKey));
+		assert.equal(
+			new X509Certificate(await readFile(join(dir, "owner.pem"))).serialNumber,
+			new X509Certificate(reloaded.cert).serialNumber,
+		);
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test("renewing a short leaf never extends past the existing CA", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "umiak-tls-renew-cap-"));
+	try {
+		let now = Date.now();
+		const tls = await quickstartTls(dir, [], {
+			caDays: 2,
+			leafDays: 1,
+			now: () => now,
+			warnings: false,
+		});
+		now += 25 * 3600000;
+		const renewed = await tls.renew();
+		assert.ok(renewed);
+		assert.equal(
+			new X509Certificate(renewed.cert).validTo,
+			new X509Certificate(await readFile(join(dir, "ca.pem"))).validTo,
+		);
+	} finally {
 		await rm(dir, { recursive: true, force: true });
 	}
 });

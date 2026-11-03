@@ -8,7 +8,10 @@ const names = [
 ]
 	.map((name) => name.trim())
 	.filter(Boolean);
-const tls = await quickstartTls(dir, names);
+const tls = await quickstartTls(dir, names, {
+	warnings: false,
+	renewOnStart: false,
+});
 const next = await tls.updateNames(names, { rotateCA: true });
 console.log(`New owner CA SHA256: ${next.caFingerprint}`);
 console.log(

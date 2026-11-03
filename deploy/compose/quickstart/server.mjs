@@ -110,7 +110,7 @@ export function createQuickstartServer({
 	env = process.env,
 	tls = {},
 	transport = https,
-	renewIntervalMs = 86400000,
+	renewIntervalMs = 60000,
 }) {
 	const allowed = clientGuard(
 		env.UMIAK_LOCAL_ALLOWED_CIDRS ??
@@ -427,7 +427,9 @@ export function createQuickstartServer({
 				if (credentials) {
 					server.setSecureContext(credentials);
 					console.log(
-						"Umiak owner TLS leaf renewed without restart; CA trust unchanged",
+						credentials.reloaded
+							? "Umiak owner TLS credentials reloaded after console rotation; replace client CA trust"
+							: "Umiak owner TLS leaf renewed without restart; CA trust unchanged",
 					);
 				}
 			} catch (error) {
