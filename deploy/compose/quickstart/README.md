@@ -250,7 +250,7 @@ gateway CA or guest port are replaced by that quickstart deployment.
 Run `pnpm build` before the compiled CLI gate, then:
 
 ```sh
-node --test deploy/compose/quickstart/*.test.mjs deploy/compose/local/*.test.mjs deploy/compose/meta-proxy.test.mjs
+node --test deploy/compose/canonical-fetch.test.mjs deploy/compose/quickstart/*.test.mjs deploy/compose/local/*.test.mjs deploy/compose/meta-proxy.test.mjs
 ```
 
 Missing host CLI binaries fail the compiled gate. The quickstart fixtures exercise

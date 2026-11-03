@@ -555,3 +555,101 @@ the test-created protocol session was closed. No pairing was started. Final
 repeated isolated-image OIDC23/23 and local1/1 passed. The Docker image audit uses
 the running container's Config.Image reference (Docker's platform config digest
 was not runnable by name on this Docker Desktop image store).
+
+
+## Post-merge S16/UI follow-up — 2026-11-03
+
+Branch `s16-ui-followup`, base `b2d8b74a`. Execution and rulings:
+[s16-ui-followup.md](s16-ui-followup.md),
+[security](s16-ui-followup-security.md),
+[dashboard](s16-ui-followup-ui.md),
+[bootstrap pages](s16-ui-followup-quickstart-ui.md).
+
+Public port 4180 now always ignores X-Forwarded-*; host-loopback published 4181
+is the explicit proxy boundary. Host Serve targets `http://localhost:4181`.
+Docker NAT/gateway peers are absent from trust configuration. The sidecar uses
+its isolated network and port 4181. Credential storage, cookie names and gateway
+CA are retained. Non-loopback HTTP host-prep warns about root execution and
+callback secrets and offers a pinned-file SHA256 verification command. VirtIO
+uses the matching immutable archive; wget auditing recognizes the PVE proxy.
+HTTP preview cookie issuance is host-only and signed labels refuse siblings;
+explicit HTTP regression coverage records these existing invariants.
+
+All main dashboard pages and bootstrap pages adopt the UI contract. Bootstrap
+rendering remains available before Next/session initialization and reads actual
+dashboard tokens rather than carrying a second palette.
+
+### Evidence
+
+Artifacts directory: `/tmp/umiak-s16-evidence-HumwBq` (outside git).
+Baseline dashboard screenshots come from a clean archive of `b2d8b74a`;
+quickstart fixtures use isolated synthetic sessions, never the live owner.
+Final command results and live observations follow below.
+
+
+Validation evidence for this follow-up:
+
+- `pnpm build`, `pnpm lint`, `pnpm typecheck` passed sequentially; lint has only
+  the pre-existing informational String.raw diagnostic in MCP's Windows helper.
+- Sequential workspace tests: 4,592 Vitest passed plus 83 Python SDK tests.
+  Later transport changes are rechecked in affected Node/MCP suites below.
+- Gateway `go build`, `go vet`, `go test`, golangci-lint passed (0 lint issues).
+- Quickstart/local/meta-proxy Node gate: 149/149 including compiled CLI.
+- OIDC Playwright: 27/27, including new light/dark Tab focus, 60-character
+  environment at 390px and empty-view primary-count tests.
+- Local Playwright: 2/2; isolated quickstart UI fixture: 1/1.
+- Shellcheck on quickstart shell entrypoints, deploy and preflight passed.
+  A broader informational run also exposed pre-existing SC1091/SC2155 in the
+  unrelated desktop/turn scripts; those files are unchanged.
+- Baseline: `before/` 38 main-page PNGs, `quickstart-before/` 10 PNGs.
+  Final: `after/` 114 PNGs, `quickstart-after/` 11 PNGs, `local-after/` 16 PNGs.
+  Full absolute path manifest: `/tmp/umiak-s16-evidence-HumwBq/screenshots.txt`.
+- Screenshots reviewed include light setup/session frame and dark Environments;
+  all use synthetic fixture data. The real toggle is used for final theme captures.
+
+Independent code review found two regressions (canonical Host for Docker DNS
+requests; PVE hides proxy config without root Sys.Audit). Both were fixed with
+regression tests. Live validation then identified that Node 26 fetch discards an
+explicit Host override, requiring a native HTTP transport and real socket tests.
+This failed first live attempt remains in `live-check.log` history; final live
+results are recorded below after the corrected redeploy.
+
+
+Final corrected transport and live verification:
+
+- Native canonical-Host HTTP transport has real socket regression tests for
+  request bodies/abort, quickstart metadata, metadata bridge and MCP initialization.
+  Final Node gate: **151/151** (`node-final.log`); final full MCP: **715 passed,
+  1 skipped** (`mcp-wire-final.log`). Relative to the full sequential workspace
+  run above this adds one MCP test; no other workspace package changed afterward.
+- Final build/lint/typecheck pass after the transport change; local Playwright
+  recheck **2/2** (`local-wire-final.log`). Quickstart UI **1/1**.
+- CT590 redeployed via `infra/dev-cp/deploy-quickstart.sh` (final log
+  `live-deploy-final.log`). Read-only `qm list` immediately before each deploy
+  showed no VM in 500–589. No PVE mutation, build or ISO download was performed.
+- Anonymous checks on `http://100.64.10.7:4180` and
+  `http://192.168.68.90:4180`: metadata 200; forged Host/Proto/For individually
+  and together leave the complete metadata unchanged, including public origin.
+  A forged denied PVE client address does not deny the real peer. No anonymous
+  cookie is issued. `:4181` cannot be reached via either external address.
+- Serve at `https://umiak-dev-cp.tail0000.ts.net:8443` returns metadata 200
+  with the correct HTTPS origin; `tailscale serve status` targets
+  `http://localhost:4181`. Explicit proxy-listener forwarding also returns the
+  HTTPS origin. Internal web-meta returns 200 after the transport fix.
+- Sensitive `/v1/sandboxes`, `/quickstart/setup/state`, `/quickstart/setup/build`
+  and `/owner/sessions` return 401 anonymously on all three origins.
+  `/setup` intentionally retains the public signed-in-address guidance page.
+- The complete owner-state digest matches before/after; claimed=true and all
+  three existing browser/CLI records are unchanged. No login as the owner,
+  pairing, approval or owner-authenticated request was made. Secure __Host-
+  issuance and HTTP cookie choice are covered by the ingress fixtures; live
+  session survival is evidenced by unchanged credentials/state, not impersonation.
+- Gateway CA/tunnel/preview certificate SHA256 checks all pass unchanged.
+  `live-check-final.log`, `live-internal.log`, `live-preservation.log` and the
+  private owner-state digest comparison are outside git in the artifact directory.
+
+Remaining: independent acceptance and master merge. Fresh-host live preparation,
+real ISO downloads and template builds remain deliberately unperformed under the
+read-only PVE constraint. Existing adopted hosts need read-only root Sys.Audit for
+URL-media proxy discovery; adoption itself remains available without it and no
+live ACL was changed.
