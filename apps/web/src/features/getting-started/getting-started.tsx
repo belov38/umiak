@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { CopyButton } from "@/components/app/copy-button";
+import { CodeBlock } from "@/components/ui/feedback";
+import { PageHeader } from "@/components/ui/panel";
 import { type GuideDeployment, guideSections } from "./content";
 
 export function GettingStarted({
@@ -53,9 +55,9 @@ export function GettingStarted({
 	const sections = guideSections(current);
 	return (
 		<article className="getting-started space-y-8">
-			<header className="space-y-3">
+			<div className="space-y-3">
 				<p className="text-sm text-muted-foreground">YOUR FIRST SANDBOX</p>
-				<h1 className="text-2xl font-semibold">Getting started</h1>
+				<PageHeader title="Getting started" />
 				<p className="max-w-3xl text-muted-foreground">
 					A virtual machine for your code, tools and agents. Start in the
 					dashboard or follow the CLI guide below.
@@ -70,7 +72,7 @@ export function GettingStarted({
 						<dd className="break-all">{current.apiUrl}</dd>
 					</div>
 				</dl>
-			</header>
+			</div>
 			<div className="guide-layout">
 				<nav aria-label="Getting started sections" className="guide-toc">
 					<p className="mb-3 text-sm font-semibold">In this guide</p>
@@ -78,7 +80,7 @@ export function GettingStarted({
 						<a
 							key={section.id}
 							href={`#${section.id}`}
-							className="block py-1.5 text-sm text-muted-foreground hover:text-foreground"
+							className="block text-sm text-link underline underline-offset-4"
 						>
 							{section.title}
 						</a>
@@ -114,9 +116,9 @@ export function GettingStarted({
 												text={block.text}
 											/>
 										</div>
-										<pre className="overflow-x-auto p-4 text-xs leading-relaxed">
+										<CodeBlock className="overflow-x-auto p-4 text-xs leading-relaxed">
 											<code>{block.text}</code>
-										</pre>
+										</CodeBlock>
 									</div>
 								),
 							)}

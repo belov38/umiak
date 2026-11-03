@@ -4,19 +4,19 @@ import type * as React from "react";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-	"group/button inline-flex shrink-0 items-center justify-center rounded-none border border-transparent text-sm font-normal whitespace-nowrap transition-colors duration-[120ms] outline-none select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:border-transparent disabled:bg-muted disabled:text-[#9e9e9e] [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-[18px]",
+	"group/button inline-flex shrink-0 items-center justify-center rounded-none border border-transparent text-sm font-normal whitespace-nowrap transition-colors duration-[120ms] outline-none select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:border-transparent disabled:bg-muted disabled:text-disabled-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-[18px]",
 	{
 		variants: {
 			variant: {
 				default:
 					"bg-primary text-primary-foreground hover:bg-[var(--primary-hover)]",
-				outline: "border-border bg-background text-foreground hover:bg-muted",
+				outline: "border-input bg-background text-foreground hover:bg-muted",
 				secondary:
 					"bg-secondary text-secondary-foreground hover:bg-secondary/80",
 				ghost: "bg-transparent hover:bg-muted active:bg-border",
 				destructive:
 					"bg-transparent text-destructive hover:bg-[var(--destructive-tint)]",
-				link: "text-primary underline underline-offset-4 hover:decoration-2",
+				link: "text-link underline underline-offset-4 hover:decoration-2",
 			},
 			size: {
 				default: "h-[var(--control-height)] gap-2 px-4",

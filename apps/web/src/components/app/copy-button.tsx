@@ -34,7 +34,7 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
 /** A monospace line with a copy button. */
 export function CopyLine({ text, label }: { text: string; label: string }) {
 	return (
-		<div className="flex items-center gap-1 rounded-lg border bg-muted/40 p-2">
+		<div className="flex items-center gap-1 rounded-none border bg-muted/40 p-2">
 			<code className="min-w-0 flex-1 font-mono text-xs break-all select-all">
 				{text}
 			</code>

@@ -54,7 +54,7 @@ export function SecretDialog({
 							{shown.rotated && " The old secret has stopped working."}
 						</DialogDescription>
 					</DialogHeader>
-					<div className="flex items-center gap-1 rounded-lg border bg-muted/40 p-2">
+					<div className="flex items-center gap-1 rounded-none border bg-muted/40 p-2">
 						<code
 							className="flex-1 font-mono text-xs break-all select-all"
 							data-testid="key-secret"
@@ -71,7 +71,7 @@ export function SecretDialog({
 						{keyExamples(shown.secret).map((line) => (
 							<div
 								key={line}
-								className="flex items-center gap-1 rounded-lg border bg-muted/40 p-2"
+								className="flex items-center gap-1 rounded-none border bg-muted/40 p-2"
 							>
 								<code className="flex-1 font-mono text-xs break-all">
 									{line}

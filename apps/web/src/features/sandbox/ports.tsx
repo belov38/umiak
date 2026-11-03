@@ -16,6 +16,7 @@ import { Field, FormDialog } from "@/components/app/form-dialog";
 import { QueryError } from "@/components/app/query-error";
 import { useLocalMode } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
+import { Radio } from "@/components/ui/choice";
 import {
 	Dialog,
 	DialogContent,
@@ -25,6 +26,7 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { useAttempt } from "@/lib/client-call";
 import { formatTime } from "@/lib/format";
 import { useDescribeError } from "@/lib/use-error";
@@ -130,7 +132,7 @@ export function PortsTab({
 				{ports.data && hosted.length === 0 && (
 					<p className="text-sm text-muted-foreground">No published ports.</p>
 				)}
-				<ul className="divide-y rounded-lg border" data-testid="hosted-ports">
+				<ul className="divide-y rounded-none border" data-testid="hosted-ports">
 					{hosted.map((p) => (
 						<li
 							key={p.port}
@@ -156,11 +158,11 @@ export function PortsTab({
 								{p.url}
 								<ExternalLinkIcon className="size-3" />
 							</a>
-							<span className="rounded bg-muted px-1.5 text-xs">
+							<span className="rounded-none bg-muted px-1.5 text-xs">
 								access: {p.access}
 							</span>
 							{p.hostRewrite === "localhost" && (
-								<span className="rounded bg-muted px-1.5 text-xs">
+								<span className="rounded-none bg-muted px-1.5 text-xs">
 									Host → localhost
 								</span>
 							)}
@@ -225,7 +227,7 @@ export function PortsTab({
 						.
 					</p>
 				)}
-				<ul className="divide-y rounded-lg border">
+				<ul className="divide-y rounded-none border">
 					{listening.map((l) => (
 						<li key={l.port} className="flex items-center gap-2 p-2 text-sm">
 							<span className="w-14 font-mono font-medium">{l.port}</span>
@@ -378,6 +380,7 @@ function PublishDialog({
 					.filter((a) => !localMode || a !== "sso")
 					.map((a) => (
 						<label
+							htmlFor={`ports-choice-1-${a}`}
 							key={a}
 							className={
 								a === "public" && publicOff
@@ -385,8 +388,8 @@ function PublishDialog({
 									: undefined
 							}
 						>
-							<input
-								type="radio"
+							<Radio
+								id={`ports-choice-1-${a}`}
 								name="access"
 								className="mr-2"
 								checked={access === a}
@@ -402,14 +405,14 @@ function PublishDialog({
 				label="Host header"
 				hint="localhost: for dev servers that check the Host (Vite, webpack)"
 			>
-				<select
-					className="h-8 rounded-lg border bg-transparent px-2 text-sm"
+				<NativeSelect
+					className="h-8 rounded-none border bg-transparent px-2 text-sm"
 					value={rewrite}
 					onChange={(e) => setRewrite(e.target.value as HostRewrite)}
 				>
 					<option value="preserve">preserve — the public host</option>
 					<option value="localhost">localhost:{p || "<port>"}</option>
-				</select>
+				</NativeSelect>
 			</Field>
 			{current && (
 				<p className="text-xs text-muted-foreground">

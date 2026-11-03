@@ -70,6 +70,21 @@ test("dashboard navigation, appearance, responsive layout and page captures", as
 			fullPage: true,
 			animations: "disabled",
 		});
+		const original = await target.locator("html").getAttribute("class");
+		for (const theme of ["light", "dark"]) {
+			await target.evaluate(
+				(t) => document.documentElement.classList.toggle("dark", t === "dark"),
+				theme,
+			);
+			await target.screenshot({
+				path: `${dir}/${name}-${theme}.png`,
+				fullPage: true,
+				animations: "disabled",
+			});
+		}
+		await target.evaluate((c) => {
+			document.documentElement.className = c ?? "";
+		}, original);
 	};
 	const nav = page.getByRole("navigation", { name: "Team navigation" });
 	await expect(
@@ -141,6 +156,12 @@ test("dashboard navigation, appearance, responsive layout and page captures", as
 	await page.goto("/app/teams/new");
 	await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 	await capture("new-team");
+	for (const path of ["templates", "getting-started"]) {
+		await page.goto(`/app/${path}`);
+		await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+		await expect(page.getByText("Loading…", { exact: true })).toHaveCount(0);
+		await capture(path);
+	}
 	await page.goto(`${base}/sandboxes/new`);
 	await expect(
 		page.getByRole("button", { name: "Create", exact: true }),

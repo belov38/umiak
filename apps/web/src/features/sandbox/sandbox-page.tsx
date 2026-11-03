@@ -14,6 +14,7 @@ import {
 	useAppSession,
 	useSingleOwner,
 } from "@/components/app/session-context";
+import { LoadingState } from "@/components/ui/feedback";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SandboxManagement } from "@/features/operator/sandbox-management";
 import { useUmiak } from "@/lib/api";
@@ -123,8 +124,7 @@ export function SandboxPage({
 			</section>
 		);
 	}
-	if (!s || !live.handle)
-		return <p className="text-sm text-muted-foreground">Loading…</p>;
+	if (!s || !live.handle) return <LoadingState />;
 	const handle = live.handle;
 
 	return (

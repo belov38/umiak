@@ -11,6 +11,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
 	BLOCK_REASONS,
 	type BlockReason,
@@ -31,11 +32,11 @@ export function NoteInput({
 	onChange: (v: string) => void;
 }) {
 	return (
-		<textarea
+		<Textarea
 			aria-label="Note"
 			rows={3}
 			maxLength={MAX_BLOCK_NOTE + 100}
-			className="w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+			className="w-full rounded-none border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
 			value={value}
 			onChange={(e) => onChange(e.target.value)}
 		/>

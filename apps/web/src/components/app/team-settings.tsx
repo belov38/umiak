@@ -21,7 +21,9 @@ import { useAppSession } from "@/components/app/session-context";
 import { TeamNotices } from "@/components/app/team-notices";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { LoadingState } from "@/components/ui/feedback";
 import { Input } from "@/components/ui/input";
+import { PageHeader, Panel } from "@/components/ui/panel";
 import {
 	Select,
 	SelectContent,
@@ -66,7 +68,7 @@ export function TeamSettings({ data }: { data: TeamSettingsData }) {
 	const perm = { role: data.myRole, personal: data.team.personal };
 	return (
 		<div className="space-y-6">
-			<h1>Team settings</h1>
+			<PageHeader title="Team settings" />
 			<ConnectionNotice />
 			<TeamNotices
 				teamId={data.team.id}
@@ -97,7 +99,7 @@ function Section({
 	children: ReactNode;
 }) {
 	return (
-		<section className="dashboard-card space-y-3">
+		<Panel className="space-y-3">
 			<div>
 				<h2 className="text-base font-semibold">{title}</h2>
 				{description && (
@@ -105,7 +107,7 @@ function Section({
 				)}
 			</div>
 			{children}
-		</section>
+		</Panel>
 	);
 }
 
@@ -130,7 +132,7 @@ function NameSection({
 		});
 	};
 	return (
-		<div className="dashboard-card space-y-3">
+		<Panel className="space-y-3">
 			<div className="flex items-center gap-2">
 				<h2>Team name</h2>
 				{data.team.personal && <Badge variant="secondary">personal</Badge>}
@@ -155,7 +157,7 @@ function NameSection({
 			) : (
 				<p className="text-muted-foreground">{data.team.name}</p>
 			)}
-		</div>
+		</Panel>
 	);
 }
 
@@ -186,9 +188,7 @@ export function QuotaSection({ teamId }: { teamId: string }) {
 		: [];
 	return (
 		<Section title="Quota and usage" description="Set by a platform operator.">
-			{limits.isPending && (
-				<p className="text-sm text-muted-foreground">Loading…</p>
-			)}
+			{limits.isPending && <LoadingState />}
 			{limits.isError && (
 				<QueryError error={limits.error} what="limits and usage" />
 			)}

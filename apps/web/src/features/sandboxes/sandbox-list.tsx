@@ -20,7 +20,9 @@ import {
 	useSingleOwner,
 } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
+import { LoadingState } from "@/components/ui/feedback";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/panel";
 import {
 	Select,
 	SelectContent,
@@ -111,16 +113,18 @@ export function SandboxList({ teamId }: { teamId: string }) {
 
 	return (
 		<section className="sandbox-list space-y-4">
-			<div className="sandbox-list-header flex flex-wrap items-center gap-x-4 gap-y-2">
-				<h1 className="text-xl font-semibold">Sandboxes</h1>
-				<QuotaLine teamId={teamId} />
-				<Button asChild className="ml-auto">
-					<Link href={teamPath(teamId, "sandboxes/new")}>
-						<PlusIcon />
-						New sandbox
-					</Link>
-				</Button>
-			</div>
+			<PageHeader
+				title="Sandboxes"
+				meta={<QuotaLine teamId={teamId} />}
+				action={
+					<Button asChild>
+						<Link href={teamPath(teamId, "sandboxes/new")}>
+							<PlusIcon />
+							New sandbox
+						</Link>
+					</Button>
+				}
+			/>
 			<div className="sandbox-filters flex flex-wrap items-start gap-2">
 				<Input
 					aria-label="Search name or slug"
@@ -170,9 +174,7 @@ export function SandboxList({ teamId }: { teamId: string }) {
 					onRetry={() => list.refetch()}
 				/>
 			)}
-			{list.isPending && (
-				<p className="text-sm text-muted-foreground">Loading…</p>
-			)}
+			{list.isPending && <LoadingState />}
 			{list.data && rows.length === 0 && (
 				<EmptyState teamId={teamId} filtered={filtered} />
 			)}
@@ -235,7 +237,7 @@ function EmptyState({
 						</li>
 						<li>
 							<span className="onboarding-number">2</span>
-							<Link href="/app/getting-started#first-sandbox">
+							<Link href={teamPath(teamId, "sandboxes/new")}>
 								Create a sandbox
 							</Link>
 						</li>

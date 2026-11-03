@@ -15,7 +15,9 @@ import {
 } from "@/components/app/session-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { LoadingState } from "@/components/ui/feedback";
 import { Input } from "@/components/ui/input";
+import { PageHeader, Panel } from "@/components/ui/panel";
 import {
 	Select,
 	SelectContent,
@@ -31,6 +33,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { useUmiak } from "@/lib/api";
 import { useAttempt } from "@/lib/client-call";
 import { formatTime } from "@/lib/format";
@@ -47,7 +50,7 @@ function Section({
 	children: ReactNode;
 }) {
 	return (
-		<section className={plain ? "space-y-3" : "dashboard-card space-y-3"}>
+		<Panel className={plain ? "space-y-3 border-0 p-0" : "space-y-3"}>
 			<div>
 				<h2 className="text-base font-semibold">{title}</h2>
 				{description && (
@@ -55,7 +58,7 @@ function Section({
 				)}
 			</div>
 			{children}
-		</section>
+		</Panel>
 	);
 }
 
@@ -67,8 +70,8 @@ export function AccountSettings({
 	const session = useAppSession();
 	return (
 		<div className="max-w-4xl space-y-8">
-			<h1 className="text-xl font-semibold">Account</h1>
-			<section className="dashboard-card space-y-5">
+			<PageHeader title="Account" />
+			<Panel className="space-y-5">
 				<div className="flex items-center justify-between gap-3">
 					<h2>Account · {session.user.name}</h2>
 					{signOutHref !== null && (
@@ -84,7 +87,7 @@ export function AccountSettings({
 				</div>
 				<Profile />
 				<DefaultTeam />
-			</section>
+			</Panel>
 			<SshKeys />
 		</div>
 	);
@@ -242,9 +245,7 @@ export function SshKeys() {
 				</>
 			}
 		>
-			{keys.isPending && (
-				<p className="text-sm text-muted-foreground">Loading…</p>
-			)}
+			{keys.isPending && <LoadingState />}
 			{keys.isError && (
 				<p className="text-sm text-destructive">
 					Could not load SSH keys: {sshKeyError(keys.error)}
@@ -299,13 +300,13 @@ export function SshKeys() {
 					value={name}
 					onChange={(e) => setName(e.target.value)}
 				/>
-				<textarea
+				<Textarea
 					aria-label="Public key"
 					placeholder="ssh-ed25519 AAAA… me@laptop"
 					required
 					rows={3}
 					spellCheck={false}
-					className="w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+					className="w-full rounded-none border border-input bg-transparent px-2.5 py-1.5 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
 					value={publicKey}
 					onChange={(e) => setPublicKey(e.target.value)}
 				/>

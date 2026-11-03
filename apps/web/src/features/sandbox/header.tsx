@@ -33,6 +33,8 @@ import { Field, FormDialog } from "@/components/app/form-dialog";
 import { useSingleOwner } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
+import { ActionBar, PageHeader } from "@/components/ui/panel";
 import { useUmiak } from "@/lib/api";
 import { copyFailureGuidance } from "@/lib/browser-guidance";
 import { useAttempt } from "@/lib/client-call";
@@ -110,20 +112,25 @@ export function SandboxHeader({
 			</Link>
 			<div className="space-y-2">
 				<div className="sandbox-title">
-					<h1 className="sandbox-detail-heading flex items-center gap-2 font-semibold">
-						<span className="truncate">{s.name ?? s.slug}</span>
-						<Button
-							size="icon-xs"
-							variant="ghost"
-							aria-label="Rename slug"
-							title="Rename slug"
-							disabled={!a.rename}
-							onClick={() => setDialog("rename")}
-						>
-							<PencilIcon />
-						</Button>
-						<BlockLock sandbox={s} />
-					</h1>
+					<PageHeader
+						compact
+						title={
+							<>
+								<span className="truncate">{s.name ?? s.slug}</span>
+								<Button
+									size="icon-xs"
+									variant="ghost"
+									aria-label="Rename slug"
+									title="Rename slug"
+									disabled={!a.rename}
+									onClick={() => setDialog("rename")}
+								>
+									<PencilIcon />
+								</Button>
+								<BlockLock sandbox={s} />
+							</>
+						}
+					/>
 					<div className="flex items-center gap-1 text-sm text-muted-foreground">
 						<code data-testid="sandbox-slug">{s.slug}</code>
 
@@ -131,7 +138,7 @@ export function SandboxHeader({
 						<CopyButton text={s.id} label="Copy sandbox ID" />
 					</div>
 				</div>
-				<div className="sandbox-actions">
+				<ActionBar className="mb-4">
 					<Button
 						variant="ghost"
 						disabled={s.state !== "ready" || s.blocked}
@@ -164,7 +171,7 @@ export function SandboxHeader({
 					{s.state === "stopped" ? (
 						<Button
 							size="default"
-							variant="ghost"
+							variant="default"
 							disabled={busy || !a.resume}
 							onClick={() =>
 								act(`Resuming ${s.slug}`, () =>
@@ -258,13 +265,13 @@ export function SandboxHeader({
 						<TrashIcon />
 						Delete
 					</Button>
-				</div>
+				</ActionBar>
 			</div>
 			<Facts teamId={teamId} sandbox={s} />
 			{s.blocked && (
 				<div
 					role="status"
-					className="flex items-center gap-2 rounded-lg border border-warning/35 bg-warning-tint p-3 text-sm text-warning"
+					className="flex items-center gap-2 rounded-none border border-warning/35 bg-warning-tint p-3 text-sm text-warning"
 				>
 					<LockIcon className="size-4 shrink-0" />
 					<p>
@@ -395,7 +402,7 @@ function Facts({
 					{labels.length === 0
 						? "—"
 						: labels.map(([k, v]) => (
-								<code key={k} className="rounded bg-muted px-1 text-xs">
+								<code key={k} className="rounded-none bg-muted px-1 text-xs">
 									{k}={v}
 								</code>
 							))}
@@ -432,7 +439,7 @@ function OperationBar({ sandbox: s }: { sandbox: SandboxData }) {
 		<div
 			role="status"
 			data-testid="operation-bar"
-			className="flex items-center gap-2 rounded-lg border bg-muted/40 p-2 text-sm"
+			className="flex items-center gap-2 rounded-none border bg-muted/40 p-2 text-sm"
 		>
 			<LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
 			<span className="font-medium">{op.kind.replace("_", " ")}</span>
@@ -440,8 +447,8 @@ function OperationBar({ sandbox: s }: { sandbox: SandboxData }) {
 				{op.state}
 				{op.step ? ` · ${op.step}` : ""}
 			</span>
-			<div className="ml-2 h-1 flex-1 overflow-hidden rounded bg-muted">
-				<div className="h-full w-1/3 animate-pulse rounded bg-primary/60" />
+			<div className="ml-2 h-1 flex-1 overflow-hidden rounded-none bg-muted">
+				<div className="h-full w-1/3 animate-pulse rounded-none bg-primary/60" />
 			</div>
 		</div>
 	);
@@ -461,7 +468,7 @@ function ErrorBlock({
 		<div
 			role="alert"
 			data-testid="sandbox-error"
-			className="flex flex-wrap items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm"
+			className="flex flex-wrap items-center gap-3 rounded-none border border-destructive/40 bg-destructive/5 p-3 text-sm"
 		>
 			<div className="flex-1">
 				<p className="font-medium text-destructive">
@@ -590,8 +597,8 @@ function ExtendDialog({
 			}}
 		>
 			<Field label="Extend by">
-				<select
-					className="h-8 rounded-lg border bg-transparent px-2 text-sm"
+				<NativeSelect
+					className="h-8 rounded-none border bg-transparent px-2 text-sm"
 					value={choice}
 					onChange={(e) => setChoice(Number(e.target.value))}
 				>
@@ -607,7 +614,7 @@ function ExtendDialog({
 								: ""}
 						</option>
 					))}
-				</select>
+				</NativeSelect>
 			</Field>
 		</FormDialog>
 	);

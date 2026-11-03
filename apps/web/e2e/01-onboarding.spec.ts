@@ -26,13 +26,15 @@ test("new user: personal team, sandbox ready, terminal survives a reload", async
 	await expect(onboarding).toBeVisible();
 	for (const [name, hash] of [
 		["Install the CLI", "install"],
-		["Create a sandbox", "first-sandbox"],
 		["Connect an agent", "agents"],
 	] as const) {
 		await expect(
 			onboarding.getByRole("link", { name, exact: true }),
 		).toHaveAttribute("href", `/app/getting-started#${hash}`);
 	}
+	await expect(
+		onboarding.getByRole("link", { name: "Create a sandbox", exact: true }),
+	).toHaveAttribute("href", `/app/t/${team}/sandboxes/new`);
 	await expect(
 		onboarding.getByRole("link", { name: "New sandbox", exact: true }),
 	).toHaveAttribute("href", `/app/t/${team}/sandboxes/new`);

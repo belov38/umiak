@@ -13,6 +13,8 @@ import { QueryError } from "@/components/app/query-error";
 import { useSingleOwner } from "@/components/app/session-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { LoadingState } from "@/components/ui/feedback";
+import { PageHeader, Panel } from "@/components/ui/panel";
 import {
 	Table,
 	TableBody,
@@ -83,10 +85,8 @@ export function SnapshotList({ teamId }: { teamId: string }) {
 	const now = Date.now();
 	return (
 		<section className="space-y-4">
-			<div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-				<h1 className="text-xl font-semibold">Snapshots</h1>
-			</div>
-			<div className="snapshot-panel space-y-3 border p-5">
+			<PageHeader title="Snapshots" />
+			<Panel className="snapshot-panel space-y-3">
 				<h2>Saved snapshots</h2>
 				<p className="text-sm text-muted-foreground">
 					{singleOwner
@@ -106,9 +106,7 @@ export function SnapshotList({ teamId }: { teamId: string }) {
 						onRetry={() => snapshots.refetch()}
 					/>
 				)}
-				{snapshots.isPending && (
-					<p className="text-sm text-muted-foreground">Loading…</p>
-				)}
+				{snapshots.isPending && <LoadingState />}
 				{snapshots.data && snapshots.data.length === 0 && (
 					<DashboardEmpty kind="snapshots">
 						No saved snapshots yet. Templates are base OS images; snapshots save
@@ -197,7 +195,7 @@ export function SnapshotList({ teamId }: { teamId: string }) {
 						</TableBody>
 					</Table>
 				)}
-			</div>
+			</Panel>
 		</section>
 	);
 }

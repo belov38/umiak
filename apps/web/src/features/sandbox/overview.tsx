@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { Sandbox, SandboxData } from "@umiak/sdk";
 import { CopyLine } from "@/components/app/copy-button";
 import { QueryError } from "@/components/app/query-error";
+import { Button } from "@/components/ui/button";
 import { formatAgo, formatTime } from "@/lib/format";
 import { formatDuration } from "./output";
 import { portsKey } from "./ports";
@@ -84,13 +85,15 @@ export function OverviewTab({
 				<div className="space-y-1">
 					<div className="flex items-center">
 						<h2 className="font-medium">Last commands</h2>
-						<button
+						<Button
+							variant="ghost"
+							size="sm"
 							type="button"
 							className="ml-auto text-xs underline"
 							onClick={() => onOpenTab("commands")}
 						>
 							All commands
-						</button>
+						</Button>
 					</div>
 					{commands.isError && (
 						<QueryError error={commands.error} what="commands" />
@@ -99,7 +102,7 @@ export function OverviewTab({
 						<p className="text-sm text-muted-foreground">None yet.</p>
 					)}
 					<ul
-						className="divide-y rounded-lg border text-sm"
+						className="divide-y rounded-none border text-sm"
 						data-testid="overview-commands"
 					>
 						{(commands.data ?? []).map((c) => (
@@ -124,19 +127,21 @@ export function OverviewTab({
 				<div className="space-y-1">
 					<div className="flex items-center">
 						<h2 className="font-medium">Published ports</h2>
-						<button
+						<Button
+							variant="ghost"
+							size="sm"
 							type="button"
 							className="ml-auto text-xs underline"
 							onClick={() => onOpenTab("ports")}
 						>
 							Manage
-						</button>
+						</Button>
 					</div>
 					{ports.isError && <QueryError error={ports.error} what="ports" />}
 					{ports.data?.hosted.length === 0 && (
 						<p className="text-sm text-muted-foreground">None.</p>
 					)}
-					<ul className="divide-y rounded-lg border text-sm">
+					<ul className="divide-y rounded-none border text-sm">
 						{(ports.data?.hosted ?? []).map((p) => (
 							<li key={p.port} className="flex items-center gap-2 p-1.5">
 								<span className="w-14 font-mono">{p.port}</span>

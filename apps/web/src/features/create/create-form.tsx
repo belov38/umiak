@@ -18,6 +18,7 @@ import {
 import { QueryError } from "@/components/app/query-error";
 import { useSingleOwner } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
+import { Radio } from "@/components/ui/choice";
 import {
 	Dialog,
 	DialogContent,
@@ -25,7 +26,9 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import { LoadingState } from "@/components/ui/feedback";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/panel";
 import {
 	Select,
 	SelectContent,
@@ -268,7 +271,7 @@ export function CreateSandboxForm({
 					<section className="min-w-0 space-y-4">
 						<DialogHeader>
 							<DialogTitle asChild>
-								<h1>New sandbox</h1>
+								<PageHeader title="New sandbox" />
 							</DialogTitle>
 							<DialogDescription className="sr-only">
 								Choose a template and the settings for your sandbox.
@@ -290,17 +293,23 @@ export function CreateSandboxForm({
 						>
 							<Row label="From">
 								<div className="flex flex-wrap items-center gap-4 text-sm">
-									<label className="flex items-center gap-1.5">
-										<input
-											type="radio"
+									<label
+										htmlFor="create-form-choice-1"
+										className="flex items-center gap-1.5"
+									>
+										<Radio
+											id="create-form-choice-1"
 											checked={form.source === "template"}
 											onChange={() => patch({ source: "template" })}
 										/>
 										template
 									</label>
-									<label className="flex items-center gap-1.5">
-										<input
-											type="radio"
+									<label
+										htmlFor="create-form-choice-2"
+										className="flex items-center gap-1.5"
+									>
+										<Radio
+											id="create-form-choice-2"
 											checked={form.source === "snapshot"}
 											disabled={readySnapshots.length === 0}
 											onChange={() =>
@@ -350,9 +359,7 @@ export function CreateSandboxForm({
 
 							{form.source === "template" ? (
 								<Row label="Template">
-									{templates.isPending && (
-										<p className="text-sm text-muted-foreground">Loading…</p>
-									)}
+									{templates.isPending && <LoadingState />}
 									{templates.data && enabled.length === 0 && (
 										<p className="text-sm text-muted-foreground">
 											No template is available. Ask a platform operator.
@@ -360,9 +367,13 @@ export function CreateSandboxForm({
 									)}
 									<div className="flex flex-col gap-1 text-sm">
 										{enabled.map((t) => (
-											<label key={t.slug} className="flex items-center gap-1.5">
-												<input
-													type="radio"
+											<label
+												htmlFor={`create-form-choice-3-${t.slug}`}
+												key={t.slug}
+												className="flex items-center gap-1.5"
+											>
+												<Radio
+													id={`create-form-choice-3-${t.slug}`}
 													checked={form.template === t.slug}
 													onChange={() =>
 														patch({ template: t.slug, size: t.defaultSize })
@@ -607,7 +618,7 @@ export function CreateSandboxForm({
 									role="alert"
 									data-testid="create-error"
 									className={cn(
-										"flex flex-wrap items-center gap-2 rounded-lg border p-3 text-sm",
+										"flex flex-wrap items-center gap-2 rounded-none border p-3 text-sm",
 										submitError.apiUnavailable || submitError.retry
 											? "border-warning/35 bg-warning-tint text-warning"
 											: "border-destructive/30 bg-destructive/5 text-destructive",

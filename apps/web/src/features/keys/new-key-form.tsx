@@ -5,6 +5,7 @@ import { PlusIcon } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { useSingleOwner } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
+import { Checkbox, Radio } from "@/components/ui/choice";
 import { Input } from "@/components/ui/input";
 import { useUmiak } from "@/lib/api";
 import {
@@ -118,9 +119,13 @@ export function NewKeyForm({
 				</p>
 				<fieldset aria-labelledby="key-access-label" className="text-sm">
 					{PRESET_NAMES.map((p) => (
-						<label key={p} className="key-preset flex items-start gap-3">
-							<input
-								type="radio"
+						<label
+							htmlFor={`new-key-form-choice-1-${p}`}
+							key={p}
+							className="key-preset flex items-start gap-3"
+						>
+							<Radio
+								id={`new-key-form-choice-1-${p}`}
 								className="mt-1"
 								checked={form.preset === p}
 								onChange={() => setForm((f) => ({ ...f, preset: p }))}
@@ -142,9 +147,12 @@ export function NewKeyForm({
 							</span>
 						</label>
 					))}
-					<label className="key-preset flex items-center gap-3">
-						<input
-							type="radio"
+					<label
+						htmlFor="new-key-form-choice-2"
+						className="key-preset flex items-center gap-3"
+					>
+						<Radio
+							id="new-key-form-choice-2"
 							checked={form.preset === "custom"}
 							onChange={() =>
 								setForm((f) => ({
@@ -162,9 +170,13 @@ export function NewKeyForm({
 					{form.preset === "custom" && (
 						<div className="grid grid-cols-2 gap-x-4 gap-y-1 pl-6">
 							{SCOPES.map((s) => (
-								<label key={s} className="flex items-center gap-1.5">
-									<input
-										type="checkbox"
+								<label
+									htmlFor={`new-key-form-choice-3-${s}`}
+									key={s}
+									className="flex items-center gap-1.5"
+								>
+									<Checkbox
+										id={`new-key-form-choice-3-${s}`}
 										checked={form.scopes.includes(s)}
 										onChange={(e) => toggleScope(s, e.target.checked)}
 									/>

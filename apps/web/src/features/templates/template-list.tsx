@@ -7,8 +7,12 @@ import { QueryError } from "@/components/app/query-error";
 import { useAppSession } from "@/components/app/session-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/choice";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { CodeBlock, LoadingState } from "@/components/ui/feedback";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
+import { ActionBar, PageHeader, Panel } from "@/components/ui/panel";
 import { useUmiak } from "@/lib/api";
 import { teamPath } from "@/lib/team-path";
 
@@ -84,7 +88,7 @@ export function TemplateList({
 	const refresh = () => client.invalidateQueries({ queryKey: ["templates"] });
 	return (
 		<section className="space-y-5">
-			<h1 className="text-xl font-semibold">Templates</h1>
+			<PageHeader title="Templates" />
 			<p className="max-w-3xl text-sm text-muted-foreground">
 				A template is a base OS image used to create sandboxes. A{" "}
 				<Link href={teamPath(teamId, "snapshots")} className="underline">
@@ -106,7 +110,7 @@ export function TemplateList({
 					onRetry={() => templates.refetch()}
 				/>
 			)}
-			{templates.isPending && <p>Loading…</p>}
+			{templates.isPending && <LoadingState />}
 			<div className="grid gap-4 xl:grid-cols-2">
 				{templates.data?.map((t) => {
 					const metadata = t as typeof t & {
@@ -126,15 +130,23 @@ export function TemplateList({
 									? "ready"
 									: "not built";
 					return (
-						<article
+						<Panel
 							key={t.slug}
 							data-testid="template-card"
-							className="space-y-4 rounded-lg border p-5"
+							className="space-y-4"
 						>
 							<div className="flex items-center justify-between gap-3">
 								<h2 className="font-semibold">{t.name || t.slug}</h2>
 								<Badge
-									variant={status === "failed" ? "destructive" : "secondary"}
+									variant={
+										status === "failed"
+											? "destructive"
+											: status === "ready"
+												? "success"
+												: status === "building"
+													? "warning"
+													: "outline"
+									}
 								>
 									{status}
 								</Badge>
@@ -177,7 +189,7 @@ export function TemplateList({
 								</p>
 							)}
 							{session.isOperator && (
-								<div className="flex flex-wrap gap-2">
+								<ActionBar>
 									<Button
 										size="sm"
 										variant="outline"
@@ -204,7 +216,7 @@ export function TemplateList({
 									{quickstart ? (
 										<Button
 											size="sm"
-											variant="outline"
+											variant="default"
 											disabled={job?.status === "running"}
 											onClick={() => {
 												setError("");
@@ -218,15 +230,15 @@ export function TemplateList({
 											{t.version ? "Rebuild…" : "Build…"}
 										</Button>
 									) : (
-										<Button asChild size="sm" variant="outline">
+										<Button asChild size="sm">
 											<Link href="/app/getting-started">
 												Build instructions
 											</Link>
 										</Button>
 									)}
-								</div>
+								</ActionBar>
 							)}
-						</article>
+						</Panel>
 					);
 				})}
 			</div>
@@ -238,7 +250,7 @@ export function TemplateList({
 				/>
 			)}
 			{job && (
-				<div className="space-y-3 rounded-lg border p-5" aria-live="polite">
+				<div className="space-y-3 rounded-none border p-5" aria-live="polite">
 					<h2 className="font-semibold">
 						Latest build: {job.slug} — {job.status}
 					</h2>
@@ -262,12 +274,12 @@ export function TemplateList({
 							{job.error}
 						</p>
 					)}
-					<pre
+					<CodeBlock
 						data-testid="template-build-log"
 						className="max-h-96 overflow-auto whitespace-pre-wrap break-all bg-muted p-3 text-xs"
 					>
 						{job.log || "Waiting for builder output…"}
-					</pre>
+					</CodeBlock>
 				</div>
 			)}
 			<Dialog
@@ -321,9 +333,13 @@ export function TemplateList({
 										licensed ISO URL or an already uploaded ISO. Without SHA256:
 										Not verified: the ISO will be used as downloaded.
 									</p>
-									<label className="block text-sm">
+									<label
+										htmlFor="template-list-choice-1"
+										className="block text-sm"
+									>
 										ISO storage
-										<select
+										<NativeSelect
+											id="template-list-choice-1"
 											name="mediaStorage"
 											className="mt-1 block w-full border bg-background p-2"
 											aria-label="ISO storage"
@@ -334,7 +350,7 @@ export function TemplateList({
 													{s.storage}
 												</option>
 											))}
-										</select>
+										</NativeSelect>
 									</label>
 									<label htmlFor="tpl-isoUrl" className="block text-sm">
 										Windows ISO HTTPS URL
@@ -378,8 +394,14 @@ export function TemplateList({
 											pattern="[a-fA-F0-9]{64}"
 										/>
 									</label>
-									<label className="flex gap-2 text-sm">
-										<input name="allowInternalIsoUrls" type="checkbox" />
+									<label
+										htmlFor="template-list-choice-2"
+										className="flex gap-2 text-sm"
+									>
+										<Checkbox
+											id="template-list-choice-2"
+											name="allowInternalIsoUrls"
+										/>
 										Explicitly allow private/internal ISO URL targets
 									</label>
 								</>
@@ -431,9 +453,12 @@ export function TemplateList({
 									{error}
 								</p>
 							)}
-							<label className="flex gap-2 text-sm">
-								<input type="checkbox" required />I confirm starting this{" "}
-								{selected.built ? "new version build" : "build"}.
+							<label
+								htmlFor="template-list-choice-3"
+								className="flex gap-2 text-sm"
+							>
+								<Checkbox id="template-list-choice-3" required />I confirm
+								starting this {selected.built ? "new version build" : "build"}.
 							</label>
 							<Button type="submit" disabled={busy}>
 								{busy

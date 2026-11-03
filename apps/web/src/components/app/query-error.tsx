@@ -28,7 +28,7 @@ export function QueryError({
 			<div
 				role="alert"
 				data-testid="api-unavailable"
-				className="flex items-center gap-2 rounded-lg border border-warning/35 bg-warning-tint p-3 text-sm text-warning"
+				className="flex items-center gap-2 rounded-none border border-warning/35 bg-warning-tint p-3 text-sm text-warning"
 			>
 				<CloudOffIcon className="size-4 shrink-0" />
 				<p className="flex-1">
