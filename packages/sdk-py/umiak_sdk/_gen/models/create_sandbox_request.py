@@ -40,7 +40,8 @@ class CreateSandboxRequest:
         size (str | Unset): Size slug; default: the template's default size Example: 2gb.
         slug (str | Unset): 3-40 characters `[a-z0-9]+(-[a-z0-9]+)*`, not ending in -<digits>; default: three random
             words Example: my-box.
-        template (str | Unset): Template slug (GET /v1/templates); ignored with `from` Example: linux.
+        template (str | Unset): Template slug (GET /v1/templates); `windows-desktop` is a compatibility alias for
+            `windows`; ignored with `from` Example: linux.
         ttl_seconds (int | None | Unset): Lifetime from ready in seconds; the deadline is ready + ttl; null: no TTL
     """
 
