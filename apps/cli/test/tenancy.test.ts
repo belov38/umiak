@@ -6,7 +6,11 @@ import { generateApiKeySecret } from "@umiak/auth/api-key";
 import { expect, it } from "vitest";
 import type { Me } from "../src/commands/whoami.ts";
 import { pathsOf, writeConfig } from "../src/config.ts";
+import { Context } from "../src/context.ts";
+import { Output } from "../src/output.ts";
 import { runCli } from "../src/program.ts";
+import { refreshKnownHosts } from "../src/ssh.ts";
+import { deploymentTenancy } from "../src/tenancy.ts";
 import { cliHome } from "./helpers/run-cli.ts";
 
 const me: Me = {
@@ -61,7 +65,18 @@ async function fixture(
 		if (req.url === "/v1/meta") {
 			calls++;
 			if (failure) res.statusCode = 503;
-			res.end(JSON.stringify({ tenancy, authMode: "oidc", oidc: null }));
+			res.end(
+				JSON.stringify({
+					tenancy,
+					authMode: "oidc",
+					oidc: null,
+					ssh: {
+						host: "ssh.example.test",
+						port: 2222,
+						hostKeys: ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixture"],
+					},
+				}),
+			);
 		} else if (req.url === "/v1/me") res.end(JSON.stringify(me));
 		else if (req.url === "/v1/limits") res.end(JSON.stringify(limits));
 		else if (req.url?.startsWith("/v1/sandboxes"))
@@ -238,6 +253,34 @@ it("refreshes an expired teams cache from current server metadata", async () => 
 			(await invoke(["--help", "--api-url", "https://another.example.test"]))
 				.stdout,
 		).toContain("--team <team>");
+		expect(metaCalls()).toBe(1);
+	});
+});
+
+it("SSH metadata refresh updates tenancy without fetching metadata again", async () => {
+	await fixture("single", async ({ home, metaCalls }) => {
+		const ctx = new Context({
+			env: home.env,
+			globals: {},
+			stdin: Readable.from([]),
+			out: new Output({
+				stdout: { write: () => {} },
+				stderr: { write: () => {} },
+				isTTY: false,
+			}),
+		});
+		const file = await refreshKnownHosts(ctx);
+		expect(readFileSync(file, "utf8")).toContain(
+			"[ssh.example.test]:2222 ssh-ed25519",
+		);
+		const profile = JSON.parse(
+			readFileSync(join(home.configDir, "config.json"), "utf8"),
+		).profiles.default;
+		expect(profile).toMatchObject({
+			tenancy: "single",
+			tenancyCheckedAt: expect.any(Number),
+		});
+		expect(await deploymentTenancy(ctx)).toBe("single");
 		expect(metaCalls()).toBe(1);
 	});
 });

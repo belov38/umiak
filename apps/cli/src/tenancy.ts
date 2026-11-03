@@ -24,6 +24,33 @@ export function cachedTenancy(resolved: Resolved): Tenancy {
 		: "teams";
 }
 const requests = new WeakMap<Context, Promise<Tenancy>>();
+/** Reuse metadata fetched for another purpose, without another network request. */
+export async function persistTenancy(
+	ctx: Context,
+	meta: { tenancy?: unknown },
+): Promise<Tenancy> {
+	const resolved = ctx.resolved;
+	const profile = resolved.profile;
+	const patch = tenancyCache(meta);
+	if (profile && resolved.apiUrl && sameApi(resolved.apiUrl, profile.apiUrl)) {
+		// Preserve concurrent profile/credential changes: update only these fields.
+		await withFileLock(ctx.paths.lock, async () => {
+			const config = readConfig(ctx.paths);
+			const current = config.profiles[resolved.profileName];
+			if (current && sameApi(current.apiUrl, profile.apiUrl)) {
+				Object.assign(current, patch);
+				writeConfig(ctx.paths, config);
+			}
+		}).catch(() => {
+			// A read-only config must not discard fresh deployment metadata.
+		});
+		Object.assign(profile, patch);
+	}
+	const tenancy = tenancyOf(meta);
+	requests.set(ctx, Promise.resolve(tenancy));
+	return tenancy;
+}
+
 export function deploymentTenancy(ctx: Context): Promise<Tenancy> {
 	const pending = requests.get(ctx);
 	if (pending) return pending;
@@ -52,22 +79,7 @@ export function deploymentTenancy(ctx: Context): Promise<Tenancy> {
 			);
 			if (!reply.ok) return cached;
 			const meta = (await reply.json()) as { tenancy?: unknown };
-			const patch = tenancyCache(meta);
-			if (matches) {
-				// Preserve concurrent profile/credential changes: update only these fields.
-				await withFileLock(ctx.paths.lock, async () => {
-					const config = readConfig(ctx.paths);
-					const current = config.profiles[resolved.profileName];
-					if (current && sameApi(current.apiUrl, profile.apiUrl)) {
-						Object.assign(current, patch);
-						writeConfig(ctx.paths, config);
-					}
-				}).catch(() => {
-					// A read-only config must not discard fresh deployment metadata.
-				});
-				Object.assign(profile, patch);
-			}
-			return tenancyOf(meta);
+			return persistTenancy(ctx, meta);
 		} catch {
 			// Display remains usable offline. Unknown deployments use legacy team output.
 			return cached;
