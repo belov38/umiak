@@ -10,8 +10,8 @@ import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { attempt } from "@/lib/client-call";
-import { describeError } from "@/lib/errors";
+import { useAttempt } from "@/lib/client-call";
+import { useDescribeError } from "@/lib/use-error";
 import {
 	defaultDownloadOffset,
 	frameText,
@@ -51,6 +51,8 @@ export function OutputView({
 	/** The command ended or was signalled: refresh the list. */
 	onChanged: () => void;
 }) {
+	const attempt = useAttempt();
+	const describeError = useDescribeError();
 	const [filter, setFilter] = useState<OutputFilter>("all");
 	const [from, setFrom] = useState<"start" | "tail">(
 		hasLongOutput(c) ? "tail" : "start",
@@ -87,7 +89,7 @@ export function OutputView({
 			return () => ac.abort();
 		},
 		// "Reload" (round) remounts the terminal, which opens a new stream.
-		[handle, c.id, from, filter, startAt, onChanged],
+		[handle, c.id, from, filter, startAt, onChanged, describeError],
 	);
 
 	const signal = async (sig: (typeof SIGNALS)[number]) => {

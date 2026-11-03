@@ -1,6 +1,7 @@
 import { AccessPage } from "@/components/app/access-page";
 // 403 of /app: a refused login (S8 §5.3 items 1, 2, 4) or a team the user is
 // not in (S8 §9.2).
+import { getDeploymentMeta } from "@/lib/deployment-meta";
 import { requestAuth } from "@/lib/session";
 
 const TEXT: Record<string, { title: string; text: string }> = {
@@ -20,7 +21,13 @@ const TEXT: Record<string, { title: string; text: string }> = {
 
 export default async function Forbidden() {
 	const a = await requestAuth().catch(() => null);
-	const t = (a?.kind === "denied" && TEXT[a.reason]) || TEXT.team;
+	const singleOwner = (await getDeploymentMeta()).tenancy === "single";
+	const t = singleOwner
+		? {
+				title: "Access unavailable",
+				text: "You do not have access to this resource.",
+			}
+		: (a?.kind === "denied" && TEXT[a.reason]) || TEXT.team;
 	return (
 		<AccessPage>
 			<h1 className="text-xl font-semibold">{t?.title}</h1>
@@ -28,7 +35,7 @@ export default async function Forbidden() {
 			{a?.kind === "session" && (
 				<p className="mt-4">
 					<a className="underline" href="/app">
-						Go to your default team
+						{singleOwner ? "Go to sandboxes" : "Go to your default team"}
 					</a>
 				</p>
 			)}

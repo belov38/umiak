@@ -190,6 +190,8 @@ export class FakePve {
 	templateConfig: Record<string, string> = { ...TEMPLATE_CONFIG };
 	fail: Record<string, Error> = {};
 	keepIpamOnDelete = false;
+	/** An unrelated configured storage that cannot be activated during a broad disk scan. */
+	unavailableStorageForScan: string | undefined;
 	/** Guest filesystem state reported by fsfreeze-status; a test sets false to model a VSS timeout. */
 	guestFrozen = false;
 	/** When set, PVE-allocated volumes land in its LV list and destroy removes them. */
@@ -307,11 +309,19 @@ export class FakePve {
 		if (!m) throw new Error(`fake: unhandled ${key}`);
 		const sub = m[4] ?? "";
 		if (method === "DELETE" && sub === "") {
+			if (
+				Number(p["destroy-unreferenced-disks"]) === 1 &&
+				this.unavailableStorageForScan
+			)
+				throw new PveApiError(
+					500,
+					`storage '${this.unavailableStorageForScan}' cannot be activated`,
+				);
 			const [id, vm] = this.#vm(path);
 			if (vm.status !== "stopped")
 				throw new PveApiError(500, `VM ${id} is running - destroy failed`);
 			this.vms.delete(id);
-			// destroy-unreferenced-disks: Proxmox removes the VM's own volumes (not our tagged clones,
+			// Proxmox removes the VM's attached volumes (not our tagged clones,
 			// which umiak-node removes by tag).
 			if (this.lvStore)
 				this.lvStore.lvs = this.lvStore.lvs.filter(

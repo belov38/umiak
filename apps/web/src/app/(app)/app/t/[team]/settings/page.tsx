@@ -1,8 +1,9 @@
 // Team settings (S8 §9.9). The team layout already refused non-members;
 // the data is read here with the same rules as the server actions.
-import { forbidden, notFound, unauthorized } from "next/navigation";
+import { forbidden, notFound, redirect, unauthorized } from "next/navigation";
 import { TeamSettings } from "@/components/app/team-settings";
 import { requestActionCtx } from "@/lib/action-context";
+import { getDeploymentMeta } from "@/lib/deployment-meta";
 import { loadTeamSettingsImpl } from "@/lib/team-actions/team-settings";
 
 export default async function TeamSettingsPage({
@@ -10,6 +11,8 @@ export default async function TeamSettingsPage({
 }: {
 	params: Promise<{ team: string }>;
 }) {
+	if ((await getDeploymentMeta()).tenancy === "single")
+		redirect("/app/settings");
 	const { team } = await params;
 	const ctx = await requestActionCtx();
 	if (ctx === null) unauthorized();

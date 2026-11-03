@@ -14,6 +14,7 @@ import { writePrivateFile } from "./config.ts";
 import type { Context } from "./context.ts";
 import { CliError } from "./exit-codes.ts";
 import { getJson } from "./http.ts";
+import { persistTenancy } from "./tenancy.ts";
 
 export type SshCertificate = components["schemas"]["SshCertificate"];
 
@@ -106,6 +107,7 @@ export function ensureKey(file: string, comment: string): void {
 }
 
 interface MetaSsh {
+	tenancy?: "single" | "teams";
 	ssh: { host: string; port: number; hostKeys: string[] };
 }
 
@@ -125,6 +127,7 @@ export async function refreshKnownHosts(
 			ctx.fetch,
 			`${ctx.apiUrl().replace(/\/+$/, "")}/v1/meta`,
 		);
+		await persistTenancy(ctx, meta);
 		name = knownHostsName(meta.ssh.host, meta.ssh.port);
 		lines = meta.ssh.hostKeys.map((k) => `${name} ${k}`);
 	} catch (err) {

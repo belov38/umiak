@@ -2,6 +2,7 @@
 // Customer dashboard frame; team routes and authorization stay unchanged.
 import {
 	ArchiveIcon,
+	BookOpenIcon,
 	BoxIcon,
 	CheckIcon,
 	ChevronDownIcon,
@@ -17,7 +18,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type React from "react";
 import { useEffect, useState } from "react";
-import { useAppSession } from "@/components/app/session-context";
+import {
+	useAppSession,
+	useSingleOwner,
+} from "@/components/app/session-context";
 import { UmiakLogo } from "@/components/app/umiak-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -52,6 +56,7 @@ export function AppShell({
 	member,
 	logoutUrl,
 	localMode = false,
+	quickstart = false,
 	children,
 }: {
 	team: AppTeam;
@@ -59,9 +64,11 @@ export function AppShell({
 	member: boolean;
 	logoutUrl: string | null;
 	localMode?: boolean;
+	quickstart?: boolean;
 	children: React.ReactNode;
 }) {
 	const session = useAppSession();
+	const singleOwner = useSingleOwner();
 	const pathname = usePathname();
 	const [mobileOpen, setMobileOpen] = useState(false);
 	const [dark, setDark] = useState(false);
@@ -89,13 +96,17 @@ export function AppShell({
 	const base = teamPath(team.id);
 	const active = (section?: string) => {
 		if (section === undefined) {
-			return pathname === base || pathname.startsWith(`${base}/sandboxes`);
+			return (
+				(singleOwner && pathname === "/app") ||
+				pathname === base ||
+				pathname.startsWith(`${base}/sandboxes`)
+			);
 		}
 		const p = teamPath(team.id, section);
 		return pathname === p || pathname.startsWith(`${p}/`);
 	};
 
-	const switcher = (
+	const switcher = singleOwner ? null : (
 		<DropdownMenu>
 			<DropdownMenuTrigger asChild>
 				<Button
@@ -137,7 +148,10 @@ export function AppShell({
 				<UmiakLogo />
 			</Link>
 			<div className="desktop-team-switcher">{switcher}</div>
-			<nav className="dashboard-nav" aria-label="Team navigation">
+			<nav
+				className="dashboard-nav"
+				aria-label={singleOwner ? "Navigation" : "Team navigation"}
+			>
 				{NAV.map((n) => (
 					<Button
 						key={n.label}
@@ -146,7 +160,11 @@ export function AppShell({
 						size="sm"
 					>
 						<Link
-							href={teamPath(team.id, n.section)}
+							href={
+								singleOwner && n.section === undefined
+									? "/app"
+									: teamPath(team.id, n.section)
+							}
 							onClick={() => setMobileOpen(false)}
 							aria-current={active(n.section) ? "page" : undefined}
 						>
@@ -158,35 +176,80 @@ export function AppShell({
 
 				<Button
 					asChild
-					variant={pathname === "/app/account" ? "secondary" : "ghost"}
+					variant={pathname === "/app/getting-started" ? "secondary" : "ghost"}
 					size="sm"
 				>
 					<Link
-						href="/app/account"
+						href="/app/getting-started"
 						onClick={() => setMobileOpen(false)}
-						aria-current={pathname === "/app/account" ? "page" : undefined}
+						aria-current={
+							pathname === "/app/getting-started" ? "page" : undefined
+						}
 					>
-						<UserIcon />
-						Account
+						<BookOpenIcon />
+						Getting started
 					</Link>
 				</Button>
-				<Button
-					asChild
-					variant={active("settings") ? "secondary" : "ghost"}
-					size="sm"
-				>
-					<Link
-						onClick={() => setMobileOpen(false)}
-						href={teamPath(team.id, "settings")}
-						aria-current={active("settings") ? "page" : undefined}
+				{singleOwner ? (
+					<Button
+						asChild
+						variant={pathname === "/app/settings" ? "secondary" : "ghost"}
+						size="sm"
 					>
-						<SettingsIcon />
-						Team
-					</Link>
-				</Button>
+						<Link
+							href="/app/settings"
+							onClick={() => setMobileOpen(false)}
+							aria-current={pathname === "/app/settings" ? "page" : undefined}
+						>
+							<SettingsIcon />
+							Settings
+						</Link>
+					</Button>
+				) : (
+					<>
+						<Button
+							asChild
+							variant={pathname === "/app/account" ? "secondary" : "ghost"}
+							size="sm"
+						>
+							<Link
+								href="/app/account"
+								onClick={() => setMobileOpen(false)}
+								aria-current={pathname === "/app/account" ? "page" : undefined}
+							>
+								<UserIcon />
+								Account
+							</Link>
+						</Button>
+						<Button
+							asChild
+							variant={active("settings") ? "secondary" : "ghost"}
+							size="sm"
+						>
+							<Link
+								onClick={() => setMobileOpen(false)}
+								href={teamPath(team.id, "settings")}
+								aria-current={active("settings") ? "page" : undefined}
+							>
+								<SettingsIcon />
+								Team
+							</Link>
+						</Button>
+					</>
+				)}
 			</nav>
 			<div className="dashboard-sidebar-footer">
-				{session.isOperator && (
+				{quickstart && (
+					<>
+						<Button asChild variant="ghost" size="sm">
+							<a href="/setup">Setup</a>
+						</Button>
+						<Button asChild variant="ghost" size="sm">
+							<a href="/owner/sessions">Owner sessions</a>
+						</Button>
+					</>
+				)}
+				{session.isOperator && !singleOwner && (
 					<>
 						<Button
 							asChild
@@ -206,40 +269,42 @@ export function AppShell({
 						</Button>
 					</>
 				)}
-				<DropdownMenu>
-					<DropdownMenuTrigger asChild>
-						<Button variant="ghost" size="sm" data-testid="user-menu">
-							<span className="max-w-56 truncate">{session.user.email}</span>
-							<ChevronDownIcon />
-						</Button>
-					</DropdownMenuTrigger>
-					<DropdownMenuContent align="end" className="min-w-56">
-						<DropdownMenuLabel className="font-normal">
-							<div className="font-medium">{session.user.name}</div>
-							<div className="text-xs text-muted-foreground">
-								{session.user.email}
-							</div>
-						</DropdownMenuLabel>
-						<DropdownMenuSeparator />
-						<DropdownMenuItem asChild>
-							<Link href="/app/account">Account</Link>
-						</DropdownMenuItem>
-						{!localMode && (
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<DropdownMenuItem asChild>
-										{/* oauth2-proxy route: a full page load. */}
-										<a href={signOutHref(logoutUrl)}>Sign out</a>
-									</DropdownMenuItem>
-								</TooltipTrigger>
-								<TooltipContent side="left" className="max-w-64">
-									Signs you out of the single sign-on session too: the CLI will
-									ask for `umiak login` again.
-								</TooltipContent>
-							</Tooltip>
-						)}
-					</DropdownMenuContent>
-				</DropdownMenu>
+				{!singleOwner && (
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
+							<Button variant="ghost" size="sm" data-testid="user-menu">
+								<span className="max-w-56 truncate">{session.user.email}</span>
+								<ChevronDownIcon />
+							</Button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end" className="min-w-56">
+							<DropdownMenuLabel className="font-normal">
+								<div className="font-medium">{session.user.name}</div>
+								<div className="text-xs text-muted-foreground">
+									{session.user.email}
+								</div>
+							</DropdownMenuLabel>
+							<DropdownMenuSeparator />
+							<DropdownMenuItem asChild>
+								<Link href="/app/account">Account</Link>
+							</DropdownMenuItem>
+							{!localMode && (
+								<Tooltip>
+									<TooltipTrigger asChild>
+										<DropdownMenuItem asChild>
+											{/* oauth2-proxy route: a full page load. */}
+											<a href={signOutHref(logoutUrl)}>Sign out</a>
+										</DropdownMenuItem>
+									</TooltipTrigger>
+									<TooltipContent side="left" className="max-w-64">
+										Signs you out of the single sign-on session too: the CLI
+										will ask for `umiak login` again.
+									</TooltipContent>
+								</Tooltip>
+							)}
+						</DropdownMenuContent>
+					</DropdownMenu>
+				)}
 				<ThemeSwitch dark={dark} onChange={chooseTheme} />
 			</div>
 		</div>

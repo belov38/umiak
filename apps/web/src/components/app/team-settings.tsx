@@ -15,6 +15,7 @@ import {
 } from "@/actions/members";
 import { renameTeam } from "@/actions/teams";
 import { ConfirmButton } from "@/components/app/confirm-button";
+import { QueryError } from "@/components/app/query-error";
 import { useAppSession } from "@/components/app/session-context";
 import { TeamNotices } from "@/components/app/team-notices";
 import { Badge } from "@/components/ui/badge";
@@ -36,7 +37,7 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { useUmiak } from "@/lib/api";
-import { attempt } from "@/lib/client-call";
+import { useAttempt } from "@/lib/client-call";
 import { formatMb, formatTime } from "@/lib/format";
 import { can, type TeamRole } from "@/lib/permissions";
 import type { ActionResult } from "@/lib/team-actions/core";
@@ -113,6 +114,7 @@ function NameSection({
 	data: TeamSettingsData;
 	canRename: boolean;
 }) {
+	const attempt = useAttempt();
 	const router = useRouter();
 	const [name, setName] = useState(data.team.name);
 	const [pending, start] = useTransition();
@@ -155,7 +157,7 @@ function NameSection({
 	);
 }
 
-function QuotaSection({ teamId }: { teamId: string }) {
+export function QuotaSection({ teamId }: { teamId: string }) {
 	const umiak = useUmiak(teamId);
 	const limits = useQuery({
 		queryKey: ["limits", teamId],
@@ -186,9 +188,7 @@ function QuotaSection({ teamId }: { teamId: string }) {
 				<p className="text-sm text-muted-foreground">Loading…</p>
 			)}
 			{limits.isError && (
-				<p className="text-sm text-destructive">
-					Could not load the quota: {limits.error.message}
-				</p>
+				<QueryError error={limits.error} what="limits and usage" />
 			)}
 			{limits.data && (
 				<Table className="max-w-md">
@@ -271,6 +271,7 @@ function MemberRow({
 	canManage: boolean;
 	isMe: boolean;
 }) {
+	const attempt = useAttempt();
 	const router = useRouter();
 	const [pending, start] = useTransition();
 	const changeRole = (role: TeamRole) =>
@@ -342,6 +343,7 @@ function MemberRow({
 }
 
 function InviteForm({ teamId }: { teamId: string }) {
+	const attempt = useAttempt();
 	const router = useRouter();
 	const [email, setEmail] = useState("");
 	const [role, setRoleValue] = useState<TeamRole>("member");
@@ -395,6 +397,7 @@ function InviteForm({ teamId }: { teamId: string }) {
 }
 
 function LeaveSection({ data }: { data: TeamSettingsData }) {
+	const attempt = useAttempt();
 	const router = useRouter();
 	return (
 		<Section title="Leave the team">

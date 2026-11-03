@@ -7,6 +7,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { toast } from "sonner";
+import { useSingleOwner } from "@/components/app/session-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,7 +33,7 @@ import {
 	toCreateEnvironmentRequest,
 	toEnvironmentPatch,
 } from "@/lib/environment-form";
-import { describeError } from "@/lib/errors";
+import { useDescribeError } from "@/lib/use-error";
 import { RepositoryRows } from "./repository-rows";
 
 export function EnvironmentDialog({
@@ -49,6 +50,7 @@ export function EnvironmentDialog({
 	onOpenChange: (open: boolean) => void;
 	onCreated?: (id: string) => void;
 }) {
+	const describeError = useDescribeError();
 	const umiak = useUmiak(teamId);
 	const detail = useQuery({
 		queryKey: ["environments", teamId, "one", editing],
@@ -106,6 +108,8 @@ function EnvironmentForm({
 	onDone: () => void;
 	onCreated?: ((id: string) => void) | undefined;
 }) {
+	const describeError = useDescribeError();
+	const singleOwner = useSingleOwner();
 	const umiak = useUmiak(teamId);
 	const queryClient = useQueryClient();
 	const [form, setForm] = useState<EnvironmentFormState>(() =>
@@ -164,7 +168,11 @@ function EnvironmentForm({
 		} catch (err) {
 			const v = describeError(err);
 			if (v.code === "already_exists") {
-				setErrors({ name: "Another environment of the team has this name" });
+				setErrors({
+					name: singleOwner
+						? "Another environment has this name"
+						: "Another environment of the team has this name",
+				});
 			} else setFormError(v.message);
 		} finally {
 			setBusy(false);
@@ -183,9 +191,15 @@ function EnvironmentForm({
 						: `Edit environment ${original.name}`}
 				</DialogTitle>
 				<DialogDescription>
-					New sandboxes of the team get these settings at create; existing
-					sandboxes keep what they got. Every member who can run commands in a
-					sandbox can read the values there.
+					{singleOwner ? (
+						"New sandboxes get these settings at creation; existing sandboxes keep their settings. Commands and agents in a sandbox can read the values there."
+					) : (
+						<>
+							New sandboxes of the team get these settings at create; existing
+							sandboxes keep what they got. Every member who can run commands in
+							a sandbox can read the values there.
+						</>
+					)}
 				</DialogDescription>
 			</DialogHeader>
 
@@ -210,7 +224,9 @@ function EnvironmentForm({
 						onChange={(e) => set({ isDefault: e.target.checked })}
 					/>
 					<span>
-						<span className="font-medium">Default for the team</span>
+						<span className="font-medium">
+							{singleOwner ? "Default environment" : "Default for the team"}
+						</span>
 						<span className="block text-xs text-muted-foreground">
 							Every create without an environment gets it, by API keys and CI
 							too (they can pass <code>environment: null</code>). The previous

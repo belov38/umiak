@@ -10,7 +10,10 @@ import { toast } from "sonner";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { EmptyState as DashboardEmpty } from "@/components/app/empty-state";
 import { QueryError } from "@/components/app/query-error";
-import { useTeamPermission } from "@/components/app/session-context";
+import {
+	useSingleOwner,
+	useTeamPermission,
+} from "@/components/app/session-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +25,7 @@ import {
 } from "@/components/ui/select";
 import { formatBytes } from "@/features/sandbox/rules";
 import { useUmiak } from "@/lib/api";
-import { attempt } from "@/lib/client-call";
+import { useAttempt } from "@/lib/client-call";
 import type { EnvironmentSummary } from "@/lib/environment-form";
 import { formatAgo, formatTime } from "@/lib/format";
 import { can } from "@/lib/permissions";
@@ -36,6 +39,8 @@ export function EnvironmentsPage({
 	/** `usr_...` → name of the team's members. */
 	people: Record<string, string>;
 }) {
+	const attempt = useAttempt();
+	const singleOwner = useSingleOwner();
 	const umiak = useUmiak(teamId);
 	const queryClient = useQueryClient();
 	const { session, team } = useTeamPermission(teamId);
@@ -64,9 +69,9 @@ export function EnvironmentsPage({
 	};
 
 	const updatedBy = (e: EnvironmentSummary): string => {
-		if (e.updatedBy === null) return "a team key";
+		if (e.updatedBy === null) return singleOwner ? "an API key" : "a team key";
 		if (e.updatedBy === session.user.id) return "you";
-		return people[e.updatedBy] ?? "a former member";
+		return people[e.updatedBy] ?? (singleOwner ? "you" : "a former member");
 	};
 
 	const now = Date.now();
@@ -116,7 +121,9 @@ export function EnvironmentsPage({
 			</div>
 			{!canManage && (
 				<p className="text-sm text-muted-foreground">
-					Only owners of the team create, change and delete environments.
+					{singleOwner
+						? "Environment changes are unavailable for this credential."
+						: "Only owners of the team create, change and delete environments."}
 				</p>
 			)}
 			{list.isError && (

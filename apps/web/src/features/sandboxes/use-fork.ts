@@ -11,9 +11,10 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useRef } from "react";
 import { toast } from "sonner";
 import { useUmiak } from "@/lib/api";
-import { attempt } from "@/lib/client-call";
-import { describeError, isSnapshotRequiresStop } from "@/lib/errors";
+import { useAttempt } from "@/lib/client-call";
+import { isSnapshotRequiresStop } from "@/lib/errors";
 import { type IdempotencySlot, slotAfter, slotFor } from "@/lib/idempotency";
+import { useDescribeError } from "@/lib/use-error";
 import { useForceStopConfirm, useNeedsForceStop } from "./force-stop";
 import { sandboxHref } from "./links";
 
@@ -22,6 +23,8 @@ export function useFork(
 	sandbox: SandboxData,
 	refresh: () => Promise<void>,
 ): { fork: () => Promise<void>; dialog: ReactNode } {
+	const attempt = useAttempt();
+	const describeError = useDescribeError();
 	const umiak = useUmiak(teamId);
 	const router = useRouter();
 	const forkKey = useRef<IdempotencySlot | null>(null);

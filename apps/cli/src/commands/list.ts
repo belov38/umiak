@@ -7,6 +7,7 @@ import type { Command } from "commander";
 import { collect, parseCount } from "../args.ts";
 import { table } from "../format.ts";
 import type { Runner } from "../program.ts";
+import { deploymentTenancy, presentAccount } from "../tenancy.ts";
 
 interface ListFlags {
 	state?: string;
@@ -32,6 +33,7 @@ export function register(program: Command, run: Runner): void {
 		.option("--limit <n>", "at most this many")
 		.action(
 			run(async (ctx, _args, opts) => {
+				const tenancy = await deploymentTenancy(ctx);
 				const f = opts as ListFlags;
 				const limit =
 					f.limit === undefined ? undefined : parseCount(f.limit, "--limit");
@@ -56,20 +58,25 @@ export function register(program: Command, run: Runner): void {
 					if (limit !== undefined && data.length >= limit) break;
 					cursor = nextCursor;
 				}
-				ctx.out.result({ data, nextCursor }, (v) =>
-					v.data.length === 0
-						? "No sandboxes."
-						: table(
-								["SLUG", "ID", "STATE", "TEMPLATE", "SIZE", "CREATED"],
-								v.data.map((s) => [
-									s.slug,
-									s.id,
-									s.state,
-									s.template,
-									s.size,
-									s.createdAt,
-								]),
-							),
+				ctx.out.result(
+					{
+						data: data.map((sandbox) => presentAccount(sandbox, tenancy)),
+						nextCursor,
+					},
+					(v) =>
+						v.data.length === 0
+							? "No sandboxes."
+							: table(
+									["SLUG", "ID", "STATE", "TEMPLATE", "SIZE", "CREATED"],
+									v.data.map((s) => [
+										s.slug,
+										s.id,
+										s.state,
+										s.template,
+										s.size,
+										s.createdAt,
+									]),
+								),
 				);
 			}),
 		);

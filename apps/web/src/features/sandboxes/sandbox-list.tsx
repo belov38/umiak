@@ -15,7 +15,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CopyButton } from "@/components/app/copy-button";
 import { EmptyState as DashboardEmpty } from "@/components/app/empty-state";
 import { QueryError } from "@/components/app/query-error";
-import { useAppSession } from "@/components/app/session-context";
+import {
+	useAppSession,
+	useSingleOwner,
+} from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -218,16 +221,36 @@ function EmptyState({
 			{filtered ? (
 				"No sandbox matches the filters."
 			) : (
-				<>
-					No sandboxes yet.{" "}
-					<Link
-						href={teamPath(teamId, "sandboxes/new")}
-						className="text-foreground underline"
-					>
-						Create one
-					</Link>{" "}
-					here, or with <code>umiak create</code>.
-				</>
+				<div className="space-y-4" data-testid="sandbox-onboarding">
+					<h2 className="text-xl font-semibold">
+						Your first sandbox starts here
+					</h2>
+					<p className="text-muted-foreground">
+						Create a VM for your project, then connect your tools.
+					</p>
+					<ol className="onboarding-checklist">
+						<li>
+							<span className="onboarding-number">1</span>
+							<Link href="/app/getting-started#install">Install the CLI</Link>
+						</li>
+						<li>
+							<span className="onboarding-number">2</span>
+							<Link href="/app/getting-started#first-sandbox">
+								Create a sandbox
+							</Link>
+						</li>
+						<li>
+							<span className="onboarding-number">3</span>
+							<Link href="/app/getting-started#agents">Connect an agent</Link>
+						</li>
+					</ol>
+					<Button asChild>
+						<Link href={teamPath(teamId, "sandboxes/new")}>
+							<PlusIcon />
+							New sandbox
+						</Link>
+					</Button>
+				</div>
 			)}
 		</DashboardEmpty>
 	);
@@ -236,6 +259,7 @@ function EmptyState({
 /** Who created the sandbox, as far as the browser knows. */
 function useCreatorName(teamId: string): (s: SandboxData) => string {
 	const session = useAppSession();
+	const singleOwner = useSingleOwner();
 	const umiak = useUmiak(teamId);
 	const keys = useQuery({
 		queryKey: ["api-keys", teamId],
@@ -253,9 +277,13 @@ function useCreatorName(teamId: string): (s: SandboxData) => string {
 		if (s.createdBy !== null && s.createdBy === session.user.id) return "you";
 		if (s.createdByKey !== null) {
 			const n = names.get(s.createdByKey);
-			return n === undefined ? "a team key" : `key ${n}`;
+			return n === undefined
+				? singleOwner
+					? "an API key"
+					: "a team key"
+				: `key ${n}`;
 		}
-		return s.createdBy === null ? "—" : "a teammate";
+		return s.createdBy === null ? "—" : singleOwner ? "you" : "a teammate";
 	};
 }
 

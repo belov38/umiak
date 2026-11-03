@@ -188,7 +188,26 @@ function textOf(e: UmiakError): { message: string; retry?: boolean } {
 }
 
 /** What to tell the user about `e`. */
-export function describeError(e: unknown): ErrorView {
+export function singleOwnerErrorText(message: string): string {
+	return message
+		.replaceAll("The team's quota", "The deployment quota")
+		.replaceAll("the team's quota", "the deployment quota")
+		.replaceAll(
+			"Only an owner of the team can do this.",
+			"This credential cannot perform this action.",
+		)
+		.replaceAll("Another sandbox of the team", "Another sandbox")
+		.replaceAll(
+			"You are not a member of this team.",
+			"You do not have access to this resource.",
+		)
+		.replaceAll(
+			"you no longer have access to this team",
+			"you no longer have access to this deployment",
+		);
+}
+
+export function describeError(e: unknown, singleOwner = false): ErrorView {
 	if (!isUmiakError(e)) {
 		return {
 			code: null,
@@ -208,7 +227,7 @@ export function describeError(e: unknown): ErrorView {
 	const t = textOf(e);
 	return {
 		code: e.code,
-		message: t.message,
+		message: singleOwner ? singleOwnerErrorText(t.message) : t.message,
 		retry: t.retry ?? false,
 		apiUnavailable: false,
 	};

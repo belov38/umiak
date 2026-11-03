@@ -40,13 +40,84 @@ test("local dashboard/admin, tokenless CLI create/exec/delete and blocked CIDR",
 	expect((await (await request.get(`${api}/v1/meta`)).json()).authMode).toBe(
 		"none",
 	);
+	const noTeamUi = async () => {
+		await expect(page.locator("body")).not.toContainText(
+			/\bteams?\b|\bmembers?\b|\binvite\b/i,
+		);
+		await expect(page.getByTestId("team-switcher")).toHaveCount(0);
+		const labels = await page
+			.locator("[aria-label], [title], [placeholder]")
+			.evaluateAll((nodes) =>
+				nodes
+					.flatMap((node) => [
+						node.getAttribute("aria-label"),
+						node.getAttribute("title"),
+						node.getAttribute("placeholder"),
+					])
+					.filter(Boolean)
+					.join(" "),
+			);
+		expect(labels).not.toMatch(/\bteams?\b|\bmembers?\b|\binvite\b/i);
+	};
 	await page.goto("/app");
+	await expect(page).toHaveURL(/\/app$/);
+	await noTeamUi();
 	await expect(page).toHaveURL(/\/app/);
 	await expect(page.locator("body")).not.toContainText("Sign in");
 	await expect(page.getByText("Sign out", { exact: true })).toHaveCount(0);
-	await page.goto("/admin");
-	await expect(page).toHaveURL(/\/admin/);
-	await expect(page.locator("body")).not.toContainText("Sign in");
+	await expect(page.getByTestId("sandbox-onboarding")).toBeVisible();
+	await page
+		.getByRole("link", { name: "Getting started", exact: true })
+		.click();
+	await expect(
+		page.getByRole("heading", { name: "Getting started", exact: true }),
+	).toBeVisible();
+	await noTeamUi();
+	await expect(page.locator("#install")).toContainText("No sign-in");
+	await expect(page.locator(".guide-addresses")).toContainText(api);
+	await page.getByRole("button", { name: "Dark", exact: true }).click();
+	await expect(page.locator("html")).toHaveClass("dark");
+	await page.getByRole("button", { name: "Light", exact: true }).click();
+	await page.goto("/app/help");
+	await expect(page).toHaveURL(/\/app\/getting-started$/);
+	for (const path of ["/admin", "/app/account", "/app/teams/new"]) {
+		await page.goto(path);
+		await expect(page).toHaveURL(/\/app\/settings$/);
+		await noTeamUi();
+	}
+	await expect(
+		page.getByRole("heading", { name: "SSH keys", exact: true }),
+	).toBeVisible();
+	await expect(
+		page.getByRole("heading", { name: "Quota and usage", exact: true }),
+	).toBeVisible();
+	await page.goto("/app/operator");
+	await expect(page).toHaveURL(/\/app$/);
+	await noTeamUi();
+	const internal = await page
+		.getByRole("link", { name: "API keys", exact: true })
+		.getAttribute("href");
+	expect(internal).toMatch(/\/app\/t\//);
+	if (!internal) throw new Error("API keys link missing");
+	await page.goto(internal);
+	await noTeamUi();
+	await expect(
+		page.getByRole("form", { name: "New API key", exact: true }),
+	).toBeVisible();
+	await page.goto(internal.replace(/\/keys$/, "/settings"));
+	await expect(page).toHaveURL(/\/app\/settings$/);
+	await noTeamUi();
+	await page.goto(internal.replace(/\/keys$/, "/environments"));
+	await page
+		.getByRole("button", { name: "New environment", exact: true })
+		.click();
+	await expect(page.getByRole("dialog")).toBeVisible();
+	await noTeamUi();
+	await page.keyboard.press("Escape");
+	await page.goto(internal.replace(/\/keys$/, "/sandboxes/new"));
+	await expect(page.getByRole("dialog")).toBeVisible();
+	await noTeamUi();
+
 	expect(
 		(
 			await request.get("/app", { headers: { host: "attacker.example:14180" } })

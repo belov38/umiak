@@ -51,7 +51,7 @@ import {
 	register as registerVersion,
 } from "./commands/version.ts";
 import { register as registerWhoami } from "./commands/whoami.ts";
-import type { Env } from "./config.ts";
+import { type Env, pathsOf } from "./config.ts";
 import { Context } from "./context.ts";
 import { EXIT_OK, EXIT_USAGE, exitCodeOf, usageError } from "./exit-codes.ts";
 import {
@@ -61,7 +61,8 @@ import {
 	outputMode,
 	type Writer,
 } from "./output.ts";
-import type { GlobalOptions } from "./profile.ts";
+import { type GlobalOptions, resolveProfile } from "./profile.ts";
+import { cachedTenancy } from "./tenancy.ts";
 
 export interface CommandMeta {
 	/** stdout carries the command's data (errors go to stderr without --json). */
@@ -187,6 +188,44 @@ export function buildProgram(io: CliIo, run: Runner): Command {
 	registerCompletion(program, run);
 	registerMcp(program, run);
 	for (const c of allCommands(program)) c.exitOverride();
+	// Help stays offline. Commands refresh the cache; explicit profile/API flags
+	// select the same saved deployment here without parsing remote arguments.
+	try {
+		const globals: GlobalOptions = {};
+		for (let i = 0; i < io.argv.length; i++) {
+			const arg = io.argv[i];
+			if (arg === "--") break;
+			for (const [flag, key] of [
+				["--profile", "profile"],
+				["--api-url", "apiUrl"],
+			] as const) {
+				if (arg === flag) {
+					const value = io.argv[++i];
+					if (value !== undefined) globals[key] = value;
+				} else if (arg?.startsWith(`${flag}=`))
+					globals[key] = arg.slice(flag.length + 1);
+			}
+		}
+		if (
+			cachedTenancy(resolveProfile(globals, io.env, pathsOf(io.env))) ===
+			"single"
+		) {
+			program.options.find((option) => option.long === "--team")?.hideHelp();
+			const wording = (text: string) =>
+				text
+					.replace(/of the team/g, "of this deployment")
+					.replace(/team API keys?/g, "API keys")
+					.replace(/team keys?/g, "API key")
+					.replace(/, team, scopes/g, ", scopes");
+			for (const command of allCommands(program)) {
+				command.description(wording(command.description()));
+				for (const option of command.options)
+					option.description = wording(option.description);
+			}
+		}
+	} catch {
+		// Invalid or missing config must not prevent --help from explaining flags.
+	}
 	return program;
 }
 

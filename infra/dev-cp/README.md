@@ -347,3 +347,75 @@ the Run dialog (opened by a one-shot interactive task, since exec runs in sessio
 agent state through QGA as SYSTEM and retries `503 desktop_starting` with a fresh ticket.
 Create 139–146 s, first stream open ~22 s. `UMIAK_E2E_SANDBOX=<slug>` reuses an existing sandbox
 for diagnostics (it is not deleted; idle observation needs the `e2e=desktop` label).
+
+## S16 quickstart stand (2026-11-03, s16-fix2)
+
+Primary URL (Tailscale Serve, public Let's Encrypt TLS):
+**https://umiak-dev-cp.tail0000.ts.net:8443/app**.
+No owner CA import is required on this URL. This single-owner dashboard opens
+Your sandboxes directly and uses plain Settings; teams remain internal. Existing CT tailscaled serves8443 to
+localhost8444; Docker guest gateway remains bound to0.0.0.0:443, with unchanged
+certificates and CA. Serve identity headers do not grant access.
+
+The stand is **claimed** by its owner. Round-3 redeployment preserved the owner
+state and both existing sessions byte-for-byte; no recovery, claim or test pairing
+was performed. Open it using your existing signed-in browser. The bootstrap steps
+below apply only to a new/unclaimed deployment.
+
+1. Read the newest one-time code privately:
+
+   ```sh
+   ssh umiak@100.64.10.7
+   cd ~/umiak
+   docker compose --env-file deploy/compose/.env -f compose.yaml -f infra/dev-cp/compose.quickstart.yaml logs --tail=20 quickstart
+   ```
+
+2. Open the primary URL and enter the newest code. No CA setup is needed.
+3. Open Getting started in the sidebar. Install and pair the CLI:
+
+   ```sh
+   curl -fsSL https://umiak-dev-cp.tail0000.ts.net:8443/install.sh | sh
+   ```
+
+4. Open the CLI pairing link in the same claimed browser and type its short code.
+   Never approve a login you did not start. Owner sessions are individually
+   revocable at `/owner/sessions` (also linked from the sidebar).
+
+Getting started: `/app/getting-started`; `/app/help` redirects. Wizard: `/setup`;
+installer: `/install.sh`; remote MCP: `/mcp`. Existing templates595–598 remain ready.
+
+Secondary private-CA URLs: LAN `https://192.168.68.90:4180/app`, tailnet direct
+`https://100.64.10.7:8444/app`. Only those paths need the separate owner CA:
+
+```sh
+mkdir -p ~/.config/umiak
+ssh umiak@100.64.10.7 'docker exec umiak-quickstart-1 cat /var/lib/umiak/owner/tls/ca.pem' > ~/.config/umiak/quickstart-ca.pem
+openssl x509 -in ~/.config/umiak/quickstart-ca.pem -noout -fingerprint -sha256
+```
+
+Owner CA SHA256 (rotated for s16-fix2 Bun compatibility):
+`3D:9E:7C:CA:2F:C2:A8:78:51:3E:D3:99:80:E3:10:03:F5:1D:B9:02:68:54:A3:95:F2:51:42:70:6E:E2:E6:64`.
+The earlier downloaded CA is obsolete; it must not be trusted. This CA constrains DNS names only; IP names are unconstrained at the CA level
+because Bun 1.4.4 rejects IP constraints. Leaf issuance remains restricted to
+configured names, and the signing key stays in the owner volume. Adding a name in `/owner/tls` requires explicit CA rotation
+and renewed trust. CA lifetime365 days; rotate before expiry. LAN reachability was
+not tested from the off-LAN Mac; direct tailnet TLS and arbitrary-SNI rejection were.
+
+Previews still use the independent wildcard guest gateway certificate: Serve does
+not support wildcard preview certificates. No firewall or PVE network settings
+were changed by the deployment. Read-only adoption reports verify cluster firewall
+and sandbox isolation; the node host-firewall enable flag controls host rules,
+independently from VM rules. Sealed templates intentionally have disabled VM rules;
+worker enables sandbox isolation during creation.
+
+Deploy: `infra/dev-cp/deploy-quickstart.sh`. Generic optional sidecar:
+`deploy/compose/quickstart/README.md`. No new Tailscale node/key is needed on CT590.
+Rollback: `UMIAK_DEVCP_SSH=umiak@100.64.10.7 UMIAK_DEVCP_AUTH_MODE=none infra/dev-cp/deploy.sh`
+(or `oidc`), reusing S15 DB and secrets. Rollback restores its Serve configuration.
+
+Round-3 checks: public Serve8443 installer with gzip and TTY/non-TTY progress;
+compiled native CLI anonymous metadata through tailnet4180, compiled Linux CLI
+anonymous metadata on LAN192.168.68.90:4180; unauthorized owner API remains401.
+No new pairing request or sandbox was created. Guest gateway443 and its three TLS
+file checksums are unchanged. For install-only checks use
+`UMIAK_INSTALL_SKIP_LOGIN=1`; pair only from an owner-approved interactive login.

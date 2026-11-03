@@ -252,7 +252,7 @@ async function main(): Promise<void> {
 		migrateOnStart: false,
 		httpPort: WORKER_HTTP_PORT,
 		pollingIntervalSeconds: 0.5,
-		idpSync: process.env.UMIAK_AUTH_MODE === "none" ? undefined : idpSync,
+		...(process.env.UMIAK_AUTH_MODE === "none" ? {} : { idpSync }),
 		// Passes run on demand (POST /idp-sync); the timer would race them.
 		idpSyncIntervalMs: 24 * 3600 * 1000,
 		payloadReady: () => wp.ready(),

@@ -22,7 +22,20 @@ test("new user: personal team, sandbox ready, terminal survives a reload", async
 		page.getByRole("button", { name: `Team: ${user.email}'s team` }),
 	).toBeVisible();
 	await expect(page.getByRole("heading", { name: "Sandboxes" })).toBeVisible();
-	await expect(page.getByText("No sandboxes yet.")).toBeVisible();
+	const onboarding = page.getByTestId("sandbox-onboarding");
+	await expect(onboarding).toBeVisible();
+	for (const [name, hash] of [
+		["Install the CLI", "install"],
+		["Create a sandbox", "first-sandbox"],
+		["Connect an agent", "agents"],
+	] as const) {
+		await expect(
+			onboarding.getByRole("link", { name, exact: true }),
+		).toHaveAttribute("href", `/app/getting-started#${hash}`);
+	}
+	await expect(
+		onboarding.getByRole("link", { name: "New sandbox", exact: true }),
+	).toHaveAttribute("href", `/app/t/${team}/sandboxes/new`);
 
 	await createSandbox(page, team, { slug: `term-${state.run}` });
 

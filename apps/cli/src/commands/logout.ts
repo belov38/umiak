@@ -44,6 +44,20 @@ async function logout(ctx: Context, revokeKey: boolean): Promise<LogoutResult> {
 				`could not revoke the refresh token at Keycloak: ${(err as Error).message}`,
 			);
 		}
+	} else if (cred?.kind === "key" && p.auth === "owner") {
+		const res = await ctx.fetch(
+			new Request(`${p.apiUrl}/owner/logout`, {
+				method: "POST",
+				headers: {
+					authorization: `Bearer ${cred.token}`,
+					"content-type": "application/json",
+				},
+				body: "{}",
+				redirect: "error",
+			}),
+		);
+		if (!res.ok) throw new Error(`Owner logout failed: HTTP ${res.status}`);
+		revoked = true;
 	} else if (cred?.kind === "key" && revokeKey) {
 		// A failure stops here: the key stays stored, so the revoke can be repeated.
 		const umiak = new Umiak({

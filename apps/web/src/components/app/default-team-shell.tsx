@@ -17,6 +17,7 @@ export async function DefaultTeamShell({
 	}
 	return (
 		<AppShell
+			quickstart={process.env.UMIAK_QUICKSTART === "1"}
 			team={team}
 			member
 			logoutUrl={webEnv().logoutUrl}

@@ -22,9 +22,9 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { envKeyProblem } from "@/lib/create-form";
-import { describeError } from "@/lib/errors";
 import { formatAgo } from "@/lib/format";
 import { type IdempotencySlot, slotAfter, slotFor } from "@/lib/idempotency";
+import { useDescribeError } from "@/lib/use-error";
 import { cn } from "@/lib/utils";
 import { formatDuration, isRunning } from "./output";
 import { OutputView } from "./output-view";
@@ -295,6 +295,7 @@ function RunDialog({
 	onOpenChange: (o: boolean) => void;
 	onStarted: (c: CommandData) => void;
 }) {
+	const describeError = useDescribeError();
 	const [cmd, setCmd] = useState("");
 	const [cwd, setCwd] = useState("");
 	const [user, setUser] = useState("");

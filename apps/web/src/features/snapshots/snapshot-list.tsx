@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { EmptyState as DashboardEmpty } from "@/components/app/empty-state";
 import { QueryError } from "@/components/app/query-error";
+import { useSingleOwner } from "@/components/app/session-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,7 +27,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useUmiak } from "@/lib/api";
-import { attempt } from "@/lib/client-call";
+import { useAttempt } from "@/lib/client-call";
 import { newSandboxHref } from "@/lib/create-form";
 import { formatAgo } from "@/lib/format";
 import { POLL_MS, POLL_RETRY_BUDGET_MS } from "@/lib/sandboxes";
@@ -39,6 +40,8 @@ const CONSISTENCY: Record<string, string> = {
 };
 
 export function SnapshotList({ teamId }: { teamId: string }) {
+	const attempt = useAttempt();
+	const singleOwner = useSingleOwner();
 	const umiak = useUmiak(teamId);
 	const queryClient = useQueryClient();
 	const snapshots = useQuery({
@@ -86,8 +89,9 @@ export function SnapshotList({ teamId }: { teamId: string }) {
 			<div className="snapshot-panel space-y-3 border p-5">
 				<h2>Saved snapshots</h2>
 				<p className="text-sm text-muted-foreground">
-					Save a snapshot from a sandbox's page. A snapshot belongs to this team
-					only.
+					{singleOwner
+						? "Save a snapshot from a sandbox's page to create another sandbox from its saved disk."
+						: "Save a snapshot from a sandbox's page. A snapshot belongs to this team only."}
 				</p>
 				{limits.data && (
 					<p className="text-sm text-muted-foreground">

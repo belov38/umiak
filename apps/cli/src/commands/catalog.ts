@@ -4,6 +4,7 @@
 import type { Command } from "commander";
 import { table } from "../format.ts";
 import type { Runner } from "../program.ts";
+import { deploymentTenancy, presentAccount } from "../tenancy.ts";
 
 export function register(program: Command, run: Runner): void {
 	program
@@ -48,8 +49,9 @@ export function register(program: Command, run: Runner): void {
 		.description("show the quota of the team, its usage and what it can create")
 		.action(
 			run(async (ctx) => {
+				const tenancy = await deploymentTenancy(ctx);
 				const { data } = await ctx.umiak().raw.GET("/v1/limits");
-				ctx.out.result(data, (v) =>
+				ctx.out.result(presentAccount(data, tenancy), (v) =>
 					[
 						`can create: ${v.canCreate ? "yes" : "no"}`,
 						table(

@@ -16,6 +16,7 @@ import {
 	useState,
 } from "react";
 import { QueryError } from "@/components/app/query-error";
+import { useSingleOwner } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -34,7 +35,7 @@ import {
 } from "@/components/ui/select";
 import { SandboxList } from "@/features/sandboxes/sandbox-list";
 import { useUmiak } from "@/lib/api";
-import { attempt } from "@/lib/client-call";
+import { useAttempt } from "@/lib/client-call";
 import {
 	type CreateFormState,
 	type CreatePrefill,
@@ -45,9 +46,10 @@ import {
 	slugProblem,
 	toCreateRequest,
 } from "@/lib/create-form";
-import { describeError, type ErrorView } from "@/lib/errors";
+import type { ErrorView } from "@/lib/errors";
 import { type IdempotencySlot, slotAfter, slotFor } from "@/lib/idempotency";
 import { teamPath } from "@/lib/team-path";
+import { useDescribeError } from "@/lib/use-error";
 import { cn } from "@/lib/utils";
 import { sandboxHref } from "../sandboxes/links";
 import { KvRows } from "./kv-rows";
@@ -123,6 +125,9 @@ export function CreateSandboxForm({
 	teamId: string;
 	prefill: CreatePrefill;
 }) {
+	const attempt = useAttempt();
+	const singleOwner = useSingleOwner();
+	const describeError = useDescribeError();
 	const umiak = useUmiak(teamId);
 	const router = useRouter();
 	const queryClient = useQueryClient();
@@ -468,8 +473,12 @@ export function CreateSandboxForm({
 									<SelectContent>
 										<SelectItem value={ENV_DEFAULT}>
 											{defaultEnv
-												? `team default: ${defaultEnv.name}`
-												: "team default (none set)"}
+												? `${singleOwner ? "default" : "team default"}: ${defaultEnv.name}`
+												: singleOwner
+													? "default (none set)"
+													: singleOwner
+														? "default (none set)"
+														: "team default (none set)"}
 										</SelectItem>
 										{envs.map((x) => (
 											<SelectItem key={x.id} value={`env:${x.name}`}>
@@ -495,7 +504,14 @@ export function CreateSandboxForm({
 								/>
 							</Row>
 
-							<Row label="Env vars" hint="Visible to everyone in the team.">
+							<Row
+								label="Env vars"
+								hint={
+									singleOwner
+										? "Visible to commands and agents in this sandbox."
+										: "Visible to everyone in the team."
+								}
+							>
 								<KvRows
 									label="Env var"
 									field="env"
@@ -548,7 +564,9 @@ export function CreateSandboxForm({
 
 							{limits.data && !limits.data.canCreate && (
 								<p className="text-sm text-warning">
-									The team's quota is used up: stop or delete a sandbox first.
+									{singleOwner
+										? "The deployment quota is used up: stop or delete a sandbox first."
+										: "The team's quota is used up: stop or delete a sandbox first."}
 								</p>
 							)}
 							{Object.keys(errors).length > 0 && (

@@ -1,167 +1,536 @@
 # Getting started
 
-Umiak gives you throwaway virtual machines (sandboxes) on Proxmox that you drive from a dashboard, a CLI, an SDK or an AI agent over MCP. This guide walks you through the dev stand from zero to a sandbox your agent can use.
+Umiak gives you throwaway Proxmox virtual machines for code, tools and AI agents.
+Open **Getting started** in the dashboard sidebar at `/app/getting-started` for this deployment’s real URLs and copy buttons. `/app/help` redirects there.
 
-## The model in one minute
+Quickstart owner and local deployments show a single-owner dashboard without teams. OIDC deployments retain teams. Both the CLI and dashboard use the explicit `/v1/meta` tenancy field; older deployments without it retain team support.
 
-| Term | What it is |
-|---|---|
-| Sandbox | One VM. It gets a slug of three random words (`mint-clay-bell`), which every command takes. |
-| Template | The image a sandbox is cloned from: `linux`, `linux-desktop`, `windows`, `windows-desktop`. |
-| Size | RAM and vCPU: `2gb` (2 vCPU), `4gb` (4 vCPU), `8gb` (8 vCPU). `linux` is 2gb only; the other templates take 4gb or 8gb. |
-| Team | Owner of sandboxes, snapshots and API keys. In local mode you are the only user, with your own team. |
-| Snapshot | A saved disk you can create new sandboxes from (`--from`). `fork` copies a sandbox directly. |
-| Port preview | An HTTPS URL for a port inside the sandbox, with `token` or `public` access. |
-| Desktop | The screen of a `*-desktop` sandbox, streamed to the browser; agents can take screenshots and click and type. |
+The examples below use `https://api.example.com`, `https://app.example.com` and `preview.example.com`. Replace them with the URLs shown in your dashboard. Commands are checked against the in-app guide by `apps/web/test/getting-started.test.ts`.
 
-A sandbox stops by itself after 15 minutes without activity (its disk is kept) and comes back with `resume`. The dev stand allows 3 running sandboxes and 8 GB of sandbox RAM in total.
+Quickstart: run `docker compose up -d --build` from the repository root, then follow [the operator quickstart](../deploy/compose/quickstart/README.md).
 
-## 1. Check you can reach the stand
+## The model in one minute (owner · private CA)
 
-The dev stand runs in container CT 590 on `pve` in local mode: no login, but **only from the home LAN `192.168.68.0/24`**. From another network (office, phone hotspot, Tailscale only) the addresses below time out.
+A sandbox is a throwaway virtual machine, identified by a three-word slug. A template is the image it is cloned from; a size sets RAM and vCPU. You own your sandboxes, snapshots and API keys.
 
-| What | Address |
-|---|---|
-| Dashboard | http://192.168.68.90:4180/app |
-| API (CLI, SDK) | http://192.168.68.90:8080 |
-| MCP over HTTP | http://192.168.68.90:4180/mcp |
-| Port previews | `https://<slug>-<port>.umiak.100-64-10-7.sslip.io` |
+Snapshots save a disk so you can create another sandbox with --from. Fork copies a sandbox directly. Port previews expose a guest port over HTTPS. Desktop templates stream a screen that people and agents can control.
 
-```sh
-curl http://192.168.68.90:8080/v1/meta     # {"authMode":"none",...}
+Inactive sandboxes stop automatically according to deployment policy. Their disks remain available for resume. Use limits to check the actual quotas before creating a sandbox.
+
+## Install the CLI (owner · private CA)
+
+This deployment serves the CLI installer. First obtain umiak-ca.pem through the operator's Docker console and compare its SHA-256 fingerprint through that trusted channel. Trust the owner CA in your browser too. Never download and trust a CA only through an unverified connection.
+
+**Retrieve owner CA (on the Docker host)**
+
+```text
+docker compose cp quickstart:/var/lib/umiak/owner/tls/ca.pem ./umiak-ca.pem
 ```
 
-If curl answers but Chrome shows `ERR_ADDRESS_UNREACHABLE`, macOS is blocking Chrome from the local network: quit Chrome fully (Cmd+Q) and start it again, or toggle Chrome off and on in System Settings → Privacy & Security → Local Network. If curl times out too, check that the Mac is on the home Wi-Fi.
+**Check owner CA fingerprint**
 
-## 2. Look around in the dashboard
+```text
+openssl x509 -in umiak-ca.pem -noout -fingerprint -sha256
+```
 
-Open http://192.168.68.90:4180/app.
+**Install with verified CA**
 
-1. **New sandbox** → template `linux` → Create. It is ready in about 15 seconds.
-2. On the sandbox page, the **Terminal** tab gives you a shell in the VM.
-3. **Ports** publishes a port, **Files** uploads and downloads, **Stop / Resume / Fork / Delete** are in the header.
-4. Delete it when you are done.
+```text
+curl --fail --cacert ./umiak-ca.pem 'https://api.example.com/install.sh' -o umiak-install.sh && UMIAK_CA_CERT="$PWD/umiak-ca.pem" sh ./umiak-install.sh
+```
 
-`/admin` is the operator panel: templates, sizes, quotas, teams. You don't need it to start.
+The installer runs login. Open the pairing link on the hostname where you claimed this deployment, and compare the short code shown in your terminal before approving. The CLI saves the CA in its profile.
 
-## 3. Install the CLI
+**Check CLI profile**
 
-The CLI is not published yet; build it from this checkout:
-
-```sh
-mise exec -- pnpm install
-mise exec -- pnpm --filter @umiak/cli build
-alias umiak="$PWD/apps/cli/dist/umiak-darwin-arm64"   # put it in ~/.zshrc or on PATH
-umiak login --api-url http://192.168.68.90:8080
+```text
 umiak whoami
 ```
 
-Previews use certificates from the dev CA. Trust it once so the browser opens them:
+## Your first sandbox
 
-```sh
-infra/dev-cp/trust-mac.sh          # asks for the macOS password; --remove undoes it
+Create a Linux sandbox, copy the printed slug into current, then run a command. The dashboard's New sandbox button and Terminal tab offer the same flow.
+
+**Create a sandbox**
+
+```text
+umiak create --template linux --wait
 ```
 
-## 4. Your first sandbox from the CLI
+**Select your sandbox**
 
-```sh
-umiak create --wait                          # linux, 2gb; prints the slug
-umiak current <slug>                         # later commands may omit the slug
+```text
+umiak current <slug>
+```
+
+**Run a command**
+
+```text
 umiak exec -- uname -a
-umiak shell                                  # interactive terminal
-umiak cp ./notes.txt <slug>:notes.txt        # and back: umiak cp <slug>:notes.txt .
-umiak push . <slug>:app                      # upload a git repository (tracked files)
+```
 
-umiak exec --detach -- python3 -m http.server 3000
-umiak port 3000                              # prints a URL with ?_token=...
-umiak port 3000 --public                     # no token
+**Open a shell**
 
-umiak stop --wait                            # disk kept, RAM freed
+```text
+umiak shell
+```
+
+**Run in a temporary sandbox**
+
+```text
+umiak run -- uname -a
+```
+
+**Copy files**
+
+```text
+umiak cp ./notes.txt <slug>:notes.txt
+umiak push . <slug>:app
+```
+
+**Stop and resume**
+
+```text
+umiak stop --wait
 umiak resume --wait
+```
+
+**Delete your sandbox**
+
+```text
 umiak rm <slug> --yes
 ```
 
-`umiak run -- <cmd>` creates a sandbox, runs one command and deletes it. `umiak ls` lists your sandboxes; `umiak limits` shows what you can still create. Every command has `--help`.
+Replace <slug> with your sandbox's name. Run creates a temporary sandbox, runs a command and deletes it. Delete resources you no longer need.
 
-## 5. Desktops
+## Port previews
 
-```sh
-umiak create --template linux-desktop --wait     # 4gb; windows-desktop takes a few minutes
-umiak desktop open <slug>                        # opens the viewer in the browser
+A preview URL has the form https://<slug>-<port>.preview.example.com. Start a server inside the VM, then publish its port. Token access is the default; public access lets anyone with the URL connect.
+
+**Start a preview server**
+
+```text
+umiak exec --detach -- python3 -m http.server 3000
+```
+
+**Publish a protected port**
+
+```text
+umiak port 3000
+```
+
+**Publish a public port**
+
+```text
+umiak port 3000 --public
+```
+
+Preview TLS uses the guest gateway certificate, which may have a different CA from the owner dashboard. Ask the operator for its verified CA if your browser does not trust it.
+
+## Desktops
+
+Use an available desktop template for a graphical session. Desktop templates need more RAM than a headless Linux sandbox. The dashboard's Desktop tab has the same viewer.
+
+**Create a desktop**
+
+```text
+umiak create --template linux-desktop --wait
+```
+
+**Open the viewer**
+
+```text
+umiak desktop open <slug>
+```
+
+**Take a screenshot**
+
+```text
 umiak desktop screenshot <slug> -o screen.png
+```
+
+**Control the desktop**
+
+```text
 umiak desktop act <slug> click 400 300
 umiak desktop act <slug> type "hello"
 ```
 
-The dashboard has the same viewer on the sandbox page, **Desktop** tab. A desktop takes 4 GB of the 8 GB budget, so delete it when you finish.
+## Connect an agent with MCP (owner · private CA)
 
-## 6. Give it to an AI agent (MCP)
+The recommended stdio transport uses your CLI profile, including pairing and CA settings. Put umiak on PATH, then register it in Claude Code or add the Codex configuration below.
 
-The CLI contains an MCP server with tools for sandboxes, commands, files, ports, snapshots and desktop control. It uses your `umiak login`.
+**Claude Code · stdio**
 
-Claude Code:
-
-```sh
+```text
 claude mcp add --transport stdio --scope user umiak -- umiak mcp
 ```
 
-Codex (`~/.codex/config.toml`):
+**Codex · ~/.codex/config.toml**
 
-```toml
+```text
 [mcp_servers.umiak]
 command = "umiak"
 args = ["mcp"]
 ```
 
-Here `umiak` must be on `PATH`, not just a shell alias. Then ask the agent something like "create a linux sandbox, clone https://github.com/... into it and run the tests". Options such as `--read-only`, `--toolsets` and `--sandbox <slug>` are in [apps/mcp/README.md](../apps/mcp/README.md). Clients that speak MCP over HTTP can use http://192.168.68.90:4180/mcp directly.
+Remote MCP is available at https://app.example.com/mcp. Local mode needs no credential. OIDC supports browser sign-in; quickstart remote MCP uses an owner credential. Prefer stdio for quickstart so credentials stay in the CLI profile. Remote clients must also trust the deployment CA.
 
-## 7. Use it from code (SDK)
+**Claude Code · remote HTTP**
 
-Both SDKs read the API URL and credentials from your CLI profile, so after `umiak login` they need no arguments.
+```text
+{
+  "mcpServers": {
+    "umiak-remote": {
+      "type": "http",
+      "url": "https://app.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${UMIAK_OWNER_TOKEN}"
+      }
+    }
+  }
+}
+```
 
-Python (`pip install -e packages/sdk-py`):
+**Codex · remote HTTP configuration**
 
-```python
+```text
+[mcp_servers.umiak-remote]
+url = "https://app.example.com/mcp"
+bearer_token_env_var = "UMIAK_OWNER_TOKEN"
+```
+
+For Claude Code, save the remote JSON configuration in .mcp.json. Set UMIAK_OWNER_TOKEN in the client environment using your own paired CLI credential from its private profile; never commit a credential or paste it into this guide. Stdio avoids this manual credential transfer.
+
+Ask your agent: "Create a Linux sandbox, clone my repository into it and run the tests." umiak mcp --help explains read-only mode, toolsets and sandbox restrictions.
+
+## Use the SDK (owner · private CA)
+
+Both SDKs read the API URL and credentials from your CLI profile after login. Run package installation from the repository checkout; these packages are available as source/workspace packages.
+
+**Install Python SDK**
+
+```text
+pip install -e packages/sdk-py
+```
+
+**Python**
+
+```text
 from umiak_sdk import Umiak
 
 with Umiak() as umiak:
     sb = umiak.sandboxes.create(template="linux", wait=True)
     try:
-        r = sb.exec("uname -a")
-        print(r.stdout)
-        sb.files.write_text("hello.txt", "hi\n")
-        print(sb.ports.host(8000, access="public").url)
+        print(sb.exec("uname -a").stdout)
     finally:
         sb.delete()
 ```
 
-TypeScript (`@umiak/sdk`, workspace package):
+**TypeScript · @umiak/sdk workspace package**
 
-```ts
+```text
 import { Umiak } from "@umiak/sdk";
 
 const umiak = new Umiak();
 const sb = await umiak.sandboxes.create({ template: "linux" }, { wait: true });
 try {
-	const r = await sb.exec(["uname", "-a"]);
-	console.log(r.stdout);
+    console.log((await sb.exec(["uname", "-a"])).stdout);
 } finally {
-	await sb.delete();
+    await sb.delete();
 }
 ```
 
-The API reference is the OpenAPI document of the api (`GET /v1/openapi.json`). In local mode the interactive `/v1/docs` page is turned off.
+The API reference is available at https://api.example.com/v1/openapi.json. API keys restrict automated clients to the scopes you choose.
 
-## When something goes wrong
+## Limits and cleanup (owner · private CA)
 
-- **Timeouts to `192.168.68.90`**: you are not on the home LAN; see step 1.
-- **Preview certificate error**: run `infra/dev-cp/trust-mac.sh`, or `curl --cacert ~/.config/umiak/dev-ca/ca.pem <url>`.
-- **`quota_exceeded` or `out_of_capacity`**: too many sandboxes are running. `umiak ls`, then `stop` or `rm --yes` some.
-- **Check the whole stand**: `UMIAK_DEVCP_AUTH_MODE=none mise exec -- bash infra/dev-cp/e2e.sh` (about 4 minutes, cleans up after itself).
-- **Logs**: `ssh umiak@192.168.68.90`, then `cd ~/umiak/deploy/compose && docker compose logs -f api worker gateway`.
+Limits belong to this deployment; check them rather than assuming a fixed VM count or memory budget. Stopping frees RAM while keeping the disk; deleting frees the sandbox resources.
 
-## Where to go next
+**Check quotas**
 
-- Dev stand details, deploy and rollback to Keycloak login: [infra/dev-cp/QUICKSTART.md](../infra/dev-cp/QUICKSTART.md), [infra/dev-cp/README.md](../infra/dev-cp/README.md).
-- Running Umiak on your own Proxmox at home: [deploy/compose/README.local.ru.md](../deploy/compose/README.local.ru.md).
-- How it works: [architecture.md](architecture.md). Status and plans: [roadmap.md](roadmap.md).
+```text
+umiak limits
+```
+
+**List sandboxes**
+
+```text
+umiak ls
+```
+
+If quota_exceeded or out_of_capacity appears, stop or delete an unused sandbox, or ask the operator about capacity. Desktop templates need at least the size shown in New sandbox.
+
+## Troubleshooting (owner · private CA)
+
+Connection timeout: check the URL, LAN or tailnet reachability and deployment network policy. Local mode is only reachable from allowed networks. On macOS, check the browser's Local Network permission if curl works but the browser cannot connect.
+
+Certificate error: obtain the CA through a trusted operator channel and compare the fingerprint. Owner and preview CAs are separate. Do not bypass certificate verification for an installer.
+
+Pairing page asks to claim an already claimed deployment: open the pairing path on the hostname where you are signed in. Cookies are host-only. An expired pairing request needs a fresh login.
+
+Template unavailable: use Setup → Templates to register detected templates or its Build Linux template button. Operators can also use the documented apps/template-builder path in the repository. A successful build must be registered before creation.
+
+**Inspect CLI commands**
+
+```text
+umiak --help
+umiak mcp --help
+```
+
+**Inspect stack logs (Docker host)**
+
+```text
+docker compose logs --tail=100 quickstart api worker gateway
+```
+
+## Optional Tailscale Serve
+
+Operators can use Tailscale Serve for a publicly trusted dashboard certificate. Supply a Tailscale auth key through the environment; never commit it. This is an optional Docker Compose override.
+
+**Start with Tailscale Serve**
+
+```text
+TS_AUTHKEY=... TS_HOSTNAME=umiak docker compose -f compose.yaml -f deploy/compose/quickstart/compose.tailscale.yaml up -d --build
+```
+
+Serve covers this dashboard hostname. It cannot serve wildcard preview hostnames: previews still use the guest gateway and its wildcard certificate and DNS configuration.
+
+## Install the CLI (owner · publicly trusted HTTPS)
+
+This deployment serves the CLI installer over publicly trusted HTTPS; no private owner CA is needed.
+
+**Install CLI**
+
+```text
+curl --fail 'https://api.example.com/install.sh' -o umiak-install.sh && sh ./umiak-install.sh
+```
+
+The installer runs login. Open the pairing link on the hostname where you claimed this deployment, and compare the short code shown in your terminal before approving. The CLI saves the CA in its profile.
+
+**Check CLI profile**
+
+```text
+umiak whoami
+```
+
+## Install the CLI (none)
+
+Build the CLI from the repository checkout. Choose the output for your OS and CPU (darwin/linux, arm64/x64), or umiak-windows-x64.exe on Windows. Copy it to a directory on PATH; a shell alias is insufficient for agent clients.
+
+**Build the CLI**
+
+```text
+mise exec -- pnpm install
+mise exec -- pnpm --filter @umiak/cli build
+```
+
+**Install CLI (macOS arm64 example)**
+
+```text
+mkdir -p ~/.local/bin
+cp apps/cli/dist/umiak-darwin-arm64 ~/.local/bin/umiak
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+**Log in to this deployment**
+
+```text
+umiak login --api-url 'https://api.example.com'
+umiak whoami
+```
+
+No sign-in is required in local mode. Access is restricted by the deployment's network policy; never expose the local listener to an untrusted network.
+
+## Connect an agent with MCP (none)
+
+The recommended stdio transport uses your CLI profile, including pairing and CA settings. Put umiak on PATH, then register it in Claude Code or add the Codex configuration below.
+
+**Claude Code · stdio**
+
+```text
+claude mcp add --transport stdio --scope user umiak -- umiak mcp
+```
+
+**Codex · ~/.codex/config.toml**
+
+```text
+[mcp_servers.umiak]
+command = "umiak"
+args = ["mcp"]
+```
+
+Remote MCP is available at https://app.example.com/mcp. Local mode needs no credential. OIDC supports browser sign-in; quickstart remote MCP uses an owner credential. Prefer stdio for quickstart so credentials stay in the CLI profile. Remote clients must also trust the deployment CA.
+
+**Claude Code · remote HTTP**
+
+```text
+claude mcp add --transport http --scope user umiak-remote 'https://app.example.com/mcp'
+```
+
+**Codex · remote HTTP configuration**
+
+```text
+[mcp_servers.umiak-remote]
+url = "https://app.example.com/mcp"
+```
+
+Ask your agent: "Create a Linux sandbox, clone my repository into it and run the tests." umiak mcp --help explains read-only mode, toolsets and sandbox restrictions.
+
+## Troubleshooting (none)
+
+Connection timeout: check the URL, LAN or tailnet reachability and deployment network policy. Local mode is only reachable from allowed networks. On macOS, check the browser's Local Network permission if curl works but the browser cannot connect.
+
+Certificate error: obtain the CA through a trusted operator channel and compare the fingerprint. Owner and preview CAs are separate. Do not bypass certificate verification for an installer.
+
+Template unavailable: ask the operator to register a template build in Admin. Template builders live in apps/template-builder in the repository.
+
+**Inspect CLI commands**
+
+```text
+umiak --help
+umiak mcp --help
+```
+
+**Inspect stack logs (Docker host)**
+
+```text
+docker compose logs --tail=100 api worker gateway
+```
+
+## The model in one minute (oidc)
+
+A sandbox is a throwaway virtual machine, identified by a three-word slug. A template is the image it is cloned from; a size sets RAM and vCPU. Your team owns its sandboxes, snapshots and API keys.
+
+Snapshots save a disk so you can create another sandbox with --from. Fork copies a sandbox directly. Port previews expose a guest port over HTTPS. Desktop templates stream a screen that people and agents can control.
+
+Inactive sandboxes stop automatically according to deployment policy. Their disks remain available for resume. Use limits to check the actual quotas before creating a sandbox.
+
+## Install the CLI (oidc)
+
+Build the CLI from the repository checkout. Choose the output for your OS and CPU (darwin/linux, arm64/x64), or umiak-windows-x64.exe on Windows. Copy it to a directory on PATH; a shell alias is insufficient for agent clients.
+
+**Build the CLI**
+
+```text
+mise exec -- pnpm install
+mise exec -- pnpm --filter @umiak/cli build
+```
+
+**Install CLI (macOS arm64 example)**
+
+```text
+mkdir -p ~/.local/bin
+cp apps/cli/dist/umiak-darwin-arm64 ~/.local/bin/umiak
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+**Log in to this deployment**
+
+```text
+umiak login --api-url 'https://api.example.com'
+umiak whoami
+```
+
+Login opens browser sign-in through this deployment's identity provider. For unattended clients, use a scoped team API key from API keys.
+
+## Connect an agent with MCP (oidc)
+
+The recommended stdio transport uses your CLI profile, including pairing and CA settings. Put umiak on PATH, then register it in Claude Code or add the Codex configuration below.
+
+**Claude Code · stdio**
+
+```text
+claude mcp add --transport stdio --scope user umiak -- umiak mcp
+```
+
+**Codex · ~/.codex/config.toml**
+
+```text
+[mcp_servers.umiak]
+command = "umiak"
+args = ["mcp"]
+```
+
+Remote MCP is available at https://app.example.com/mcp. Local mode needs no credential. OIDC supports browser sign-in; quickstart remote MCP uses an owner credential. Prefer stdio for quickstart so credentials stay in the CLI profile. Remote clients must also trust the deployment CA.
+
+**Claude Code · remote OAuth**
+
+```text
+claude mcp add --transport http --scope user --client-id umiak-mcp --callback-port 33418 umiak-remote 'https://app.example.com/mcp'
+claude mcp login umiak-remote
+```
+
+**Codex · remote OAuth**
+
+```text
+codex mcp add umiak-remote --url 'https://app.example.com/mcp' --oauth-client-id umiak-mcp
+codex mcp login umiak-remote
+```
+
+**Codex · OAuth callback setting**
+
+```text
+[mcp_servers.umiak-remote.oauth]
+client_id = "umiak-mcp"
+callback_port = 33418
+```
+
+Ask your agent: "Create a Linux sandbox, clone my repository into it and run the tests." umiak mcp --help explains read-only mode, toolsets and sandbox restrictions.
+
+## Use the SDK (oidc)
+
+Both SDKs read the API URL and credentials from your CLI profile after login. Run package installation from the repository checkout; these packages are available as source/workspace packages.
+
+**Install Python SDK**
+
+```text
+pip install -e packages/sdk-py
+```
+
+**Python**
+
+```text
+from umiak_sdk import Umiak
+
+with Umiak() as umiak:
+    sb = umiak.sandboxes.create(template="linux", wait=True)
+    try:
+        print(sb.exec("uname -a").stdout)
+    finally:
+        sb.delete()
+```
+
+**TypeScript · @umiak/sdk workspace package**
+
+```text
+import { Umiak } from "@umiak/sdk";
+
+const umiak = new Umiak();
+const sb = await umiak.sandboxes.create({ template: "linux" }, { wait: true });
+try {
+    console.log((await sb.exec(["uname", "-a"])).stdout);
+} finally {
+    await sb.delete();
+}
+```
+
+The API reference is available at https://api.example.com/v1/openapi.json. API keys can restrict automated clients to a team and scopes.
+
+## Limits and cleanup (oidc)
+
+Limits belong to this deployment and team; check them rather than assuming a fixed VM count or memory budget. Stopping frees RAM while keeping the disk; deleting frees the sandbox resources.
+
+**Check quotas**
+
+```text
+umiak limits
+```
+
+**List sandboxes**
+
+```text
+umiak ls
+```
+
+If quota_exceeded or out_of_capacity appears, stop or delete an unused sandbox, or ask the operator about capacity. Desktop templates need at least the size shown in New sandbox.

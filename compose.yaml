@@ -1,0 +1,367 @@
+# Zero-config S16 entry point: docker compose up --build
+# The S7/S15/OIDC deployment remains at deploy/compose/compose.yaml.
+name: umiak-quickstart
+
+x-app-env: &app-env
+  UMIAK_AUTH_MODE: none
+  UMIAK_QUICKSTART: "1"
+  UMIAK_LOCAL_ALLOWED_CIDRS: 127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,fc00::/7
+  UMIAK_LOCAL_DENIED_CIDRS: ${UMIAK_LOCAL_DENIED_CIDRS:-10.88.0.0/24}
+  UMIAK_APP_ORIGIN: https://localhost:8444
+  UMIAK_APP_URL: https://localhost:8444
+  UMIAK_API_URL: https://localhost:8444
+  UMIAK_API_PUBLIC_URL: https://localhost:8444
+  UMIAK_PREVIEW_DOMAIN: umiak.localhost
+  UMIAK_OPERATOR_GROUPS: umiak-local-operator
+  UMIAK_DATABASE_PASSWORD_FILE: /quickstart-db/password
+  UMIAK_QUICKSTART_NETWORK_FILE: /network-config/quickstart-network.json
+  UMIAK_SECRETS_DIR: /pve-secrets
+
+x-restart: &restart
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: 10m, max-file: "3" }
+
+x-quickstart-build: &quickstart-build
+  context: .
+  dockerfile: deploy/compose/quickstart/Dockerfile
+
+x-worker-build: &worker-build
+  context: .
+  dockerfile: apps/worker/Dockerfile
+
+x-web-build: &web-build
+  context: .
+  dockerfile: apps/web/Dockerfile
+
+services:
+  web-meta:
+    image: node:26.13.0-bookworm-slim
+    user: "1000:1000"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: [node, /meta-proxy.mjs]
+    volumes:
+      - ./deploy/compose/meta-proxy.mjs:/meta-proxy.mjs:ro
+    networks: [control, web-internal]
+    depends_on:
+      api: { condition: service_healthy }
+
+  gateway-secrets:
+    image: umiak-quickstart:dev
+    build: *quickstart-build
+    user: "0:0"
+    entrypoint: [node, deploy/compose/quickstart/gateway-init.mjs]
+    environment:
+      {
+        UMIAK_SECRETS_DIR: /pve-secrets,
+        UMIAK_QUICKSTART_NETWORK_FILE: /network-config/quickstart-network.json,
+      }
+    volumes:
+      - network-config:/network-config
+      - gateway-secrets:/gateway-secrets
+      - pve-secrets:/pve-secrets:ro
+    network_mode: none
+    restart: "no"
+
+  secrets-init:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM alpine:3.24.3
+        RUN apk add --no-cache openssh-keygen jq openssl
+        COPY deploy/compose/secrets-init/init.sh /legacy-init.sh
+        COPY deploy/compose/quickstart/bootstrap.sh /bootstrap.sh
+        ENTRYPOINT ["sh", "/bootstrap.sh"]
+    user: "0:0"
+    environment: { UMIAK_SECRETS_ROOT: /secrets }
+    volumes:
+      - network-config:/network-config
+      - secrets:/secrets
+      - gateway-secrets:/secrets/gateway
+      - database-secret:/secrets/database
+      - owner-data:/secrets/owner
+      - pve-secrets:/secrets/pve
+    depends_on:
+      gateway-secrets: { condition: service_completed_successfully }
+    network_mode: none
+    restart: "no"
+
+  postgres:
+    <<: *restart
+    image: postgres:18.6-alpine
+    command: [postgres, -c, max_connections=200]
+    environment:
+      POSTGRES_USER: umiak
+      POSTGRES_DB: umiak
+      POSTGRES_PASSWORD_FILE: /quickstart-db/password
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - database-secret:/quickstart-db:ro
+    depends_on:
+      secrets-init: { condition: service_completed_successfully }
+    networks: [control, web-internal]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U umiak -d umiak"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    image: umiak-worker:quickstart
+    build: *worker-build
+    entrypoint: [node, /quickstart/run.mjs]
+    command: [node, apps/worker/src/admin/main.ts, migrate]
+    environment: *app-env
+    volumes:
+      - ./deploy/compose/quickstart/run.mjs:/quickstart/run.mjs:ro
+      - database-secret:/quickstart-db:ro
+    networks: [control]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  web-migrate:
+    image: umiak-web:quickstart
+    build: *web-build
+    working_dir: /app/migrate
+    entrypoint: [node, /quickstart/run.mjs]
+    command: [node, packages/payload/src/migrate.ts]
+    environment:
+      <<: *app-env
+      UMIAK_PAYLOAD_SECRET_FILE: /all-secrets/payload-secret
+    volumes:
+      - ./deploy/compose/quickstart/run.mjs:/quickstart/run.mjs:ro
+      - database-secret:/quickstart-db:ro
+      - type: volume
+        source: secrets
+        target: /all-secrets
+        read_only: true
+        volume: { subpath: web }
+    networks: [control]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck: { disable: true }
+    restart: "no"
+
+  worker:
+    <<: *restart
+    image: umiak-worker:quickstart
+    build: *worker-build
+    entrypoint: [node, /quickstart/run.mjs]
+    command: [node, apps/worker/src/main.ts]
+    environment:
+      <<: *app-env
+      UMIAK_PAYLOAD_SECRET_FILE: /all-secrets/payload-secret
+      UMIAK_DATA_KEYS_FILE: /all-secrets/data-keys.json
+      UMIAK_GATEWAY_SERVICE_TOKEN_FILE: /all-secrets/worker-gateway-token
+      UMIAK_SSH_USER_CA_KEYS_FILE: /all-secrets/ssh_user_ca.pub
+      UMIAK_RECONCILE_DRY_RUN: "1"
+      UMIAK_MIGRATE_ON_START: "0"
+      UMIAK_HTTP_PORT: "9090"
+    volumes:
+      - network-config:/network-config:ro
+      - ./deploy/compose/quickstart/run.mjs:/quickstart/run.mjs:ro
+      - database-secret:/quickstart-db:ro
+      - type: volume
+        source: secrets
+        target: /all-secrets
+        read_only: true
+        volume: { subpath: worker }
+      - pve-secrets:/pve-secrets:ro
+    networks: [control]
+    depends_on:
+      web-migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:9090/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    stop_grace_period: 90s
+
+  api:
+    <<: *restart
+    image: umiak-api:quickstart
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    entrypoint: [node, /quickstart/run.mjs]
+    command: [node, apps/api/src/main.ts]
+    environment:
+      <<: *app-env
+      UMIAK_PAYLOAD_SECRET_FILE: /all-secrets/payload-secret
+      UMIAK_API_CURSOR_KEY_FILE: /all-secrets/cursor-key
+      UMIAK_IDENTITY_FILE: /identity.yaml
+      UMIAK_DATA_KEYS_FILE: /all-secrets/data-keys.json
+      UMIAK_API_SERVICE_TOKENS_FILE: /all-secrets/service-tokens.json
+      UMIAK_API_GATEWAY_TOKEN_FILE: /all-secrets/gateway-token
+      UMIAK_SSH_LOGIN_CA_KEY_FILE: /all-secrets/ssh-login-ca
+      UMIAK_SSH_HOST_KEYS_FILE: /all-secrets/ssh-host-keys.pub
+      UMIAK_LOCAL_ALLOWED_HOSTS: api:8080,localhost:8444
+      UMIAK_API_TRUSTED_PROXY_CIDRS: 172.29.116.10/32,172.29.116.11/32
+      UMIAK_SSH_HOST: localhost
+      UMIAK_SSH_PORT: "2222"
+    volumes:
+      - network-config:/network-config:ro
+      - ./deploy/compose/quickstart/run.mjs:/quickstart/run.mjs:ro
+      - ./deploy/compose/config/identity.yaml:/identity.yaml:ro
+      - database-secret:/quickstart-db:ro
+      - type: volume
+        source: secrets
+        target: /all-secrets
+        read_only: true
+        volume: { subpath: api }
+    networks: [control]
+    depends_on:
+      web-migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:9090/readyz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    stop_grace_period: 30s
+
+  web:
+    <<: *restart
+    image: umiak-web:quickstart
+    build: *web-build
+    entrypoint: [node, /quickstart/run.mjs]
+    command: [node, server.js]
+    environment:
+      <<: *app-env
+      UMIAK_PAYLOAD_SECRET_FILE: /all-secrets/payload-secret
+    volumes:
+      - network-config:/network-config:ro
+      - ./deploy/compose/quickstart/run.mjs:/quickstart/run.mjs:ro
+      - database-secret:/quickstart-db:ro
+      - type: volume
+        source: secrets
+        target: /all-secrets
+        read_only: true
+        volume: { subpath: web }
+    networks: [web-internal]
+    depends_on:
+      web-migrate: { condition: service_completed_successfully }
+    stop_grace_period: 30s
+
+  mcp:
+    <<: *restart
+    image: umiak-mcp:quickstart
+    build:
+      context: .
+      dockerfile: apps/mcp/Dockerfile
+    environment:
+      <<: *app-env
+      UMIAK_MCP_API_URL: http://api:8080
+      UMIAK_MCP_PUBLIC_URL: https://localhost:8444/mcp
+      UMIAK_MCP_ALLOWED_HOSTS: localhost:8444
+      UMIAK_API_TRUSTED_PROXY_CIDRS: 172.29.116.10/32
+    networks:
+      control: { ipv4_address: 172.29.116.11 }
+    depends_on:
+      api: { condition: service_healthy }
+    stop_grace_period: 30s
+
+  gateway:
+    <<: *restart
+    image: umiak-quickstart:dev
+    build: *quickstart-build
+    command: [/umiak-gateway, serve]
+    environment:
+      <<: *app-env
+      UMIAK_DATABASE_PASSWORD_FILE: /quickstart-db/gateway-password
+      UMIAK_RUN_UID: "65532"
+      UMIAK_RUN_GID: "65532"
+      UMIAK_GATEWAY_INTERNAL_URL: http://gateway:7000
+      UMIAK_GATEWAY_PREVIEW_DOMAIN: umiak.localhost
+      UMIAK_GATEWAY_TUNNEL_HOST: tunnel.localhost
+      UMIAK_GATEWAY_SSH_HOST: ssh.localhost
+      UMIAK_GATEWAY_API_URL: http://api:8082
+      UMIAK_GATEWAY_API_TOKEN_FILE: /gateway-secrets/api-token
+      UMIAK_GATEWAY_SERVICE_TOKENS_FILE: /gateway-secrets/service-tokens.json
+      UMIAK_GATEWAY_COOKIE_KEYS_FILE: /gateway-secrets/cookie-keys
+      UMIAK_GATEWAY_TLS_PREVIEW_CERT_FILE: /gateway-secrets/umiak.pem
+      UMIAK_GATEWAY_TLS_PREVIEW_KEY_FILE: /gateway-secrets/umiak.key
+      UMIAK_GATEWAY_TLS_TUNNEL_CERT_FILE: /gateway-secrets/tunnel.pem
+      UMIAK_GATEWAY_TLS_TUNNEL_KEY_FILE: /gateway-secrets/tunnel.key
+      UMIAK_GATEWAY_SSH_HOST_KEY_FILES: /gateway-secrets/ssh_host_ed25519_key,/gateway-secrets/ssh_host_ecdsa_key
+      UMIAK_GATEWAY_SSH_USER_CA_KEY_FILE: /gateway-secrets/ssh_user_ca
+      UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS_FILE: /gateway-secrets/login-ca-keys
+    # Gateway secrets are owned by its existing uid; read-only, never the owner CA.
+    user: "0:0"
+    volumes:
+      - network-config:/network-config:ro
+      - database-secret:/quickstart-db:ro
+      - gateway-secrets:/gateway-secrets:ro
+    ports:
+      - "${UMIAK_GATEWAY_BIND:-0.0.0.0}:${UMIAK_GATEWAY_HTTPS_PORT:-443}:8443"
+      - "${UMIAK_GATEWAY_BIND:-0.0.0.0}:${UMIAK_GATEWAY_SSH_PORT:-2222}:2222"
+    networks: [control]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test:
+        [CMD, /umiak-gateway, healthcheck, "-url=http://127.0.0.1:9090/readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    stop_grace_period: 960s
+
+  quickstart:
+    <<: *restart
+    image: umiak-quickstart:dev
+    build: *quickstart-build
+    environment:
+      <<: *app-env
+      UMIAK_QUICKSTART_PORT: "8444"
+      UMIAK_QUICKSTART_TLS_NAMES: ${UMIAK_QUICKSTART_TLS_NAMES:-}
+      UMIAK_QUICKSTART_ASSETS: /app/quickstart-assets
+      UMIAK_QUICKSTART_TLS_DIR: /var/lib/umiak/owner/tls
+    volumes:
+      - network-config:/network-config
+      - database-secret:/quickstart-db:ro
+      - owner-data:/var/lib/umiak/owner
+      - pve-secrets:/pve-secrets
+      - gateway-secrets:/gateway-secrets:ro
+    ports:
+      - "${UMIAK_QUICKSTART_BIND:-0.0.0.0}:${UMIAK_QUICKSTART_PORT:-8444}:8444"
+    networks:
+      control: { ipv4_address: 172.29.116.10 }
+      web-internal: {}
+    depends_on:
+      web-migrate: { condition: service_completed_successfully }
+      api: { condition: service_healthy }
+      web: { condition: service_started }
+
+volumes:
+  postgres-data: {}
+  database-secret: {}
+  secrets: {}
+  gateway-secrets: {}
+  network-config: {}
+  owner-data: {}
+  pve-secrets: {}
+
+networks:
+  control:
+    ipam:
+      config:
+        - subnet: 172.29.116.0/24
+          ip_range: 172.29.116.128/25
+  web-internal:
+    internal: true

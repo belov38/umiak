@@ -12,6 +12,9 @@
 name: umiak-e2e
 
 services:
+  web-meta:
+    depends_on: !override
+      e2e-backend: { condition: service_healthy }
   migrate:
     volumes:
       - ./config/e2e.yaml:/etc/umiak/umiak.yaml:ro

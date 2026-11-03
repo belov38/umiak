@@ -7,6 +7,7 @@ from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
 from ..models.meta_auth_mode import MetaAuthMode
+from ..models.meta_tenancy import MetaTenancy
 from ..types import UNSET, Unset
 
 if TYPE_CHECKING:
@@ -31,6 +32,8 @@ class Meta:
         ssh (MetaSsh):
         umiak_domain (str): Domain of published ports: https://<slug>-<port>.<umiakDomain> Example: umiak.example.com.
         auth_mode (MetaAuthMode | Unset):
+        tenancy (MetaTenancy | Unset): Presentation model for this deployment. Missing on older servers means teams;
+            independent of credential kind.
     """
 
     api_url: str
@@ -43,6 +46,7 @@ class Meta:
     ssh: MetaSsh
     umiak_domain: str
     auth_mode: MetaAuthMode | Unset = UNSET
+    tenancy: MetaTenancy | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -76,6 +80,10 @@ class Meta:
         if not isinstance(self.auth_mode, Unset):
             auth_mode = self.auth_mode.value
 
+        tenancy: str | Unset = UNSET
+        if not isinstance(self.tenancy, Unset):
+            tenancy = self.tenancy.value
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
@@ -93,6 +101,8 @@ class Meta:
         )
         if auth_mode is not UNSET:
             field_dict["authMode"] = auth_mode
+        if tenancy is not UNSET:
+            field_dict["tenancy"] = tenancy
 
         return field_dict
 
@@ -150,6 +160,13 @@ class Meta:
         else:
             auth_mode = MetaAuthMode(_auth_mode)
 
+        _tenancy = d.pop("tenancy", UNSET)
+        tenancy: MetaTenancy | Unset
+        if isinstance(_tenancy, Unset):
+            tenancy = UNSET
+        else:
+            tenancy = MetaTenancy(_tenancy)
+
         meta = cls(
             api_url=api_url,
             api_version=api_version,
@@ -161,6 +178,7 @@ class Meta:
             ssh=ssh,
             umiak_domain=umiak_domain,
             auth_mode=auth_mode,
+            tenancy=tenancy,
         )
 
         meta.additional_properties = d

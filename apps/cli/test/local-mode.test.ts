@@ -16,7 +16,7 @@ it("logs in without credentials and saves a tokenless local profile", async () =
 		res.end(
 			JSON.stringify(
 				req.url?.endsWith("/meta")
-					? { authMode: "none", oidc: null }
+					? { authMode: "none", tenancy: "single", oidc: null }
 					: {
 							user: { id: "local", email: "local@localhost" },
 							team: { id: "team_local" },
@@ -50,7 +50,12 @@ it("logs in without credentials and saves a tokenless local profile", async () =
 	expect(
 		JSON.parse(readFileSync(join(home.configDir, "config.json"), "utf8"))
 			.profiles.default,
-	).toEqual({ apiUrl, auth: "none" });
+	).toEqual({
+		apiUrl,
+		auth: "none",
+		tenancy: "single",
+		tenancyCheckedAt: expect.any(Number),
+	});
 	expect(existsSync(join(home.configDir, "credentials.json"))).toBe(false);
 	expect(calls).toEqual([undefined, undefined]);
 });

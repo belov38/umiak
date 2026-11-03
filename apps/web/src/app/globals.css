@@ -864,3 +864,52 @@ input[type="radio"] {
 		width: calc(100% - 3rem);
 	}
 }
+
+/* Getting started uses the dashboard palette in both appearance modes. */
+.guide-layout {
+	display: grid;
+	grid-template-columns: 13rem minmax(0, 1fr);
+	gap: 3rem;
+	max-width: 76rem;
+}
+.guide-toc {
+	position: sticky;
+	top: 2rem;
+	align-self: start;
+	border-left: 2px solid var(--border);
+	padding-left: 1rem;
+}
+.onboarding-checklist {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 1rem 2rem;
+	margin-block: 1.5rem;
+}
+.onboarding-checklist li {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+.onboarding-number {
+	display: grid;
+	place-items: center;
+	width: 1.75rem;
+	height: 1.75rem;
+	border: 1px solid var(--border);
+	color: var(--foreground);
+}
+.onboarding-checklist a:hover {
+	text-decoration: underline;
+}
+@media (max-width: 900px) {
+	.guide-layout {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 2rem;
+	}
+	.guide-toc {
+		position: static;
+	}
+	.onboarding-checklist {
+		flex-direction: column;
+	}
+}

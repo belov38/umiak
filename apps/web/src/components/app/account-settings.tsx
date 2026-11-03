@@ -9,7 +9,10 @@ import { type FormEvent, type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { setDefaultTeam } from "@/actions/account";
 import { ConfirmButton } from "@/components/app/confirm-button";
-import { useAppSession } from "@/components/app/session-context";
+import {
+	useAppSession,
+	useSingleOwner,
+} from "@/components/app/session-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,7 +32,7 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { useUmiak } from "@/lib/api";
-import { attempt } from "@/lib/client-call";
+import { useAttempt } from "@/lib/client-call";
 import { formatTime } from "@/lib/format";
 
 function Section({
@@ -118,6 +121,7 @@ function Profile() {
 }
 
 function DefaultTeam() {
+	const attempt = useAttempt();
 	const s = useAppSession();
 	const router = useRouter();
 	const [pending, start] = useTransition();
@@ -178,7 +182,8 @@ function sshKeyError(e: unknown): string {
 	return e instanceof Error ? e.message : String(e);
 }
 
-function SshKeys() {
+export function SshKeys() {
+	const singleOwner = useSingleOwner();
 	const s = useAppSession();
 	// SSH keys belong to the person, not a team.
 	const umiak = useUmiak(s.defaultTeamId);
@@ -233,7 +238,7 @@ function SshKeys() {
 			description={
 				<>
 					For <code>ssh &lt;sandbox&gt;@&lt;ssh host&gt;</code> into sandboxes
-					of your teams.
+					{singleOwner ? " you own." : " of your teams."}
 				</>
 			}
 		>

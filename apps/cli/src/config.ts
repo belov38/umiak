@@ -14,11 +14,16 @@ import { CliError } from "./exit-codes.ts";
 
 export type Env = Record<string, string | undefined>;
 
-export type AuthKind = "oidc" | "key" | "none";
+export type AuthKind = "oidc" | "key" | "none" | "owner";
 export type StoreKind = "keychain" | "file";
 
 export interface Profile {
 	apiUrl: string;
+	/** Cached deployment presentation; absent on older profiles/servers. */
+	tenancy?: "single" | "teams";
+	tenancyCheckedAt?: number;
+	/** Persisted private CA bundle for this deployment. */
+	caFile?: string;
 	/** Team chosen at login (`--team` / UMIAK_TEAM); else the default team of the user. */
 	team?: string;
 	auth: AuthKind;

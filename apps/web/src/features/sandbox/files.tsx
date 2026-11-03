@@ -40,9 +40,9 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
-import { attempt } from "@/lib/client-call";
-import { describeError } from "@/lib/errors";
+import { useAttempt } from "@/lib/client-call";
 import { formatTime } from "@/lib/format";
+import { useDescribeError } from "@/lib/use-error";
 import { cn } from "@/lib/utils";
 import {
 	breadcrumbs,
@@ -78,6 +78,8 @@ export function FilesTab({
 	sandbox: SandboxData;
 	handle: Sandbox;
 }) {
+	const attempt = useAttempt();
+	const describeError = useDescribeError();
 	const queryClient = useQueryClient();
 	const read = canRead(sandbox);
 	const work = canWork(sandbox);
@@ -557,6 +559,7 @@ function PreviewDialog({
 	file: FileInfo | null;
 	onClose: () => void;
 }) {
+	const describeError = useDescribeError();
 	const q = useQuery({
 		queryKey: ["file-preview", teamId, handle.id, file?.path, file?.modifiedAt],
 		queryFn: async ({ signal }) => {
@@ -639,6 +642,7 @@ function MoveDialog({
 	onClose: () => void;
 	onDone: () => Promise<unknown>;
 }) {
+	const attempt = useAttempt();
 	const [to, setTo] = useState("");
 	return (
 		<FormDialog
@@ -687,6 +691,7 @@ function MkdirDialog({
 	onOpenChange: (o: boolean) => void;
 	onDone: () => Promise<unknown>;
 }) {
+	const attempt = useAttempt();
 	const [name, setName] = useState("");
 	const bad = name.includes("/") ? "A name, without /" : null;
 	return (

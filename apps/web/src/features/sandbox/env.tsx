@@ -21,7 +21,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
-import { attempt } from "@/lib/client-call";
+import { useAttempt } from "@/lib/client-call";
 import {
 	bytesToBase64,
 	envKeyProblem,
@@ -46,6 +46,7 @@ export function EnvTab({
 	sandbox: SandboxData;
 	handle: Sandbox;
 }) {
+	const attempt = useAttempt();
 	const queryClient = useQueryClient();
 	const key = ["env", teamId, sandbox.id] as const;
 	const q = useQuery({

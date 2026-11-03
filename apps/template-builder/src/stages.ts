@@ -33,7 +33,9 @@ import { isProtectedVmid } from "./vmid-guard.ts";
 // Stages of `umiak-tpl build` (spec S5 section 7.2); build.ts runs them in order and rolls back.
 
 /** Storage of the base images and seed ISOs. */
-export const MEDIA_STORAGE = "local";
+export const MEDIA_STORAGE = process.env.UMIAK_PVE_MEDIA_STORAGE || "local";
+if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(MEDIA_STORAGE))
+	throw new Error("Invalid template media storage name");
 export const BUILD_TAG = "umiak-tpl";
 /** smbios1 of the build VM: serial "ds=nocloud" (base64). Removed with the seed ISO. */
 export const BUILD_SMBIOS1 = `serial=${Buffer.from("ds=nocloud").toString("base64")},base64=1`;

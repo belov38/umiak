@@ -17,7 +17,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useUmiak } from "@/lib/api";
-import { attempt } from "@/lib/client-call";
+import { useAttempt } from "@/lib/client-call";
 import { canDelete, canFork, canResume, canStop } from "@/lib/sandboxes";
 import { DeleteSandboxDialog } from "./delete-dialog";
 import { sandboxHref } from "./links";
@@ -41,6 +41,7 @@ export function RowActions({
 	teamId: string;
 	sandbox: SandboxData;
 }) {
+	const attempt = useAttempt();
 	const umiak = useUmiak(teamId);
 	const refresh = useRefreshSandboxes(teamId);
 	const [busy, setBusy] = useState(false);

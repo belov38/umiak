@@ -59,11 +59,11 @@ const USAGE = `usage:
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 const TEMPLATES_DIR = join(REPO_ROOT, "infra/templates");
 const UBUNTU_KEY_FILE = join(TEMPLATES_DIR, "keys/ubuntu-cloud-images.asc");
-const UPDATE_KEYS_FILE = join(
-	REPO_ROOT,
-	"services/guest-agent/packaging/trust/update-keys.pub",
-);
-const LOG_DIR = join(REPO_ROOT, "build-logs");
+const UPDATE_KEYS_FILE =
+	process.env.UMIAK_UPDATE_KEYS_FILE ??
+	join(REPO_ROOT, "services/guest-agent/packaging/trust/update-keys.pub");
+const LOG_DIR =
+	process.env.UMIAK_TEMPLATE_LOG_DIR ?? join(REPO_ROOT, "build-logs");
 
 class UsageError extends Error {}
 

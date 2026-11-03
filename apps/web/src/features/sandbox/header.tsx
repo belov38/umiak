@@ -30,16 +30,18 @@ import { toast } from "sonner";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { CopyButton } from "@/components/app/copy-button";
 import { Field, FormDialog } from "@/components/app/form-dialog";
+import { useSingleOwner } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useUmiak } from "@/lib/api";
-import { attempt } from "@/lib/client-call";
+import { useAttempt } from "@/lib/client-call";
 import { copyText } from "@/lib/clipboard";
 import { slugProblem } from "@/lib/create-form";
-import { describeError, isSnapshotRequiresStop } from "@/lib/errors";
+import { isSnapshotRequiresStop } from "@/lib/errors";
 import { formatTime } from "@/lib/format";
 import { type IdempotencySlot, slotAfter, slotFor } from "@/lib/idempotency";
 import { teamPath } from "@/lib/team-path";
+import { useDescribeError } from "@/lib/use-error";
 import { DeleteSandboxDialog } from "../sandboxes/delete-dialog";
 import { useNeedsForceStop } from "../sandboxes/force-stop";
 import { sandboxHref } from "../sandboxes/links";
@@ -70,6 +72,7 @@ export function SandboxHeader({
 	desktop?: boolean;
 	track: (operationId: string) => void;
 }) {
+	const attempt = useAttempt();
 	const umiak = useUmiak(teamId);
 	const router = useRouter();
 	const refreshAll = useRefreshSandboxes(teamId);
@@ -481,6 +484,7 @@ function RenameDialog({
 	open: boolean;
 	onOpenChange: (o: boolean) => void;
 }) {
+	const attempt = useAttempt();
 	const umiak = useUmiak(teamId);
 	const router = useRouter();
 	const params = useSearchParams();
@@ -553,6 +557,7 @@ function ExtendDialog({
 	open: boolean;
 	onOpenChange: (o: boolean) => void;
 }) {
+	const attempt = useAttempt();
 	const umiak = useUmiak(teamId);
 	const queryClient = useQueryClient();
 	const [choice, setChoice] = useState(0);
@@ -616,6 +621,9 @@ function SnapshotDialog({
 	open: boolean;
 	onOpenChange: (o: boolean) => void;
 }) {
+	const attempt = useAttempt();
+	const singleOwner = useSingleOwner();
+	const describeError = useDescribeError();
 	const umiak = useUmiak(teamId);
 	const queryClient = useQueryClient();
 	const [name, setName] = useState("");
@@ -697,7 +705,11 @@ function SnapshotDialog({
 			<Field
 				label="Name"
 				error={problem}
-				hint="Unique in the team, e.g. web-stack"
+				hint={
+					singleOwner
+						? "Unique name, e.g. web-stack"
+						: "Unique in the team, e.g. web-stack"
+				}
 			>
 				<Input
 					value={name}

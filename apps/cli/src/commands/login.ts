@@ -15,28 +15,38 @@
 // `{"event":"logged_in","profile","apiUrl","me"}`.
 
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { isWellFormedApiKey } from "@umiak/auth/api-key";
 import { Umiak } from "@umiak/sdk";
 import type { Command } from "commander";
 import { deviceLogin, revokeRefreshToken } from "../auth/device-grant.ts";
 import { withFileLock } from "../auth/lock.ts";
+import { ownerLogin } from "../auth/owner-login.ts";
 import {
 	credentialName,
 	OIDC_CLIENT_ID,
 	parseCredential,
 	type StoredCredential,
 } from "../auth/token.ts";
-import { type Profile, readConfig, writeConfig } from "../config.ts";
+import {
+	type Profile,
+	readConfig,
+	writeConfig,
+	writePrivateFile,
+} from "../config.ts";
 import type { Context } from "../context.ts";
 import { CliError, usageError } from "../exit-codes.ts";
 import { deadline, getJson } from "../http.ts";
 import { readAll } from "../io.ts";
 import type { Runner } from "../program.ts";
+import { presentAccount, tenancyCache, tenancyOf } from "../tenancy.ts";
 import { CLI_VERSION } from "./version.ts";
 import { humanMe, type Me } from "./whoami.ts";
 
 interface MetaOidc {
-	authMode?: "none" | "oidc";
+	tenancy?: "single" | "teams";
+	authMode?: "none" | "oidc" | "owner";
 	oidc: { issuer: string; clientId: string; audience: string } | null;
 }
 
@@ -147,13 +157,32 @@ async function login(
 	const apiUrl = r.apiUrl;
 	let cred: StoredCredential | undefined;
 	let profile: Profile;
+	let meta: MetaOidc;
 	if (opts.keyStdin === true) {
 		const key = keyFromStdin(await readAll(ctx.stdin));
+		meta = await getJson<MetaOidc>(ctx.fetch, `${apiUrl}/v1/meta`).catch(
+			() => ({ oidc: null }),
+		);
 		cred = { kind: "key", token: key };
 		profile = { apiUrl, auth: "key" };
 	} else {
-		const meta = await getJson<MetaOidc>(ctx.fetch, `${apiUrl}/v1/meta`);
-		if (meta.authMode === "none") {
+		meta = await getJson<MetaOidc>(ctx.fetch, `${apiUrl}/v1/meta`);
+		if (meta.authMode === "owner") {
+			const token = await ownerLogin({
+				apiUrl,
+				fetch: ctx.fetch,
+				onCode(code) {
+					ctx.out.event("pairing_code", code);
+					ctx.out.info(
+						`Open ${code.verificationUri} in the claimed owner browser. Enter pairing code ${code.code ?? code.id}.`,
+					);
+					if (opts.browser !== false && process.stderr.isTTY === true)
+						openBrowser(code.verificationUri);
+				},
+			});
+			cred = { kind: "key", token };
+			profile = { apiUrl, auth: "owner" };
+		} else if (meta.authMode === "none") {
 			profile = { apiUrl, auth: "none" };
 		} else {
 			const f = await deviceFlow(ctx, apiUrl, opts.browser !== false, meta);
@@ -161,6 +190,7 @@ async function login(
 			profile = { apiUrl, auth: "oidc", issuer: f.issuer };
 		}
 	}
+	Object.assign(profile, tenancyCache(meta));
 	const token =
 		cred === undefined
 			? undefined
@@ -168,6 +198,17 @@ async function login(
 				? cred.token
 				: cred.accessToken;
 	const me = await meWith(ctx, apiUrl, token, r.team);
+	const ca = ctx.globals.cacert ?? ctx.env.UMIAK_CA_FILE;
+	if (ca !== undefined && ca !== "") {
+		const path = join(
+			ctx.paths.configDir,
+			`ca-${encodeURIComponent(r.profileName)}.pem`,
+		);
+		writePrivateFile(path, readFileSync(ca, "utf8"));
+		profile.caFile = path;
+	} else if (r.profile?.caFile !== undefined) {
+		profile.caFile = r.profile.caFile;
+	}
 	if (r.team !== undefined) profile.team = r.team;
 
 	const name = r.profileName;
@@ -228,7 +269,7 @@ async function login(
 	}
 	ctx.out.event(
 		"logged_in",
-		{ profile: name, apiUrl, me },
+		{ profile: name, apiUrl, me: presentAccount(me, tenancyOf(meta)) },
 		(v) =>
 			`Logged in to ${v.apiUrl} as ${humanMe(v.me)} (profile ${v.profile}).`,
 	);

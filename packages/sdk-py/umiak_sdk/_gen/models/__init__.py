@@ -202,6 +202,7 @@ from .meta_auth_mode import MetaAuthMode
 from .meta_oidc_type_0 import MetaOidcType0
 from .meta_openapi_response_200 import MetaOpenapiResponse200
 from .meta_ssh import MetaSsh
+from .meta_tenancy import MetaTenancy
 from .move_request import MoveRequest
 from .operation import Operation
 from .operation_error_type_0 import OperationErrorType0
@@ -471,6 +472,7 @@ __all__ = (
     "MetaOidcType0",
     "MetaOpenapiResponse200",
     "MetaSsh",
+    "MetaTenancy",
     "MeTeam",
     "MeTeamRoleType1",
     "MeTeamRoleType2Type1",

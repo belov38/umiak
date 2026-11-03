@@ -41,6 +41,7 @@ export default async function TeamLayout({
 	const env = webEnv();
 	return (
 		<AppShell
+			quickstart={process.env.UMIAK_QUICKSTART === "1"}
 			team={current}
 			member={session.teams.some((t) => t.id === team)}
 			logoutUrl={env.logoutUrl}

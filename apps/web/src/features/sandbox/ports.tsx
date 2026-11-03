@@ -25,9 +25,9 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { attempt } from "@/lib/client-call";
-import { describeError } from "@/lib/errors";
+import { useAttempt } from "@/lib/client-call";
 import { formatTime } from "@/lib/format";
+import { useDescribeError } from "@/lib/use-error";
 import { blockText } from "../sandboxes/state-cell";
 import { canConfigure, portProblem, portUrl } from "./rules";
 
@@ -69,6 +69,7 @@ export function PortsTab({
 	sandbox: SandboxData;
 	handle: Sandbox;
 }) {
+	const attempt = useAttempt();
 	const queryClient = useQueryClient();
 	const key = portsKey(teamId, sandbox.id);
 	const ports = useQuery({
@@ -293,6 +294,7 @@ function PublishDialog({
 		p: Awaited<ReturnType<Sandbox["ports"]["host"]>>,
 	) => Promise<void>;
 }) {
+	const describeError = useDescribeError();
 	const localMode = useLocalMode();
 	const [port, setPort] = useState("");
 	const [access, setAccess] = useState<Access>("token");

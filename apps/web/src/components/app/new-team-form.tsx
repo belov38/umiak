@@ -4,10 +4,11 @@ import { type FormEvent, useState, useTransition } from "react";
 import { createTeam } from "@/actions/teams";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { attempt } from "@/lib/client-call";
+import { useAttempt } from "@/lib/client-call";
 import { teamPath } from "@/lib/team-path";
 
 export function NewTeamForm() {
+	const attempt = useAttempt();
 	const router = useRouter();
 	const [name, setName] = useState("");
 	const [error, setError] = useState<string | null>(null);
