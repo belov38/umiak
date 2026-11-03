@@ -48,8 +48,8 @@ def command(*args, capture=True):
     return result.stdout.strip() if capture else ""
 
 
-def get(path):
-    return json.loads(command("pvesh", "get", path, "--output-format", "json"))
+def get(path, *options):
+    return json.loads(command("pvesh", "get", path, *options, "--output-format", "json"))
 
 
 def exists(path):
@@ -72,9 +72,9 @@ if int(get("/cluster/firewall/options").get("enable", 0)) != 1:
 # Read host-rule options without changing them: they do not gate VM isolation.
 node_firewall = get(f"/nodes/{config['node']}/firewall/options")
 # Applying SDN commits all pending changes, so refuse any unrelated transaction.
-vnets = get("/cluster/sdn/vnets")
+vnets = get("/cluster/sdn/vnets", "--pending", "1")
 for path in ["/cluster/sdn/zones", "/cluster/sdn/vnets", *["/cluster/sdn/vnets/" + row["vnet"] + "/subnets" for row in vnets]]:
-    if any(row.get("pending") or row.get("state") in ["new", "changed", "deleted"] for row in get(path)):
+    if any(row.get("pending") or row.get("state") in ["new", "changed", "deleted"] for row in get(path, "--pending", "1")):
         raise SystemExit("Pending SDN changes must be applied or reverted by the administrator first")
 for path, expected in [
     ("/cluster/sdn/zones/umiak", {"type": "simple", "ipam": "pve", "dhcp": "dnsmasq"}),

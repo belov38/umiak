@@ -70,7 +70,7 @@ export function pinnedPve(connection, tokenSecret) {
 			return this.request("POST", path, data);
 		},
 		request(method, path, data) {
-			if (!/^\/[a-zA-Z0-9_@!./%-]+$/.test(path))
+			if (!/^\/[a-zA-Z0-9_@!./%-]+(?:\?pending=1)?$/.test(path))
 				throw new Error("Invalid PVE API path");
 			const url = new URL(`/api2/json${path}`, connection.apiUrl);
 			return new Promise((resolve, reject) => {
@@ -454,13 +454,19 @@ export async function verifyAdoption(api, connection, nodeCheck) {
 	await check("pool", "/pools/umiak");
 	await check(
 		"SDN zone",
-		"/cluster/sdn/zones/umiak",
-		(x) => x.type === "simple",
+		"/cluster/sdn/zones/umiak?pending=1",
+		(x) =>
+			x.type === "simple" &&
+			!x.pending &&
+			!["new", "changed", "deleted"].includes(x.state),
 	);
 	await check(
 		"SDN VNet",
-		"/cluster/sdn/vnets/umiak0",
-		(x) => x.zone === "umiak",
+		"/cluster/sdn/vnets/umiak0?pending=1",
+		(x) =>
+			x.zone === "umiak" &&
+			!x.pending &&
+			!["new", "changed", "deleted"].includes(x.state),
 	);
 	const ipset = await check(
 		"gateway IPSet",

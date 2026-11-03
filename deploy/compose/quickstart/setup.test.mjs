@@ -522,3 +522,24 @@ test("isolation permits disabled host rules and sealed templates but checks sand
 		/net0 firewall/,
 	);
 });
+
+test("API adoption reads pending SDN metadata and refuses staged zone changes", async () => {
+	const paths = [];
+	const api = {
+		get: async (path) => {
+			paths.push(path);
+			if (path === "/cluster/firewall/options") return { enable: 1 };
+			if (path === "/access/permissions")
+				return { "/pool/umiak": { "VM.Audit": 1 } };
+			if (path.includes("/nodes/pve/storage")) return [];
+			if (path === "/cluster/sdn/zones/umiak?pending=1")
+				return { type: "simple", state: "changed" };
+			return {};
+		},
+	};
+	await assert.rejects(
+		verifyAdoption(api, connection, async () => ({})),
+		/SDN zone/,
+	);
+	assert.ok(paths.includes("/cluster/sdn/zones/umiak?pending=1"));
+});
