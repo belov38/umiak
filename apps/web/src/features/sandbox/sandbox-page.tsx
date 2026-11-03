@@ -10,7 +10,12 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 import { QueryError } from "@/components/app/query-error";
+import {
+	useAppSession,
+	useSingleOwner,
+} from "@/components/app/session-context";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SandboxManagement } from "@/features/operator/sandbox-management";
 import { useUmiak } from "@/lib/api";
 import { teamPath } from "@/lib/team-path";
 import { type SandboxTab, sandboxHref } from "../sandboxes/links";
@@ -48,6 +53,8 @@ export function SandboxPage({
 	teamId: string;
 	sandboxRef: string;
 }) {
+	const singleOwner = useSingleOwner();
+	const session = useAppSession();
 	const umiak = useUmiak(teamId);
 	const router = useRouter();
 	const params = useSearchParams();
@@ -101,8 +108,10 @@ export function SandboxPage({
 				</Link>
 				{isNotFound(live.error) ? (
 					<p className="text-sm" data-testid="sandbox-not-found">
-						No sandbox <code>{sandboxRef}</code> in this team: it may have been
-						deleted.
+						No sandbox <code>{sandboxRef}</code>{" "}
+						{singleOwner
+							? "is unavailable: it may have been deleted."
+							: "in this team: it may have been deleted."}
 					</p>
 				) : (
 					<QueryError
@@ -126,6 +135,7 @@ export function SandboxPage({
 				desktop={desktop}
 				track={live.track}
 			/>
+			{singleOwner && session.isOperator && <SandboxManagement sandbox={s} />}
 			{live.error !== null && (
 				<QueryError
 					error={live.error}

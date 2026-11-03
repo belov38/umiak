@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DeleteSandboxDialog } from "@/features/sandboxes/delete-dialog";
 import { useUmiak } from "@/lib/api";
-import { attempt } from "@/lib/client-call";
+import { useAttempt } from "@/lib/client-call";
 import { canDelete, canStop } from "@/lib/sandboxes";
 import { BlockDialog, UnblockDialog } from "./block-dialog";
 
@@ -25,6 +25,7 @@ export function OperatorActions({
 	portsOpen: boolean;
 	onTogglePorts: () => void;
 }) {
+	const attempt = useAttempt();
 	const umiak = useUmiak(sandbox.teamId);
 	const queryClient = useQueryClient();
 	const [busy, setBusy] = useState(false);

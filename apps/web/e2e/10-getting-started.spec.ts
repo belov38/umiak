@@ -7,6 +7,7 @@ test("Getting started uses deployment URLs, copies commands and follows appearan
 	as,
 }, testInfo) => {
 	const { page, context } = await as("alice");
+	await expect(page.getByTestId("team-switcher")).toBeVisible();
 	await page
 		.getByRole("link", { name: "Getting started", exact: true })
 		.click();

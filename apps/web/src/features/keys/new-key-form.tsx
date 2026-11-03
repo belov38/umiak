@@ -3,6 +3,7 @@
 // full) or scopes by hand, lifetime (90 days by default, at most 365).
 import { PlusIcon } from "lucide-react";
 import { type FormEvent, useState } from "react";
+import { useSingleOwner } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useUmiak } from "@/lib/api";
@@ -17,7 +18,7 @@ import {
 	type Scope,
 	toCreateKeyRequest,
 } from "@/lib/api-keys";
-import { describeError } from "@/lib/errors";
+import { useDescribeError } from "@/lib/use-error";
 import type { ShownSecret } from "./secret-dialog";
 
 const PRESET_TEXT: Record<PresetName, string> = {
@@ -33,6 +34,8 @@ export function NewKeyForm({
 	teamId: string;
 	onIssued: (s: ShownSecret) => void | Promise<void>;
 }) {
+	const describeError = useDescribeError();
+	const singleOwner = useSingleOwner();
 	const umiak = useUmiak(teamId);
 	const [form, setForm] = useState<KeyFormState>(emptyKeyForm);
 	const [error, setError] = useState<string | null>(null);
@@ -73,7 +76,7 @@ export function NewKeyForm({
 			method="post"
 			onSubmit={submit}
 			className="key-form"
-			aria-label="New team API key"
+			aria-label={singleOwner ? "New API key" : "New team API key"}
 		>
 			<div className="grid gap-4 sm:grid-cols-2">
 				<label

@@ -15,7 +15,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CopyButton } from "@/components/app/copy-button";
 import { EmptyState as DashboardEmpty } from "@/components/app/empty-state";
 import { QueryError } from "@/components/app/query-error";
-import { useAppSession } from "@/components/app/session-context";
+import {
+	useAppSession,
+	useSingleOwner,
+} from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -256,6 +259,7 @@ function EmptyState({
 /** Who created the sandbox, as far as the browser knows. */
 function useCreatorName(teamId: string): (s: SandboxData) => string {
 	const session = useAppSession();
+	const singleOwner = useSingleOwner();
 	const umiak = useUmiak(teamId);
 	const keys = useQuery({
 		queryKey: ["api-keys", teamId],
@@ -273,9 +277,13 @@ function useCreatorName(teamId: string): (s: SandboxData) => string {
 		if (s.createdBy !== null && s.createdBy === session.user.id) return "you";
 		if (s.createdByKey !== null) {
 			const n = names.get(s.createdByKey);
-			return n === undefined ? "a team key" : `key ${n}`;
+			return n === undefined
+				? singleOwner
+					? "an API key"
+					: "a team key"
+				: `key ${n}`;
 		}
-		return s.createdBy === null ? "—" : "a teammate";
+		return s.createdBy === null ? "—" : singleOwner ? "you" : "a teammate";
 	};
 }
 

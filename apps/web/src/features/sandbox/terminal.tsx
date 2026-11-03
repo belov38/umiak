@@ -13,9 +13,10 @@ import type { CommandData, Pty, Sandbox, SandboxData } from "@umiak/sdk";
 import { LoaderCircleIcon, PlusIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useSingleOwner } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
-import { attempt } from "@/lib/client-call";
-import { describeError } from "@/lib/errors";
+import { useAttempt } from "@/lib/client-call";
+import { useDescribeError } from "@/lib/use-error";
 import { cn } from "@/lib/utils";
 import { watchPtySocket } from "@/lib/ws";
 import { exitText } from "./output";
@@ -53,6 +54,8 @@ export function TerminalTab({
 	sandbox: SandboxData;
 	handle: Sandbox;
 }) {
+	const attempt = useAttempt();
+	const describeError = useDescribeError();
 	const queryClient = useQueryClient();
 	const gate = canWork(sandbox);
 	const key = ["ptys", teamId, sandbox.id] as const;
@@ -216,6 +219,9 @@ function TerminalSession({
 	onDetach: () => void;
 	onClosed: () => void;
 }) {
+	const attempt = useAttempt();
+	const singleOwner = useSingleOwner();
+	const describeError = useDescribeError();
 	const [phase, setPhase] = useState<PtyPhase>("connecting");
 	const [why, setWhy] = useState<string | null>(null);
 	const [failure, setFailure] = useState<PtyFailure | null>(null);
@@ -283,7 +289,7 @@ function TerminalSession({
 				})
 				.catch((e: unknown) => {
 					if (ac.signal.aborted) return;
-					setFailure(ptyFailure(e));
+					setFailure(ptyFailure(e, singleOwner));
 					setPhase("failed");
 				});
 			return () => {
@@ -294,7 +300,7 @@ function TerminalSession({
 			};
 		},
 		// "Reconnect" (attemptNo) remounts the terminal: a new connection.
-		[handle, commandId],
+		[handle, commandId, singleOwner, describeError],
 	);
 
 	const close = async () => {

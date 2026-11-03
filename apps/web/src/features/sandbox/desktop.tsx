@@ -6,7 +6,7 @@ import { ConfirmButton } from "@/components/app/confirm-button";
 import { QueryError } from "@/components/app/query-error";
 import { useLocalMode } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
-import { attempt } from "@/lib/client-call";
+import { useAttempt } from "@/lib/client-call";
 import { fetchDesktopLink } from "./desktop-link";
 import { headerActions } from "./rules";
 
@@ -19,6 +19,7 @@ export function DesktopTab({
 	handle: Sandbox;
 	track: (id: string) => void;
 }) {
+	const attempt = useAttempt();
 	const localMode = useLocalMode();
 	const [url, setUrl] = useState<string | null>(null);
 	const [error, setError] = useState<unknown>(null);

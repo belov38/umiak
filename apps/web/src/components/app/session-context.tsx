@@ -1,19 +1,29 @@
 "use client";
 import { createContext, type ReactNode, useContext } from "react";
 import type { AppSession } from "@/lib/app-session";
+import type { Tenancy } from "@/lib/tenancy";
+
+const TenancyContext = createContext<Tenancy>("teams");
+export function useSingleOwner() {
+	return useContext(TenancyContext) === "single";
+}
 
 const SessionContext = createContext<AppSession | null>(null);
 
 export function SessionProvider({
 	session,
+	tenancy = "teams",
 	children,
 }: {
 	session: AppSession;
+	tenancy?: Tenancy;
 	children: ReactNode;
 }) {
 	return (
 		<SessionContext.Provider value={session}>
-			{children}
+			<TenancyContext.Provider value={tenancy}>
+				{children}
+			</TenancyContext.Provider>
 		</SessionContext.Provider>
 	);
 }

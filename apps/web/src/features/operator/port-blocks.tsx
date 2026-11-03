@@ -7,15 +7,18 @@ import { LockIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { QueryError } from "@/components/app/query-error";
+import { useSingleOwner } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
 import { useUmiak } from "@/lib/api";
-import { attempt } from "@/lib/client-call";
+import { useAttempt } from "@/lib/client-call";
 import { BlockDialog, UnblockDialog } from "./block-dialog";
 
 // Kept after closing (open: false), so the title does not change mid-animation.
 type Dialog = { kind: "block" | "unblock"; port: number; open: boolean } | null;
 
 export function PortBlocks({ sandbox }: { sandbox: SandboxData }) {
+	const attempt = useAttempt();
+	const singleOwner = useSingleOwner();
 	const umiak = useUmiak(sandbox.teamId);
 	const queryClient = useQueryClient();
 	const key = ["ports", sandbox.teamId, sandbox.id] as const;
@@ -104,7 +107,11 @@ export function PortBlocks({ sandbox }: { sandbox: SandboxData }) {
 				open={dialog?.kind === "block" && dialog.open}
 				onOpenChange={(o) => !o && setDialog((d) => d && { ...d, open: false })}
 				title={`Block port ${dialog?.port ?? ""} of ${sandbox.slug}?`}
-				description="The gateway refuses the port at once; the team cannot change, rotate or unpublish it until an operator unblocks it."
+				description={
+					singleOwner
+						? "The gateway refuses this port immediately. Unblock it before changing, rotating or unpublishing it."
+						: "The gateway refuses the port at once; the team cannot change, rotate or unpublish it until an operator unblocks it."
+				}
 				onBlock={async (body) => {
 					if (dialog === null) return false;
 					const port = dialog.port;

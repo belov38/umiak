@@ -4,7 +4,7 @@
 // the error. `onRetry` adds a "Try again" button.
 import { CloudOffIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { describeError } from "@/lib/errors";
+import { useDescribeError } from "@/lib/use-error";
 
 export function QueryError({
 	error,
@@ -16,6 +16,7 @@ export function QueryError({
 	what: string;
 	onRetry?: () => void;
 }) {
+	const describeError = useDescribeError();
 	const v = describeError(error);
 	const retry = onRetry && (
 		<Button size="xs" variant="outline" onClick={onRetry}>

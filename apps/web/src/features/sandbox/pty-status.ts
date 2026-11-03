@@ -1,7 +1,7 @@
 // Connection state of a terminal tab (S8 §9.6 Terminal), without the DOM:
 // close codes of the PTY WebSocket (S7 §10.2, §23.4) and the final errors
 // of the SDK's Pty as text and whether "Reconnect" can help.
-import { describeError } from "@/lib/errors";
+import { describeError, singleOwnerErrorText } from "@/lib/errors";
 
 /** Scrollback asked for when (re)attaching to a terminal (S8 §9.6). */
 export const PTY_TAIL_BYTES = 64 * 1024;
@@ -38,7 +38,7 @@ export interface PtyFailure {
 }
 
 /** A final error of the Pty (close code or error frame) → text. */
-export function ptyFailure(e: unknown): PtyFailure {
+export function ptyFailure(e: unknown, singleOwner = false): PtyFailure {
 	const code =
 		e &&
 		typeof e === "object" &&
@@ -62,8 +62,11 @@ export function ptyFailure(e: unknown): PtyFailure {
 		case "unauthorized": // 4401
 		case "token_expired":
 			return {
-				message:
-					"Access ended: your session expired or you no longer have access to this team. Reload the page.",
+				message: singleOwner
+					? singleOwnerErrorText(
+							"Access ended: your session expired or you no longer have access to this team. Reload the page.",
+						)
+					: "Access ended: your session expired or you no longer have access to this team. Reload the page.",
 				retry: false,
 			};
 		case "not_found": // 4404
@@ -74,9 +77,9 @@ export function ptyFailure(e: unknown): PtyFailure {
 				retry: true,
 			};
 		case "forbidden": // 4403
-			return { message: describeError(e).message, retry: false };
+			return { message: describeError(e, singleOwner).message, retry: false };
 		default:
-			return { message: describeError(e).message, retry: true };
+			return { message: describeError(e, singleOwner).message, retry: true };
 	}
 }
 

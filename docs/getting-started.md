@@ -3,13 +3,15 @@
 Umiak gives you throwaway Proxmox virtual machines for code, tools and AI agents.
 Open **Getting started** in the dashboard sidebar at `/app/getting-started` for this deployment’s real URLs and copy buttons. `/app/help` redirects there.
 
+Quickstart owner and local deployments show a single-owner dashboard without teams. OIDC deployments retain teams. Both the CLI and dashboard use the explicit `/v1/meta` tenancy field; older deployments without it retain team support.
+
 The examples below use `https://api.example.com`, `https://app.example.com` and `preview.example.com`. Replace them with the URLs shown in your dashboard. Commands are checked against the in-app guide by `apps/web/test/getting-started.test.ts`.
 
 Quickstart: run `docker compose up -d --build` from the repository root, then follow [the operator quickstart](../deploy/compose/quickstart/README.md).
 
-## The model in one minute
+## The model in one minute (owner · private CA)
 
-A sandbox is a throwaway virtual machine, identified by a three-word slug. A template is the image it is cloned from; a size sets RAM and vCPU. Your team owns its sandboxes, snapshots and API keys.
+A sandbox is a throwaway virtual machine, identified by a three-word slug. A template is the image it is cloned from; a size sets RAM and vCPU. You own your sandboxes, snapshots and API keys.
 
 Snapshots save a disk so you can create another sandbox with --from. Fork copies a sandbox directly. Port previews expose a guest port over HTTPS. Desktop templates stream a screen that people and agents can control.
 
@@ -202,7 +204,7 @@ For Claude Code, save the remote JSON configuration in .mcp.json. Set UMIAK_OWNE
 
 Ask your agent: "Create a Linux sandbox, clone my repository into it and run the tests." umiak mcp --help explains read-only mode, toolsets and sandbox restrictions.
 
-## Use the SDK
+## Use the SDK (owner · private CA)
 
 Both SDKs read the API URL and credentials from your CLI profile after login. Run package installation from the repository checkout; these packages are available as source/workspace packages.
 
@@ -239,11 +241,11 @@ try {
 }
 ```
 
-The API reference is available at https://api.example.com/v1/openapi.json. API keys can restrict automated clients to a team and scopes.
+The API reference is available at https://api.example.com/v1/openapi.json. API keys restrict automated clients to the scopes you choose.
 
-## Limits and cleanup
+## Limits and cleanup (owner · private CA)
 
-Limits belong to this deployment and team; check them rather than assuming a fixed VM count or memory budget. Stopping frees RAM while keeping the disk; deleting frees the sandbox resources.
+Limits belong to this deployment; check them rather than assuming a fixed VM count or memory budget. Stopping frees RAM while keeping the disk; deleting frees the sandbox resources.
 
 **Check quotas**
 
@@ -396,6 +398,14 @@ umiak mcp --help
 docker compose logs --tail=100 api worker gateway
 ```
 
+## The model in one minute (oidc)
+
+A sandbox is a throwaway virtual machine, identified by a three-word slug. A template is the image it is cloned from; a size sets RAM and vCPU. Your team owns its sandboxes, snapshots and API keys.
+
+Snapshots save a disk so you can create another sandbox with --from. Fork copies a sandbox directly. Port previews expose a guest port over HTTPS. Desktop templates stream a screen that people and agents can control.
+
+Inactive sandboxes stop automatically according to deployment policy. Their disks remain available for resume. Use limits to check the actual quotas before creating a sandbox.
+
 ## Install the CLI (oidc)
 
 Build the CLI from the repository checkout. Choose the output for your OS and CPU (darwin/linux, arm64/x64), or umiak-windows-x64.exe on Windows. Copy it to a directory on PATH; a shell alias is insufficient for agent clients.
@@ -467,3 +477,60 @@ callback_port = 33418
 ```
 
 Ask your agent: "Create a Linux sandbox, clone my repository into it and run the tests." umiak mcp --help explains read-only mode, toolsets and sandbox restrictions.
+
+## Use the SDK (oidc)
+
+Both SDKs read the API URL and credentials from your CLI profile after login. Run package installation from the repository checkout; these packages are available as source/workspace packages.
+
+**Install Python SDK**
+
+```text
+pip install -e packages/sdk-py
+```
+
+**Python**
+
+```text
+from umiak_sdk import Umiak
+
+with Umiak() as umiak:
+    sb = umiak.sandboxes.create(template="linux", wait=True)
+    try:
+        print(sb.exec("uname -a").stdout)
+    finally:
+        sb.delete()
+```
+
+**TypeScript · @umiak/sdk workspace package**
+
+```text
+import { Umiak } from "@umiak/sdk";
+
+const umiak = new Umiak();
+const sb = await umiak.sandboxes.create({ template: "linux" }, { wait: true });
+try {
+    console.log((await sb.exec(["uname", "-a"])).stdout);
+} finally {
+    await sb.delete();
+}
+```
+
+The API reference is available at https://api.example.com/v1/openapi.json. API keys can restrict automated clients to a team and scopes.
+
+## Limits and cleanup (oidc)
+
+Limits belong to this deployment and team; check them rather than assuming a fixed VM count or memory budget. Stopping frees RAM while keeping the disk; deleting frees the sandbox resources.
+
+**Check quotas**
+
+```text
+umiak limits
+```
+
+**List sandboxes**
+
+```text
+umiak ls
+```
+
+If quota_exceeded or out_of_capacity appears, stop or delete an unused sandbox, or ask the operator about capacity. Desktop templates need at least the size shown in New sandbox.

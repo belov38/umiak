@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useUmiak } from "@/lib/api";
-import { attempt } from "@/lib/client-call";
+import { useAttempt } from "@/lib/client-call";
 
 export function DeleteSandboxDialog({
 	teamId,
@@ -30,6 +30,7 @@ export function DeleteSandboxDialog({
 	onOpenChange: (open: boolean) => void;
 	onDeleted: () => void | Promise<void>;
 }) {
+	const attempt = useAttempt();
 	const umiak = useUmiak(teamId);
 	const [typed, setTyped] = useState("");
 	const [busy, setBusy] = useState(false);

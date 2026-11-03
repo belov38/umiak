@@ -22,6 +22,8 @@ const env: Record<string, string | undefined> = {
 		process.env.UMIAK_APP_ORIGIN ?? `http://${LOOPBACK}:${PROXY_PORT}`,
 	UMIAK_OPERATOR_GROUPS: process.env.UMIAK_OPERATOR_GROUPS ?? OPERATOR_GROUP,
 	UMIAK_PREVIEW_DOMAIN: process.env.UMIAK_PREVIEW_DOMAIN ?? "umiak.localhost",
+	UMIAK_WEB_META_URL:
+		process.env.UMIAK_WEB_META_URL ?? `http://${LOOPBACK}:8080/v1/meta`,
 	UMIAK_API_PUBLIC_URL:
 		process.env.UMIAK_API_PUBLIC_URL ?? `http://${LOOPBACK}:8080`,
 	PAYLOAD_SECRET:

@@ -10,7 +10,10 @@ import { toast } from "sonner";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { EmptyState as DashboardEmpty } from "@/components/app/empty-state";
 import { QueryError } from "@/components/app/query-error";
-import { useTeamPermission } from "@/components/app/session-context";
+import {
+	useSingleOwner,
+	useTeamPermission,
+} from "@/components/app/session-context";
 import { TeamNotices } from "@/components/app/team-notices";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -34,7 +37,7 @@ import {
 	partitionKeys,
 	presetOf,
 } from "@/lib/api-keys";
-import { attempt } from "@/lib/client-call";
+import { useAttempt } from "@/lib/client-call";
 import { formatAgo, formatDate } from "@/lib/format";
 import { can } from "@/lib/permissions";
 import type { TeamNoticeView } from "@/lib/team-actions/team-settings";
@@ -48,6 +51,8 @@ export function KeysPage({
 	teamId: string;
 	notices: TeamNoticeView[];
 }) {
+	const attempt = useAttempt();
+	const singleOwner = useSingleOwner();
 	const umiak = useUmiak(teamId);
 	const queryClient = useQueryClient();
 	const { session, team } = useTeamPermission(teamId);
@@ -96,24 +101,37 @@ export function KeysPage({
 
 	return (
 		<section className="space-y-4">
-			<TeamNotices
-				teamId={teamId}
-				notices={notices}
-				canAcknowledge={can(session, team, "acknowledgeNotice")}
-				canRevoke={canRevoke}
-			/>
+			{!singleOwner && (
+				<TeamNotices
+					teamId={teamId}
+					notices={notices}
+					canAcknowledge={can(session, team, "acknowledgeNotice")}
+					canRevoke={canRevoke}
+				/>
+			)}
 			<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
 				<h1 className="text-xl font-semibold">API keys</h1>
 			</div>
 			<div className="dashboard-card keys-card">
 				<div className="key-intro">
-					<h2>{team0?.name ?? "Team"} keys</h2>
+					<h2>
+						{singleOwner ? "Automation keys" : `${team0?.name ?? "Team"} keys`}
+					</h2>
 					<p className="text-sm text-muted-foreground">
-						Keys are for CI and agents and belong to the team. People do not
-						need one: run <code>umiak login</code> to use the CLI with your own
-						account.
-						{!canIssue &&
-							" Only an owner of the team can issue and rotate keys."}
+						{singleOwner ? (
+							<>
+								Keys let CI and agents access this deployment with selected
+								scopes. For the CLI, use <code>umiak login</code>.
+							</>
+						) : (
+							<>
+								Keys are for CI and agents and belong to the team. People do not
+								need one: run <code>umiak login</code> to use the CLI with your
+								own account.
+								{!canIssue &&
+									" Only an owner of the team can issue and rotate keys."}
+							</>
+						)}
 					</p>
 				</div>
 				{canIssue && (

@@ -13,10 +13,10 @@ import { ConfirmButton } from "@/components/app/confirm-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useUmiak } from "@/lib/api";
-import { attempt } from "@/lib/client-call";
-import { describeError } from "@/lib/errors";
+import { useAttempt } from "@/lib/client-call";
 import { formatTime } from "@/lib/format";
 import type { TeamNoticeView } from "@/lib/team-actions/team-settings";
+import { useDescribeError } from "@/lib/use-error";
 
 export function TeamNotices({
 	teamId,
@@ -56,6 +56,8 @@ function Notice({
 	canAcknowledge: boolean;
 	canRevoke: boolean;
 }) {
+	const attempt = useAttempt();
+	const describeError = useDescribeError();
 	const umiak = useUmiak(teamId);
 	const router = useRouter();
 	const queryClient = useQueryClient();

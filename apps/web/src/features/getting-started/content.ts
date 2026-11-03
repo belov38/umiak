@@ -1,5 +1,6 @@
 /** Commands are checked against docs/getting-started.md by the drift test. */
 export interface GuideDeployment {
+	tenancy?: "single" | "teams";
 	mode: "owner" | "none" | "oidc";
 	ownerPrivateCA?: boolean;
 	apiUrl: string;
@@ -23,6 +24,7 @@ const code = (label: string, value: string): Block => ({
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 export function guideSections(d: GuideDeployment): GuideSection[] {
+	const singleOwner = d.tenancy === "single";
 	const api = d.apiUrl.replace(/\/+$/, "");
 	const mcp = `${d.appUrl.replace(/\/+$/, "")}/mcp`;
 	const sections: GuideSection[] = [
@@ -31,7 +33,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 			title: "The model in one minute",
 			blocks: [
 				text(
-					"A sandbox is a throwaway virtual machine, identified by a three-word slug. A template is the image it is cloned from; a size sets RAM and vCPU. Your team owns its sandboxes, snapshots and API keys.",
+					`A sandbox is a throwaway virtual machine, identified by a three-word slug. A template is the image it is cloned from; a size sets RAM and vCPU. ${singleOwner ? "You own your sandboxes, snapshots and API keys." : "Your team owns its sandboxes, snapshots and API keys."}`,
 				),
 				text(
 					"Snapshots save a disk so you can create another sandbox with --from. Fork copies a sandbox directly. Port previews expose a guest port over HTTPS. Desktop templates stream a screen that people and agents can control.",
@@ -97,7 +99,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 							text(
 								d.mode === "none"
 									? "No sign-in is required in local mode. Access is restricted by the deployment's network policy; never expose the local listener to an untrusted network."
-									: "Login opens browser sign-in through this deployment's identity provider. For unattended clients, use a scoped team API key from API keys.",
+									: `Login opens browser sign-in through this deployment's identity provider. For unattended clients, use a scoped ${singleOwner ? "" : "team "}API key from API keys.`,
 							),
 						],
 		},
@@ -253,7 +255,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 					'import { Umiak } from "@umiak/sdk";\n\nconst umiak = new Umiak();\nconst sb = await umiak.sandboxes.create({ template: "linux" }, { wait: true });\ntry {\n    console.log((await sb.exec(["uname", "-a"])).stdout);\n} finally {\n    await sb.delete();\n}',
 				),
 				text(
-					`The API reference is available at ${api}/v1/openapi.json. API keys can restrict automated clients to a team and scopes.`,
+					`The API reference is available at ${api}/v1/openapi.json. ${singleOwner ? "API keys restrict automated clients to the scopes you choose." : "API keys can restrict automated clients to a team and scopes."}`,
 				),
 			],
 		},
@@ -262,7 +264,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 			title: "Limits and cleanup",
 			blocks: [
 				text(
-					"Limits belong to this deployment and team; check them rather than assuming a fixed VM count or memory budget. Stopping frees RAM while keeping the disk; deleting frees the sandbox resources.",
+					`Limits belong to this deployment${singleOwner ? "" : " and team"}; check them rather than assuming a fixed VM count or memory budget. Stopping frees RAM while keeping the disk; deleting frees the sandbox resources.`,
 				),
 				code("Check quotas", "umiak limits"),
 				code("List sandboxes", "umiak ls"),
