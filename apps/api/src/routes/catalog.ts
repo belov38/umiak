@@ -4,6 +4,10 @@
 // templates are listed for operators only.
 import { createRoute } from "@hono/zod-openapi";
 import type { SizeConfig, TemplateConfig } from "@umiak/config";
+import {
+	NODE_NOT_BUILDING_SQL,
+	STORAGE_BELOW_THRESHOLDS_SQL,
+} from "@umiak/core";
 import { authOf } from "../auth/principal.ts";
 import type { ApiApp, ApiDeps } from "../deps.ts";
 import { ERROR_RESPONSES, jsonResponse } from "../openapi/registry.ts";
@@ -13,7 +17,16 @@ import {
 	type TemplateSchema,
 } from "../schemas/catalog.ts";
 
+export interface NodeTemplateAvailability {
+	nodeId: string;
+	nodeName: string;
+	version: string | null;
+	pveVmid: number | null;
+	available: boolean;
+}
+
 export interface CatalogTemplate {
+	availability: NodeTemplateAvailability[];
 	template: TemplateConfig;
 	/** Version of the newest active build; null without one. */
 	version: string | null;
@@ -48,10 +61,36 @@ export async function catalogTemplates(
 		);
 		for (const row of r.rows) builds.set(row.template_slug, row);
 	}
+	const availability = new Map<string, NodeTemplateAvailability[]>();
+	if (deps.pool !== null && templates.length > 0) {
+		const r = await deps.pool.query<
+			NodeTemplateAvailability & { templateSlug: string }
+		>(
+			`
+   SELECT slug AS "templateSlug", n.id AS "nodeId", n.name AS "nodeName",
+    tb.version, tb.pve_vmid AS "pveVmid",
+    (p.state='active' AND n.state='active' AND tb.id IS NOT NULL
+     AND ${NODE_NOT_BUILDING_SQL}
+     AND COALESCE(${STORAGE_BELOW_THRESHOLDS_SQL},false)) AS available
+   FROM runtime.nodes n JOIN runtime.providers p ON p.id=n.provider_id
+   CROSS JOIN unnest($1::text[]) AS slug
+   LEFT JOIN runtime.template_builds tb ON tb.node_id=n.id AND tb.template_slug=slug AND tb.status='active'
+   LEFT JOIN runtime.storages st ON st.id=tb.storage_id AND st.node_id=n.id AND st.provider_id=n.provider_id
+   WHERE n.retired_at IS NULL
+   ORDER BY n.name,n.id`,
+			[templates.map((t) => t.slug)],
+		);
+		for (const { templateSlug, ...row } of r.rows) {
+			const list = availability.get(templateSlug) ?? [];
+			list.push(row);
+			availability.set(templateSlug, list);
+		}
+	}
 	return templates.map((template) => {
 		const build = builds.get(template.slug);
 		return {
 			template,
+			availability: availability.get(template.slug) ?? [],
 			version: build?.version ?? null,
 			buildCreatedAt: build?.created_at
 				? new Date(build.created_at).toISOString()
@@ -85,6 +124,7 @@ function templateResource(t: CatalogTemplate): typeof TemplateSchema._output {
 		version: t.version,
 		buildCreatedAt: t.buildCreatedAt,
 		pveVmid: t.pveVmid,
+		availability: t.availability,
 	};
 }
 

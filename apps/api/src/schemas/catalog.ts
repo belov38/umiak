@@ -4,6 +4,21 @@ import { extensibleEnum } from "../openapi/registry.ts";
 
 export const TemplateSchema = z
 	.object({
+		availability: z
+			.array(
+				z.object({
+					nodeId: z.uuid(),
+					nodeName: z.string(),
+					version: z.string().nullable(),
+					pveVmid: z.int().nullable(),
+					available: z.boolean(),
+				}),
+			)
+			.optional()
+			.openapi({
+				description:
+					"Per-node local template availability; does not guarantee free RAM",
+			}),
 		slug: z.string().openapi({ example: "linux" }),
 		name: z.string(),
 		os: extensibleEnum(["linux", "windows"]),

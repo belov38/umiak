@@ -101,6 +101,7 @@ describe.skipIf(skipPg())("templates, sizes and limits", () => {
 			version: expect.stringMatching(/^v\d+$/),
 			buildCreatedAt: expect.any(String),
 			pveVmid: expect.any(Number),
+			availability: expect.any(Array),
 		});
 		expect(data.find((t) => t.slug === old)).toMatchObject({
 			capabilities: ["exec"],
@@ -120,6 +121,67 @@ describe.skipIf(skipPg())("templates, sizes and limits", () => {
 		});
 	});
 
+	it("lists each node's version and availability without exposing its SSH endpoint", async () => {
+		const a = await createTopology(db.pool, {
+			build: { templateSlug: unbuilt, version: "node-a" },
+		});
+		const b = await createTopology(db.pool, {
+			providerId: a.providerId,
+			build: { templateSlug: unbuilt, version: "node-b" },
+		});
+		const c = await createTopology(db.pool, {
+			providerId: a.providerId,
+			build: { templateSlug: "different" },
+		});
+		await db.pool.query(
+			"UPDATE runtime.nodes SET state='cordoned' WHERE id=$1",
+			[b.nodeId],
+		);
+		try {
+			const r = await h.request("GET", "/v1/templates");
+			const item = body(r).data.find((t: Body) => t.slug === unbuilt);
+			expect(item.availability).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						nodeId: a.nodeId,
+						version: "node-a",
+						available: true,
+					}),
+					expect.objectContaining({
+						nodeId: b.nodeId,
+						version: "node-b",
+						available: false,
+					}),
+					expect.objectContaining({
+						nodeId: c.nodeId,
+						version: null,
+						available: false,
+					}),
+				]),
+			);
+			expect(JSON.stringify(item)).not.toContain("node_agent_ref");
+			expect(JSON.stringify(item)).not.toContain("https://pve:");
+			await db.pool.query(
+				"UPDATE runtime.nodes SET retired_at=now() WHERE id=$1",
+				[b.nodeId],
+			);
+			const next = body(await h.request("GET", "/v1/templates")).data.find(
+				(t: Body) => t.slug === unbuilt,
+			);
+			expect(next.availability.map((x: Body) => x.nodeId)).not.toContain(
+				b.nodeId,
+			);
+		} finally {
+			await db.pool.query(
+				"UPDATE runtime.template_builds SET status='retired' WHERE node_id=ANY($1::uuid[])",
+				[[a.nodeId, b.nodeId, c.nodeId]],
+			);
+			await db.pool.query(
+				"UPDATE runtime.nodes SET retired_at=now() WHERE id=ANY($1::uuid[])",
+				[[a.nodeId, b.nodeId, c.nodeId]],
+			);
+		}
+	});
 	it("GET /v1/sizes: every configured size, smallest first", async () => {
 		const r = await h.request("GET", "/v1/sizes");
 		expect(body(r).data).toEqual([

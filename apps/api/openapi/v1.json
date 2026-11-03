@@ -3992,6 +3992,44 @@
 						},
 						"type": "array"
 					},
+					"availability": {
+						"description": "Per-node local template availability; does not guarantee free RAM",
+						"items": {
+							"properties": {
+								"available": {
+									"type": "boolean"
+								},
+								"nodeId": {
+									"format": "uuid",
+									"type": "string"
+								},
+								"nodeName": {
+									"type": "string"
+								},
+								"pveVmid": {
+									"type": [
+										"integer",
+										"null"
+									]
+								},
+								"version": {
+									"type": [
+										"string",
+										"null"
+									]
+								}
+							},
+							"required": [
+								"nodeId",
+								"nodeName",
+								"version",
+								"pveVmid",
+								"available"
+							],
+							"type": "object"
+						},
+						"type": "array"
+					},
 					"buildCreatedAt": {
 						"description": "Creation date of the active build",
 						"format": "date-time",

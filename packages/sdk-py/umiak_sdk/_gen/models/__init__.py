@@ -274,6 +274,7 @@ from .start_command_request_env import StartCommandRequestEnv
 from .start_command_request_mode import StartCommandRequestMode
 from .sync_command_result import SyncCommandResult
 from .template import Template
+from .template_availability_item import TemplateAvailabilityItem
 from .template_list import TemplateList
 from .template_os import TemplateOs
 from .unblock_request import UnblockRequest
@@ -549,6 +550,7 @@ __all__ = (
     "StartCommandRequestMode",
     "SyncCommandResult",
     "Template",
+    "TemplateAvailabilityItem",
     "TemplateList",
     "TemplateOs",
     "UnblockRequest",

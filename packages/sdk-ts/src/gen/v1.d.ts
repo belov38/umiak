@@ -2715,6 +2715,15 @@ export interface components {
         };
         Template: {
             allowedSizes: string[];
+            /** @description Per-node local template availability; does not guarantee free RAM */
+            availability?: {
+                available: boolean;
+                /** Format: uuid */
+                nodeId: string;
+                nodeName: string;
+                pveVmid: number | null;
+                version: string | null;
+            }[];
             /**
              * Format: date-time
              * @description Creation date of the active build

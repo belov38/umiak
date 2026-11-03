@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import datetime
 from collections.abc import Mapping
-from typing import Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
 from ..models.template_os import TemplateOs
 from ..types import UNSET, Unset
+
+if TYPE_CHECKING:
+    from ..models.template_availability_item import TemplateAvailabilityItem
+
 
 T = TypeVar("T", bound="Template")
 
@@ -26,6 +30,8 @@ class Template:
         os (TemplateOs):
         slug (str):  Example: linux.
         version (None | str): Version of the active build; null while none is active
+        availability (list[TemplateAvailabilityItem] | Unset): Per-node local template availability; does not guarantee
+            free RAM
         build_created_at (datetime.datetime | None | Unset): Creation date of the active build
         pve_vmid (int | None | Unset): VMID of the active sealed template
     """
@@ -39,6 +45,7 @@ class Template:
     os: TemplateOs
     slug: str
     version: None | str
+    availability: list[TemplateAvailabilityItem] | Unset = UNSET
     build_created_at: datetime.datetime | None | Unset = UNSET
     pve_vmid: int | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -62,6 +69,13 @@ class Template:
 
         version: None | str
         version = self.version
+
+        availability: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.availability, Unset):
+            availability = []
+            for availability_item_data in self.availability:
+                availability_item = availability_item_data.to_dict()
+                availability.append(availability_item)
 
         build_created_at: None | str | Unset
         if isinstance(self.build_created_at, Unset):
@@ -92,6 +106,8 @@ class Template:
                 "version": version,
             }
         )
+        if availability is not UNSET:
+            field_dict["availability"] = availability
         if build_created_at is not UNSET:
             field_dict["buildCreatedAt"] = build_created_at
         if pve_vmid is not UNSET:
@@ -101,6 +117,8 @@ class Template:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.template_availability_item import TemplateAvailabilityItem  # noqa: PLC0415
+
         d = dict(src_dict)
         allowed_sizes = cast(list[str], d.pop("allowedSizes"))
 
@@ -124,6 +142,15 @@ class Template:
             return cast(None | str, data)
 
         version = _parse_version(d.pop("version"))
+
+        _availability = d.pop("availability", UNSET)
+        availability: list[TemplateAvailabilityItem] | Unset = UNSET
+        if _availability is not UNSET:
+            availability = []
+            for availability_item_data in _availability:
+                availability_item = TemplateAvailabilityItem.from_dict(availability_item_data)
+
+                availability.append(availability_item)
 
         def _parse_build_created_at(data: object) -> datetime.datetime | None | Unset:
             if data is None:
@@ -161,6 +188,7 @@ class Template:
             os=os,
             slug=slug,
             version=version,
+            availability=availability,
             build_created_at=build_created_at,
             pve_vmid=pve_vmid,
         )
