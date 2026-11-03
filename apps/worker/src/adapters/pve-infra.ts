@@ -116,7 +116,7 @@ export async function loadNodeTopology(
 		     AND s.driver = 'lvmthin'
 		   ORDER BY (s.node_id IS NULL), s.name LIMIT 1
 		 ) st ON true
-		 WHERE n.id = $1`,
+		 WHERE n.id = $1 AND n.retired_at IS NULL`,
 		[nodeId],
 	);
 	const row = r.rows[0];
@@ -155,8 +155,8 @@ export function secretDirOf(secretsDir: string, secretRef: string): string {
 /**
  * Builds PveApi and SshNodeOps from the Secret files of the provider:
  * `pve-token` (mode 600), `pve-root-ca.pem`, `umiak-node_ed25519`,
- * `known_hosts`. Env: `UMIAK_PVE_TOKEN_ID` (default `umiak@pve!dev`),
- * `UMIAK_NODE_SSH_HOST` (default `nodes.node_agent_ref`).
+ * `known_hosts`. Env: `UMIAK_PVE_TOKEN_ID` (default `umiak@pve!dev`).
+ * SSH routing always uses `nodes.node_agent_ref`.
  */
 export function pveClientsFromSecrets(
 	secretsDir: string,
@@ -174,7 +174,7 @@ export function pveClientsFromSecrets(
 		let node: SshNodeOps;
 		try {
 			node = new SshNodeOps({
-				host: env.UMIAK_NODE_SSH_HOST ?? t.nodeAgentRef,
+				host: t.nodeAgentRef,
 				privateKey: readFileSync(join(dir, "umiak-node_ed25519")),
 				knownHosts: readFileSync(join(dir, "known_hosts"), "utf8"),
 			});
@@ -929,7 +929,7 @@ export class PveInfraRegistry implements InfraRegistry {
 	readonly #family: string | undefined;
 	readonly #cache = new Map<
 		string,
-		Promise<{ infra: PveNodeInfra; refreshedAt: number }>
+		Promise<{ infra: PveNodeInfra; refreshedAt: number; topology: string }>
 	>();
 
 	constructor(pool: pg.Pool, o: PveInfraRegistryOptions) {
@@ -960,8 +960,9 @@ export class PveInfraRegistry implements InfraRegistry {
 
 	async #build(
 		nodeId: string,
-	): Promise<{ infra: PveNodeInfra; refreshedAt: number }> {
-		const t = await loadNodeTopology(this.#db, nodeId);
+		topology?: NodeTopology,
+	): Promise<{ infra: PveNodeInfra; refreshedAt: number; topology: string }> {
+		const t = topology ?? (await loadNodeTopology(this.#db, nodeId));
 		const clients = await this.#clients(t);
 		const infra = new PveNodeInfra(this.#db, t, clients, {
 			...(this.#o.vmLockSleep ? { vmLockSleep: this.#o.vmLockSleep } : {}),
@@ -976,7 +977,7 @@ export class PveInfraRegistry implements InfraRegistry {
 			infra.close();
 			throw err;
 		}
-		return { infra, refreshedAt: Date.now() };
+		return { infra, refreshedAt: Date.now(), topology: JSON.stringify(t) };
 	}
 
 	async forNode(nodeId: string): Promise<NodeInfra> {
@@ -994,8 +995,30 @@ export class PveInfraRegistry implements InfraRegistry {
 			Date.now() - entry.refreshedAt >=
 			(this.#o.templateRefreshMs ?? 10_000)
 		) {
-			entry.refreshedAt = Date.now();
-			await entry.infra.setTemplates(await this.#templatesOf(nodeId));
+			// Install the refresh promise before awaiting I/O so concurrent callers share it.
+			if (this.#cache.get(nodeId) !== p)
+				return (await this.#cache.get(nodeId))?.infra ?? this.forNode(nodeId);
+			const refreshed = (async () => {
+				try {
+					const t = await loadNodeTopology(this.#db, nodeId);
+					if (JSON.stringify(t) !== entry.topology) {
+						const next = await this.#build(nodeId, t);
+						entry.infra.close();
+						return next;
+					}
+					await entry.infra.setTemplates(await this.#templatesOf(nodeId));
+					entry.refreshedAt = Date.now();
+					return entry;
+				} catch (err) {
+					entry.infra.close();
+					throw err;
+				}
+			})();
+			this.#cache.set(nodeId, refreshed);
+			refreshed.catch(() => {
+				if (this.#cache.get(nodeId) === refreshed) this.#cache.delete(nodeId);
+			});
+			return (await refreshed).infra;
 		}
 		return entry.infra;
 	}

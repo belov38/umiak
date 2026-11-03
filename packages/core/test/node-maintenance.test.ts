@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { withTx } from "@umiak/db";
 import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { admit, place, tryPoweredStart } from "../src/index.ts";
+import { admit, lockNode, place, tryPoweredStart } from "../src/index.ts";
 import {
 	beginNodeBuild,
 	finishNodeBuild,
@@ -32,6 +32,63 @@ const reserve = (nodeId: string, jobId = randomUUID()) =>
 	);
 
 describe("node maintenance (S19)", () => {
+	it("an admission waiting for the node lock observes a newly committed build reservation", async () => {
+		const a = await createTopology(db.pool);
+		let admission: Promise<unknown> | undefined;
+		await withTx(db.pool, async (tx) => {
+			await lockNode(tx, a.nodeId);
+			const entered = Promise.withResolvers<void>();
+			admission = withTx(db.pool, async (other) => {
+				entered.resolve();
+				return admit(other, {
+					nodeId: a.nodeId,
+					storageId: a.storageId,
+					templateBuildId: a.templateBuildId,
+					needMb: 2048,
+					pairKey: null,
+					evict: false,
+					jobs,
+				});
+			});
+			await entered.promise;
+			await beginNodeBuild(tx, {
+				nodeId: a.nodeId,
+				jobId: randomUUID(),
+				templateSlug: "linux",
+			});
+		});
+		expect(await admission).toEqual({ ok: false });
+	});
+	it("a build waiting on admitted placement sees the committed machine reservation", async () => {
+		const a = await createTopology(db.pool);
+		let building: Promise<unknown> | undefined;
+		await withTx(db.pool, async (tx) => {
+			expect(
+				await admit(tx, {
+					nodeId: a.nodeId,
+					needMb: 2048,
+					pairKey: null,
+					evict: false,
+					jobs,
+				}),
+			).toMatchObject({ ok: true });
+			const entered = Promise.withResolvers<void>();
+			building = withTx(db.pool, async (other) => {
+				entered.resolve();
+				return beginNodeBuild(other, {
+					nodeId: a.nodeId,
+					jobId: randomUUID(),
+					templateSlug: "linux",
+				});
+			});
+			// Observe rejection immediately, but assert it after the owner commits.
+			void building.catch(() => {});
+			await entered.promise;
+			await insertMachine(tx.client, a, { state: "allocating" });
+		});
+		await expect(building).rejects.toThrow(/idle/);
+	});
+
 	it("promotes a build on one node without deprecating the other's build, fenced by reservation", async () => {
 		const a = await createTopology(db.pool);
 		const b = await createTopology(db.pool, { providerId: a.providerId });

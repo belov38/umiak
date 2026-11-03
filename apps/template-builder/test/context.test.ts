@@ -1,5 +1,5 @@
 import { FakePve } from "@umiak/pve/testing";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { imageCacheDir, RamGuard, registryDir } from "../src/context.ts";
 
 function pveWith(
@@ -24,6 +24,25 @@ function pveWith(
 }
 
 describe("RamGuard", () => {
+	it("does not charge another node's VMs against the target node cap", async () => {
+		const pve = pveWith([{ vmid: 500, memory: 8192, status: "running" }]);
+		const get = pve.get.bind(pve);
+		vi.spyOn(pve, "get").mockImplementation(async (path, params) => {
+			const result = await get(path, params);
+			if (path === "/cluster/resources")
+				return (result as object[]).map((v) => ({ ...v, node: "pve2" }));
+			return result;
+		});
+		const g = new RamGuard({
+			api: pve,
+			node: "pve",
+			pool: "umiak",
+			capMb: 4096,
+		});
+		expect(await g.runningMb()).toBe(0);
+		await expect(g.reserve(601, 4096)).resolves.toBeUndefined();
+	});
+
 	it("counts running non-template pool VMs and refuses to exceed the cap", async () => {
 		const pve = pveWith([
 			{ vmid: 500, memory: 2048, status: "running" },

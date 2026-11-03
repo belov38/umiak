@@ -154,6 +154,7 @@ export class RamGuard {
 		>("/cluster/resources", { type: "vm" });
 		const others = vms.filter(
 			(v) =>
+				(v.node ?? node) === node &&
 				v.pool === pool &&
 				v.template !== 1 &&
 				v.vmid !== except &&

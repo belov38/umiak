@@ -114,6 +114,42 @@ async function setup(
 }
 
 describe("PveInfraRegistry", () => {
+	it("refreshes clients after endpoint changes and closes them on retirement", async () => {
+		const topo = await createTopology(db.pool);
+		const hosts: string[] = [];
+		let closed = 0;
+		const registry = new PveInfraRegistry(db.pool, {
+			secretsDir: "/unused",
+			templateRefreshMs: 0,
+			clients: (t) => {
+				hosts.push(t.nodeAgentRef);
+				return {
+					api: new FakePve(),
+					node: new FakeNode(),
+					close: () => {
+						closed++;
+					},
+				};
+			},
+		});
+		await registry.forNode(topo.nodeId);
+		await db.pool.query(
+			"UPDATE runtime.nodes SET node_agent_ref='second' WHERE id=$1",
+			[topo.nodeId],
+		);
+		await registry.forNode(topo.nodeId);
+		expect(hosts).toEqual(["umiak-node", "second"]);
+		expect(closed).toBe(1);
+		await db.pool.query(
+			"UPDATE runtime.nodes SET retired_at=now() WHERE id=$1",
+			[topo.nodeId],
+		);
+		await expect(registry.forNode(topo.nodeId)).rejects.toThrow(/node/);
+		expect(closed).toBe(2);
+		await registry.close();
+		expect(closed).toBe(2);
+	});
+
 	it("a running Windows snapshot needs an explicit crashConsistent, also with an agent-only preparation hook", async () => {
 		const e = await setup();
 		const m = randomUUID();
@@ -1166,18 +1202,20 @@ describe("pveClientsFromSecrets", () => {
 		).rejects.toThrow(/mode 600/);
 	});
 
-	it("UMIAK_NODE_SSH_HOST overrides node_agent_ref as the SSH host", async () => {
+	it("uses each node's pinned DB SSH host despite a misleading global override", async () => {
 		const topo = await createTopology(db.pool);
 		const t = await loadNodeTopology(db.pool, topo.nodeId);
 		const root = mkdtempSync(join(tmpdir(), "umiak-secrets-"));
 		writeSecrets(root, "pve.example.ts.net");
-		await expect(async () =>
-			pveClientsFromSecrets(root, {})(t),
-		).rejects.toThrow(/no pinned host key for umiak-node/);
 		const c = await pveClientsFromSecrets(root, {
-			UMIAK_NODE_SSH_HOST: "pve.example.ts.net",
-		})(t);
+			UMIAK_NODE_SSH_HOST: "wrong.example",
+		})({ ...t, nodeAgentRef: "pve.example.ts.net" });
 		expect(c.node).toBeInstanceOf(SshNodeOps);
 		c.close?.();
+		await expect(async () =>
+			pveClientsFromSecrets(root, {
+				UMIAK_NODE_SSH_HOST: "pve.example.ts.net",
+			})(t),
+		).rejects.toThrow(/no pinned host key/);
 	});
 });

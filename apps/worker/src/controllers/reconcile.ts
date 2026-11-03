@@ -166,7 +166,7 @@ export async function runReconcile(
 	const parts: [string, () => Promise<Plan[]>][] = [];
 	for (const provider of p.rows) {
 		const nodes = await ctx.pool.query<{ id: string }>(
-			`SELECT id FROM runtime.nodes WHERE provider_id = $1 AND state <> 'down' ORDER BY id`,
+			`SELECT id FROM runtime.nodes WHERE provider_id = $1 AND state <> 'down' AND retired_at IS NULL ORDER BY id`,
 			[provider.id],
 		);
 		for (const { id } of nodes.rows) {
@@ -951,7 +951,7 @@ async function planLeases(
 	const nodeOfVm = async (vmid: number): Promise<string | null> => {
 		providerNodes ??= (
 			await ctx.pool.query<{ id: string }>(
-				`SELECT id FROM runtime.nodes WHERE provider_id = $1 AND state <> 'down' ORDER BY id`,
+				`SELECT id FROM runtime.nodes WHERE provider_id = $1 AND state <> 'down' AND retired_at IS NULL ORDER BY id`,
 				[provider.id],
 			)
 		).rows.map((x) => x.id);
