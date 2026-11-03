@@ -13,6 +13,7 @@ import (
 
 // Error codes of the Umiak-Error header (spec section 7.6).
 const (
+	CodeDesktopStarting        = "desktop_starting"
 	CodeRouteNotFound          = "route_not_found"
 	CodeRouteBlocked           = "route_blocked"
 	CodeAuthRequired           = "auth_required"
@@ -42,6 +43,7 @@ type Error struct {
 
 // defaultMessages is used when Error.Message is empty.
 var defaultMessages = map[string]string{
+	CodeDesktopStarting:        "Starting the desktop… This takes up to a minute.",
 	CodeRouteNotFound:          "This address does not exist.",
 	CodeRouteBlocked:           "This address is blocked.",
 	CodeAuthRequired:           "Authentication is required.",
@@ -59,6 +61,29 @@ var defaultMessages = map[string]string{
 }
 
 const fallbackMessage = "The request could not be completed."
+
+// Dashboard brand tokens from apps/web/src/app/globals.css. Keep this page
+// self-contained: the sandbox origin cannot depend on dashboard assets.
+var desktopStartingPage = template.Must(template.New("desktop-starting").Parse(`<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+{{if .Refresh}}<meta http-equiv="refresh" content="5">{{end}}
+<title>Starting the desktop… · Umiak</title>
+<style>
+:root{color-scheme:light dark;--background:#fefefe;--foreground:#060606;--muted-foreground:#4d4d4d;--primary:#263fa9;--border:#e0e0e0}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--background);color:var(--foreground);font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+main{width:min(100%,36rem);padding:3rem 2rem}.brand{font-family:"Funnel Display",system-ui,sans-serif;font-size:1.5rem;font-weight:600;letter-spacing:-.04em;margin-bottom:3rem}
+h1{font-size:1.5rem;font-weight:500;letter-spacing:-.03em;margin:1.5rem 0 .75rem}p{line-height:1.6;margin:.5rem 0;color:var(--muted-foreground)}.hint{margin-top:2rem;font-size:.875rem}
+.spinner{width:2rem;height:2rem;border:2px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-color-scheme:dark){:root{--background:#060606;--foreground:#fefefe;--muted-foreground:#b8b8b8;--border:#2e2e2e;--primary:#929fd3}}
+@media (prefers-reduced-motion:reduce){.spinner{animation:none}}
+</style></head><body><main>
+<div class="brand">umiak</div>
+<div role="status" aria-live="polite"><div class="spinner" aria-hidden="true"></div>
+<h1>Starting the desktop…</h1><p>This takes up to a minute.</p></div>
+{{if .Refresh}}<p class="hint">You can stay here. Your desktop will open automatically.</p>{{end}}
+</main></body></html>`))
 
 var page = template.Must(template.New("page").Parse(`<!doctype html>
 <html lang="en">
@@ -139,7 +164,11 @@ func Write(w http.ResponseWriter, r *http.Request, e Error) {
 		if head {
 			return
 		}
-		_ = page.Execute(w, pageData{
+		renderer := page
+		if e.Code == CodeDesktopStarting {
+			renderer = desktopStartingPage
+		}
+		_ = renderer.Execute(w, pageData{
 			Status:    e.Status,
 			Title:     http.StatusText(e.Status),
 			Message:   e.Message,
