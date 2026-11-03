@@ -11,7 +11,7 @@ plan: `docs/plans/s5-linux-template.md`). The build VM is driven only through th
 - Host runbook steps done: `infra/pve/setup.sh media` (role `UmiakTemplateMedia` on `/storage/local`) and
   `infra/pve/setup.sh node` (an `umiak-node` with `media.list`/`media.remove` and template origins in its range).
 - The S1 client config (`UMIAK_PVE_URL`, `UMIAK_PVE_TLS_NAME`, `UMIAK_NODE_SSH_HOST`, `~/.config/umiak/`).
-- Dev template slots: `linux` 597, `linux-desktop` 596, `windows` 595. Templates 595–598 are read-only on the active stand: no rebuilds or deletes. VM 598 is the retired headless Windows build; freeing it needs Ilia's explicit approval. Fresh installations allocate empty template slots separately from sandbox VMIDs 500–589. Rebuilds need another empty slot and preserve the active version.
+- Dev template slots: `linux` 597, `linux-desktop` 596, `windows` 595. Templates 595–597 are read-only on the active stand: no rebuilds or deletes. VM 598 (old headless Windows) was deleted on 2026-11-04; slots 598 and 599 are free.
 
 ## Build
 

@@ -163,6 +163,9 @@ export async function retire(
 		report.push(
 			`VM ${vmid}: ${present ? `holds ${name ?? "another guest"}, not this build` : "gone"}; left alone`,
 		);
+		// A VM deleted outside retire (or by a task that failed after removing it)
+		// still holds its template lease; free it when nothing occupies the VMID.
+		if (!present) await releaseTemplateLease(d, vmid, report);
 	} else if (vmid !== null && !opts.deleteVm) {
 		throw new Error(
 			`template VM ${vmid} (${m.vmName}) of build ${buildId} still exists; --delete-vm deletes it`,
@@ -176,27 +179,15 @@ export async function retire(
 			(!poc && (vmid === d.cfg.templateVmid || isProtectedVmid(vmid)))
 		)
 			throw new Error(`VM ${vmid} is not a template slot of umiak-tpl`);
+		// Referenced disks are removed with the VM. The unreferenced-disk scan walks every
+		// storage on the node and fails the whole task on an inactive one (pve: vmdata).
 		const upid = await d.api.delete<string>(`/nodes/${m.node}/qemu/${vmid}`, {
 			purge: 1,
-			"destroy-unreferenced-disks": 1,
+			"destroy-unreferenced-disks": 0,
 		});
 		await d.api.waitTask(m.node, upid, { timeoutMs: 10 * 60_000 });
 		report.push(`deleted template VM ${vmid} ${m.vmName}`);
-		const lease = (await d.allocator.list()).find(
-			(l) => l.vmid === vmid && l.purpose === "template",
-		);
-		// The VM is gone: a lease failure is reported and does not keep the build ready.
-		if (lease) {
-			try {
-				await d.allocator.release(vmid);
-				await d.node.call("dhcp.release", { mac: lease.mac });
-				report.push(`released template lease ${vmid}`);
-			} catch (err) {
-				report.push(
-					`lease ${vmid}: ${err instanceof Error ? err.message : String(err)}`,
-				);
-			}
-		}
+		await releaseTemplateLease(d, vmid, report);
 	}
 	d.registry.update(buildId, {
 		status: "retired",
@@ -204,4 +195,25 @@ export async function retire(
 	});
 	report.push(`build ${buildId} (${m.templateSlug} ${m.version}): retired`);
 	return report;
+}
+
+/** The VM is gone: a lease failure is reported and does not keep the build ready. */
+async function releaseTemplateLease(
+	d: Pick<RetireDeps, "allocator" | "node">,
+	vmid: number,
+	report: string[],
+): Promise<void> {
+	const lease = (await d.allocator.list()).find(
+		(l) => l.vmid === vmid && l.purpose === "template",
+	);
+	if (!lease) return;
+	try {
+		await d.allocator.release(vmid);
+		await d.node.call("dhcp.release", { mac: lease.mac });
+		report.push(`released template lease ${vmid}`);
+	} catch (err) {
+		report.push(
+			`lease ${vmid}: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
 }

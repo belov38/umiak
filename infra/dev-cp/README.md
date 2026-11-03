@@ -228,7 +228,7 @@ export UMIAK_VMID_RANGE=580-589
 ssh -o BatchMode=yes -o HostKeyAlias=pve.tail0000.ts.net root@100.64.10.2 qm list
 ```
 
-Current template slots (S17): **597** `linux`, **596** `linux-desktop`, **595** `windows` (Windows 11 with desktop). **598** is the retired headless Windows build, retained for existing sandboxes and snapshots. All four template VMs are read-only on the active stand. No rebuilds or deletes; freeing 598 needs Ilia's explicit approval. Sandbox clones use **500–589**, with at most 8 GiB RAM total. Never touch 9000/9001 or VMs below 500; never stop another user's VM to make room.
+Current template slots (S17): **597** `linux`, **596** `linux-desktop`, **595** `windows` (Windows 11 with desktop). VM **598** (the old headless Windows build) was deleted on 2026-11-04 with Ilia's approval; its catalog build stays `retired`. Slots 598 and 599 are free. The three template VMs are read-only on the active stand: no rebuilds or deletes. Sandbox clones use **500–589**, with at most 8 GiB RAM total. Never touch 9000/9001 or VMs below 500; never stop another user's VM to make room.
 
 The build/verification notes below are historical R1 evidence, not authorization to rebuild the live stand.
 
@@ -249,7 +249,7 @@ The R1 checked builds all pin the new dev CA and agent `0.1.0+20261101.087b3f3a`
 | `linux` | 597 | `20261101.1` | `01a1991c-0aa8-77af-94fa-6e4ec1e9a24f` | 99 / 2 / 0 |
 | `linux-desktop` | 596 | `20261101.3` | `01a1992c-8cdc-7036-802a-fa52d23f7056` | 107 / 2 / 0 |
 | `windows` (desktop; formerly `windows-desktop`) | 595 | `20261101.7` | `01a1993d-3986-7c3e-ab41-4408207656c4` | 112 / 5 / 0 |
-| retired headless `windows` | 598 | `20261101.2` | `01a19983-d967-7ea4-bd34-233e58dbce4d` | 101 / 5 / 0 |
+| retired headless `windows` (VM deleted 2026-11-04) | 598 | `20261101.2` | `01a19983-d967-7ea4-bd34-233e58dbce4d` | 101 / 5 / 0 |
 
 For future builds on a fresh installation, run `infra/templates/windows/moonlight-web/build.sh` before `umiak-tpl build windows`. Rebuilds require a new empty template slot. Do not rebuild or delete any current stand template.
 

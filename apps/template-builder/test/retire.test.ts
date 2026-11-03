@@ -197,6 +197,19 @@ describe("retire", () => {
 		]);
 	});
 
+	it("releases the template lease of a build whose VM was deleted outside retire", async () => {
+		const s = await setup();
+		s.registry.update(ID_GONE, { pveVmid: 597 });
+		s.pve.vms.delete(597);
+		const report = await retire(s.deps, ID_GONE, { deleteVm: true });
+		expect(report.join("\n")).toContain("released template lease 597");
+		expect(s.pve.calls.filter((c) => c.method === "DELETE")).toEqual([]);
+		expect((await s.allocator.list()).map((l) => l.vmid).sort()).toEqual([
+			598, 599,
+		]);
+		expect(s.registry.get(ID_GONE)?.status).toBe("retired");
+	});
+
 	it("refuses a build whose template VM still exists without --delete-vm", async () => {
 		const s = await setup();
 		await expect(retire(s.deps, ID_LIVE, { deleteVm: false })).rejects.toThrow(
@@ -213,7 +226,7 @@ describe("retire", () => {
 			{
 				method: "DELETE",
 				path: "/nodes/pve/qemu/598",
-				params: { purge: 1, "destroy-unreferenced-disks": 1 },
+				params: { purge: 1, "destroy-unreferenced-disks": 0 },
 			},
 		]);
 		expect(s.pve.vms.has(598)).toBe(false);

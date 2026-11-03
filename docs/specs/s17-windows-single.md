@@ -24,8 +24,7 @@ rulings in S9/S10; Linux retains `linux` and `linux-desktop`.
   five-second refresh contract. HTML says “Starting the desktop…” and “This
   takes up to a minute.” It uses dashboard brand colors in light/dark mode,
   an accessible spinner, reduced-motion support and no external assets.
-- VM 598 is read-only and remains on PVE. Reclaiming it requires Ilia's explicit
-  approval. No template rebuilds, ISO downloads, network or firewall changes.
+- VM 598 was deleted on 2026-11-04 with Ilia's approval (`umiak-tpl retire --delete-vm --force`); its build row stays `retired` for history.
 - Deployment must preserve owner sessions and guest CA, include current main,
   and occur only after checking CT590/origin and active operations.
 
