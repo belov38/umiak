@@ -59,3 +59,9 @@ def test_hard_failures_have_no_fix(tmp_path):
 def test_umiak_guests_in_ranges_are_allowed(tmp_path):
     runner = FakeRunner(tmp_path, guests=[{"vmid": 600, "type": "qemu", "name": "umiak-tpl-linux", "tags": "umiak"}])
     assert by_name(checklist.inspect(runner))["free-vmids"].ok
+
+
+def test_enabled_dnsmasq_service_fails_with_disable_fix(tmp_path):
+    check = by_name(checklist.inspect(FakeRunner(tmp_path, dnsmasq_enabled=True)))["dnsmasq"]
+    assert not check.ok
+    assert check.fix.commands == [["systemctl", "disable", "--now", "dnsmasq"]]

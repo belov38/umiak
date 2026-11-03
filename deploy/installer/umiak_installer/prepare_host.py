@@ -19,6 +19,7 @@ import ipaddress
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -87,6 +88,32 @@ class PrepareResult:
     files: dict[str, Path] = field(default_factory=dict)
 
 
+def dnsmasq_service_enabled(runner: Runner) -> bool:
+    """The system-wide dnsmasq must stay disabled: PVE SDN runs its own instances."""
+    try:
+        state = runner.run(["systemctl", "is-enabled", "dnsmasq"])
+    except CommandError as error:  # non-zero for disabled, masked, not-found
+        state = error.stdout.strip()
+    return state in ("enabled", "enabled-runtime", "alias")
+
+
+def _grants(cfg: "PrepareConfig", media_name: str) -> list[tuple[str, str]]:
+    return [
+        ("/pool/umiak", "UmiakPoC"),
+        ("/storage/" + cfg.storage, "PVEDatastoreUser"),
+        ("/sdn/zones/umiak", "PVESDNUser"),
+        ("/storage/" + media_name, "UmiakTemplateMedia"),
+        ("/pool/umiak", "UmiakConsole"),
+        ("/nodes/" + cfg.node, "UmiakMediaDownload"),
+        # Root-only read access is needed because PVE otherwise omits http_proxy.
+        ("/", "UmiakDatacenterAudit"),
+    ]
+
+
+def _granted(acls, path, principal, role):
+    return any(x.get("path") == path and x.get("ugid") == principal and x.get("roleid") == role for x in acls)
+
+
 def _rule_matches(row, rule):
     return all(str(row.get(key, "")) == str(value) for key, value in rule.items())
 
@@ -126,7 +153,7 @@ def _preflight(runner: Runner, cfg: PrepareConfig) -> dict:
         check = error.stdout
     if "[fail]" in check:
         raise InstallerError("Host network configuration differs from live state; refusing SDN apply")
-    if not runner.path("/usr/sbin/dnsmasq").exists():
+    if not runner.path("/usr/sbin/dnsmasq").exists() or dnsmasq_service_enabled(runner):
         raise InstallerError("Install dnsmasq and dnsmasq-utils with its system service disabled first")
     if runner.run(["sysctl", "-n", "net.ipv4.ip_forward"]) != "1":
         raise InstallerError("Enable IPv4 forwarding first")
@@ -210,14 +237,15 @@ class _Journal:
         self.record(["command", list(reverse)])
         return self.runner.run(argv)
 
-    def create(self, path, child, *args):
+    def create(self, path, child, *args) -> bool:
         if exists(self.runner, child):
-            return
+            return False
         if "/firewall/" in child:
             self.record(["collection", child])
         else:
             self.record(["command", ["pvesh", "delete", child]])
         self.runner.run(["pvesh", "create", path, *args])
+        return True
 
 
 def _arm(runner: Runner, state: Path, bridge: dict) -> None:
@@ -227,8 +255,13 @@ def _arm(runner: Runner, state: Path, bridge: dict) -> None:
     write_secret(state / rollback.BRIDGE, json.dumps(bridge))
     write_secret(state / rollback.JOURNAL, "[]")
     (state / rollback.ACTIVE).write_text("active")
-    runner.run(["systemd-run", "--quiet", "--collect", f"--unit={ROLLBACK_UNIT}", "--on-active=5min",
-                "/usr/bin/python3", str(script), str(state)])
+    try:
+        runner.run(["systemd-run", "--quiet", "--collect", f"--unit={ROLLBACK_UNIT}", "--on-active=5min",
+                    "/usr/bin/python3", str(script), str(state)])
+    except BaseException:
+        # Nothing changed yet; without a timer the marker would block every rerun.
+        (state / rollback.ACTIVE).unlink(missing_ok=True)
+        raise
 
 
 def _stop_timer(runner: Runner) -> None:
@@ -240,7 +273,7 @@ def _stop_timer(runner: Runner) -> None:
 
 
 def _apply(runner: Runner, cfg: PrepareConfig, facts: dict, out_dir: Path, journal: _Journal) -> None:
-    roles, acls = facts["roles"], facts["acls"]
+    roles = facts["roles"]
     if "UmiakPoC" not in roles:
         journal.mutate(["pveum", "role", "add", "UmiakPoC", "--privs", POC_PRIVS], ["pveum", "role", "delete", "UmiakPoC"])
     if not exists(runner, "/pools/umiak"):
@@ -260,39 +293,24 @@ def _apply(runner: Runner, cfg: PrepareConfig, facts: dict, out_dir: Path, journ
             ["pveum", "user", "token", "remove", USER_ID, TOKEN_NAME],
         )
         write_secret(token_file, json.loads(added)["value"])
+    # Removing a token also drops its ACL entries in PVE: read ACLs only now.
+    acls = get(runner, "/access/acl")
 
     for role, privileges in EXTRA_ROLES:
         if role not in roles:
             journal.mutate(["pveum", "role", "add", role, "--privs", privileges], ["pveum", "role", "delete", role])
-    grants = [
-        ("/pool/umiak", "UmiakPoC"),
-        ("/storage/" + cfg.storage, "PVEDatastoreUser"),
-        ("/sdn/zones/umiak", "PVESDNUser"),
-        ("/storage/" + facts["media_name"], "UmiakTemplateMedia"),
-        ("/pool/umiak", "UmiakConsole"),
-        ("/nodes/" + cfg.node, "UmiakMediaDownload"),
-    ]
-
-    def granted(path, principal, role):
-        return any(x.get("path") == path and x.get("ugid") == principal and x.get("roleid") == role for x in acls)
-
     for flag, principal in [("--users", USER_ID), ("--tokens", TOKEN_ID)]:
-        for path, role in grants:
-            if not granted(path, principal, role):
-                journal.mutate(["pveum", "acl", "modify", path, flag, principal, "--roles", role],
+        for path, role in _grants(cfg, facts["media_name"]):
+            if not _granted(acls, path, principal, role):
+                extra = ["--propagate", "0"] if path == "/" else []
+                journal.mutate(["pveum", "acl", "modify", path, flag, principal, "--roles", role, *extra],
                                ["pveum", "acl", "delete", path, flag, principal, "--roles", role])
-        # Root-only read access is needed because PVE otherwise omits http_proxy.
-        if not granted("/", principal, "UmiakDatacenterAudit"):
-            journal.mutate(
-                ["pveum", "acl", "modify", "/", flag, principal, "--roles", "UmiakDatacenterAudit", "--propagate", "0"],
-                ["pveum", "acl", "delete", "/", flag, principal, "--roles", "UmiakDatacenterAudit"],
-            )
 
-    journal.create("/cluster/sdn/zones", "/cluster/sdn/zones/umiak",
+    sdn_changed = journal.create("/cluster/sdn/zones", "/cluster/sdn/zones/umiak",
                    "--zone", "umiak", "--type", "simple", "--ipam", "pve", "--dhcp", "dnsmasq")
-    journal.create("/cluster/sdn/vnets", "/cluster/sdn/vnets/umiak0",
+    sdn_changed |= journal.create("/cluster/sdn/vnets", "/cluster/sdn/vnets/umiak0",
                    "--vnet", "umiak0", "--zone", "umiak", "--isolate-ports", "1")
-    journal.create("/cluster/sdn/vnets/umiak0/subnets", SUBNET,
+    sdn_changed |= journal.create("/cluster/sdn/vnets/umiak0/subnets", SUBNET,
                    "--subnet", "10.88.0.0/24", "--type", "subnet", "--gateway", "10.88.0.1", "--snat", "1",
                    "--dhcp-range", "start-address=10.88.0.100,end-address=10.88.0.250",
                    "--dhcp-dns-server", str(ipaddress.ip_address(cfg.guest_dns)))
@@ -311,15 +329,21 @@ def _apply(runner: Runner, cfg: PrepareConfig, facts: dict, out_dir: Path, journ
         journal.mutate(["pvesh", "create", group, *args, "--pos", str(position)], ["pvesh", "delete", f"{group}/{position}"])
         rules.insert(position, rule)
 
-    # Apply only if something changed: a no-op rerun must not reload SDN.
-    if any(action[0] != "file" for action in journal.actions):
+    # Only zone/VNet/subnet changes need an SDN apply (firewall objects and
+    # access changes are live); a no-op rerun must not reload SDN.
+    if sdn_changed:
         try:
             runner.run(["pvesh", "set", "/cluster/sdn"])
         finally:
             rollback.restore_bridge(journal.state, runner.run)
 
 
-def _verify(runner: Runner, cfg: PrepareConfig) -> None:
+def _verify(runner: Runner, cfg: PrepareConfig, media_name: str) -> None:
+    acls = get(runner, "/access/acl")
+    for principal in (USER_ID, TOKEN_ID):
+        for path, role in _grants(cfg, media_name):
+            if not _granted(acls, path, principal, role):
+                raise InstallerError(f"Verification failed: {principal} lacks {role} on {path}")
     for path, expected in TOPOLOGY:
         current = get(runner, path)
         if any(str(current.get(key)) != str(value) for key, value in expected.items()):
@@ -373,7 +397,7 @@ def _node_config(cfg: PrepareConfig, facts: dict) -> str:
 
 def prepare(runner: Runner, cfg: PrepareConfig, out_dir: Path) -> PrepareResult:
     facts = _preflight(runner, cfg)
-    out_dir = Path(out_dir)
+    out_dir = Path(out_dir).resolve()
     out_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     state = runner.path(STATE_DIR)
     state.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -384,12 +408,16 @@ def prepare(runner: Runner, cfg: PrepareConfig, out_dir: Path) -> PrepareResult:
         except BlockingIOError as error:
             raise InstallerError("Another host preparation is running") from error
         if (state / rollback.ACTIVE).exists():
-            raise InstallerError("A previous preparation's rollback is pending; wait for its timer and retry")
+            raise InstallerError(
+                "A previous preparation was not rolled back completely. Its timer retries in a few minutes; "
+                f"to retry now run: python3 {state / 'rollback.py'} {state}"
+            )
         journal = _Journal(runner, state)
         _arm(runner, state, facts["bridge"])
+        keep_timer = False
         try:
             _apply(runner, cfg, facts, out_dir, journal)
-            _verify(runner, cfg)
+            _verify(runner, cfg, facts["media_name"])
             public_key = _node_key(runner, out_dir)
             write_secret(out_dir / "pve-token-id", TOKEN_ID)
             write_secret(out_dir / "pve-root-ca.pem", runner.path("/etc/pve/pve-root-ca.pem").read_text())
@@ -398,10 +426,16 @@ def prepare(runner: Runner, cfg: PrepareConfig, out_dir: Path) -> PrepareResult:
             write_secret(state / STAGED_NODE_CONFIG, _node_config(cfg, facts))
             (state / rollback.ACTIVE).unlink()
         except BaseException:
-            rollback.replay(state, runner.run)
+            try:
+                rollback.replay(state, runner.run)
+            except Exception:  # noqa: BLE001 - surface the original error
+                # Leave the timer armed: it retries the rollback from the journal.
+                keep_timer = True
+                print(f"Rollback incomplete; retry with: python3 {state / 'rollback.py'} {state}", file=sys.stderr)
             raise
         finally:
-            _stop_timer(runner)
+            if not keep_timer:
+                _stop_timer(runner)
     finally:
         lock.close()
     return PrepareResult(
@@ -421,19 +455,30 @@ def _restore(path: Path, saved) -> None:
     if saved is None:
         path.unlink(missing_ok=True)
     else:
-        path.write_bytes(saved[0])
-        try:
-            path.chmod(saved[1])
-        except OSError:
-            pass  # pmxcfs (/etc/pve) has fixed permissions
+        _replace(path, saved[0], saved[1])
 
 
-def _replace(path: Path, data: bytes, mode: int) -> None:
-    # Write next to the target and rename: never truncate a running binary.
+def _replace(path: Path, data: bytes, mode: int | None) -> None:
+    # Write next to the target and rename: never truncate a running binary or
+    # leave a half-written file. mode=None for pmxcfs (fixed permissions).
     tmp = path.with_name("." + path.name + ".umiak-new")
-    tmp.write_bytes(data)
-    tmp.chmod(mode)
-    os.replace(tmp, path)
+    try:
+        tmp.write_bytes(data)
+        if mode is not None:
+            tmp.chmod(mode)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _remove_key_line(keys: Path, line: str) -> None:
+    # Re-read: other nodes may have changed the cluster-wide file meanwhile.
+    content = keys.read_text() if keys.exists() else ""
+    lines = content.splitlines()
+    if line in lines:
+        kept = [item for item in lines if item != line]
+        _replace(keys, ("\n".join(kept) + "\n" if kept else "").encode(), None)
 
 
 def install_node_agent(runner: Runner, binary: Path, sha256: str, public_key: str) -> None:
@@ -454,19 +499,29 @@ def install_node_agent(runner: Runner, binary: Path, sha256: str, public_key: st
     if not re.fullmatch(r"[0-9a-f]{64}", sha256 or "") or hashlib.sha256(data).hexdigest() != sha256:
         raise InstallerError("Node-agent checksum mismatch")
     target, config, keys = runner.path(NODE_BINARY), runner.path(NODE_CONFIG), runner.path(AUTHORIZED_KEYS)
-    saved = {path: _snapshot(path) for path in (target, config, keys)}
+    saved = {path: _snapshot(path) for path in (target, config)}
+    line = f'restrict,command="{NODE_BINARY} --stdio" {public_key}'
+    added_line = False
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         _replace(target, data, 0o755)
         _replace(config, staged.read_bytes(), 0o644)
-        line = f'restrict,command="{NODE_BINARY} --stdio" {public_key}'
+        # /etc/pve/priv/authorized_keys is cluster-wide root SSH access: append
+        # only our line, atomically (pmxcfs supports rename), never rewrite others.
         content = keys.read_text() if keys.exists() else ""
         if line not in content.splitlines():
-            keys.write_text(content.rstrip("\n") + ("\n" if content.strip() else "") + line + "\n")
+            _replace(keys, (content + ("" if not content or content.endswith("\n") else "\n") + line + "\n").encode(), None)
+            added_line = True
         probe = runner.run([str(target), "--stdio"], input=json.dumps({"op": "version", "args": {}}))
         if not json.loads(probe).get("ok"):
             raise InstallerError("Node-agent verification failed")
     except BaseException:
-        for path, previous in saved.items():
-            _restore(path, previous)
+        undo = [(path, lambda p=path, prev=previous: _restore(p, prev)) for path, previous in saved.items()]
+        if added_line:
+            undo.append((keys, lambda: _remove_key_line(keys, line)))
+        for path, action in undo:
+            try:
+                action()
+            except Exception as error:  # noqa: BLE001 - restore the rest, keep the original error
+                print(f"Could not restore {path}: {error}", file=sys.stderr)
         raise

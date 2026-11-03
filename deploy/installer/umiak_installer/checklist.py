@@ -6,6 +6,7 @@ inspect() never changes the host; apply_fix() runs one fix the user confirmed.
 import sys
 from dataclasses import dataclass, field
 
+from .prepare_host import dnsmasq_service_enabled
 from .pve import CommandError, Runner, get, lvmthin_storages, media_storages, pending_sdn
 
 DEFAULT_RANGES = ((500, 589), (600, 699))
@@ -30,6 +31,10 @@ class Check:
 DNSMASQ_FIX = Fix(
     "Install dnsmasq for SDN DHCP and disable its system-wide service (Proxmox SDN runs its own instances)",
     [["apt-get", "install", "-y", "dnsmasq", "dnsmasq-utils"], ["systemctl", "disable", "--now", "dnsmasq"]],
+)
+DNSMASQ_SERVICE_FIX = Fix(
+    "Disable the system-wide dnsmasq service (Proxmox SDN runs its own instances)",
+    [["systemctl", "disable", "--now", "dnsmasq"]],
 )
 FORWARD_FIX = Fix(
     "Enable IPv4 forwarding persistently for SDN SNAT (/etc/sysctl.d/99-umiak.conf)",
@@ -84,6 +89,14 @@ def _media(runner, node):
     return _check("media-storage", bool(names), "directory storages with iso,import: " + (", ".join(names) or "none"))
 
 
+def _dnsmasq(runner):
+    if not runner.path("/usr/sbin/dnsmasq").exists():
+        return _check("dnsmasq", False, "dnsmasq missing", DNSMASQ_FIX)
+    enabled = dnsmasq_service_enabled(runner)
+    detail = "dnsmasq present, system service " + ("enabled" if enabled else "disabled")
+    return _check("dnsmasq", not enabled, detail, DNSMASQ_SERVICE_FIX)
+
+
 def _forward(runner):
     value = runner.run(["sysctl", "-n", "net.ipv4.ip_forward"])
     return _check("ip-forward", value == "1", f"net.ipv4.ip_forward = {value}", FORWARD_FIX)
@@ -119,7 +132,6 @@ def _vmids(runner, ranges):
 
 def inspect(runner: Runner, node: str | None = None, storage: str | None = None, ranges=DEFAULT_RANGES) -> list[Check]:
     node = node or runner.hostname()
-    dnsmasq = runner.path("/usr/sbin/dnsmasq").exists()
     python_ok = sys.version_info >= (3, 11)
     return [
         _check("root", runner.euid() == 0, "running as root" if runner.euid() == 0 else "run the installer as root"),
@@ -128,7 +140,7 @@ def inspect(runner: Runner, node: str | None = None, storage: str | None = None,
         _check("python", python_ok, "Python " + ".".join(map(str, sys.version_info[:3]))),
         _safe("lvmthin-storage", lambda: _lvmthin(runner, node, storage)),
         _safe("media-storage", lambda: _media(runner, node)),
-        _check("dnsmasq", dnsmasq, "dnsmasq " + ("present" if dnsmasq else "missing"), DNSMASQ_FIX),
+        _safe("dnsmasq", lambda: _dnsmasq(runner)),
         _safe("ip-forward", lambda: _forward(runner)),
         _safe("cluster-firewall", lambda: _firewall(runner)),
         _safe("sdn-pending", lambda: _pending(runner)),

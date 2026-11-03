@@ -1,4 +1,5 @@
 import copy
+import errno
 import hashlib
 import json
 import stat
@@ -95,6 +96,14 @@ def test_missing_secret_file_rotates_existing_token(host):
     ]
     assert (out / "pve-token").read_text() == "fake-secret-2"
     assert stat.S_IMODE((out / "pve-token").stat().st_mode) == 0o600
+    # PVE drops a removed token's ACLs; the grants must be re-created.
+    token_acls = {(x["path"], x["roleid"]) for x in runner.acls if x["ugid"] == "umiak@pve!umiak"}
+    assert token_acls == {("/pool/umiak", "UmiakPoC"), ("/storage/local-lvm", "PVEDatastoreUser"),
+                          ("/sdn/zones/umiak", "PVESDNUser"), ("/storage/local", "UmiakTemplateMedia"),
+                          ("/pool/umiak", "UmiakConsole"), ("/nodes/pve", "UmiakMediaDownload"),
+                          ("/", "UmiakDatacenterAudit")}
+    # Access-only changes do not reload SDN.
+    assert ["pvesh", "set", "/cluster/sdn"] not in runner.commands
 
 
 def test_stale_secret_file_without_token_adds_token(host):
@@ -261,3 +270,117 @@ def test_armed_rollback_script_runs_standalone(host):
     # Success cleared the active marker, so the timer's run is a no-op.
     done = subprocess.run([sys.executable, "-I", str(script), str(state_dir)], check=False, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
+
+
+def test_failed_timer_arm_does_not_block_reruns(host):
+    runner, out = host
+    runner.fail_on = lambda argv: argv[0] == "systemd-run"
+    with pytest.raises(CommandError):
+        prepare_host.prepare(runner, config(), out)
+    assert not runner.path("/var/lib/umiak-installer/active").exists()
+    assert [a for a in runner.mutations() if a[0] != "systemd-run"] == []
+    runner.fail_on = None
+    prepare_host.prepare(runner, config(), out)
+    assert (out / "pve-token").exists()
+
+
+def test_incomplete_rollback_keeps_timer_and_explains_retry(host):
+    runner, out = host
+    runner.fail_on = lambda argv: argv[:4] in (["pveum", "user", "token", "add"], ["pveum", "role", "delete", "UmiakPoC"])
+    with pytest.raises(CommandError):
+        prepare_host.prepare(runner, config(), out)
+    state_dir = runner.path("/var/lib/umiak-installer")
+    assert (state_dir / "active").exists()
+    assert ["systemctl", "stop", "umiak-installer-rollback.timer"] not in runner.commands
+    runner.fail_on = None
+    with pytest.raises(InstallerError, match="rollback.py") as refused:
+        prepare_host.prepare(runner, config(), out)
+    assert f"python3 {state_dir / 'rollback.py'} {state_dir}" in str(refused.value)
+
+
+def test_relative_out_dir_is_journaled_absolute(host, monkeypatch):
+    runner, out = host
+    monkeypatch.chdir(out.parent)
+    runner.fail_on = lambda argv: argv[:3] == ["pvesh", "create", "/cluster/sdn/zones"]
+    with pytest.raises(CommandError):
+        prepare_host.prepare(runner, config(), prepare_host.Path("out"))
+    journal = json.loads(runner.path("/var/lib/umiak-installer/undo.json").read_text())
+    files = [action[1] for action in journal if action[0] == "file"]
+    assert files == [str(out.resolve() / "pve-token")]
+
+
+def _agent(out):
+    binary = out.parent / "umiak-node"
+    binary.write_bytes(AGENT)
+    return binary, hashlib.sha256(AGENT).hexdigest()
+
+
+def test_failed_install_removes_only_its_own_key_line(host):
+    runner, out = host
+    result = prepare_host.prepare(runner, config(), out)
+    binary, sha = _agent(out)
+    keys = runner.path("/etc/pve/priv/authorized_keys")
+
+    def probe_fails_after_concurrent_edit(argv):
+        if argv[-1] == "--stdio":
+            # Another node adds its key while we run: it must survive our cleanup.
+            keys.write_text(keys.read_text() + "ssh-ed25519 AAAA other-node\n")
+            return True
+        return False
+
+    runner.fail_on = probe_fails_after_concurrent_edit
+    with pytest.raises(CommandError):
+        prepare_host.install_node_agent(runner, binary, sha, result.public_key)
+    assert keys.read_text() == "ssh-rsa AAAA existing-management-key\nssh-ed25519 AAAA other-node\n"
+    assert sorted(p.name for p in keys.parent.iterdir()) == ["authorized_keys"]
+
+
+def test_failed_install_keeps_preexisting_key_line(host):
+    runner, out = host
+    result = prepare_host.prepare(runner, config(), out)
+    binary, sha = _agent(out)
+    prepare_host.install_node_agent(runner, binary, sha, result.public_key)
+    keys = runner.path("/etc/pve/priv/authorized_keys")
+    before = keys.read_text()
+    runner.fail_on = lambda argv: argv[-1] == "--stdio"
+    with pytest.raises(CommandError):
+        prepare_host.install_node_agent(runner, binary, sha, result.public_key)
+    assert keys.read_text() == before
+
+
+def test_restore_failure_does_not_mask_error_or_skip_other_files(host, monkeypatch):
+    runner, out = host
+    result = prepare_host.prepare(runner, config(), out)
+    binary, sha = _agent(out)
+    prepare_host.install_node_agent(runner, binary, sha, result.public_key)
+    target = runner.path("/usr/local/bin/umiak-node")
+    config_path = runner.path("/etc/umiak-node.toml")
+    old_config = config_path.read_bytes()
+
+    new_agent = b"newer-agent"
+    binary.write_bytes(new_agent)
+    real_replace = prepare_host._replace
+
+    probed = []
+
+    def replace(path, data, mode):
+        if probed and path == config_path and data == old_config:
+            raise OSError("restore of config failed")
+        return real_replace(path, data, mode)
+
+    real_write_bytes = prepare_host.Path.write_bytes
+
+    def write_bytes(self, data):
+        if self == target:  # a running binary cannot be written in place
+            raise OSError(errno.ETXTBSY, "Text file busy")
+        return real_write_bytes(self, data)
+
+    monkeypatch.setattr(prepare_host, "_replace", replace)
+    monkeypatch.setattr(prepare_host.Path, "write_bytes", write_bytes)
+    runner.fail_on = lambda argv: argv[-1] == "--stdio" and not probed.append(1)
+    with pytest.raises(CommandError):
+        prepare_host.install_node_agent(runner, binary, hashlib.sha256(new_agent).hexdigest(), result.public_key)
+    # The binary was restored by rename (no in-place write of a running file).
+    assert target.read_bytes() == AGENT
+    assert stat.S_IMODE(target.stat().st_mode) == 0o755
+    assert not any(p.name.endswith(".umiak-new") for p in target.parent.iterdir())

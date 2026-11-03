@@ -31,6 +31,7 @@ class FakeRunner(Runner):
         root: Path,
         *,
         dnsmasq=True,
+        dnsmasq_enabled=False,
         ip_forward="1",
         firewall=1,
         euid=0,
@@ -77,6 +78,7 @@ class FakeRunner(Runner):
         if dnsmasq:
             files["/usr/sbin/dnsmasq"] = "fake"
         self.ip_forward = ip_forward
+        self.dnsmasq_enabled = dnsmasq_enabled
         for name, value in files.items():
             path = self.path(name)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -177,6 +179,10 @@ class FakeRunner(Runner):
             self.objects[argv[2]].update({k.removeprefix("--"): int(v) for k, v in values.items()})
         elif argv[:3] == ["ip", "link", "set"]:
             self.path("/sys/class/net/vmbr0/bridge/mcast_hash_max").write_text(argv[-1])
+        elif argv[:3] == ["systemctl", "is-enabled", "dnsmasq"]:
+            if not self.dnsmasq_enabled:
+                raise CommandError(argv, 1, "disabled", "")
+            out = "enabled"
         elif head == ["sysctl", "-n"]:
             out = self.ip_forward
         elif head == ["ifquery", "--check"]:
@@ -212,6 +218,8 @@ class FakeRunner(Runner):
                 out = json.dumps({"full-tokenid": f"{argv[4]}!{argv[5]}", "value": f"fake-secret-{self.token_counter}"})
             elif argv[2:4] == ["token", "remove"]:
                 self.tokens[:] = [x for x in self.tokens if x["tokenid"] != argv[5]]
+                # Like PVE (remove_token -> delete_user_acl): the token's ACLs go too.
+                self.acls[:] = [x for x in self.acls if x["ugid"] != f"{argv[4]}!{argv[5]}"]
                 self.objects.pop(f"/access/users/{argv[4]}/token/{argv[5]}", None)
         elif head == ["pveum", "acl"]:
             acl = {"path": argv[3], "ugid": argv[5], "roleid": argv[7]}
