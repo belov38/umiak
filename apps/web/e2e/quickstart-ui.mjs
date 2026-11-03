@@ -113,16 +113,36 @@ test("quickstart appearance, focus and revoke confirmation", async () => {
 		};
 		await capture("claim", "/app");
 		const token = await store.claim(code);
-		await capture("signin", "/owner/pair");
+		const pendingPair = await store.pairStart();
+		await capture("signin", `/owner/pair?id=${pendingPair.id}`);
 		assert.equal(await page.locator("nav").count(), 0);
+		assert.equal(
+			await page.locator("#host-command").textContent(),
+			"docker compose exec quickstart umiak-signin",
+		);
 		await page.getByLabel("Sign-in code", { exact: true }).fill("WRONG");
 		await page.getByRole("button", { name: "Sign in", exact: true }).click();
 		await page.getByText("Sign-in failed.", { exact: false }).waitFor();
+		await page.route("**/owner/signin", (route) =>
+			route.fulfill({
+				status: 429,
+				headers: { "Retry-After": "120" },
+				json: { error: { code: "signin_limited", retryable: true } },
+			}),
+		);
+		await page.getByRole("button", { name: "Sign in", exact: true }).click();
+		await page
+			.getByText("Too many attempts, try again in 2 minutes.", { exact: true })
+			.waitFor();
+		await page.unroute("**/owner/signin");
 		const { printSigninCode } = await load("signin-code.mjs");
 		const issued = await printSigninCode(store, () => {});
 		await page.getByLabel("Sign-in code", { exact: true }).fill(issued.code);
 		await page.getByRole("button", { name: "Sign in", exact: true }).click();
-		await page.waitForFunction(() => !document.getElementById("signin"));
+		await page
+			.getByRole("heading", { name: "Approve CLI pairing", exact: true })
+			.waitFor();
+		assert.equal(new URL(page.url()).searchParams.get("id"), pendingPair.id);
 		assert.equal(await store.authenticate(token), true);
 		await page.goto(`${origin}/owner/sessions`);
 		await page
@@ -155,6 +175,10 @@ test("quickstart appearance, focus and revoke confirmation", async () => {
 		});
 		await capture("pair-approve", `/owner/pair?id=${pair.id}`);
 		await capture("sessions", "/owner/sessions");
+		assert.equal(
+			await page.getByText("This browser", { exact: false }).count(),
+			1,
+		);
 		if (!baseline) {
 			let confirmed = false;
 			page.once("dialog", async (d) => {
@@ -162,7 +186,7 @@ test("quickstart appearance, focus and revoke confirmation", async () => {
 				await d.dismiss();
 			});
 			await page
-				.getByRole("button", { name: "Revoke", exact: true })
+				.getByRole("button", { name: /^Revoke browser session created/ })
 				.first()
 				.click();
 			assert.equal(confirmed, true);

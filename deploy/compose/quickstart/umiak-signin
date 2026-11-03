@@ -1,0 +1,2 @@
+#!/bin/sh
+exec node /app/deploy/compose/quickstart/run.mjs node /app/deploy/compose/quickstart/signin-code.mjs "$@"

@@ -162,3 +162,24 @@ because the active stand forbids those mutations. No main merge in this branch.
   continually update last-use time. Revocation retains confirmation.
 - Recovery remains console-only, destructive and behind an explicit disclosure
   warning that all browser and CLI sessions and pending pairings are revoked.
+
+### Sign-in follow-up rulings (2026-11-03)
+
+- Quickstart is one ingress process. Source admission buckets are a bounded,
+  expiring in-memory Map, shared by stores using the same repository, rather than
+  part of the owner JSON. Restart clears source buckets; durable global code
+  failures and one-time consumption remain transactional. Multiple ingress
+  processes would require a shared limiter before deployment.
+- Authentication checks last-use with a read-only query. Only a session at least
+  60 seconds stale enters a mutation transaction, which checks age again. Startup
+  discards old persisted source buckets without changing sessions.
+- Sign-in admission and outstanding-code capacity return 429 `signin_limited`,
+  retryable with Retry-After seconds; a wrong code returns 403 `invalid_signin`.
+- `umiak-signin` on image PATH invokes the existing credential loader and console
+  issuer. `--help` issues no code. Console issuance audit goes to PID 1 stdout,
+  not the operator terminal; audit fields are event, source, hostname, issuer.
+- Session timestamps render in browser-local time (readable UTC before scripts); current browser is marked, revoke
+  names include creation and a session-id prefix, self-revoke clears the cookie.
+  Minted codes use large monospace text, copy and remaining-time countdown.
+- JSON owner requests get 401. Browser sign-in reloads the original pairing URL;
+  invalid or expired pairings render a friendly page.

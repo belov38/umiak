@@ -19,6 +19,10 @@ const esc = (value) =>
 				c
 			],
 	);
+const sessionTime = (value) =>
+	value == null
+		? "unknown"
+		: `<time datetime="${esc(new Date(value).toISOString())}">${esc(new Date(value).toLocaleString("en-GB", { timeZone: "UTC" }))} UTC</time>`;
 const json = (res, status, value) => {
 	res.writeHead(status, {
 		"content-type": "application/json",
@@ -178,8 +182,14 @@ export function createQuickstartServer({
 				return fail(res, 403, "origin_forbidden");
 			if (!safe && browser && req.headers.origin !== origin)
 				return fail(res, 403, "origin_required");
-			if (path.startsWith("/owner/") && !rate(req, owner))
-				return fail(res, 429, "rate_limited");
+			if (path.startsWith("/owner/") && !rate(req, owner)) {
+				res.setHeader("retry-after", "60");
+				return fail(
+					res,
+					429,
+					path === "/owner/signin" ? "signin_limited" : "rate_limited",
+				);
+			}
 			if (path === "/v1/meta" && req.method === "GET") {
 				const reply = await metadataFetch(
 					`http://${env.UMIAK_QUICKSTART_API_HOST ?? "api"}:${env.UMIAK_QUICKSTART_API_PORT ?? 8080}/v1/meta`,
@@ -283,6 +293,8 @@ export function createQuickstartServer({
 				if (await setupHandler(req, res, { origin, owner })) return;
 			}
 			if (!owner) {
+				if (req.headers.accept?.includes("application/json"))
+					return fail(res, 401, "owner_required");
 				if (
 					req.method === "GET" &&
 					(path === "/" ||
@@ -310,7 +322,15 @@ export function createQuickstartServer({
 					return fail(res, 403, "origin_required");
 				if (!(await store.canApprove(token)))
 					return fail(res, 403, "browser_session_required");
-				return json(res, 200, await store.signinCode());
+				return json(
+					res,
+					200,
+					await store.signinCode({
+						source: req.umiakClientAddress,
+						hostname: url.hostname,
+						issuer: "browser",
+					}),
+				);
 			}
 
 			if (
@@ -325,17 +345,26 @@ export function createQuickstartServer({
 			if (path === "/owner/sessions" && req.method === "GET") {
 				if (!(await store.canApprove(token)))
 					return fail(res, 403, "browser_session_required");
-				const sessions = await store.sessions();
+				const sessions = await store.sessions(token);
 				return page(
 					res,
 					"Owner sessions",
-					`${signinIssueContent()}<p>CLI sessions expire after 30 days. Revoke a lost device here.</p>${sessions.map((x) => `<section><strong>${esc(x.kind)}</strong> · hostname ${esc(x.hostname ?? "unknown (created before upgrade)")} · created ${esc(x.created ? new Date(x.created).toISOString() : "unknown")} · last used ${esc(x.lastUsed ? new Date(x.lastUsed).toISOString() : "unknown")} · expires ${esc(new Date(x.expires).toISOString())} <button class="destructive" data-session="${esc(x.id)}">Revoke</button></section>`).join("")}<p id="result" role="status"></p><script>document.querySelectorAll('[data-session]').forEach(b=>b.onclick=async()=>{if(!confirm("Revoke this session? The device will lose access immediately."))return;b.disabled=true;const r=await fetch('/owner/sessions/revoke',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.session})});if(r.ok)location.reload();else {b.disabled=false;document.querySelector('#result').textContent='Could not revoke session';}});</script>`,
+					`${signinIssueContent()}<p>CLI sessions expire after 30 days. Revoke a lost device here.</p>${sessions.map((x) => `<section><strong>${esc(x.kind)}</strong>${x.current ? " · This browser" : ""} · hostname ${esc(x.hostname ?? "unknown (created before upgrade)")} · created ${sessionTime(x.created)} · last used ${sessionTime(x.lastUsed)} · expires ${sessionTime(x.expires)} <button class="destructive" aria-label="Revoke ${esc(x.kind)} session created ${esc(x.created ? new Date(x.created).toISOString() : "unknown")} (${esc(x.id.slice(0, 8))})" data-session="${esc(x.id)}">Revoke</button></section>`).join("")}<p id="result" role="status"></p><script>document.querySelectorAll('time[datetime]').forEach(t=>t.textContent=new Date(t.dateTime).toLocaleString());document.querySelectorAll('[data-session]').forEach(b=>b.onclick=async()=>{if(!confirm("Revoke this session? The device will lose access immediately."))return;b.disabled=true;const r=await fetch('/owner/sessions/revoke',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.session})});if(r.ok)location.reload();else {b.disabled=false;document.querySelector('#result').textContent='Could not revoke session';}});</script>`,
 				);
 			}
 			if (path === "/owner/sessions/revoke" && req.method === "POST") {
 				if (!(await store.canApprove(token)))
 					return fail(res, 403, "browser_session_required");
-				await store.revokeSession((await body(req)).id);
+				const id = (await body(req)).id;
+				const current = (await store.sessions(token)).find(
+					(x) => x.id === id,
+				)?.current;
+				await store.revokeSession(id);
+				if (current)
+					res.setHeader(
+						"set-cookie",
+						`${origin.startsWith("https:") ? COOKIE : "umiak_owner"}=; Path=/; HttpOnly; ${origin.startsWith("https:") ? "Secure; " : ""}SameSite=Strict; Max-Age=0`,
+					);
 				return json(res, 200, { revoked: true });
 			}
 			if (path === "/owner/logout" && req.method === "POST") {
@@ -355,7 +384,16 @@ export function createQuickstartServer({
 			}
 			if (path === "/owner/pair" && req.method === "GET") {
 				const id = url.searchParams.get("id");
-				const info = await store.pairInfo(id);
+				let info;
+				try {
+					info = await store.pairInfo(id);
+				} catch {
+					return page(
+						res,
+						"Pairing unavailable",
+						"<p>This pairing link is invalid or has expired. Start a new login from your CLI.</p>",
+					);
+				}
 				return page(
 					res,
 					"Approve CLI pairing",
@@ -393,12 +431,17 @@ export function createQuickstartServer({
 			req.on("aborted", () => upstream.destroy());
 			req.pipe(upstream);
 		} catch (error) {
+			if (!res.headersSent && error.message === "signin_limited") {
+				res.setHeader("retry-after", String(error.retryAfter ?? 600));
+				return fail(res, 429, "signin_limited");
+			}
 			if (!res.headersSent)
 				fail(
 					res,
 					error.message === "body_too_large" ? 413 : 403,
 					[
 						"invalid_claim",
+						"invalid_signin",
 						"invalid_pair",
 						"owner_unclaimed",
 						"pair_limit",

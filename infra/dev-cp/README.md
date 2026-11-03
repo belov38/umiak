@@ -423,9 +423,11 @@ From a signed-in browser use **Owner sessions → Sign in another browser**.
 Alternatively, run this on CT 590; it preserves all current owner sessions:
 
 ```sh
-cd ~/umiak
-docker compose -p umiak --env-file deploy/compose/.env -f compose.yaml -f infra/dev-cp/compose.quickstart.yaml exec quickstart node deploy/compose/quickstart/run.mjs node deploy/compose/quickstart/signin-code.mjs
+docker compose -p umiak exec quickstart umiak-signin
 ```
+
+The explicit project name works from any directory; no `-f` or `--env-file`
+is needed for exec. Use `umiak-signin --help` for a read-only check.
 
 Enter the printed one-time code at the deployment's Sign in page within ten
 minutes. Use the same hostname thereafter. Never run `recover.mjs` for ordinary
