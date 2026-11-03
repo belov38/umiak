@@ -104,3 +104,71 @@ test("legacy undifferentiated credentials are rejected after upgrade", async () 
 	assert.equal(await store.authenticate(token), false);
 	assert.equal(await store.canApprove(token), false);
 });
+
+test("sign-in codes expire, are consumed atomically and preserve other access", async () => {
+	let now = 1000;
+	const repo = new MemoryOwnerRepository();
+	const store = new OwnerStore(repo, { now: () => now });
+	const first = await store.claim(await store.init(), "first.example");
+	const pair = await store.pairStart();
+	const issued = await store.signinCode();
+	assert.match(issued.code, /^[A-Z2-7]{4}(-[A-Z2-7]{4}){5}$/);
+	assert.ok(
+		!JSON.stringify(repo.state).includes(issued.code.replaceAll("-", "")),
+	);
+	const results = await Promise.allSettled([
+		store.signin(issued.code, "one", "second.example"),
+		store.signin(issued.code, "two"),
+	]);
+	assert.equal(results.filter((x) => x.status === "fulfilled").length, 1);
+	assert.equal(await store.authenticate(first), true);
+	await store.pairApprove(pair.id, pair.code);
+	assert.ok(await store.pairPoll(pair.id, pair.secret));
+	const expired = await store.signinCode();
+	now += 600001;
+	await assert.rejects(store.signin(expired.code, "three"), /invalid_signin/);
+});
+
+test("failed sign-ins persist limits across stores and invalidate outstanding codes", async () => {
+	const repo = new MemoryOwnerRepository();
+	const store = new OwnerStore(repo);
+	await store.claim(await store.init());
+	const issued = await store.signinCode();
+	for (let i = 0; i < 20; i++)
+		await assert.rejects(
+			store.signin("wrong", `source-${i}`),
+			/invalid_signin/,
+		);
+	await assert.rejects(
+		new OwnerStore(repo).signin(issued.code, "fresh"),
+		/invalid_signin/,
+	);
+	const next = await store.signinCode();
+	for (let i = 0; i < 20; i++)
+		await assert.rejects(store.signin("wrong", "limited"), /invalid_signin/);
+	await assert.rejects(store.signin(next.code, "limited"), /signin_limited/);
+});
+
+test("recovery invalidates unused sign-in codes even after reclaim", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	await store.claim(await store.init());
+	const issued = await store.signinCode();
+	await store.claim(await store.recover());
+	await assert.rejects(store.signin(issued.code, "new"), /invalid_signin/);
+});
+
+test("sessions retain creation hostname and record last HTTP use", async () => {
+	let now = 1000;
+	const store = new OwnerStore(new MemoryOwnerRepository(), { now: () => now });
+	const token = await store.claim(await store.init(), "first.example");
+	now = 2000;
+	await store.touch(token);
+	const session = (await store.sessions())[0];
+	assert.equal(session.hostname, "first.example");
+	assert.equal(session.created, 1000);
+	assert.equal(session.lastUsed, 2000);
+	const pair = await store.pairStart({ hostname: "cli.example" });
+	await store.pairApprove(pair.id, pair.code);
+	const cli = await store.pairPoll(pair.id, pair.secret);
+	assert.equal((await store.session(cli)).hostname, "cli.example");
+});

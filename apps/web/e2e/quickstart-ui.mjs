@@ -113,7 +113,39 @@ test("quickstart appearance, focus and revoke confirmation", async () => {
 		};
 		await capture("claim", "/app");
 		const token = await store.claim(code);
-		await capture("pair", "/owner/pair");
+		await capture("signin", "/owner/pair");
+		assert.equal(await page.locator("nav").count(), 0);
+		await page.getByLabel("Sign-in code", { exact: true }).fill("WRONG");
+		await page.getByRole("button", { name: "Sign in", exact: true }).click();
+		await page.getByText("Sign-in failed.", { exact: false }).waitFor();
+		const { printSigninCode } = await load("signin-code.mjs");
+		const issued = await printSigninCode(store, () => {});
+		await page.getByLabel("Sign-in code", { exact: true }).fill(issued.code);
+		await page.getByRole("button", { name: "Sign in", exact: true }).click();
+		await page.waitForFunction(() => !document.getElementById("signin"));
+		assert.equal(await store.authenticate(token), true);
+		await page.goto(`${origin}/owner/sessions`);
+		await page
+			.getByRole("button", { name: "Sign in another browser", exact: true })
+			.click();
+		await page.locator("#signin-result code").waitFor();
+		const anotherCode = await page.locator("#signin-result code").textContent();
+		const second = await browser.newContext();
+		try {
+			const p = await second.newPage();
+			await p.goto(`${origin}/owner/sessions`);
+			await p.getByLabel("Sign-in code", { exact: true }).fill(anotherCode);
+			await p.getByRole("button", { name: "Sign in", exact: true }).click();
+			await p
+				.getByRole("heading", { name: "Owner sessions", exact: true })
+				.waitFor();
+			await page.reload();
+			await page
+				.getByRole("heading", { name: "Owner sessions", exact: true })
+				.waitFor();
+		} finally {
+			await second.close();
+		}
 		await context.addCookies([
 			{ name: "umiak_owner", value: token, url: origin },
 		]);
