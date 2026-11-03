@@ -125,11 +125,86 @@ test("fresh node download uses only the expiring setup capability and expires af
 		400,
 	);
 	state.preparation.expiresAt = Date.now() + 60000;
+	const caPem = await readFile(join(dir, "ca.pem"), "utf8");
+	await writeFile(join(dir, "pve-root-ca.pem"), caPem);
+	const rules = [
+		{
+			type: "out",
+			action: "ACCEPT",
+			proto: "tcp",
+			dport: "443",
+			dest: "+umiak-gateway",
+		},
+		...[
+			"10.0.0.0/8",
+			"172.16.0.0/12",
+			"192.168.0.0/16",
+			"100.64.0.0/10",
+			"169.254.0.0/16",
+			"224.0.0.0/4",
+			"::/1",
+			"8000::/1",
+		].map((dest) => ({ type: "out", action: "DROP", dest })),
+	];
+	state.hostReport = {
+		user: { enable: 1 },
+		zone: { type: "simple" },
+		vnet: { zone: "umiak" },
+		firewall: { enable: 1 },
+		nodeFirewall: { enable: 1 },
+		vmFirewallsValid: true,
+		rules,
+		ipset: [{ cidr: "192.168.68.90" }],
+	};
+	state.hostReportAt = new Date().toISOString();
+	let reads = 0;
+	const adoption = createSetupHandler({
+		pool: {},
+		store,
+		secretsDir: dir,
+		makePve: () => ({
+			get: async (path) => {
+				reads++;
+				if (path === "/cluster/firewall/options")
+					throw Object.assign(new Error("forbidden"), { status: 403 });
+				return {};
+			},
+		}),
+		nodeCheck: async () => ({
+			version: "test",
+			config: { vmidMin: 500, vmidMax: 589, vnet: "umiak0" },
+		}),
+	});
+	await adoption.wizard.run("host", { mode: "adopt" });
+	assert.equal(state.hostReportUsed, true);
+	await assert.rejects(
+		() => adoption.wizard.run("host", { mode: "adopt" }),
+		/generate a new read-only adoption report/,
+	);
+	assert.ok(reads >= 3);
+	state.hostReportUsed = false;
+	state.hostReportAt = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+	await assert.rejects(
+		() => adoption.wizard.run("host", { mode: "adopt" }),
+		/generate a new/,
+	);
+	state.hostReportAt = new Date().toISOString();
+	const disabled = createSetupHandler({
+		pool: {},
+		store,
+		secretsDir: dir,
+		makePve: () => ({ get: async () => ({ enable: 0 }) }),
+	});
+	await assert.rejects(
+		() => disabled.wizard.run("host", { mode: "adopt" }),
+		/Cluster firewall must be enabled/,
+	);
+
 	const callback = await request("/quickstart/setup/callback", {
 		token,
 		tokenSecret: "fake-token-secret",
 		caPem: await readFile(join(dir, "ca.pem"), "utf8"),
-		sshPublicKey: "ssh-ed25519 AAAA",
+		sshPublicKey: `ssh-ed25519 ${Buffer.concat([Buffer.from([0, 0, 0, 11]), Buffer.from("ssh-ed25519"), Buffer.from([0, 0, 0, 32]), Buffer.alloc(32, 1)]).toString("base64")}`,
 	});
 	assert.equal(callback.status, 200);
 	assert.equal(

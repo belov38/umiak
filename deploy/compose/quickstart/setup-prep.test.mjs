@@ -51,3 +51,23 @@ test("fresh host real program completes against fake PVE and preserves existing 
 	assert.match(result.stdout, /FAKE FRESH HOST PASS/);
 	assert.doesNotMatch(result.stdout, /fake-secret/);
 });
+for (const scenario of [
+	"disabled-firewall",
+	"pending-sdn",
+	"partial-failure-rerun",
+	"nonempty-delete",
+]) {
+	test(`fresh prep fake covers ${scenario}`, () => {
+		const result = spawnSync(
+			"python3",
+			[
+				"deploy/compose/quickstart/setup-prep-fake.py",
+				"deploy/compose/quickstart/setup-prep.py",
+				scenario,
+			],
+			{ encoding: "utf8" },
+		);
+		assert.equal(result.status, 0, result.stderr);
+		assert.match(result.stdout, new RegExp(`SCENARIO PASS: ${scenario}`));
+	});
+}

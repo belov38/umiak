@@ -88,8 +88,11 @@ export function pinnedPve(connection, tokenSecret) {
 						response.on("end", () => {
 							if (response.statusCode !== 200)
 								return reject(
-									new Error(
-										`PVE ${path}: HTTP ${response.statusCode}; check token permissions`,
+									Object.assign(
+										new Error(
+											`PVE ${path}: HTTP ${response.statusCode}; check token permissions`,
+										),
+										{ status: response.statusCode },
 									),
 								);
 							try {
@@ -323,10 +326,48 @@ export function verifyIsolation(rules, ipset, gateway, sets = {}) {
 	return true;
 }
 
+export async function verifyFirewall(api, connection) {
+	const firewall = await api.get("/cluster/firewall/options");
+	if (Number(firewall.enable) !== 1)
+		throw new Error("Cluster firewall must be enabled");
+	const nodeFirewall = await api.get(
+		`/nodes/${connection.node}/firewall/options`,
+	);
+	if (Number(nodeFirewall.enable ?? 1) !== 1)
+		throw new Error("Node firewall must be enabled");
+	const vms = await api.get(`/nodes/${connection.node}/qemu`);
+	for (const vm of Array.isArray(vms) ? vms : []) {
+		const id = Number(vm.vmid);
+		if (!((id >= 500 && id <= 589) || (id >= 595 && id <= 598))) continue;
+		const config = await api.get(`/nodes/${connection.node}/qemu/${id}/config`);
+		if (
+			!String(config.tags || "")
+				.split(";")
+				.some((tag) => tag === "umiak-tpl" || tag.startsWith("umiak"))
+		)
+			continue;
+		const options = await api.get(
+			`/nodes/${connection.node}/qemu/${id}/firewall/options`,
+		);
+		if (Number(options.enable ?? 0) !== 1)
+			throw new Error(`VM ${id} firewall must be enabled`);
+		for (const [key, value] of Object.entries(config)) {
+			if (
+				/^net\d+$/.test(key) &&
+				!/(?:^|,)firewall=1(?:,|$)/.test(String(value))
+			)
+				throw new Error(`VM ${id} ${key} firewall must be enabled`);
+		}
+	}
+	return { firewall, nodeFirewall };
+}
+
 export async function verifyAdoption(api, connection, nodeCheck) {
 	const uid = connection.tokenId.split("!")[0];
 	const token = connection.tokenId.split("!")[1];
 	const checks = [];
+	await verifyFirewall(api, connection);
+	checks.push({ name: "enabled cluster, node and VM firewalls", ok: true });
 	const check = async (name, path, valid = () => true) => {
 		const result = await api.get(path);
 		if (!valid(result))

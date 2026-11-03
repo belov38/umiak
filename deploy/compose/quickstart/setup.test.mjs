@@ -71,31 +71,33 @@ test("adoption reads only existing PVE objects and fails closed on missing zone"
 	const api = {
 		get: async (path) => {
 			paths.push(path);
-			return path.includes("/zones/")
-				? { type: "simple" }
-				: path.includes("/vnets/")
-					? { zone: "umiak" }
-					: path.includes("/ipset/")
-						? denySets[path.split("/").at(-1)] || [{ cidr: "192.168.68.90" }]
-						: path.includes("/groups/")
-							? [
-									{
-										type: "out",
-										action: "ACCEPT",
-										proto: "tcp",
-										dport: "443",
-										dest: "+umiak-gateway",
-									},
-									{ type: "out", action: "DROP", dest: "+umiak-deny" },
-									{ type: "out", action: "DROP", dest: "+umiak-deny6" },
-								]
-							: path.includes("/tokens/")
-								? { privsep: 1 }
-								: path.includes("/users/")
-									? { enable: 1 }
-									: path === "/access/permissions"
-										? { "/pool/umiak": { "VM.Audit": 1 } }
-										: {};
+			return path === "/cluster/firewall/options"
+				? { enable: 1 }
+				: path.includes("/zones/")
+					? { type: "simple" }
+					: path.includes("/vnets/")
+						? { zone: "umiak" }
+						: path.includes("/ipset/")
+							? denySets[path.split("/").at(-1)] || [{ cidr: "192.168.68.90" }]
+							: path.includes("/groups/")
+								? [
+										{
+											type: "out",
+											action: "ACCEPT",
+											proto: "tcp",
+											dport: "443",
+											dest: "+umiak-gateway",
+										},
+										{ type: "out", action: "DROP", dest: "+umiak-deny" },
+										{ type: "out", action: "DROP", dest: "+umiak-deny6" },
+									]
+								: path.includes("/tokens/")
+									? { privsep: 1 }
+									: path.includes("/users/")
+										? { enable: 1 }
+										: path === "/access/permissions"
+											? { "/pool/umiak": { "VM.Audit": 1 } }
+											: {};
 		},
 	};
 	const r = await verifyAdoption(api, connection, async () => ({
@@ -350,4 +352,99 @@ test("help copy examples contain actual newlines and link certificate settings",
 		renderSetup({ steps: {} }, "https://stack.example"),
 		/otherwise pin the leaf/,
 	);
+});
+
+test("wizard refuses inherited step names without writing state", async () => {
+	let writes = 0;
+	const wizard = new SetupWizard({
+		store: {
+			read: async () => ({ steps: {} }),
+			write: async () => {
+				writes++;
+			},
+		},
+		steps: {},
+	});
+	await assert.rejects(
+		() => wizard.run("constructor", {}),
+		/Unknown setup step/,
+	);
+	assert.equal(writes, 0);
+});
+test("adoption rejects disabled cluster firewall before accepting host", async () => {
+	await assert.rejects(
+		() =>
+			verifyAdoption(
+				{
+					get: async (path) =>
+						path === "/cluster/firewall/options" ? { enable: 0 } : {},
+				},
+				connection,
+				async () => ({}),
+			),
+		/firewall/,
+	);
+});
+test("wizard UI has themes, progress and template selections without raw JSON", () => {
+	const html = renderSetup(
+		{
+			steps: {},
+			detectedTemplates: [
+				{ templateSlug: "linux", pveVmid: 597, name: "Linux" },
+			],
+		},
+		"https://stack.example",
+	);
+	assert.match(html, /prefers-color-scheme/);
+	assert.match(html, /progress/);
+	assert.match(html, /type="checkbox"/);
+	assert.doesNotMatch(
+		html,
+		/Build registrations \(JSON\)|prepared stand|umiak-tpl preflight/,
+	);
+	assert.doesNotMatch(html, /class="ready">Not configured/);
+});
+
+test("SSH callback rejects multiline and malformed host keys", async () => {
+	const { validateSshPublicKey } = await import("./setup.mjs");
+	const key = Buffer.concat([
+		Buffer.from([0, 0, 0, 11]),
+		Buffer.from("ssh-ed25519"),
+		Buffer.from([0, 0, 0, 32]),
+		Buffer.alloc(32, 1),
+	]);
+	const valid = `ssh-ed25519 ${key.toString("base64")}`;
+	assert.equal(validateSshPublicKey(valid), valid);
+	for (const value of [
+		`${valid}\n`,
+		`${valid}\nhost ssh-ed25519 AAAA`,
+		"ssh-ed25519 AAAA",
+	])
+		assert.throws(() => validateSshPublicKey(value), /Invalid SSH/);
+});
+
+test("isolation verifies node and VM firewall switches and NIC flags", async () => {
+	const { verifyFirewall } = await import("./setup-host.mjs");
+	const node = "pve";
+	const data = {
+		"/cluster/firewall/options": { enable: 1 },
+		"/nodes/pve/firewall/options": { enable: 1 },
+		"/nodes/pve/qemu": [{ vmid: 597 }],
+		"/nodes/pve/qemu/597/config": {
+			tags: "umiak-tpl",
+			net0: "virtio=00:11:22:33:44:55,bridge=umiak0,firewall=1",
+		},
+		"/nodes/pve/qemu/597/firewall/options": { enable: 1 },
+	};
+	const api = { get: async (path) => data[path] };
+	await verifyFirewall(api, { node });
+	data["/nodes/pve/firewall/options"].enable = 0;
+	await assert.rejects(() => verifyFirewall(api, { node }), /Node firewall/);
+	data["/nodes/pve/firewall/options"].enable = 1;
+	data["/nodes/pve/qemu/597/firewall/options"].enable = 0;
+	await assert.rejects(() => verifyFirewall(api, { node }), /VM 597 firewall/);
+	data["/nodes/pve/qemu/597/firewall/options"].enable = 1;
+	data["/nodes/pve/qemu/597/config"].net0 =
+		"virtio=00:11:22:33:44:55,bridge=umiak0";
+	await assert.rejects(() => verifyFirewall(api, { node }), /net0 firewall/);
 });

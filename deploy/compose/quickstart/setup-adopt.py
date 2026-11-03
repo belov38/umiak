@@ -41,6 +41,21 @@ report = {
     "denySets": {name: optional_set(name) for name in ["umiak-deny", "umiak-deny6", "umiak-deny-public"]},
     "firewall": get("/cluster/firewall/options"),
 }
+report["nodeFirewall"] = get("/nodes/" + config["node"] + "/firewall/options")
+report["vmFirewallsValid"] = True
+for vm in get("/nodes/" + config["node"] + "/qemu"):
+    vmid = int(vm["vmid"])
+    if not (500 <= vmid <= 589 or 595 <= vmid <= 598):
+        continue
+    vm_config = get(f"/nodes/{config['node']}/qemu/{vmid}/config")
+    if not any(tag.startswith("umiak") for tag in vm_config.get("tags", "").split(";")):
+        continue
+    options = get(f"/nodes/{config['node']}/qemu/{vmid}/firewall/options")
+    if int(options.get("enable", 0)) != 1:
+        report["vmFirewallsValid"] = False
+    for key, value in vm_config.items():
+        if key.startswith("net") and key[3:].isdigit() and "firewall=1" not in value.split(","):
+            report["vmFirewallsValid"] = False
 node = subprocess.run(["/usr/local/bin/umiak-node", "--stdio"], input=json.dumps({"op": "version", "args": {}}), text=True, capture_output=True, check=True)
 report["nodeAgent"] = json.loads(node.stdout)
 ca = Path(config.get("caPath", "/root/.config/umiak/quickstart-ca.pem"))

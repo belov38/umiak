@@ -47,6 +47,23 @@ const digest = (value) => createHash("sha256").update(value).digest("hex");
 function requireValue(ok, message) {
 	if (!ok) throw new Error(message);
 }
+export function validateSshPublicKey(value) {
+	requireValue(
+		typeof value === "string" &&
+			!/[\r\n]/.test(value) &&
+			/^ssh-ed25519 [A-Za-z0-9+/]+={0,2}$/.test(value),
+		"Invalid SSH host public key",
+	);
+	const key = Buffer.from(value.split(" ")[1], "base64");
+	requireValue(
+		key.length === 51 &&
+			key.readUInt32BE(0) === 11 &&
+			key.subarray(4, 15).toString() === "ssh-ed25519" &&
+			key.readUInt32BE(15) === 32,
+		"Invalid SSH host public key",
+	);
+	return value;
+}
 export function validateConnection(input) {
 	const url = new URL(input.apiUrl);
 	requireValue(
@@ -108,6 +125,11 @@ export function validateNetwork(input) {
 			host !== "0.0.0.0",
 		"Use the gateway LAN address reachable from guests",
 	);
+	const guestDns = input.guestDns || "1.1.1.1";
+	requireValue(
+		isIP(guestDns) !== 0,
+		"Guest DNS resolver must be an IP address",
+	);
 	const previewDomain =
 		input.previewDomain || `umiak.${host.replaceAll(".", "-")}.sslip.io`;
 	requireValue(
@@ -122,7 +144,7 @@ export function validateNetwork(input) {
 		url.protocol === "wss:" && !url.username && !url.password,
 		"Tunnel URL must use wss",
 	);
-	return { gatewayAddress: host, previewDomain, tunnelUrl };
+	return { gatewayAddress: host, previewDomain, tunnelUrl, guestDns };
 }
 export class PgSetupStore {
 	constructor(pool) {
@@ -174,7 +196,8 @@ export class SetupWizard {
 			const state = await this.store.read();
 			state.steps ??= {};
 			state.complete = false;
-			if (!this.steps[name]) throw new Error("Unknown setup step");
+			if (!Object.hasOwn(this.steps, name))
+				throw new Error("Unknown setup step");
 			if (STEPS.includes(name)) {
 				for (const prior of STEPS.slice(0, STEPS.indexOf(name)))
 					requireValue(
@@ -311,56 +334,65 @@ export function createSetupHandler({
 				requireRootCA(await readOptional(secretsDir, "pve-root-ca.pem")),
 				"PVE root CA is required before host adoption; supply it in Connect or generate a read-only host report",
 			);
-			if (state.hostReport) {
-				const report = state.hostReport;
-				verifyIsolation(report.rules, report.ipset, undefined, report.denySets);
-				requireValue(
-					Number(report.user?.enable ?? 1) === 1 &&
-						report.zone?.type === "simple" &&
-						report.vnet?.zone === "umiak" &&
-						Array.isArray(report.ipset) &&
-						report.ipset.some((x) => x.cidr) &&
-						Array.isArray(report.rules) &&
-						report.rules.length > 0 &&
-						Number(report.firewall?.enable) === 1,
-					"Existing host report does not match the required isolated Umiak setup",
-				);
-				await api.get("/pools/umiak");
-				const node = await nodeCheck(connection, secretsDir);
-				requireValue(
-					node.version &&
-						node.config?.vmidMin === 500 &&
-						node.config?.vmidMax === 589 &&
-						node.config?.vnet === "umiak0",
-					"Restricted node-agent configuration mismatch",
-				);
-				return {
-					checks: [
-						"user",
-						"token",
-						"role",
-						"pool",
-						"SDN zone",
-						"SDN VNet",
-						"gateway IPSet",
-						"egress firewall rules",
-						"enabled firewall",
-						"restricted node-agent",
-					].map((name) => ({ name, ok: true })),
-					nodeVersion: node.version,
-					reportAt: state.hostReportAt,
-				};
-			}
 			try {
 				return await verifyAdoption(api, connection, () =>
 					nodeCheck(connection, secretsDir),
 				);
 			} catch (error) {
-				throw new Error(
-					error.message +
-						"; for least-privilege tokens use Generate read-only adoption report, then retry Adopt",
-				);
+				if (
+					error.status !== 403 ||
+					!state.hostReport ||
+					state.hostReportUsed ||
+					!Number.isFinite(Date.parse(state.hostReportAt)) ||
+					Date.now() - Date.parse(state.hostReportAt) > 5 * 60 * 1000
+				)
+					throw new Error(
+						error.message +
+							"; generate a new read-only adoption report, then retry Adopt",
+					);
 			}
+			// Privilege-separated tokens cannot inspect global firewall policy. Accept
+			// only a fresh one-time report obtained with the scoped console capability.
+			state.hostReportUsed = true;
+			const report = state.hostReport;
+			verifyIsolation(report.rules, report.ipset, undefined, report.denySets);
+			requireValue(
+				Number(report.user?.enable ?? 1) === 1 &&
+					report.zone?.type === "simple" &&
+					report.vnet?.zone === "umiak" &&
+					Number(report.firewall?.enable) === 1 &&
+					Number(report.nodeFirewall?.enable ?? 1) === 1 &&
+					report.vmFirewallsValid === true,
+				"Existing host report does not match the required isolated Umiak setup",
+			);
+			await api.get("/pools/umiak");
+			const node = await nodeCheck(connection, secretsDir);
+			requireValue(
+				node.version &&
+					node.config?.vmidMin === 500 &&
+					node.config?.vmidMax === 589 &&
+					node.config?.vnet === "umiak0",
+				"Restricted node-agent configuration mismatch",
+			);
+			return {
+				checks: [
+					"user",
+					"token",
+					"role",
+					"pool",
+					"SDN zone",
+					"SDN VNet",
+					"gateway IPSet",
+					"egress firewall rules",
+					"enabled cluster, node and VM firewalls",
+					"restricted node-agent",
+				].map((name) => ({ name, ok: true })),
+				nodeVersion: node.version,
+				reportAt: state.hostReportAt,
+				ipset: report.ipset,
+				rules: report.rules,
+				denySets: report.denySets,
+			};
 		},
 		async limits(input, state) {
 			const limits = validateLimits(input);
@@ -406,7 +438,7 @@ export function createSetupHandler({
 		},
 		async network(input, state) {
 			const network = validateNetwork(input);
-			const report = state.hostReport || state.steps.host.data;
+			const report = state.steps.host.data;
 			verifyIsolation(
 				report.rules,
 				report.ipset,
@@ -774,6 +806,8 @@ export function createSetupHandler({
 							node: connection.node,
 							tokenId: connection.tokenId,
 							nodeSha256,
+							storage: prep.storage,
+							guestDns: prep.guestDns,
 						};
 						const script =
 							prep.mode === "fresh"
@@ -799,6 +833,7 @@ export function createSetupHandler({
 						);
 						state.hostReport = input.report;
 						state.hostReportAt = new Date().toISOString();
+						delete state.hostReportUsed;
 						if (
 							input.caPem &&
 							!(await readOptional(secretsDir, "pve-root-ca.pem"))
@@ -813,7 +848,7 @@ export function createSetupHandler({
 							typeof input.tokenSecret === "string" &&
 								input.tokenSecret.length > 0 &&
 								typeof input.caPem === "string" &&
-								typeof input.sshPublicKey === "string",
+								validateSshPublicKey(input.sshPublicKey),
 							"Host callback credentials are incomplete",
 						);
 						const api = makePve(connection, input.tokenSecret);
@@ -855,11 +890,60 @@ export function createSetupHandler({
 			return false;
 		}
 		if (req.method === "GET" && (path === "/app/help" || path === "/help")) {
-			html(res, renderHelp(context.origin));
+			res.writeHead(303, { Location: "/app/getting-started" });
+			res.end();
 			return true;
 		}
 		if (req.method === "GET" && path === "/setup") {
-			html(res, renderSetup(await store.read(), context.origin));
+			const state = await store.read();
+			state.detectedTemplates = [];
+			if (state.steps.connection?.status === "ready") {
+				try {
+					const api = await pveOf(state);
+					const vms = await api.get(`/nodes/${connectionOf(state).node}/qemu`);
+					for (const vm of vms) {
+						if (
+							Number(vm.template) !== 1 ||
+							vm.vmid < 595 ||
+							vm.vmid > 598 ||
+							!String(vm.tags || "")
+								.split(";")
+								.includes("umiak-tpl")
+						)
+							continue;
+						const config = await api.get(
+							`/nodes/${connectionOf(state).node}/qemu/${vm.vmid}/config`,
+						);
+						const slug =
+							String(config.tags || "")
+								.split(";")
+								.map((tag) => tag.replace(/^umiak-template-/, ""))
+								.find((tag) =>
+									[
+										"linux",
+										"linux-desktop",
+										"windows",
+										"windows-desktop",
+									].includes(tag),
+								) ||
+							(String(vm.name || "").includes("windows-desktop")
+								? "windows-desktop"
+								: String(vm.name || "").includes("windows")
+									? "windows"
+									: String(vm.name || "").includes("desktop")
+										? "linux-desktop"
+										: "linux");
+						state.detectedTemplates.push({
+							templateSlug: slug,
+							pveVmid: Number(vm.vmid),
+							name: vm.name,
+						});
+					}
+				} catch (error) {
+					state.templateDetectionError = error.message;
+				}
+			}
+			html(res, renderSetup(state, context.origin));
 			return true;
 		}
 		if (req.method === "GET" && path === "/quickstart/setup/state") {
@@ -913,6 +997,10 @@ export function createSetupHandler({
 					);
 				state.preparation = {
 					mode,
+					storage:
+						input.storage || state.steps.limits?.data?.storage || "local-lvm",
+					guestDns:
+						input.guestDns || state.steps.network?.data?.guestDns || "1.1.1.1",
 					connectionHash: digest(JSON.stringify(state.steps.connection.data)),
 					hash: digest(token),
 					expiresAt: Date.now() + 15 * 60 * 1000,

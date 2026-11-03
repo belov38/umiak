@@ -1,4 +1,5 @@
 # Test harness: run the real generated Python program against a fake PVE/host.
+import atexit
 import base64
 import hashlib
 import io
@@ -14,18 +15,22 @@ import tempfile
 import urllib.request
 
 source = Path(sys.argv[1]).read_text()
+scenario = sys.argv[2] if len(sys.argv) > 2 else "success"
+fail_callback = scenario in ["partial-failure-rerun", "nonempty-delete"]
+roles, users, tokens, acls = [], [], [], []
 original_path = Path
 sandbox = original_path(tempfile.mkdtemp(prefix="umiak-prep-fake-"))
 commands = []
-objects = {"/cluster/firewall/options": {"enable": 1}}
+objects = {"/cluster/firewall/options": {"enable": 0 if scenario == "disabled-firewall" else 1}, "/nodes/pve/firewall/options": {"enable": 1}, "/cluster/sdn/zones": [], "/cluster/sdn/vnets": [], "/access/acl": acls, "/storage/fast": {"type":"lvmthin","vgname":"custom-vg","thinpool":"custom-pool"}}
+if scenario == "pending-sdn": objects["/cluster/sdn/zones"] = [{"zone":"foreign","pending":1}]
 agent = b"fake-node-agent"
 report = {}
-config = {"origin": "https://stack.example:8443", "token": "a" * 64, "node": "pve", "gateway": "192.168.68.90", "publicKey": "ssh-ed25519 AAAA test", "tokenId": "developer@pve!quickstart", "nodeSha256": hashlib.sha256(agent).hexdigest()}
+config = {"origin": "https://stack.example:8443", "token": "a" * 64, "node": "pve", "gateway": "192.168.68.90", "publicKey": "ssh-ed25519 AAAA test", "tokenId": "developer@pve!quickstart", "nodeSha256": hashlib.sha256(agent).hexdigest(), "storage": "fast"}
 
 
 def mapped(value="."):
     text = str(value)
-    return sandbox / text.lstrip("/") if text.startswith("/") else original_path(value)
+    return original_path(text) if text.startswith(str(sandbox)) else sandbox / text.lstrip("/") if text.startswith("/") else original_path(value)
 
 
 for name, value in {
@@ -60,6 +65,8 @@ class Reply:
 
 def urlopen(request, **_kwargs):
     if isinstance(request, urllib.request.Request):
+        if fail_callback:
+            raise RuntimeError("injected callback failure")
         report.update(json.loads(request.data))
     else:
         assert request == config["origin"] + "/pve-setup.sh?token=" + config["token"] + "&asset=node-agent"
@@ -80,25 +87,62 @@ def run(args, **kwargs):
     elif args[:2] == ["pvesh", "create"]:
         path = args[2]
         values = dict(zip(args[3::2], args[4::2], strict=True))
-        child = values.get("--zone") or values.get("--vnet") or values.get("--subnet") or values.get("--name") or values.get("--group")
+        child = values.get("--zone") if path.endswith("zones") else values.get("--vnet") if path.endswith("vnets") else values.get("--subnet") or values.get("--name") or values.get("--group")
         if child:
-            objects[path + "/" + child] = values
+            child_path = path + "/" + child
+            if "subnets" in path: child_path = path + "/umiak-10.88.0.0-24"
+            if child_path in objects: raise subprocess.CalledProcessError(2,args)
+            objects[child_path] = [] if "/firewall/" in path else {key.removeprefix("--"): value for key,value in values.items()}
+        elif path in objects and isinstance(objects[path],list):
+            row = {key.removeprefix("--"): value for key,value in values.items()}
+            if "cidr" in row:
+                if any(old.get("cidr") == row["cidr"] for old in objects[path]): raise subprocess.CalledProcessError(2,args)
+                objects[path].append(row)
+            else:
+                objects[path].insert(int(values.get("--pos",0)),row)
+                for pos,row in enumerate(objects[path]): row["pos"] = pos
         out = "{}"
+    elif args[:2] == ["pvesh", "delete"]:
+        path = args[2]
+        if path in objects:
+            if isinstance(objects[path],list) and objects[path]: raise subprocess.CalledProcessError(2,args)
+            del objects[path]
+        else:
+            parent, key = path.rsplit("/",1)
+            rows = objects.get(parent,[])
+            objects[parent] = [row for row in rows if str(row.get("cidr",row.get("pos"))) != key]
     elif args[:3] == ["pvesh", "set", "/cluster/sdn"]:
         mapped("/sys/class/net/vmbr0/bridge/mcast_hash_max").write_text("8192")
     elif args[:3] == ["ip", "link", "set"]:
         mapped("/sys/class/net/vmbr0/bridge/mcast_hash_max").write_text(args[-1])
     elif args[:2] == ["sysctl", "-n"]:
         out = "1"
-    elif args[:2] == ["pveum", "role"] and args[2] == "list":
-        out = "[]"
+    elif args[:2] == ["pveum", "role"]:
+        if args[2] == "list": out = json.dumps(roles)
+        elif args[2] == "add": roles.append({"roleid":args[3]})
+        elif args[2] == "delete": roles[:] = [x for x in roles if x["roleid"] != args[3]]
+    elif args[:3] == ["pveum", "pool", "add"]:
+        objects["/pools/"+args[3]] = {}
+    elif args[:3] == ["pveum", "pool", "delete"]:
+        objects.pop("/pools/"+args[3],None)
     elif args[:2] == ["pveum", "user"]:
-        out = json.dumps({"value": "fake-secret"}) if "add" in args and "token" in args else "[]"
+        if args[2] == "list": out = json.dumps(users)
+        elif args[2] == "add": users.append({"userid":args[3]})
+        elif args[2] == "delete": users[:] = [x for x in users if x["userid"] != args[3]]
+        elif args[2:4] == ["token","list"]: out = json.dumps(tokens)
+        elif args[2:4] == ["token","add"]:
+            tokens.append({"tokenid":args[5]}); out = json.dumps({"value":"fake-secret"})
+        elif args[2:4] == ["token","remove"]: tokens[:] = [x for x in tokens if x["tokenid"] != args[5]]
+    elif args[:2] == ["pveum", "acl"]:
+        acl = {"path":args[3], "ugid":args[5], "roleid":args[7]}
+        if args[2] == "modify": acls.append(acl)
+        elif args[2] == "delete": acls[:] = [x for x in acls if x != acl]
     elif args[-1] == "--stdio":
         out = json.dumps({"ok": True, "result": {"version": "fake"}})
     return subprocess.CompletedProcess(args, 0, stdout=out, stderr="")
 
 
+atexit.register = lambda fn: None
 pathlib.Path = mapped
 subprocess.run = run
 os.geteuid = lambda: 0
@@ -106,8 +150,42 @@ socket.gethostname = lambda: "pve"
 ssl.create_default_context = lambda **_: object()
 urllib.request.urlopen = urlopen
 sys.argv = ["setup-prep.py", base64.b64encode(json.dumps(config).encode()).decode()]
-namespace = {"__name__": "__main__"}
-exec(compile(source, "setup-prep.py", "exec"), namespace)
+def execute():
+    namespace = {"__name__": "__main__"}
+    try:
+        exec(compile(source, "setup-prep.py", "exec"), namespace)
+    except BaseException:
+        if "rollback_on_exit" in namespace: namespace["rollback_on_exit"]()
+        raise
+    finally:
+        if "lock" in namespace and not namespace["lock"].closed: namespace["lock"].close()
+    return namespace
+
+if scenario in ["disabled-firewall", "pending-sdn"]:
+    try: execute()
+    except SystemExit as error: assert "firewall" in str(error) or "Pending SDN" in str(error)
+    else: raise AssertionError("Disabled firewall accepted")
+    assert not any(args[0] in ["pveum","systemd-run"] or args[:2] == ["pvesh","create"] for args in commands)
+    assert not mapped("/var/lib/umiak-quickstart").exists()
+    print("SCENARIO PASS: " + scenario)
+    sys.exit(0)
+if fail_callback:
+    before_objects = json.loads(json.dumps(objects))
+    try: execute()
+    except RuntimeError as error: assert "injected" in str(error)
+    else: raise AssertionError("Failure not injected")
+    assert not roles and not users and not tokens and not acls
+    assert objects == before_objects, (objects, before_objects)
+    assert not mapped("/usr/local/bin/umiak-node").exists()
+    assert not mapped("/etc/umiak-node.toml").exists()
+    assert mapped("/etc/pve/priv/authorized_keys").read_text() == "existing-management-key\n"
+    fail_callback = False
+namespace = execute()
+# A successful rerun tolerates every pre-existing object, CIDR, ACL and token.
+namespace = execute()
+assert 'vg = "custom-vg"' in mapped("/etc/umiak-node.toml").read_text()
+assert 'storage = "fast"' in mapped("/etc/umiak-node.toml").read_text()
+if scenario != "success": print("SCENARIO PASS: " + scenario)
 assert mapped("/sys/class/net/vmbr0/bridge/mcast_hash_max").read_text() == "1024"
 assert mapped("/etc/pve/priv/authorized_keys").read_text().startswith("existing-management-key\n")
 assert any(command[:2] == ["systemd-run", "--quiet"] for command in commands)
