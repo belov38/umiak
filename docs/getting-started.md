@@ -571,3 +571,17 @@ Setup and Settings show guest CA, tunnel and preview certificate expiry dates.
 At one year or less before CA expiry, the warning explains that CA rotation
 requires rebuilding agent packages and templates and migrating existing guests.
 Plan rotation before expiry; the CA is never silently replaced or extended.
+
+### New browser or device? (quickstart)
+
+Owner cookies are per browser and hostname. The Sign in page has no dashboard
+navigation until authenticated. Get a ten-minute, one-use code from an existing
+browser's **Owner sessions → Sign in another browser**, or on the Docker host:
+
+```sh
+docker compose exec quickstart node deploy/compose/quickstart/run.mjs node deploy/compose/quickstart/signin-code.mjs
+```
+
+Enter the code and select **Sign in**. Other browsers and CLI credentials remain
+valid. CLI sessions cannot mint browser access. Console recovery is destructive:
+use it only as a last resort because it revokes every browser and CLI credential.
