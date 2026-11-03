@@ -1,231 +1,129 @@
 # S16: zero-config self-host quickstart
 
-Decision: Ilia, 2026-11-03. Status: acceptance fixes and additions implemented on s16-fix, verified on CT590; independent acceptance pending.
+Decision: Ilia, 2026-11-03. Current scope: round 5 on `s16-fix4`.
+The HTTP decision supersedes all earlier private owner CA/TLS rulings.
+Evidence and historical rounds: `docs/plans/s16-quickstart.md`.
 
-## Intent and acceptance
+## Intent
 
-A developer runs `docker compose up` from the repository root, claims the deployment,
-configures a home Proxmox host in the dashboard, installs the CLI from that same
-origin and creates, executes in and deletes a first sandbox. No handwritten `.env`.
-LAN, MagicDNS and ordinary DNS names work without a Tailscale dependency.
-Existing OIDC and S15 deployment paths remain available.
+Run `docker compose up -d --build` from the repository root, claim ownership,
+configure a home Proxmox host, install the bundled CLI from the same origin and
+create/exec/delete a sandbox. No handwritten environment file is required for the
+LAN IP path. OIDC and S15 remain available through their existing compose files.
 
-## Approaches and rulings
+## HTTP, proxies and ownership
 
-These are implementer decisions under Ilia's explicit delegation of technical details.
+- Owner ingress serves plain HTTP on Docker host port4180, bound to all interfaces
+  by default (`UMIAK_QUICKSTART_BIND` and `UMIAK_QUICKSTART_PORT` configure host
+  binding). Dashboard, API, MCP, installer and downloads use this one origin.
+  Private owner CA, certificate issuance, SNI policy, rotation UI and CA downloads
+  are removed. The guest gateway TLS listener and its CA are independent.
+- LAN/tailnet access retains S15 allowed/denied peer CIDRs, including sandbox and
+  PVE node addresses. Network access grants no ownership. A random 256-bit one-time
+  claim code is printed privately to Compose logs; credentials are stored as
+  digests, scoped, expiring and revocable. Recovery is Docker-console only.
+- Direct Host validation allows localhost, literal addresses, the configured
+  public hostname and `UMIAK_QUICKSTART_ALLOWED_HOSTS`. Additional DNS names must
+  be explicitly configured. Unknown DNS Hosts fail before routing. Destinations
+  are fixed upstreams, never selected from Host. Exact Origin checks protect
+  mutations, including claim and browser pairing approval; WebSockets are gated.
+- `UMIAK_TRUSTED_PROXY_CIDRS` defaults to loopback. Compose additionally trusts its
+  host NAT peer; the optional sidecar overlay trusts its isolated peer. Only these
+  peers may supply X-Forwarded-Proto/Host/For. A trusted proxy must reject unknown
+  Hosts; optional `UMIAK_PUBLIC_URL` pins its external origin. Ordinary direct
+  requests ignore forged forwarding headers. Forwarded client chains are walked
+  from the trusted end for rate limits and preparation peer checks.
+- HTTP cookies use `umiak_owner` without Secure. Trusted HTTPS proxy requests use
+  `__Host-umiak_owner; Secure`, preserving existing Serve owner sessions. Both are
+  HttpOnly, Path=/, SameSite=Strict. Existing CLI bearer credentials stay valid.
+- HTTPS is supplied by an operator's proxy. Tailscale Serve is recommended and
+  needs no private owner CA. Funnel is public Internet exposure: owner gate is
+  then the only protection. Setup/settings visibly warn on *.ts.net origins.
+  No Tailscale identity header grants authorization; proxy trust is generic.
+- Short-code CLI pairing needs approval by a claimed browser; CLI sessions cannot
+  approve pairing and expire within30 days. Installer accepts HTTP with a warning
+  that integrity depends on the LAN because checksums use the same channel. It
+  still verifies archive and executable SHA256 before atomic installation.
+  Generic CLI `--cacert`/`UMIAK_CA_FILE` remains for private operator proxies.
+  Public HTTP login warns once. Private/loopback/tailnet HTTP is allowed.
 
-1. Reuse S15 local identity behind an isolated owner ingress, rather than requiring
-   Keycloak or independently implementing identity in every component. Only the
-   owner ingress publishes user control-plane routes; upstream listeners must never
-   be reachable around it. Guest gateway TLS, SSH and tunnel authentication remain
-   independent. OIDC stays in the existing compose entry point.
-2. Root `compose.yaml` is the quickstart entry point. Generated secrets live in
-   named volumes, survive recreation and are never baked into images or git.
-   Postgres uses a generated password, not the development literal password.
-3. Owner claim uses a random 256-bit single-use code printed to compose logs.
-   Claim is atomic and persisted. The code is invalid after successful claim.
-   Random owner credentials are stored only as digests, with expiry and revocation.
-   Browser cookies are HttpOnly, SameSite=Strict and Secure on HTTPS. Mutation
-   requests must pass same-origin checks. Neither CIDR membership nor identity
-   headers confer ownership. Claim/pair attempts are bounded and rate limited.
-4. HTTPS is required for remote ownership. A separate quickstart CA issues certificates
-   only for configured/owner-approved names and local addresses, with critical X.509 name constraints; operators obtain and verify the CA through the local
-   Docker trust channel before remote curl. Never recommend `curl -k | sh`.
-   Arbitrary Host headers do not select proxy destinations. Unknown TLS SNI names are rejected before HTTP. Strict same-origin mutation checks remain required; TLS alone is not a general DNS-rebinding defence.
-5. CLI pairing creates a short-lived request; a claimed browser approves it and the
-   CLI receives a revocable bearer credential. A code alone does not approve pairing.
-   The CLI persists the CA for subsequent requests; installer assets are unauthenticated
-   but no credentials or host bootstrap tokens are public.
-6. Keep the S15 deny list for sandbox subnet and node SNAT addresses at ingress,
-   including WebSocket upgrades. Explicitly allow tailnet 100.64.0.0/10 in addition
-   to LAN ranges. Do not trust forwarded client identity from arbitrary peers.
-7. Wizard state and errors are durable in Postgres. Steps: connection (TLS fingerprint
-   pin), host preparation/adoption, storage/VMID/RAM policy, guest gateway and preview
-   domain, templates, smoke. Re-running a step verifies current state. Completion
-   requires successful smoke and a registered Linux template, not just form submission.
-8. Adoption is read-only against PVE: verify user/token permissions, pool, SDN zone/VNet,
-   firewall IPSet/rules, restricted node-agent SSH and templates. It may write control
-   plane configuration/registration but must not create another PVE setup.
-9. Fresh host setup reuses the S1 preparation primitives with a one-time, expiring,
-   deployment-bound callback token. No arbitrary shell values from form input are
-   interpolated unquoted. Dry run emits intended actions without host mutation or token
-   consumption. Firewall/network mutations require an automatic rollback timer and
-   stay limited to Umiak-owned objects. Never touch vmbr0.
-10. Linux template build reuses S5 builder; desktop/Windows are optional and require
-    user-provided ISO where applicable. No rebuilds of existing pve templates.
-11. Help pages are rendered inside the authenticated dashboard with actual request
-    origin in CLI/MCP/SDK examples and copy controls. No third-party scripts.
-12. Installer ships four existing Bun targets (Darwin/Linux arm64/x64), plus Windows
-    x64 when practical, with SHA256SUMS; detects unsupported targets before downloads,
-    verifies exact filename checksum before install, defaults to ~/.local/bin and
-    invokes `umiak login --api-url <origin>`. Chosen directory and CA are configurable.
+## Guest gateway, previews and browser capabilities
 
-13. Initial remote bootstrap uses a DNS name (LAN DNS, mDNS or MagicDNS), or
-    localhost on the Docker host. Docker NAT cannot reveal every host IP to a
-    container before TLS. `/owner/tls` lets the claimed owner add raw IP SANs
-    immediately and persist them without an environment file. Dev CT IP SANs are
-    supplied by its existing infrastructure overlay. This is an explicit bootstrap
-    step for raw-IP-only installations, not an assumption that IPs send SNI.
-14. Fresh preparation fails closed when dnsmasq, host IPv4 forwarding or an enabled
-    cluster firewall are missing. Enabling shared global host policy can affect
-    unrelated guests and cannot be safely automated under the host constraints.
-    The generated script reports these prerequisites before applying changes;
-    administrator host preparation remains a documented fresh-host gap.
-15. Owner recovery is a Docker-console command only: it atomically revokes all
-    browser/CLI credentials and prints a new one-time code without changing wizard
-    or VM state. There is no network recovery endpoint.
-16. Ship only template-builder/database production dependencies in the owner image;
-    CLI build dependencies stay in a separate stage. CT590 has a 30 GiB disk, and
-    shipping all monorepo dependencies exceeded free unpack space during live build.
-17. Adoption verifies deny IPSet coverage and rule precedence, including the existing
-    S10 TURN UDP3478 gateway exception; neither any nonempty rule list nor CIDR
-    membership is evidence of isolation. Referenced node IPs are denied dynamically
-    for HTTP and WebSockets; only one-time preparation capabilities bypass that deny.
+- Guest agents keep using TLS on gateway:443 and pin the guest CA, not a leaf.
+  Never replace this CA during an owner-ingress migration. Quickstart CA lasts
+  ten years. Leaves are reissued from the same CA within30 days of expiry, at
+  startup and daily without user action. Retain leaf keys and atomically rename
+  certificates so existing hot reload never sees a mismatched key/certificate.
+  Dev-cp has the same periodic control, independent of redeployment.
+- Setup/settings show guest CA, tunnel and preview leaf expiry. Warn starting one
+  year before CA expiry: CA rotation requires rebuilding agent packages/templates.
+  `/metrics` includes CA and leaf expiry gauges. Leaf renewal needs no rebuild.
+- Quickstart exposes token/public previews over HTTP on configurable port8085,
+  using IP-derived sslip.io names. API/CLI/dashboard return the configured scheme
+  and port. Real wildcard HTTPS certificate deployments remain supported. Serve
+  cannot terminate wildcard previews, which stay on LAN/tailnet IP HTTP.
+- Non-localhost HTTP is not a browser secure context. Clipboard uses execCommand
+  fallback. Desktop WebCodecs/WebRTC requirements are detected and explained;
+  unavailable browser APIs cannot be enabled by the app. Guidance: Serve
+  (recommended), localhost via `ssh -L 4180:localhost:4180 <docker-host>`, an HTTPS
+  proxy, or a temporary Chrome insecure-origin-as-secure flag with an explicit
+  warning that protection is weakened for that origin.
 
-## Live stand constraints
+## Setup, media and templates
 
-Only pve / CT590; no pve2 or ip-hub-pve. Sandbox VMIDs 500–589, total sandbox RAM
-at most 8 GiB, sequential VMs, check usage first, delete every created resource.
-Templates 595–598 read-only. Never touch resources below 500, 9000/9001, 100–109
-or vmbr0. No broad cleanup. Always `umiak rm --yes`.
-Preserve CT590 :443 and existing dev CA byte-for-byte; guests can reach only this
-endpoint through umiak-gateway. Quickstart uses a separate HTTPS port.
-No firewall changes unless indispensable, scoped and protected by auto rollback.
-Rollback remains `UMIAK_DEVCP_AUTH_MODE=none|oidc infra/dev-cp/deploy.sh`.
-Never authenticate as ilia@example.com. No secrets in git; docs/comments English.
+- Setup stores durable connection, host, limits, network, templates and smoke
+  steps in Postgres. First-run completion requires smoke, which creates one2GiB
+  Linux sandbox, execs and deletes it. Dashboard builds after completion never
+  reset completion or invalidate smoke. Failed builds preserve setup steps.
+- Adoption is read-only on PVE and preserves existing objects/template IDs.
+  Validate pinned PVE TLS fingerprint, node-agent, token permissions, cluster
+  firewall, VM/NIC isolation, SDN pending state, deny IPSet coverage and precedence.
+  Node host firewall flag is independent of VM firewall enforcement. Templates
+  remain excluded from sandbox isolation checks.
+- Fresh preparation is an expiring one-use capability with dry run and complete
+  per-run rollback limited to Umiak objects. It checks storage, dnsmasq, IPv4
+  forwarding and cluster firewall before writes. It never enables global host
+  policy or changes vmbr0. Missing prerequisites require administrator preparation.
+- Template VMIDs have a configurable range disjoint from sandbox500–589;
+  inventory/nextid checks allocate an empty slot. Rebuild requires confirmation,
+  preserves active version and existing sandbox/snapshot disks, and needs another
+  free slot. Adopted node-agent range changes require administrator action.
+- Windows stays licensed user-provided media. Uploaded names and
+  `storage:iso/name.iso` share validation with build; storage and filename are
+  passed separately to S5. HTTPS downloads run on PVE, never through Umiak.
+  Optional SHA256 verifies source; absent checksums remain explicitly unverified,
+  even after recording the computed digest. VirtIO form prefills recipe hash;
+  empty VirtIO retains the builder's pinned verified fallback.
+- HEAD preflight is advisory. PVE download-url has no redirect-disable option.
+  Audit every page of its final wget log: every Location and every resolved or
+  connecting address follows the original URL policy. Reject HTTPS downgrades,
+  credentials, internal targets without explicit opt-in, 6to4 and Teredo. On
+  violation fail the job and delete the downloaded volume; report cleanup failure.
+  This post-download control cannot prevent the outbound request itself.
+- Local media.sha256 omits the optional storage argument for older node-agents.
+  Preserve actual agent error messages and durable builder output in Setup.
 
-## Verification
+## Deployment isolation and presentation
 
-Gate: pnpm build/lint/typecheck; sequential workspace tests; Go build/vet/test/lint;
-Python SDK tests; Playwright OIDC 21/21 and local. New tests cover atomic claim,
-replay, unclaimed/unauthorized access, CSRF, forged headers, WebSocket gate, expiry,
-pair approval, wizard retries and adoption failures, installer checksum failures and
-unsupported architectures, shellcheck and host-prep dry run.
-Live: deploy CT590, claim, adopt existing pve, register existing builds, install on Mac
-via LAN and MagicDNS, create/exec/rm, dashboard help. Preserve healthy S15 rollback.
-Fresh-host live setup/build is explicitly deferred to a clean host and recorded as a
-roadmap gap; fakes and dry run cover its code path in this scope.
+Generated secrets survive named-volume recreation and never enter git/images.
+API/web/worker get separate secret subdirectories; public network configuration is
+separate from PVE secrets. Web reaches only GET /v1/meta through a private bridge.
+Owner ingress is the sole public control-plane boundary. Optional proxy sidecar
+shares no upstream network; host-published listeners still need their own gates.
+Single tenancy uses personal Settings/navigation and no team controls. CLI caches
+server tenancy and preserves explicit team overrides. Missing metadata means teams.
+Effective lifecycle and size defaults come from existing API/config catalogs.
 
-## Execution record
+## Live constraints and gate
 
-Implementation and verification evidence is tracked in `docs/plans/s16-quickstart.md`.
+CT590 is claimed and in use. Preserve owner state/sessions/sandboxes and guest
+CA. Never log in as ilia@example.com, reset claim or create a pairing. No live
+builds, downloads, VM creation, host prep, firewall or network changes. Only
+read-only pvesh/qm on pve; never touch pve2/ip-hub-pve. Restart only with no active
+operations. Serve8443 forwards to HTTP4180; LAN is http://192.168.68.90:4180.
 
-### Dev exposure ruling
-
-CT590 exposes the owner service on tailnet8444 and, for LAN access, HTTPS4180 (the
-existing allowed S15 port). Both terminate at the same owner gate. This avoids
-changing PVE firewall policy or guest gateway443. Generic root compose stays on
-8444. The Mac live run used MagicDNS and tailnet IP per Ilia's follow-up.
-
-### Acceptance follow-up rulings (2026-11-03)
-
-- CA constraints are immutable: owner-approved expansion requires explicit CA rotation and renewed client trust. Handshakes never invoke openssl.
-- CLI credentials have a 30-day maximum lifetime, cannot approve pairing or manage owner sessions, and are individually revocable. Authentication reads state without locking or updating it; no last-seen writes are required.
-- Optional Tailscale Serve terminates publicly trusted MagicDNS HTTPS before the same owner ingress. LAN/private-DNS remains independent. Serve is neither ownership proof nor a wildcard preview certificate service.
-- Getting started uses the native Next dashboard shell in every authentication mode. Owner bootstrap pages share theme tokens while remaining on the isolated ingress.
-
-- Public network configuration is distributed through a dedicated volume, separate from PVE credentials and service secrets. Web/API/worker receive only their own secret subdirectories; worker gets only its gateway token/public SSH CA, and gateway gets no PVE credential mount.
-- Undifferentiated legacy owner sessions are rejected on upgrade: their browser/CLI scope cannot be recovered safely. Console recovery produces a fresh claim.
-- Proxmox node firewall enable controls host rules independently of guest isolation. Adoption reads it without changing it; cluster enable and managed sandbox VM/NIC settings are mandatory. Sealed templates are read-only and excluded from running-sandbox firewall checks.
-
-### Single-owner presentation ruling (Ilia/master, 2026-11-03)
-
-Anonymous `/v1/meta` declares `tenancy: single|teams`: single for S15 none and
-S16 owner; teams for OIDC. Missing values from old servers mean teams. This field,
-not credential type or a second web environment decision, controls presentation.
-The internal local team and all API resources remain unchanged. MCP tools and
-outputs remain unchanged. Both SDK metadata models include tenancy.
-
-Single deployments hide team switcher/new team/membership/invites/roles, expose
-plain Settings and owner/operator actions, and land directly on sandboxes. Internal
-team-scoped URLs remain implementation details. Guide/wizard wording is personal.
-CLI profiles cache tenancy at login, refresh daily or with an existing metadata
-fetch, and use it for whoami/limits/ls/help. API-key profiles follow server tenancy;
-explicit `--team` and `UMIAK_TEAM` remain supported.
-
-CLI help uses the persisted tenancy cache offline. Commands that present tenancy
-(whoami/limits/ls) refresh it after24 hours with a bounded anonymous request;
-network failure retains the last known value. Old/absent metadata defaults teams.
-Explicit team overrides remain accepted even when their help entry is hidden.
-
-The web network remains isolated from the API control network. A minimal read-only
-bridge on both networks forwards only exact anonymous GET /v1/meta, with no
-credentials/identity headers and no host-published port. It exposes no other API
-route. The dashboard consumes the same API tenancy through this bridge. Existing
-SSH metadata reads also refresh the CLI tenancy cache without another request.
-
-### Round 3 rulings (s16-fix2, 2026-11-03)
-
-- Latest stable Bun is 1.4.4 (checked upstream releases). The compiled CLI rejects
-  any IP name constraint; retain the pinned runtime and standard TLS verification.
-  New owner CAs constrain DNS subtrees only. IPs remain leaf SANs, but the CA is
-  **unconstrained for IP names**. The ingress issues only configured names and
-  keeps the signing key inside its owner volume. Existing IP-constrained CAs need
-  explicit rotation and replacement of client trust; sessions are unaffected.
-- New configured names never crash the ingress: retain its existing CA/allowlist,
-  warn in logs, certificates and setup, then require owner UI or Docker console
-  rotation. Check leaf expiry daily and renew under the same CA without restart.
-- Serve sidecars share a dedicated network only with ingress; they cannot reach
-  API, MCP, web or Postgres. A fixed internal IP target avoids SNI and CA expansion
-  when enabling Serve; certificate verification on this isolated internal proxy
-  link remains skipped. CLI TLS verification is unchanged. Source addresses may be Docker NAT addresses; approval
-  relies on the short code and client details, never source identity.
-- Wizard uses collapsible sequential steps. Apply network settings with
-  `docker compose up -d --force-recreate gateway-secrets && docker compose restart gateway worker api web`.
-  Manual template instructions refer to the operator's checkout.
-- Fresh preparation validates storage before any writes, checks pending subnet
-  objects as well as zones/VNets, discovers node-eligible ISO/import media storage,
-  and uses its actual ID for ACLs, node-agent paths and builder configuration.
-  Atexit owns a single quiet rollback-timer cancellation.
-- Installer uses gzip, available by default on macOS and common Linux distributions.
-  DOWNLOADS supplies version and compressed byte size; SHA256SUMS verifies both
-  archive and final executable before atomic replacement. TTY stderr gets curl's
-  progress bar; redirected stderr gets a quiet transfer with a size announcement.
-  `UMIAK_INSTALL_SKIP_LOGIN=1` supports install-only verification without pairing.
-- Claimed CT590 is an active owner deployment: preserve DB/owner volume, credentials
-  and sandbox state. Test pairing on the isolated local ingress only; live checks
-  are anonymous. Do not reset claim or use owner recovery during this round.
-
-### Round 4 rulings (s16-fix3, 2026-11-03)
-
-- Templates are base OS images; snapshots are saved sandbox disks. Dashboard
-  catalog is visible to members, with mutations restricted to owners/operators.
-  Rebuild requires explicit confirmation and a new free VMID; active versions and
-  running sandboxes must remain intact. The dev stand's 595–598 are read-only.
-- Template allocation has its own configurable range, disjoint from sandbox IDs.
-  Adoption preserves discovered VMIDs; inventory and nextid checks precede allocation.
-- Effective lifecycle defaults come from ConfigReader via additive optional
-  `/v1/limits.defaults` (`ttlSeconds`, `idleTimeoutSeconds`). Null disables a policy;
-  old servers without the field display unavailable rather than guessed defaults.
-  Template size and environment defaults use their existing API catalogs.
-- Windows media stays user supplied and licensed. HTTPS ISO downloads accept optional
-  SHA256 (Ilia update, 2026-11-03) and require explicit opt-in for internal
-  destinations. They run directly on PVE storage and report PVE task logs.
-  Missing checksums show "Not verified: the ISO will be used as downloaded";
-  computed hashes are recorded without claiming source verification. No media is shipped or hosted by Umiak.
-- Verification on claimed CT590 preserves owner credentials and sessions. No new
-  sandboxes, template builds, ISO downloads, firewall/network changes or host prep.
-
-### Round-3 acceptance incorporated in round 4
-
-- New owner CAs last ten years. Leaf expiry is capped at CA expiry, including
-  legacy one-year CAs. Thirty days before expiry, status/UI/logs require explicit
-  rotation; expiry never silently changes client trust.
-- TLS credentials are complete versioned generations selected by one atomic pointer.
-  Orphan staging directories are ignored after a crash. Console rotation suppresses
-  the obsolete pending-names warning; ingress reloads a changed pointer within
-  sixty seconds, before attempting renewal. Restart it for immediate activation.
-- Fresh prep and both adoption paths explicitly request pending SDN metadata for
-  zones, VNets and subnets. Any new/changed/deleted state blocks continuation;
-  the fake hides this metadata unless pending=1 was passed.
-- Installer signals terminate with conventional signal exit codes and clean once.
-  Public installer/download HEAD returns GET headers without ownership or a body.
-- Serve has a private configured upstream and no shared control-plane network,
-  but Docker routing can reach public host-published listeners. This is not a
-  firewall against published ports; their own authorization remains mandatory.
-
-Fresh preparation passes the configured template range into `/etc/umiak-node.toml`
-(default600–699, legacy-template override disabled). Later range expansion on an
-adopted host also requires the administrator to update the restricted node-agent
-range; build validation reports this before downloading media or creating a VM.
-Adoption never rewrites host configuration. Existing templates stay where they are.
+Gate: pnpm build/lint/typecheck, sequential workspace tests, quickstart/local/
+meta-proxy Node tests including compiled HTTP CLI and custom-CA HTTPS proxy,
+shellcheck, Go build/vet/test/lint, Python SDK, OIDC23 and local Playwright.
+Use unique Compose projects/ports. Fresh-host prep/build remains fake/dry-run
+because the active stand forbids those mutations. No main merge in this branch.

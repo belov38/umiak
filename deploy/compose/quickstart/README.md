@@ -5,52 +5,98 @@ From the repository root:
 ```sh
 docker compose up -d --build
 docker compose logs quickstart
-docker compose cp quickstart:/var/lib/umiak/owner/tls/ca.pem ./umiak-ca.pem
-openssl x509 -in umiak-ca.pem -noout -fingerprint -sha256
 ```
 
-Use the local Docker console as the trust channel. Install this verified CA in your
-browser trust store, then open `https://localhost:8444` on the Docker host, or
-`https://<configured-DNS-name>:8444` remotely. Set `UMIAK_QUICKSTART_TLS_NAMES` before boot for remote DNS names. DNS can be LAN DNS, mDNS, MagicDNS or
-ordinary DNS; Tailscale is optional. For example:
+Open `http://localhost:4180` on the Docker host or `http://<docker-host-LAN-IP>:4180`
+from your trusted LAN. Enter the one-time setup code from the logs to claim
+ownership, then continue to `/setup`. No dashboard certificate or CA installation
+is needed. The owner ingress serves plain HTTP; guest tunnel TLS remains separate.
 
-```sh
-UMIAK_QUICKSTART_TLS_NAMES=server.home.example docker compose up -d --build
-```
+The default listener is published on all host interfaces. Keep it on a trusted LAN
+or configure host firewall access. `UMIAK_QUICKSTART_BIND=127.0.0.1` restricts the
+published listener to the Docker host; `UMIAK_QUICKSTART_PORT` changes port 4180.
+A DNS hostname can be added with `UMIAK_QUICKSTART_ALLOWED_HOSTS`; raw LAN IPs and
+localhost work directly. Tailscale is optional.
 
-The variable is passed into the ingress on first boot. No external relay is used.
+Other peers still need owner authorization to operate the deployment. Owner
+cookies expire after 180 days; CLI sessions after at most 30 days. CLI pairing
+requests expire after five minutes. Credentials and claim state survive container
+recreation. HTTP access uses the host-only `umiak_owner` cookie; trusted HTTPS
+proxy access uses the Secure, host-only `__Host-umiak_owner` cookie.
 
-Enter the one-time setup code from the logs to claim ownership. Other LAN/tailnet
-peers cannot operate the deployment. Owner cookies expire after 180 days; CLI sessions after at most 30 days. CLI pairing
-requests expire after five minutes. Credentials and claim state survive container recreation.
+## Choose your connection
 
-For raw LAN/tailnet IP URLs, first open by localhost or a DNS name and visit
-`/owner/tls` to add the IPs to the certificate. This takes effect immediately and is
-persisted without an `.env` file. Only configured names are accepted. Adding names requires explicit CA rotation and renewed trust; unknown SNI is rejected. New CAs expire after ten years; existing CAs keep their original expiry. Rotate explicitly before expiry.
-The CA has critical DNS-only permitted subtrees, with configured IPs as leaf SANs.
-Bun 1.4.4 (latest stable checked on 2026-11-03) rejects any IP name constraints;
-TLS verification stays enabled. This CA is **unconstrained for IP names**. Ingress
-issuance stays limited to its configured names, unknown DNS SNI is rejected, and
-the signing key never leaves the owner volume. Trust this CA only on owner clients.
-The guest gateway on port 443 uses its own independent CA.
+1. **Trusted LAN HTTP:** open `http://HOST:4180`. Use the dashboard, API, CLI and
+   MCP at this same origin. This is the default with no certificate setup.
+2. **Tailscale Serve (recommended for remote access and browser secure contexts):**
+   Serve supplies HTTPS for the tailnet hostname and keeps access within your
+   tailnet. Enable HTTPS certificates and MagicDNS in your tailnet, then run:
 
-Adding configured names after first boot keeps existing addresses serving with
-the old CA and logs a warning, also shown in Setup and `/owner/tls`. An owner can
-explicitly rotate at `/owner/tls` (also for an old IP-constrained CA), or use the
-trusted Docker console:
+   ```sh
+   TS_AUTHKEY=YOUR_KEY TS_HOSTNAME=umiak docker compose -f compose.yaml -f deploy/compose/quickstart/compose.tailscale.yaml up -d --build
+   ```
 
-```sh
-docker compose exec quickstart node deploy/compose/quickstart/rotate-ca.mjs server.home.example 192.168.1.10
-docker compose restart quickstart
-docker compose cp quickstart:/var/lib/umiak/owner/tls/ca.pem ./umiak-ca.pem
-openssl x509 -in umiak-ca.pem -noout -fingerprint -sha256
-```
+   Open `https://umiak.YOUR-TAILNET.ts.net`; the sidecar's `tailscale status` reports
+   its hostname. Supply the auth key through the environment and keep it out of
+   source control. Its state volume retains node identity. The sidecar connects to
+   the owner HTTP ingress on a dedicated network; it does not share an application
+   upstream network. Owner authorization still applies; Tailscale identity headers
+   are discarded. Funnel is disabled in the supplied configuration.
+3. **Funnel or your own HTTPS reverse proxy:** if you use Funnel, this is public.
+   An Internet-facing reverse proxy also publishes the deployment to the Internet;
+   owner authorization remains required. Prefer Serve for private remote access.
+   Terminate HTTPS at your proxy and forward to the owner HTTP ingress, including
+   WebSocket upgrades. Configure `UMIAK_PUBLIC_URL=https://your-hostname` and trust
+   only the proxy's socket address via `UMIAK_TRUSTED_PROXY_CIDRS`. The proxy must
+   overwrite `X-Forwarded-Proto`, `X-Forwarded-Host` and `X-Forwarded-For`. The
+   ingress uses these headers only from configured trusted proxy addresses; direct
+   clients cannot select their scheme, origin or client identity this way.
 
-The command prints the new fingerprint. Replace the old CA in browser trust and
-CLI CA files; existing sessions, database and guest gateway trust survive. Do not
-run console rotation concurrently with an owner UI rotation. Ingress checks the atomic credential pointer every minute. Leaves renew
-when less than seven days remain, without restarting the ingress or changing CA
-trust. The CA itself requires explicit owner rotation before expiry. Leaf expiry is capped at the CA expiry, and a warning appears in Setup, `/owner/tls`, `/owner/tls/status`, and logs within thirty days of CA expiry.
+Setup and Settings show the warning **if you use Funnel, this is public** whenever
+the current origin hostname ends in `.ts.net`; the hostname alone cannot establish
+whether Serve or Funnel is in use.
+
+Serve covers the dashboard hostname and cannot cover wildcard sandbox preview
+hostnames. Default previews remain `http://<slug>-<port>.<IP-derived-sslip.io>:8085`,
+using the guest gateway's separate HTTP listener. For example, a gateway at
+`192.168.1.10` can use `http://<slug>-3000.192.168.1.10.sslip.io:8085`.
+Token access remains the default; `umiak port 3000 --public` deliberately allows
+anyone who can reach that preview. The gateway listener still enforces token,
+public and team policies; HTTP does not remove those checks. sslip.io supplies DNS
+only. Use your own wildcard DNS if needed. `UMIAK_PREVIEW_PORT` changes port 8085;
+configured non-quickstart deployments may use HTTPS preview URLs instead.
+
+## Browser secure contexts
+
+The dashboard and terminal can work over LAN HTTP. Copy buttons use
+`document.execCommand("copy")` when Clipboard API is absent or denied; if both
+methods fail, select and copy the visible text manually.
+
+The desktop viewer follows the configured preview scheme and port (HTTP8085 in
+quickstart). Its WebSocket video path needs WebCodecs `VideoDecoder`, unavailable
+on ordinary LAN HTTP. Serve secures the dashboard only; it cannot secure a
+separate wildcard HTTP viewer. An HTTPS dashboard cannot embed an HTTP viewer
+because of mixed-content policy. Open the viewer separately for HTTP experiments;
+apply any test override to its exact origin as well. Operators can serve the viewer
+through their own HTTPS proxy. An HTTPS viewer inside an HTTP dashboard also loses
+secure context until opened in a new tab. WebRTC `RTCPeerConnection` remains
+available in tested Chromium HTTP contexts; this does not prove a complete remote
+desktop stream works in every browser. Desktop does not capture browser camera or
+microphone. No dashboard `getUserMedia` or `crypto.subtle` calls were found.
+Clipboard API is unavailable on LAN HTTP, but execCommand fallback remains.
+The terminal uses same-origin ws/wss and works over HTTP.
+
+For secure-context features choose one of these four options:
+
+1. Tailscale Serve (recommended).
+2. Localhost, including an SSH tunnel: run
+   `ssh -L 4180:localhost:4180 <docker-host>`, then open `http://localhost:4180`.
+   Localhost is treated as potentially trustworthy by browsers.
+3. Your own HTTPS reverse proxy with a trusted certificate.
+4. For a quick Chrome test only, open
+   `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, add this deployment's
+   exact origin, enable it and relaunch Chrome. This weakens browser protection;
+   remove the exception after testing. It does not establish certificate trust.
 
 ## Wizard
 
@@ -61,8 +107,7 @@ Open `/setup`. Each step records status and errors in Postgres and can be retrie
    `pve-secrets`; otherwise use host preparation to provision them. Fingerprint
    checking protects discovery; the worker uses the actual Proxmox root CA.
 2. Adopt an existing host, or generate a preparation command. With least-privilege
-   API tokens, generate the read-only adoption report command, copy the verified
-   owner CA to the PVE host and run it as root. This reports existing user/token,
+   API tokens, generate the read-only adoption report command, run it as root on the PVE host. This reports existing user/token,
    pool, SDN, IPSet/rules and node-agent without changing host objects. Host script
    URLs are expiring, single-use capabilities; keep them private. Inspect `--dry-run`
    first. Fresh preparation fails closed if shared host networking/firewall
@@ -83,22 +128,50 @@ Open `/setup`. Each step records status and errors in Postgres and can be retrie
 Getting started is at `/app/getting-started` (`/app/help` redirects) with this deployment's actual CLI, MCP and SDK URLs and copy
 buttons. The dashboard sidebar links Getting started and Setup.
 
+## Guest certificates and expiry
+
+The guest tunnel still uses TLS and the existing gateway CA; dashboard HTTP does
+not change guest trust. A newly generated guest CA lasts ten years. Existing CAs
+keep their original expiry and are never silently replaced or extended.
+
+The gateway checks leaf certificates daily and renews tunnel and preview leaves
+when 30 days or less remain, using the same CA. Renewal reloads certificates
+without restarting the gateway and does not require new agent packages or
+new templates. Leaf expiry is capped by the CA expiry.
+
+Setup and Settings show guest CA, tunnel and preview certificate expiry dates
+from the owner-only `/quickstart/setup/certificates` endpoint. When the CA has one
+year or less remaining, they show a rotation warning. CA rotation changes guest
+trust and requires rebuilding agent packages and templates, followed by a planned
+migration of existing guests. Plan it before expiry. Keep the current gateway CA
+trusted by existing templates when changing network settings.
+
 ## Install and pair the CLI
 
-With the verified CA saved as `~/.config/umiak/quickstart-ca.pem`:
-
 ```sh
-curl --cacert ~/.config/umiak/quickstart-ca.pem -fsSL https://HOST:8444/install.sh |
-  UMIAK_CA_CERT="$HOME/.config/umiak/quickstart-ca.pem" sh
+curl -fsSL http://HOST:4180/install.sh -o umiak-install.sh
+sh ./umiak-install.sh
 ```
 
-For a publicly trusted certificate the command is simply
-`curl -fsSL https://HOST:8444/install.sh | sh`. The installer detects Darwin/Linux
-arm64/x64, verifies SHA256SUMS, installs to `~/.local/bin` (`UMIAK_INSTALL_DIR` overrides
-it) and starts `umiak login`. Open its pairing URL in the claimed browser, compare
-the short code and enter it to approve. Never approve a request you did not start. If your owner browser uses another
-hostname for this same deployment, open the pairing path and request ID on that
-claimed hostname; cookies are intentionally host-only.
+With Serve or a public HTTPS proxy, substitute its HTTPS origin. There is no
+quickstart owner CA. For your own proxy using a private CA, obtain and verify that
+CA through your trusted operator channel; generic client CA support remains:
+
+```sh
+curl --cacert ./proxy-ca.pem -fsSL https://your-proxy/install.sh -o umiak-install.sh
+CURL_CA_BUNDLE="$PWD/proxy-ca.pem" UMIAK_INSTALL_SKIP_LOGIN=1 sh ./umiak-install.sh
+umiak login --api-url https://your-proxy --cacert ./proxy-ca.pem
+```
+
+The installer detects Darwin/Linux arm64/x64, verifies SHA256SUMS, installs to
+`~/.local/bin` (`UMIAK_INSTALL_DIR` overrides it), and starts `umiak login`. Open its
+pairing URL in the claimed browser and compare the short code before approving.
+Never approve a pairing you did not start. If the owner browser uses another
+hostname for this deployment, open the pairing path and request ID on that
+claimed hostname; cookies are host-only. Profiles retain the deployment URL and
+any explicitly configured proxy CA path. `umiak logout` revokes that CLI credential.
+Windows x64 CLI is available under `/downloads/umiak-windows-x64.exe`; the shell
+installer supports Darwin and Linux.
 
 ```sh
 umiak create --template linux --size 2gb --wait
@@ -106,9 +179,9 @@ umiak exec <slug> -- uname -a
 umiak rm <slug> --yes
 ```
 
-CLI profiles retain the CA path. `umiak logout` revokes that CLI's owner credential.
-Windows x64 CLI is available under `/downloads/umiak-windows-x64.exe`; the shell
-installer supports Darwin and Linux.
+Pairing limits use the validated client address from the socket or a configured
+trusted proxy. Docker Desktop NAT and Serve can collapse clients into one source,
+sharing those limits. CLI sessions can be revoked at `/owner/sessions`.
 
 ## Console recovery and legacy modes
 
@@ -130,58 +203,18 @@ CT590 deployment: `infra/dev-cp/deploy-quickstart.sh`; rollback:
 `UMIAK_DEVCP_AUTH_MODE=none infra/dev-cp/deploy.sh` (or `oidc`). No PVE objects,
 gateway CA or guest port are replaced by that quickstart deployment.
 
-## Optional Tailscale Serve (publicly trusted owner HTTPS)
+## Local validation
 
-Enable HTTPS certificates and MagicDNS in your tailnet, then run:
+Run `pnpm build` before the compiled CLI gate, then:
 
 ```sh
-TS_AUTHKEY=YOUR_KEY TS_HOSTNAME=umiak docker compose -f compose.yaml -f deploy/compose/quickstart/compose.tailscale.yaml up -d --build
+node --test deploy/compose/quickstart/*.test.mjs deploy/compose/local/*.test.mjs deploy/compose/meta-proxy.test.mjs
 ```
 
-Open the node's `https://umiak.YOUR-TAILNET.ts.net` URL (see
-`docker compose -f compose.yaml -f deploy/compose/quickstart/compose.tailscale.yaml exec tailscale tailscale status`).
-Claim with the Docker log code, then `curl -fsSL https://umiak.YOUR-TAILNET.ts.net/install.sh | sh`
-and enter the CLI short code in the owner browser. No CA download or `--cacert` is needed.
-The state volume retains node identity; protect the auth key and do not commit it.
-Serve uses userspace networking and its configured upstream is the private owner ingress;
-its internal HTTPS target skips certificate verification within a dedicated network
-shared only with quickstart. It connects by a fixed internal IP without SNI, so
-enabling Serve requires no new owner-CA name. The sidecar has no network in common
-with api, mcp, web or postgres. Docker routing can still reach host-published
-quickstart and gateway ports; those are public listeners with their own authentication.
-This network arrangement is not a firewall against published host ports. It never bypasses the owner gate. Tailscale identity headers are stripped,
-not used as authentication. Funnel is disabled. The fixed sidecar address is used
-only to report public certificate handling in metadata, never to grant access.
-
-Serve cannot issue wildcard certificates. Sandbox previews continue to use the
-gateway wildcard domain/certificate and its separate trust configuration. The LAN
-owner endpoint remains available with the constrained owner CA; Tailscale is optional.
-
-Pairing pending limits and request limits use the socket source, never arbitrary
-forwarded headers. Docker Desktop NAT and Serve can collapse multiple clients into
-one source: they share its limits. Pending entries expire after five minutes;
-short codes, timestamp and client details help detect unsolicited pairing attempts.
-CLI sessions expire after 30 days and can be individually revoked at `/owner/sessions`.
-
-If you change Serve's HTTPS port, set `UMIAK_QUICKSTART_SERVE_PORT` on the owner
-service to that port (default443). The trusted sidecar peer plus MagicDNS origin
-port select the installer instructions only. This avoids confusing direct private
-HTTPS with Serve when Docker NAT gives both the same socket source; neither source
-nor origin port confers owner authorization.
-
-
-## Compiled CLI TLS gate
-
-Run `pnpm build` first, then
-`node --test deploy/compose/quickstart/*.test.mjs deploy/compose/local/*.test.mjs deploy/compose/meta-proxy.test.mjs`.
-The quickstart wildcard includes `compiled-cli.test.mjs`; missing host binaries
-fail rather than skip. It executes `apps/cli/dist/umiak-<os>-<arch>` against a real
-HTTPS quickstart ingress and its generated constrained CA, with an isolated owner
-store and metadata upstream fixture. Both DNS localhost and raw IP login must
-reach `/v1/meta` and create pairing requests. This catches Bun verifier failures
-that source tests under Node cannot detect. TLS tests also exercise first-boot DNS,
-pending-name restart, explicit rotation and a one-day leaf renewed at runtime.
-Compose assertions ensure the optional sidecar cannot share any upstream network.
+Missing host CLI binaries fail the compiled gate. The quickstart fixtures exercise
+HTTP pairing and trusted proxy origins using an isolated owner store. Gateway
+certificate tests verify same-CA leaf renewal and retained guest trust. No live
+Proxmox environment is required by these local tests.
 
 ### Installer download and pairing
 
@@ -194,10 +227,10 @@ verified executable is installed by an atomic rename in the destination director
 
 The installer prints the PATH hint before starting owner pairing. Set
 `UMIAK_INSTALL_SKIP_LOGIN=1` to install without starting a pairing request; it prints
-the manual `umiak login` command, including the selected CA when needed. For example:
+the manual `umiak login` command, including a selected proxy CA when needed. For example:
 
 ```sh
-curl -fsSL https://your-deployment/install.sh | UMIAK_INSTALL_SKIP_LOGIN=1 sh
+curl -fsSL http://HOST:4180/install.sh | UMIAK_INSTALL_SKIP_LOGIN=1 sh
 ```
 
 A native Darwin arm64 build measured 90,976,226 bytes before gzip and 40,887,362
@@ -223,7 +256,9 @@ size and remains explicitly unverified. Mismatches never overwrite an existing I
 Obtain the Windows SHA256 from the Microsoft or licensed vendor download portal.
 VirtIO defaults to Fedora's official stable alias:
 <https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso>.
-Its checksum field deliberately starts empty: the alias moves and Fedora's
+Its checksum field starts with the recipe-pinned SHA256. Leaving VirtIO empty uses
+the builder's pinned, checksum-verified download. The stable alias can move; a
+checksum mismatch must be resolved by confirming a new trusted digest. Fedora's
 `CHECKSUM` currently lists RPM MD5s, not an ISO SHA256. Download the ISO on a
 trusted workstation and compute `sha256sum virtio-win.iso` (Linux),
 `shasum -a 256 virtio-win.iso` (macOS), or `Get-FileHash virtio-win.iso -Algorithm
@@ -239,9 +274,9 @@ Do not grant cluster-wide `Sys.Modify` just for ISO downloads. These checks matc
 
 URLs reject credentials, non-HTTPS schemes, and internal/loopback DNS answers
 unless the owner explicitly checks the internal URL permission. HEAD preflight
-validates each redirect before handing the final HTTPS URL to PVE. Fedora's
+checks redirects returned to HEAD before handing the final HTTPS URL to PVE. Fedora's
 same-host HTTP redirect is upgraded to HTTPS. PVE performs its own later DNS
-lookup and GET, so the administrator must trust the source and DNS; Umiak does not
+lookup and GET. PVE offers no redirect-disable option for this API. Umiak audits the complete wget task log after download: every Location must remain HTTPS and every reported resolved/connecting address must satisfy the URL address policy. A violation fails the job and deletes the downloaded volume. This post-download control cannot prevent the request itself; the administrator must trust the source and DNS. Umiak does not
 proxy the bytes or control a source that changes between preflight and download.
 Progress and failures are taken from the PVE task log. No ISO download or Windows
 build is part of validation-only checks.
@@ -249,21 +284,3 @@ build is part of validation-only checks.
 The selected ISO storage is resolved by the restricted node-agent's read-only
 `media.sha256` operation through `pvesm path <storage>:iso/<name>`. Update the
 node-agent when using this new optional storage argument on an existing host.
-
-
-### TLS rotation durability
-
-CA rotation and leaf renewal write a complete private generation directory and
-publish it by atomically renaming the `current` symlink. Compatibility paths such
-as `ca.pem` point through that single pointer. Startup ignores abandoned staging
-directories; it migrates an intact older flat layout without changing its CA.
-A running ingress detects a console-published generation before renewing any leaf
-and reloads the matching CA policy, key and leaf together. Console rotation no
-longer emits the obsolete pre-rotation warning. Restart quickstart after console
-rotation for immediate activation; otherwise the running ingress reloads within
-one minute. Replace client trust with the newly printed CA fingerprint. Existing
-owner sessions and the independent guest gateway CA are preserved.
-
-Decision: new owner CAs last ten years to avoid routine trust redistribution;
-90-day leaves still rotate automatically. Existing roots are never extended or
-silently replaced. Explicit CA renewal remains an owner operation.

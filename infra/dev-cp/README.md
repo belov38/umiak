@@ -348,74 +348,79 @@ agent state through QGA as SYSTEM and retries `503 desktop_starting` with a fres
 Create 139–146 s, first stream open ~22 s. `UMIAK_E2E_SANDBOX=<slug>` reuses an existing sandbox
 for diagnostics (it is not deleted; idle observation needs the `e2e=desktop` label).
 
-## S16 quickstart stand (2026-11-03, s16-fix2)
+## S16 HTTP quickstart stand (2026-11-03, s16-fix4)
 
-Primary URL (Tailscale Serve, public Let's Encrypt TLS):
-**https://umiak-dev-cp.tail0000.ts.net:8443/app**.
-No owner CA import is required on this URL. This single-owner dashboard opens
-Your sandboxes directly and uses plain Settings; teams remain internal. Existing CT tailscaled serves8443 to
-localhost8444; Docker guest gateway remains bound to0.0.0.0:443, with unchanged
-certificates and CA. Serve identity headers do not grant access.
+Recommended owner URL: **https://umiak-dev-cp.tail0000.ts.net:8443/app**.
+The existing host Tailscale Serve terminates public TLS and forwards to
+`http://localhost:4180`. LAN: **http://192.168.68.90:4180/app**.
+Direct tailnet: **http://100.64.10.7:4180/app**. No private owner CA exists.
+The ingress publishes one HTTP port for dashboard/API/MCP/install/downloads.
 
-The stand is **claimed** by its owner. Round-3 redeployment preserved the owner
-state and both existing sessions byte-for-byte; no recovery, claim or test pairing
-was performed. Open it using your existing signed-in browser. The bootstrap steps
-below apply only to a new/unclaimed deployment.
+CT590 is claimed by Ilia and active. Preserve owner state, sessions and sandboxes.
+Never recover/reclaim, log in as ilia@example.com or start a pairing to verify a
+redeploy. Existing Serve `__Host-umiak_owner` and CLI bearer sessions remain valid;
+plain HTTP uses a separate non-Secure cookie and therefore requires its own login.
+Anonymous access gets the owner gate, never an upstream identity bypass.
 
-1. Read the newest one-time code privately:
-
-   ```sh
-   ssh umiak@100.64.10.7
-   cd ~/umiak
-   docker compose --env-file deploy/compose/.env -f compose.yaml -f infra/dev-cp/compose.quickstart.yaml logs --tail=20 quickstart
-   ```
-
-2. Open the primary URL and enter the newest code. No CA setup is needed.
-3. Open Getting started in the sidebar. Install and pair the CLI:
-
-   ```sh
-   curl -fsSL https://umiak-dev-cp.tail0000.ts.net:8443/install.sh | sh
-   ```
-
-4. Open the CLI pairing link in the same claimed browser and type its short code.
-   Never approve a login you did not start. Owner sessions are individually
-   revocable at `/owner/sessions` (also linked from the sidebar).
-
-Getting started: `/app/getting-started`; `/app/help` redirects. Wizard: `/setup`;
-installer: `/install.sh`; remote MCP: `/mcp`. Existing templates595–598 remain ready.
-
-Secondary private-CA URLs: LAN `https://192.168.68.90:4180/app`, tailnet direct
-`https://100.64.10.7:8444/app`. Only those paths need the separate owner CA:
+Private operator procedure (no credentials in transcripts):
 
 ```sh
-mkdir -p ~/.config/umiak
-ssh umiak@100.64.10.7 'docker exec umiak-quickstart-1 cat /var/lib/umiak/owner/tls/ca.pem' > ~/.config/umiak/quickstart-ca.pem
-openssl x509 -in ~/.config/umiak/quickstart-ca.pem -noout -fingerprint -sha256
+ssh umiak@100.64.10.7
+cd ~/umiak
+docker compose --env-file deploy/compose/.env -f compose.yaml -f infra/dev-cp/compose.quickstart.yaml ps
 ```
 
-Owner CA SHA256 (rotated for s16-fix2 Bun compatibility):
-`3D:9E:7C:CA:2F:C2:A8:78:51:3E:D3:99:80:E3:10:03:F5:1D:B9:02:68:54:A3:95:F2:51:42:70:6E:E2:E6:64`.
-The earlier downloaded CA is obsolete; it must not be trusted. This CA constrains DNS names only; IP names are unconstrained at the CA level
-because Bun 1.4.4 rejects IP constraints. Leaf issuance remains restricted to
-configured names, and the signing key stays in the owner volume. Adding a name in `/owner/tls` requires explicit CA rotation
-and renewed trust. CA lifetime365 days; rotate before expiry. LAN reachability was
-not tested from the off-LAN Mac; direct tailnet TLS and arbitrary-SNI rejection were.
+Build while services keep running, verify no unfinished runtime operations or
+sandbox activity immediately before the short replacement. Deploy with
+`infra/dev-cp/deploy-quickstart.sh`. It keeps guest trust unchanged and sets:
 
-Previews still use the independent wildcard guest gateway certificate: Serve does
-not support wildcard preview certificates. No firewall or PVE network settings
-were changed by the deployment. Read-only adoption reports verify cluster firewall
-and sandbox isolation; the node host-firewall enable flag controls host rules,
-independently from VM rules. Sealed templates intentionally have disabled VM rules;
-worker enables sandbox isolation during creation.
+```sh
+tailscale serve --bg --https=8443 http://localhost:4180
+```
 
-Deploy: `infra/dev-cp/deploy-quickstart.sh`. Generic optional sidecar:
-`deploy/compose/quickstart/README.md`. No new Tailscale node/key is needed on CT590.
-Rollback: `UMIAK_DEVCP_SSH=umiak@100.64.10.7 UMIAK_DEVCP_AUTH_MODE=none infra/dev-cp/deploy.sh`
-(or `oidc`), reusing S15 DB and secrets. Rollback restores its Serve configuration.
+Do not reset Serve or enable Funnel during deployment. **If you use Funnel, this
+is public Internet exposure and the owner gate is the only protection.** Prefer
+Serve. For your own Caddy/nginx proxy, set `UMIAK_PUBLIC_URL` and the proxy's exact
+`UMIAK_TRUSTED_PROXY_CIDRS`; reject unknown Hosts. Only trusted peers can supply
+X-Forwarded-Proto/Host/For. Root Compose trusts its host NAT peer for host-run
+Serve, and the optional sidecar trusts only its dedicated peer. This does not
+trust Tailscale identity headers. Direct DNS names use
+`UMIAK_QUICKSTART_ALLOWED_HOSTS`; literal LAN/tailnet IPs work by default.
 
-Round-3 checks: public Serve8443 installer with gzip and TTY/non-TTY progress;
-compiled native CLI anonymous metadata through tailnet4180, compiled Linux CLI
-anonymous metadata on LAN192.168.68.90:4180; unauthorized owner API remains401.
-No new pairing request or sandbox was created. Guest gateway443 and its three TLS
-file checksums are unchanged. For install-only checks use
-`UMIAK_INSTALL_SKIP_LOGIN=1`; pair only from an owner-approved interactive login.
+Getting started: `/app/getting-started`; wizard `/setup`; installer `/install.sh`;
+remote MCP `/mcp`. Install-only verification preserves existing CLI profiles:
+
+```sh
+curl -fsSL https://umiak-dev-cp.tail0000.ts.net:8443/install.sh |
+  UMIAK_INSTALL_SKIP_LOGIN=1 sh
+```
+
+HTTP installer checks SHA256 but warns that both binary and manifest use the
+same unencrypted channel. Generic CLI `--cacert`/`UMIAK_CA_FILE` remains available
+only when an operator's own HTTPS proxy needs private trust.
+
+Previews use HTTP on LAN/tailnet IP-derived sslip.io names at configurable8085,
+with unchanged token/public modes. Serve cannot issue wildcard preview names.
+Do not put wildcard previews behind the owner's Serve origin. HTTPS previews are
+available to operators with a wildcard certificate. Guest tunnel:443 stays TLS,
+uses its existing CA and is independent of owner HTTP. No PVE firewall/network
+change is part of this migration. LAN8085 reachability may depend on existing CT
+firewall rules; if blocked, report it rather than adding a firewall rule.
+
+Guest CA lasts10 years. A networkless `gateway-renewal` sidecar checks on startup
+and daily, reissuing leaves within30 days from the same CA and retaining leaf
+keys. Atomic certificate replacement is hot-reloaded by gateway. Templates need
+no rebuild for leaf renewal. Setup/settings show CA/tunnel/preview expiry; metrics
+include the same expiry timestamps. The CA warning begins one year before expiry:
+CA rotation requires rebuilding agent packages and templates. Legacy dev-cp
+`deploy.sh` also runs a renewal sidecar, independent of redeployment.
+
+At a non-localhost HTTP origin, browser secure-context restrictions can remove
+Clipboard API and WebCodecs; desktop decoding may be unavailable. Clipboard uses
+execCommand fallback. Use Serve (recommended), `ssh -L 4180:localhost:4180
+<docker-host>` and `http://localhost:4180`, your own HTTPS proxy, or for a quick
+Chrome test `chrome://flags/#unsafely-treat-insecure-origin-as-secure` for the exact
+origin. The flag weakens browser protection for that origin.
+
+Rollback remains `UMIAK_DEVCP_AUTH_MODE=none|oidc infra/dev-cp/deploy.sh`. It reuses
+S15 DB and guest secrets. Never use `down -v` or broad cleanup on the active stand.

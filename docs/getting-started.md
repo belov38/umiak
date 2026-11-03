@@ -9,37 +9,25 @@ The examples below use `https://api.example.com`, `https://app.example.com` and 
 
 Quickstart: run `docker compose up -d --build` from the repository root, then follow [the operator quickstart](../deploy/compose/quickstart/README.md).
 
-## The model in one minute (owner · private CA)
+## The model in one minute (owner)
 
 A sandbox is a throwaway virtual machine, identified by a three-word slug. A template is the image it is cloned from; a size sets RAM and vCPU. You own your sandboxes, snapshots and API keys.
 
-Snapshots save a disk so you can create another sandbox with --from. Fork copies a sandbox directly. Port previews expose a guest port over HTTPS. Desktop templates stream a screen that people and agents can control.
+Snapshots save a disk so you can create another sandbox with --from. Fork copies a sandbox directly. Port previews expose a guest port over HTTP or HTTPS. Desktop templates stream a screen that people and agents can control.
 
 Inactive sandboxes stop automatically according to deployment policy. Their disks remain available for resume. Use limits to check the actual quotas before creating a sandbox.
 
-## Install the CLI (owner · private CA)
+## Install the CLI (owner)
 
-This deployment serves the CLI installer. First obtain umiak-ca.pem through the operator's Docker console and compare its SHA-256 fingerprint through that trusted channel. Trust the owner CA in your browser too. Never download and trust a CA only through an unverified connection.
+Quickstart uses HTTP on your trusted LAN by default (`http://HOST:4180`). For remote access and browser secure contexts, use Tailscale Serve (recommended) or your own HTTPS reverse proxy. Replace the example HTTPS origin below with your deployment's origin. No owner CA is generated.
 
-**Retrieve owner CA (on the Docker host)**
-
-```text
-docker compose cp quickstart:/var/lib/umiak/owner/tls/ca.pem ./umiak-ca.pem
-```
-
-**Check owner CA fingerprint**
+**Install CLI**
 
 ```text
-openssl x509 -in umiak-ca.pem -noout -fingerprint -sha256
+curl --fail 'https://api.example.com/install.sh' -o umiak-install.sh && sh ./umiak-install.sh
 ```
 
-**Install with verified CA**
-
-```text
-curl --fail --cacert ./umiak-ca.pem 'https://api.example.com/install.sh' -o umiak-install.sh && UMIAK_CA_CERT="$PWD/umiak-ca.pem" sh ./umiak-install.sh
-```
-
-The installer runs login. Open the pairing link on the hostname where you claimed this deployment, and compare the short code shown in your terminal before approving. The CLI saves the CA in its profile.
+The installer runs login. Open the pairing link on the hostname where you claimed this deployment, and compare the short code shown in your terminal before approving. The CLI saves the deployment connection settings in its profile.
 
 **Check CLI profile**
 
@@ -105,7 +93,7 @@ Replace <slug> with your sandbox's name. Run creates a temporary sandbox, runs a
 
 ## Port previews
 
-A preview URL has the form https://<slug>-<port>.preview.example.com. Start a server inside the VM, then publish its port. Token access is the default; public access lets anyone with the URL connect.
+In a configured HTTPS deployment, a preview URL has the form https://<slug>-<port>.preview.example.com. Start a server inside the VM, then publish its port. Token access is the default; public access lets anyone with the URL connect.
 
 **Start a preview server**
 
@@ -125,7 +113,7 @@ umiak port 3000
 umiak port 3000 --public
 ```
 
-Preview TLS uses the guest gateway certificate, which may have a different CA from the owner dashboard. Ask the operator for its verified CA if your browser does not trust it.
+Quickstart previews default to `http://<slug>-<port>.<gateway-IP>.sslip.io:8085`. The exact scheme, domain and port come from deployment metadata. Token access is still the default; `--public` allows anyone who can reach the preview. Serve cannot cover wildcard preview hostnames. Configured HTTPS previews use the guest gateway certificate; ask the operator for its verified CA if needed.
 
 ## Desktops
 
@@ -156,9 +144,9 @@ umiak desktop act <slug> click 400 300
 umiak desktop act <slug> type "hello"
 ```
 
-## Connect an agent with MCP (owner · private CA)
+## Connect an agent with MCP (owner)
 
-The recommended stdio transport uses your CLI profile, including pairing and CA settings. Put umiak on PATH, then register it in Claude Code or add the Codex configuration below.
+The recommended stdio transport uses your paired CLI profile. Put umiak on PATH, then register it in Claude Code or add the Codex configuration below.
 
 **Claude Code · stdio**
 
@@ -174,7 +162,7 @@ command = "umiak"
 args = ["mcp"]
 ```
 
-Remote MCP is available at https://app.example.com/mcp. Local mode needs no credential. OIDC supports browser sign-in; quickstart remote MCP uses an owner credential. Prefer stdio for quickstart so credentials stay in the CLI profile. Remote clients must also trust the deployment CA.
+Remote MCP is available at https://app.example.com/mcp. Local mode needs no credential. OIDC supports browser sign-in; quickstart remote MCP uses an owner credential. Prefer stdio for quickstart so credentials stay in the CLI profile. Clients using your own HTTPS proxy must trust its certificate.
 
 **Claude Code · remote HTTP**
 
@@ -204,7 +192,7 @@ For Claude Code, save the remote JSON configuration in .mcp.json. Set UMIAK_OWNE
 
 Ask your agent: "Create a Linux sandbox, clone my repository into it and run the tests." umiak mcp --help explains read-only mode, toolsets and sandbox restrictions.
 
-## Use the SDK (owner · private CA)
+## Use the SDK (owner)
 
 Both SDKs read the API URL and credentials from your CLI profile after login. Run package installation from the repository checkout; these packages are available as source/workspace packages.
 
@@ -243,7 +231,7 @@ try {
 
 The API reference is available at https://api.example.com/v1/openapi.json. API keys restrict automated clients to the scopes you choose.
 
-## Limits and cleanup (owner · private CA)
+## Limits and cleanup (owner)
 
 Limits belong to this deployment; check them rather than assuming a fixed VM count or memory budget. Stopping frees RAM while keeping the disk; deleting frees the sandbox resources.
 
@@ -261,11 +249,11 @@ umiak ls
 
 If quota_exceeded or out_of_capacity appears, stop or delete an unused sandbox, or ask the operator about capacity. Desktop templates need at least the size shown in New sandbox.
 
-## Troubleshooting (owner · private CA)
+## Troubleshooting (owner)
 
 Connection timeout: check the URL, LAN or tailnet reachability and deployment network policy. Local mode is only reachable from allowed networks. On macOS, check the browser's Local Network permission if curl works but the browser cannot connect.
 
-Certificate error: obtain the CA through a trusted operator channel and compare the fingerprint. Owner and preview CAs are separate. Do not bypass certificate verification for an installer.
+Certificate error: check the certificate configured on your own HTTPS proxy or guest gateway. Obtain any required CA through a trusted operator channel and compare its fingerprint. Do not bypass certificate verification for an installer.
 
 Pairing page asks to claim an already claimed deployment: open the pairing path on the hostname where you are signed in. Cookies are host-only. An expired pairing request needs a fresh login.
 
@@ -286,7 +274,7 @@ docker compose logs --tail=100 quickstart api worker gateway
 
 ## Optional Tailscale Serve
 
-Operators can use Tailscale Serve for a publicly trusted dashboard certificate. Supply a Tailscale auth key through the environment; never commit it. This is an optional Docker Compose override.
+Quickstart defaults to LAN HTTP on port 4180. Tailscale Serve is recommended for private remote access and browser secure contexts. Operators may use their own HTTPS reverse proxy instead. If you use Funnel, this is public; an Internet-facing proxy also exposes the deployment publicly. Owner authentication remains required. Supply a Tailscale auth key through the environment; never commit it. This is an optional Docker Compose override.
 
 **Start with Tailscale Serve**
 
@@ -294,25 +282,7 @@ Operators can use Tailscale Serve for a publicly trusted dashboard certificate. 
 TS_AUTHKEY=... TS_HOSTNAME=umiak docker compose -f compose.yaml -f deploy/compose/quickstart/compose.tailscale.yaml up -d --build
 ```
 
-Serve covers this dashboard hostname. It cannot serve wildcard preview hostnames: previews still use the guest gateway and its wildcard certificate and DNS configuration.
-
-## Install the CLI (owner · publicly trusted HTTPS)
-
-This deployment serves the CLI installer over publicly trusted HTTPS; no private owner CA is needed.
-
-**Install CLI**
-
-```text
-curl --fail 'https://api.example.com/install.sh' -o umiak-install.sh && sh ./umiak-install.sh
-```
-
-The installer runs login. Open the pairing link on the hostname where you claimed this deployment, and compare the short code shown in your terminal before approving. The CLI saves the CA in its profile.
-
-**Check CLI profile**
-
-```text
-umiak whoami
-```
+Serve covers this dashboard hostname. It cannot serve wildcard preview hostnames: quickstart previews still use the guest gateway HTTP listener on port 8085 and IP-derived sslip.io DNS by default. Setup and Settings show the Funnel public-exposure warning on a `.ts.net` origin. See the operator quickstart for trusted proxy headers and host configuration.
 
 ## Install the CLI (none)
 
@@ -344,7 +314,7 @@ No sign-in is required in local mode. Access is restricted by the deployment's n
 
 ## Connect an agent with MCP (none)
 
-The recommended stdio transport uses your CLI profile, including pairing and CA settings. Put umiak on PATH, then register it in Claude Code or add the Codex configuration below.
+The recommended stdio transport uses your paired CLI profile. Put umiak on PATH, then register it in Claude Code or add the Codex configuration below.
 
 **Claude Code · stdio**
 
@@ -360,7 +330,7 @@ command = "umiak"
 args = ["mcp"]
 ```
 
-Remote MCP is available at https://app.example.com/mcp. Local mode needs no credential. OIDC supports browser sign-in; quickstart remote MCP uses an owner credential. Prefer stdio for quickstart so credentials stay in the CLI profile. Remote clients must also trust the deployment CA.
+Remote MCP is available at https://app.example.com/mcp. Local mode needs no credential. OIDC supports browser sign-in; quickstart remote MCP uses an owner credential. Prefer stdio for quickstart so credentials stay in the CLI profile. Clients using your own HTTPS proxy must trust its certificate.
 
 **Claude Code · remote HTTP**
 
@@ -381,7 +351,7 @@ Ask your agent: "Create a Linux sandbox, clone my repository into it and run the
 
 Connection timeout: check the URL, LAN or tailnet reachability and deployment network policy. Local mode is only reachable from allowed networks. On macOS, check the browser's Local Network permission if curl works but the browser cannot connect.
 
-Certificate error: obtain the CA through a trusted operator channel and compare the fingerprint. Owner and preview CAs are separate. Do not bypass certificate verification for an installer.
+Certificate error: check the certificate configured on your own HTTPS proxy or guest gateway. Obtain any required CA through a trusted operator channel and compare its fingerprint. Do not bypass certificate verification for an installer.
 
 Template unavailable: ask the operator to register a template build in Admin. Template builders live in apps/template-builder in the repository.
 
@@ -402,7 +372,7 @@ docker compose logs --tail=100 api worker gateway
 
 A sandbox is a throwaway virtual machine, identified by a three-word slug. A template is the image it is cloned from; a size sets RAM and vCPU. Your team owns its sandboxes, snapshots and API keys.
 
-Snapshots save a disk so you can create another sandbox with --from. Fork copies a sandbox directly. Port previews expose a guest port over HTTPS. Desktop templates stream a screen that people and agents can control.
+Snapshots save a disk so you can create another sandbox with --from. Fork copies a sandbox directly. Port previews expose a guest port over HTTP or HTTPS. Desktop templates stream a screen that people and agents can control.
 
 Inactive sandboxes stop automatically according to deployment policy. Their disks remain available for resume. Use limits to check the actual quotas before creating a sandbox.
 
@@ -436,7 +406,7 @@ Login opens browser sign-in through this deployment's identity provider. For una
 
 ## Connect an agent with MCP (oidc)
 
-The recommended stdio transport uses your CLI profile, including pairing and CA settings. Put umiak on PATH, then register it in Claude Code or add the Codex configuration below.
+The recommended stdio transport uses your paired CLI profile. Put umiak on PATH, then register it in Claude Code or add the Codex configuration below.
 
 **Claude Code · stdio**
 
@@ -452,7 +422,7 @@ command = "umiak"
 args = ["mcp"]
 ```
 
-Remote MCP is available at https://app.example.com/mcp. Local mode needs no credential. OIDC supports browser sign-in; quickstart remote MCP uses an owner credential. Prefer stdio for quickstart so credentials stay in the CLI profile. Remote clients must also trust the deployment CA.
+Remote MCP is available at https://app.example.com/mcp. Local mode needs no credential. OIDC supports browser sign-in; quickstart remote MCP uses an owner credential. Prefer stdio for quickstart so credentials stay in the CLI profile. Clients using your own HTTPS proxy must trust its certificate.
 
 **Claude Code · remote OAuth**
 
@@ -534,3 +504,64 @@ umiak ls
 ```
 
 If quota_exceeded or out_of_capacity appears, stop or delete an unused sandbox, or ask the operator about capacity. Desktop templates need at least the size shown in New sandbox.
+
+
+## LAN install and private proxy CAs
+
+For a default LAN deployment:
+
+```sh
+curl --fail http://HOST:4180/install.sh -o umiak-install.sh && sh ./umiak-install.sh
+```
+
+Generic `--cacert` support is available when your own HTTPS proxy uses a private
+CA. Verify that CA through a trusted operator channel, then use:
+
+```sh
+curl --fail --cacert ./proxy-ca.pem https://your-proxy/install.sh -o umiak-install.sh
+UMIAK_CA_CERT="$PWD/proxy-ca.pem" sh ./umiak-install.sh
+umiak login --api-url https://your-proxy --cacert ./proxy-ca.pem
+```
+
+Quickstart does not generate an owner CA. Publicly trusted Serve/proxy certificates
+and LAN HTTP need no private CA file.
+
+## Secure browser features
+
+The desktop viewer follows the preview scheme and port (HTTP8085 in quickstart).
+Its WebSocket video decoder needs WebCodecs `VideoDecoder`, unavailable on LAN
+HTTP. Serve secures the dashboard, not separate wildcard HTTP viewers. An HTTPS
+parent cannot embed an HTTP viewer; use **Open in new tab** for HTTP experiments,
+and set any Chrome test override for that exact viewer origin too. A viewer HTTPS
+proxy resolves that transport restriction; an HTTPS viewer under an HTTP parent
+must be opened in a new tab to avoid the insecure ancestor.
+
+In Chromium, `RTCPeerConnection` exists on LAN HTTP, while `VideoDecoder`,
+`VideoEncoder`, Clipboard API, `navigator.mediaDevices` and `crypto.subtle` do not.
+WebRTC constructor availability is not a full desktop streaming test. Desktop does
+not capture the browser camera/microphone; no dashboard getUserMedia or
+crypto.subtle usage was found. Clipboard falls back to execCommand, then manual
+selection. Dashboard and same-origin WebSocket terminal otherwise work over HTTP.
+
+For features requiring a secure browser context:
+
+1. Use Tailscale Serve (recommended).
+2. Use localhost: for a remote Docker host, run
+   `ssh -L 4180:localhost:4180 <docker-host>` and open `http://localhost:4180`.
+3. Use your own HTTPS reverse proxy with a trusted certificate.
+4. For a quick Chrome test only, add the exact deployment origin at
+   `chrome://flags/#unsafely-treat-insecure-origin-as-secure` and relaunch Chrome.
+   This weakens browser protection; remove the exception after the test. It does
+   not establish certificate trust.
+
+## Guest certificate lifecycle
+
+The guest tunnel keeps TLS and its existing CA. New guest CAs last ten years;
+existing CAs retain their expiry. Gateway leaf certificates are checked daily and
+renewed with the same CA when 30 days or less remain, without restarting the
+gateway. Leaf renewal keeps agent/template trust intact.
+
+Setup and Settings show guest CA, tunnel and preview certificate expiry dates.
+At one year or less before CA expiry, the warning explains that CA rotation
+requires rebuilding agent packages and templates and migrating existing guests.
+Plan rotation before expiry; the CA is never silently replaced or extended.

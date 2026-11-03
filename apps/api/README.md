@@ -67,6 +67,7 @@ principal, то есть после аутентификации; до неё к
 | `UMIAK_APP_URL` | обязательна | адрес дашборда (`/v1/meta` `appUrl`) |
 | `UMIAK_APP_ORIGIN` | origin `UMIAK_APP_URL` | `Origin`, который принимает proxied listener |
 | `UMIAK_PREVIEW_DOMAIN` | обязательна | домен портов (`<slug>-<port>.<domain>`) |
+| `UMIAK_PREVIEW_SCHEME`, `UMIAK_PREVIEW_PORT` | `https`, `443` (для `http`: `80`) | схема и внешний порт preview URL; quickstart использует `http` и `8085` |
 | `UMIAK_SSH_HOST`, `UMIAK_SSH_PORT` | `ssh.<UMIAK_PREVIEW_DOMAIN>`, `22` | SSH gateway для `/v1/meta` и `/ssh` |
 | `UMIAK_SSH_HOST_KEYS_FILE` | — | публичные host keys gateway, по одному в строке |
 | `UMIAK_SSH_LOGIN_CA_KEY_FILE` | — | закрытый ed25519 SSH login CA без пароля (PKCS#8 PEM или OpenSSH); без него `ssh/certificate` недоступен |
