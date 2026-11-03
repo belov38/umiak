@@ -14,6 +14,7 @@ x-app-env: &app-env
   UMIAK_PREVIEW_DOMAIN: umiak.localhost
   UMIAK_OPERATOR_GROUPS: umiak-local-operator
   UMIAK_DATABASE_PASSWORD_FILE: /quickstart-db/password
+  UMIAK_QUICKSTART_NETWORK_FILE: /network-config/quickstart-network.json
   UMIAK_SECRETS_DIR: /pve-secrets
 
 x-restart: &restart
@@ -40,8 +41,13 @@ services:
     build: *quickstart-build
     user: "0:0"
     entrypoint: [node, deploy/compose/quickstart/gateway-init.mjs]
-    environment: { UMIAK_SECRETS_DIR: /pve-secrets }
+    environment:
+      {
+        UMIAK_SECRETS_DIR: /pve-secrets,
+        UMIAK_QUICKSTART_NETWORK_FILE: /network-config/quickstart-network.json,
+      }
     volumes:
+      - network-config:/network-config
       - gateway-secrets:/gateway-secrets
       - pve-secrets:/pve-secrets:ro
     network_mode: none
@@ -59,6 +65,7 @@ services:
     user: "0:0"
     environment: { UMIAK_SECRETS_ROOT: /secrets }
     volumes:
+      - network-config:/network-config
       - secrets:/secrets
       - gateway-secrets:/secrets/gateway
       - database-secret:/secrets/database
@@ -115,7 +122,11 @@ services:
     volumes:
       - ./deploy/compose/quickstart/run.mjs:/quickstart/run.mjs:ro
       - database-secret:/quickstart-db:ro
-      - secrets:/all-secrets:ro
+      - type: volume
+        source: secrets
+        target: /all-secrets
+        read_only: true
+        volume: { subpath: web }
     networks: [control]
     depends_on:
       migrate: { condition: service_completed_successfully }
@@ -132,17 +143,21 @@ services:
       <<: *app-env
       UMIAK_PAYLOAD_SECRET_FILE: /all-secrets/payload-secret
       UMIAK_DATA_KEYS_FILE: /all-secrets/data-keys.json
-      UMIAK_GATEWAY_SERVICE_TOKEN_FILE: /gateway-secrets/worker-gateway-token
-      UMIAK_SSH_USER_CA_KEYS_FILE: /gateway-secrets/ssh_user_ca.pub
+      UMIAK_GATEWAY_SERVICE_TOKEN_FILE: /all-secrets/worker-gateway-token
+      UMIAK_SSH_USER_CA_KEYS_FILE: /all-secrets/ssh_user_ca.pub
       UMIAK_RECONCILE_DRY_RUN: "1"
       UMIAK_MIGRATE_ON_START: "0"
       UMIAK_HTTP_PORT: "9090"
     volumes:
+      - network-config:/network-config:ro
       - ./deploy/compose/quickstart/run.mjs:/quickstart/run.mjs:ro
       - database-secret:/quickstart-db:ro
-      - secrets:/all-secrets:ro
+      - type: volume
+        source: secrets
+        target: /all-secrets
+        read_only: true
+        volume: { subpath: worker }
       - pve-secrets:/pve-secrets:ro
-      - gateway-secrets:/gateway-secrets:ro
     networks: [control]
     depends_on:
       web-migrate: { condition: service_completed_successfully }
@@ -170,23 +185,27 @@ services:
     environment:
       <<: *app-env
       UMIAK_PAYLOAD_SECRET_FILE: /all-secrets/payload-secret
-      UMIAK_API_CURSOR_KEY_FILE: /all-secrets/api/cursor-key
+      UMIAK_API_CURSOR_KEY_FILE: /all-secrets/cursor-key
       UMIAK_IDENTITY_FILE: /identity.yaml
       UMIAK_DATA_KEYS_FILE: /all-secrets/data-keys.json
-      UMIAK_API_SERVICE_TOKENS_FILE: /all-secrets/api/service-tokens.json
-      UMIAK_API_GATEWAY_TOKEN_FILE: /all-secrets/api/gateway-token
-      UMIAK_SSH_LOGIN_CA_KEY_FILE: /all-secrets/api/ssh-login-ca
-      UMIAK_SSH_HOST_KEYS_FILE: /all-secrets/api/ssh-host-keys.pub
+      UMIAK_API_SERVICE_TOKENS_FILE: /all-secrets/service-tokens.json
+      UMIAK_API_GATEWAY_TOKEN_FILE: /all-secrets/gateway-token
+      UMIAK_SSH_LOGIN_CA_KEY_FILE: /all-secrets/ssh-login-ca
+      UMIAK_SSH_HOST_KEYS_FILE: /all-secrets/ssh-host-keys.pub
       UMIAK_LOCAL_ALLOWED_HOSTS: api:8080,localhost:8444
       UMIAK_API_TRUSTED_PROXY_CIDRS: 172.29.116.10/32,172.29.116.11/32
       UMIAK_SSH_HOST: localhost
       UMIAK_SSH_PORT: "2222"
     volumes:
+      - network-config:/network-config:ro
       - ./deploy/compose/quickstart/run.mjs:/quickstart/run.mjs:ro
       - ./deploy/compose/config/identity.yaml:/identity.yaml:ro
       - database-secret:/quickstart-db:ro
-      - secrets:/all-secrets:ro
-      - pve-secrets:/pve-secrets:ro
+      - type: volume
+        source: secrets
+        target: /all-secrets
+        read_only: true
+        volume: { subpath: api }
     networks: [control]
     depends_on:
       web-migrate: { condition: service_completed_successfully }
@@ -213,9 +232,14 @@ services:
       <<: *app-env
       UMIAK_PAYLOAD_SECRET_FILE: /all-secrets/payload-secret
     volumes:
+      - network-config:/network-config:ro
       - ./deploy/compose/quickstart/run.mjs:/quickstart/run.mjs:ro
       - database-secret:/quickstart-db:ro
-      - secrets:/all-secrets:ro
+      - type: volume
+        source: secrets
+        target: /all-secrets
+        read_only: true
+        volume: { subpath: web }
     networks: [web-internal]
     depends_on:
       web-migrate: { condition: service_completed_successfully }
@@ -267,9 +291,9 @@ services:
     # Gateway secrets are owned by its existing uid; read-only, never the owner CA.
     user: "0:0"
     volumes:
+      - network-config:/network-config:ro
       - database-secret:/quickstart-db:ro
       - gateway-secrets:/gateway-secrets:ro
-      - pve-secrets:/pve-secrets:ro
     ports:
       - "${UMIAK_GATEWAY_BIND:-0.0.0.0}:${UMIAK_GATEWAY_HTTPS_PORT:-443}:8443"
       - "${UMIAK_GATEWAY_BIND:-0.0.0.0}:${UMIAK_GATEWAY_SSH_PORT:-2222}:2222"
@@ -294,6 +318,7 @@ services:
       UMIAK_QUICKSTART_ASSETS: /app/quickstart-assets
       UMIAK_QUICKSTART_TLS_DIR: /var/lib/umiak/owner/tls
     volumes:
+      - network-config:/network-config
       - database-secret:/quickstart-db:ro
       - owner-data:/var/lib/umiak/owner
       - pve-secrets:/pve-secrets
@@ -313,6 +338,7 @@ volumes:
   database-secret: {}
   secrets: {}
   gateway-secrets: {}
+  network-config: {}
   owner-data: {}
   pve-secrets: {}
 

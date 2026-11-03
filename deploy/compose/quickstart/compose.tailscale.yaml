@@ -1,0 +1,24 @@
+# Optional exposure: owner authorization still applies; no Tailscale identity trust.
+services:
+  tailscale:
+    image: tailscale/tailscale:v1.104.4
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?set a Tailscale auth key}
+      TS_HOSTNAME: ${TS_HOSTNAME:-umiak}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "true"
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./deploy/compose/quickstart/tailscale:/config:ro
+    networks:
+      control: { ipv4_address: 172.29.116.12 }
+    depends_on:
+      quickstart: { condition: service_started }
+  quickstart:
+    environment:
+      UMIAK_QUICKSTART_SERVE_PEERS: 172.29.116.12
+      UMIAK_QUICKSTART_TLS_NAMES: "quickstart,${UMIAK_QUICKSTART_TLS_NAMES:-}"
+volumes:
+  tailscale-state: {}

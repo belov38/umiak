@@ -27,6 +27,7 @@ services:
     volumes:
       - /home/umiak/umiak/deploy/compose/quickstart:/app/deploy/compose/quickstart:ro
     environment:
+      UMIAK_QUICKSTART_SERVE_PEERS: 172.29.116.128
       UMIAK_QUICKSTART_TLS_NAMES: 192.168.68.90,100.64.10.7,umiak-dev-cp,umiak-dev-cp.tail0000.ts.net
       UMIAK_LOCAL_DENIED_CIDRS: 192.168.68.116/32,100.64.10.2/32,10.88.0.0/24
       UMIAK_PVE_URL: https://192.168.68.116:8006

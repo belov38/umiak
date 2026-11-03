@@ -3,9 +3,9 @@
 import { execFile } from "node:child_process";
 import { createHash, randomBytes, X509Certificate } from "node:crypto";
 import { lookup } from "node:dns/promises";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
 	buildInvocation,
@@ -271,6 +271,8 @@ export function createSetupHandler({
 	pool,
 	store = new PgSetupStore(pool),
 	secretsDir = process.env.UMIAK_PVE_SECRETS_DIR || "/pve-secrets",
+	networkFile = process.env.UMIAK_QUICKSTART_NETWORK_FILE ||
+		join(secretsDir, "quickstart-network.json"),
 	assetsDir = process.env.UMIAK_QUICKSTART_ASSETS || "/app/quickstart-assets",
 	apiUrl = "http://api:8080",
 	makePve = pinnedPve,
@@ -445,11 +447,11 @@ export function createSetupHandler({
 				network.gatewayAddress,
 				report.denySets,
 			);
-			await atomicSecret(
-				secretsDir,
-				"quickstart-network.json",
-				JSON.stringify(network),
-			);
+			await mkdir(dirname(networkFile), { recursive: true, mode: 0o755 });
+			await writeFile(`${networkFile}.new`, JSON.stringify(network), {
+				mode: 0o644,
+			});
+			await rename(`${networkFile}.new`, networkFile);
 			return network;
 		},
 		async templates(input, state) {

@@ -23,13 +23,14 @@ sha256sum deploy/compose/secrets/gateway/{ca,tunnel,umiak}.pem >deploy/compose/s
 cp -n deploy/compose/.env deploy/compose/secrets/devcp/s15.env
 compose=(docker compose --env-file deploy/compose/.env -f compose.yaml -f infra/dev-cp/compose.quickstart.yaml)
 "${compose[@]}" config --quiet
-"${compose[@]}" build migrate web-migrate api mcp gateway-secrets quickstart
+"${compose[@]}" build secrets-init migrate web-migrate api mcp gateway-secrets quickstart
 # Prevent the old unauthenticated ingress from bypassing owner gate.
 (cd deploy/compose && docker compose stop local-ingress)
 "${compose[@]}" up -d
 sha256sum -c deploy/compose/secrets/devcp/s16-tls-before.sha256
+tailscale serve --bg --https=8443 https+insecure://localhost:8444
 "${compose[@]}" ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
 echo 'Retrieve setup code privately with: docker compose --env-file deploy/compose/.env -f compose.yaml -f infra/dev-cp/compose.quickstart.yaml logs quickstart'
-echo 'Owner URL: https://umiak-dev-cp.tail0000.ts.net:8444'
+echo 'Owner URL: https://umiak-dev-cp.tail0000.ts.net:8443 (publicly trusted Serve TLS)'
 echo 'LAN URL: https://192.168.68.90:4180'
 REMOTE
