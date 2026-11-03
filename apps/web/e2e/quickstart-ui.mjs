@@ -149,6 +149,24 @@ test("quickstart appearance, focus and revoke confirmation", async () => {
 			.getByRole("button", { name: "Sign in another browser", exact: true })
 			.click();
 		await page.locator("#signin-result code").waitFor();
+		await page.getByText(/^Expires in [0-9]+:[0-9]{2}$/).waitFor();
+		assert.ok(
+			await page
+				.locator("#signin-result code")
+				.evaluate((el) => parseFloat(getComputedStyle(el).fontSize) >= 20),
+		);
+		await page.evaluate(() => {
+			Object.defineProperty(navigator, "clipboard", {
+				configurable: true,
+				value: {
+					writeText: async () => {
+						throw new Error("Clipboard permission denied");
+					},
+				},
+			});
+		});
+		await page.getByRole("button", { name: "Copy code", exact: true }).click();
+		await page.getByRole("button", { name: "Copied", exact: true }).waitFor();
 		const anotherCode = await page.locator("#signin-result code").textContent();
 		const second = await browser.newContext();
 		try {
