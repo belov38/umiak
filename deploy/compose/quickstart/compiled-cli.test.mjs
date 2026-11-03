@@ -51,7 +51,8 @@ for (const host of ["localhost", "127.0.0.1"])
 				{
 					env: {
 						...process.env,
-						UMIAK_CONFIG_DIR: join(dir, "config"),
+						XDG_CONFIG_HOME: join(dir, "config"),
+						XDG_STATE_HOME: join(dir, "state"),
 						UMIAK_CREDENTIAL_STORE: "file",
 					},
 					stdio: ["ignore", "pipe", "pipe"],

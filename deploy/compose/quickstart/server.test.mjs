@@ -331,3 +331,27 @@ test("anonymous browser guide navigations show claim while API clients retain JS
 		await new Promise((resolve) => server.close(resolve));
 	}
 });
+
+test("download length enables determinate installer progress through Serve", async (t) => {
+	const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const dir = await mkdtemp(join(tmpdir(), "umiak-download-length-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	await writeFile(join(dir, "umiak-darwin-arm64.gz"), "compressed bytes");
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	await store.init();
+	const server = createQuickstartServer({
+		store,
+		transport: http,
+		assetsDir: dir,
+		env: {},
+	});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	t.after(() => new Promise((resolve) => server.close(resolve)));
+	const response = await fetch(
+		`http://127.0.0.1:${server.address().port}/downloads/umiak-darwin-arm64.gz`,
+	);
+	assert.equal(response.headers.get("content-length"), "16");
+	assert.equal(await response.text(), "compressed bytes");
+});

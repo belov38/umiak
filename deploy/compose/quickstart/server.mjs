@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, readFileSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
@@ -234,6 +234,7 @@ export function createQuickstartServer({
 					return res.end(
 						readFileSync(asset, "utf8").replaceAll("__UMIAK_ORIGIN__", origin),
 					);
+				res.setHeader("content-length", statSync(asset).size);
 				return createReadStream(asset).pipe(res);
 			}
 			if (path === "/owner/claim" && req.method === "POST") {

@@ -171,7 +171,7 @@ nor origin port confers owner authorization.
 ## Compiled CLI TLS gate
 
 Run `pnpm build` first, then
-`node --test deploy/compose/quickstart/*.test.mjs deploy/compose/local/*.test.mjs deploy/compose/meta-proxy/*.test.mjs`.
+`node --test deploy/compose/quickstart/*.test.mjs deploy/compose/local/*.test.mjs deploy/compose/meta-proxy.test.mjs`.
 The quickstart wildcard includes `compiled-cli.test.mjs`; missing host binaries
 fail rather than skip. It executes `apps/cli/dist/umiak-<os>-<arch>` against a real
 HTTPS quickstart ingress and its generated constrained CA, with an isolated owner

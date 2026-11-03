@@ -208,6 +208,7 @@ test("fresh node download uses only the expiring setup capability and expires af
 	const callback = await request("/quickstart/setup/callback", {
 		token,
 		tokenSecret: "fake-token-secret",
+		mediaStorage: "local",
 		caPem: await readFile(join(dir, "ca.pem"), "utf8"),
 		sshPublicKey: `ssh-ed25519 ${Buffer.concat([Buffer.from([0, 0, 0, 11]), Buffer.from("ssh-ed25519"), Buffer.from([0, 0, 0, 32]), Buffer.alloc(32, 1)]).toString("base64")}`,
 	});
