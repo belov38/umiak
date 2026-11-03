@@ -40,10 +40,12 @@ import { CliError, usageError } from "../exit-codes.ts";
 import { deadline, getJson } from "../http.ts";
 import { readAll } from "../io.ts";
 import type { Runner } from "../program.ts";
+import { presentAccount, tenancyCache, tenancyOf } from "../tenancy.ts";
 import { CLI_VERSION } from "./version.ts";
 import { humanMe, type Me } from "./whoami.ts";
 
 interface MetaOidc {
+	tenancy?: "single" | "teams";
 	authMode?: "none" | "oidc" | "owner";
 	oidc: { issuer: string; clientId: string; audience: string } | null;
 }
@@ -155,12 +157,16 @@ async function login(
 	const apiUrl = r.apiUrl;
 	let cred: StoredCredential | undefined;
 	let profile: Profile;
+	let meta: MetaOidc;
 	if (opts.keyStdin === true) {
 		const key = keyFromStdin(await readAll(ctx.stdin));
+		meta = await getJson<MetaOidc>(ctx.fetch, `${apiUrl}/v1/meta`).catch(
+			() => ({ oidc: null }),
+		);
 		cred = { kind: "key", token: key };
 		profile = { apiUrl, auth: "key" };
 	} else {
-		const meta = await getJson<MetaOidc>(ctx.fetch, `${apiUrl}/v1/meta`);
+		meta = await getJson<MetaOidc>(ctx.fetch, `${apiUrl}/v1/meta`);
 		if (meta.authMode === "owner") {
 			const token = await ownerLogin({
 				apiUrl,
@@ -184,6 +190,7 @@ async function login(
 			profile = { apiUrl, auth: "oidc", issuer: f.issuer };
 		}
 	}
+	Object.assign(profile, tenancyCache(meta));
 	const token =
 		cred === undefined
 			? undefined
@@ -262,7 +269,7 @@ async function login(
 	}
 	ctx.out.event(
 		"logged_in",
-		{ profile: name, apiUrl, me },
+		{ profile: name, apiUrl, me: presentAccount(me, tenancyOf(meta)) },
 		(v) =>
 			`Logged in to ${v.apiUrl} as ${humanMe(v.me)} (profile ${v.profile}).`,
 	);

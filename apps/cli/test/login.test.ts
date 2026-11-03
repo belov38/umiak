@@ -184,6 +184,8 @@ describe("umiak login", () => {
 					auth: "oidc",
 					issuer: w.oidc.issuer,
 					credentialStore: "file",
+					tenancy: "teams",
+					tenancyCheckedAt: expect.any(Number),
 				},
 			},
 		});
@@ -331,6 +333,8 @@ describe("umiak login", () => {
 			apiUrl: w.url,
 			auth: "key",
 			credentialStore: "file",
+			tenancy: "teams",
+			tenancyCheckedAt: expect.any(Number),
 		});
 		const t = await runCli(["auth", "token", "--json"], { env: home.env });
 		expect(JSON.parse(t.stdout)).toEqual({
