@@ -86,4 +86,9 @@ Files: spec evidence and roadmap S19 row; architecture locality note.
 
 - Catalog availability is optional in OpenAPI/SDK models to support existing server responses during upgrades; S19 always emits it.
 - Node registration is a trusted core primitive, not a public HTTP mutation. It rejects local storage changes (disk migration is out of scope), RAM caps below existing reservations, and changes while a build reservation is open.
-- Initial full workspace test caught the new Drizzle table missing from the aggregate schema export; fixed and DB schema-drift checks pass. Full workspace build/typecheck pass; remaining full test run is in progress. Installer integration/live/Go gate/final acceptance remain outstanding until S18 implementation merges.
+- Initial full workspace test caught the new Drizzle table missing from the aggregate schema export; fixed and DB schema-drift checks pass (74 tests).
+- Full workspace pnpm test passed: core was 374 at that run; the final affected core suite subsequently passed 377 tests after inventory and promotion-fence additions. API 1073, worker 427 (+7 skipped), template-builder 600, MCP 715 (+1 skipped), CLI 190; both SDK suites passed (TS142/Python83). Full typecheck and lint passed; lint retains one pre-existing informational String.raw diagnostic in MCP test code.
+- Full pnpm build passed again after the final inventory addition.
+- All five Go modules: build/vet/lint passed. Race tests passed for proto/tunnel/node-agent/gateway. Initial full guest-agent race run failed timing checks TestRecoverNeverAttachedPTY (307ms vs300ms) and TestQuiesceBudget (50ms); isolated packages passed. Full guest-agent race repeat retained QuiesceBudget failure; full `go test -race -p 1 ./...` then passed. No Go code changed.
+- Windows builds for proto/tunnel/guest-agent and Windows vet for proto/tunnel passed; Linux guest-agent integration-tag golangci-lint passed. Linux runtime systemd integration was not run on this macOS host.
+- Installer integration/live/final independent acceptance remain outstanding until S18 implementation merges. No PVE host or guest mutations were performed. Do not merge the partial stage to main.
