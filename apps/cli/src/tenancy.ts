@@ -79,7 +79,7 @@ export function deploymentTenancy(ctx: Context): Promise<Tenancy> {
 }
 type AccountPresentation<T extends object> = Omit<
 	T,
-	"team" | "teamId" | "teamName"
+	"team" | "teams" | "teamId" | "teamName"
 > & {
 	team?: T extends { team: infer Team } ? Team : never;
 };
@@ -91,9 +91,15 @@ export function presentAccount<T extends object>(
 	if (tenancy === "teams") return value;
 	const {
 		team: _team,
+		teams: _teams,
 		teamId: _id,
 		teamName: _name,
 		...rest
-	} = value as T & { team?: unknown; teamId?: unknown; teamName?: unknown };
+	} = value as T & {
+		team?: unknown;
+		teams?: unknown;
+		teamId?: unknown;
+		teamName?: unknown;
+	};
 	return rest as AccountPresentation<T>;
 }

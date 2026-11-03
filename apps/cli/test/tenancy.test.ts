@@ -4,14 +4,20 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { generateApiKeySecret } from "@umiak/auth/api-key";
 import { expect, it } from "vitest";
+import type { Me } from "../src/commands/whoami.ts";
 import { pathsOf, writeConfig } from "../src/config.ts";
 import { runCli } from "../src/program.ts";
 import { cliHome } from "./helpers/run-cli.ts";
 
-const me = {
+const me: Me = {
 	user: { id: "usr_local", email: "owner@example.test", name: "Owner" },
 	team: { id: "team_internal", name: "Internal team", role: "owner" },
-	auth: { kind: "team_key", scopes: ["sandbox:read"] },
+	teams: [
+		{ id: "team_internal", name: "Internal team", role: "owner" },
+		{ id: "team_additional", name: "Second team", role: "member" },
+	],
+	isOperator: false,
+	auth: { kind: "team_key", scopes: ["sandboxes:read"] },
 };
 const sandbox = {
 	id: "sb_one",
@@ -130,6 +136,11 @@ it.each(["single", "teams", undefined] as const)(
 					expect(reply.stdout.includes("team_internal")).toBe(
 						tenancy !== "single",
 					);
+					if (tenancy === "single") {
+						expect(reply.stdout).not.toContain("team_additional");
+						expect(reply.stdout).not.toContain("Internal team");
+						expect(reply.stdout).not.toContain('"teams"');
+					}
 				}
 				const human = await invoke(["whoami", "--human"]);
 				expect(human.stdout.includes("in team")).toBe(tenancy !== "single");
@@ -194,6 +205,8 @@ it("persists tenancy from anonymous metadata on key login", async () => {
 		);
 		expect(reply.code, reply.stderr).toBe(0);
 		expect(reply.stdout).not.toContain("team_internal");
+		expect(reply.stdout).not.toContain("team_additional");
+		expect(reply.stdout).not.toContain('"teams"');
 		expect(
 			JSON.parse(readFileSync(join(home.configDir, "config.json"), "utf8"))
 				.profiles.default,

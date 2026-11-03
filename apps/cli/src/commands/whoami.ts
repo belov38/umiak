@@ -8,7 +8,9 @@ import { deploymentTenancy, presentAccount } from "../tenancy.ts";
 export type Me = components["schemas"]["Me"];
 
 /** One line: who, in which team, with which credential. */
-export function humanMe(me: Omit<Me, "team"> & { team?: Me["team"] }): string {
+export function humanMe(
+	me: Omit<Me, "team" | "teams"> & { team?: Me["team"] },
+): string {
 	const who =
 		me.user === null
 			? me.team
