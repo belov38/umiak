@@ -178,7 +178,7 @@ export const sandboxCreate = defineTool({
 	name: "sandbox_create",
 	title: "Create a sandbox",
 	description:
-		"Creates a sandbox (VM) from a template or saved snapshot and waits until it is ready. Labels it created-via=mcp. If not ready in time, call sandbox_get with wait_for=ready and wait_seconds=50.",
+		"Creates a VM from a template/snapshot; waits for ready. Adds created-via=mcp. On timeout: sandbox_get(wait_for=ready, wait_seconds=50).",
 	toolset: "core",
 	scopes: ["sandboxes:write"],
 	annotations: NEW_RESOURCE,
@@ -189,7 +189,7 @@ export const sandboxCreate = defineTool({
 			.string()
 			.optional()
 			.describe(
-				"Template slug: linux (default), linux-desktop or windows (Windows 11 with desktop); windows-desktop is a legacy alias of windows; ignored with from_snapshot",
+				"Slug: linux (default), linux-desktop, windows (desktop; alias windows-desktop). Ignored with from_snapshot",
 			),
 		size: sizeShape,
 		name: nameShape,
@@ -274,9 +274,7 @@ export const sandboxList = defineTool({
 		template: z
 			.string()
 			.optional()
-			.describe(
-				"Only this template slug; windows-desktop is an alias of windows",
-			),
+			.describe("Template filter; windows-desktop aliases windows"),
 		query: z.string().optional().describe("Name or slug prefix"),
 		limit: z
 			.number()

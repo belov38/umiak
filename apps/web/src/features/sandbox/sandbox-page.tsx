@@ -1,8 +1,7 @@
 "use client";
-import { useQuery } from "@tanstack/react-query";
 // The sandbox page (S8 §9.6): header with live state and actions, tabs
 // Overview | Terminal | Commands | Files | Ports | SSH | Env | Desktop (the
-// last only for templates with the `desktop` capability). The tab is in
+// last only for sandboxes with a desktop endpoint). The tab is in
 // `?tab=`; only the open tab is mounted, so leaving it closes its streams
 // and sockets.
 import { UmiakError } from "@umiak/sdk";
@@ -17,7 +16,6 @@ import {
 import { LoadingState } from "@/components/ui/feedback";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SandboxManagement } from "@/features/operator/sandbox-management";
-import { useUmiak } from "@/lib/api";
 import { teamPath } from "@/lib/team-path";
 import { type SandboxTab, sandboxHref } from "../sandboxes/links";
 import { CommandsTab } from "./commands";
@@ -56,21 +54,11 @@ export function SandboxPage({
 }) {
 	const singleOwner = useSingleOwner();
 	const session = useAppSession();
-	const umiak = useUmiak(teamId);
 	const router = useRouter();
 	const params = useSearchParams();
 	const live = useLiveSandbox(teamId, sandboxRef);
 	const s = live.data;
-	const templates = useQuery({
-		queryKey: ["templates", teamId],
-		queryFn: ({ signal }) => umiak.templates({ signal }),
-		staleTime: 5 * 60_000,
-	});
-	const desktop =
-		s !== undefined &&
-		(templates.data ?? []).some(
-			(t) => t.slug === s.template && t.capabilities.includes("desktop"),
-		);
+	const desktop = Boolean(s?.endpoints.desktop);
 	const tabs = TABS.filter((t) => t.id !== "desktop" || desktop);
 	const asked = params.get("tab") ?? "overview";
 	const tab: Tab = tabs.some((t) => t.id === asked)
