@@ -2145,7 +2145,7 @@ export interface components {
              */
             appUrl: string;
             /** @enum {string} */
-            authMode?: "oidc" | "none";
+            authMode?: "oidc" | "none" | "owner";
             /**
              * @description Build of the api
              * @example 1.4.0+3f2c1a9
@@ -2174,6 +2174,11 @@ export interface components {
                 hostKeys: string[];
                 port: number;
             };
+            /**
+             * @description Presentation model for this deployment. Missing on older servers means teams; independent of credential kind.
+             * @enum {string}
+             */
+            tenancy?: "single" | "teams";
             /**
              * @description Domain of published ports: https://<slug>-<port>.<umiakDomain>
              * @example umiak.example.com

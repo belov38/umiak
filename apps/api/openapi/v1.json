@@ -2414,7 +2414,8 @@
 					"authMode": {
 						"enum": [
 							"oidc",
-							"none"
+							"none",
+							"owner"
 						],
 						"type": "string"
 					},
@@ -2489,6 +2490,14 @@
 							"hostKeys"
 						],
 						"type": "object"
+					},
+					"tenancy": {
+						"description": "Presentation model for this deployment. Missing on older servers means teams; independent of credential kind.",
+						"enum": [
+							"single",
+							"teams"
+						],
+						"type": "string"
 					},
 					"umiakDomain": {
 						"description": "Domain of published ports: https://<slug>-<port>.<umiakDomain>",

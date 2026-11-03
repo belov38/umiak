@@ -127,6 +127,7 @@ describe("local API", () => {
 		expect(settings.oidc).toBeNull();
 		expect(await (await request("/v1/meta")).json()).toMatchObject({
 			authMode: "none",
+			tenancy: "single",
 			oidc: null,
 		});
 	});

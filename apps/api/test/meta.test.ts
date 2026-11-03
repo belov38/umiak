@@ -17,6 +17,7 @@ describe("GET /v1/meta (S7 §13)", () => {
 		const r = await h.request("GET", "/v1/meta");
 		expect(r.status).toBe(200);
 		expect(r.body).toEqual({
+			tenancy: "teams",
 			apiVersion: "v1",
 			build: "1.2.3+abc",
 			appUrl: settings.appUrl,
