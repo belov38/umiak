@@ -141,8 +141,11 @@ export async function promoteNodeTemplate(
 	);
 	if (!n.rows[0]?.eligible)
 		throw new Error("Template promotion requires an active node");
-	const reservation = await tx.client.query<{ id: string }>(
-		"SELECT id FROM runtime.node_build_jobs WHERE node_id=$1 AND status IN ('running','interrupted')",
+	const reservation = await tx.client.query<{
+		id: string;
+		template_slug: string;
+	}>(
+		"SELECT id,template_slug FROM runtime.node_build_jobs WHERE node_id=$1 AND status IN ('running','interrupted')",
 		[input.nodeId],
 	);
 	if (reservation.rows[0] && reservation.rows[0].id !== input.jobId)
@@ -154,6 +157,11 @@ export async function promoteNodeTemplate(
 		[input.buildId, input.nodeId],
 	);
 	if (!build.rows[0]) throw new Error("Unknown or retired template build");
+	if (
+		reservation.rows[0] &&
+		reservation.rows[0].template_slug !== build.rows[0].template_slug
+	)
+		throw new Error("Build reservation is for a different template");
 	await tx.client.query(
 		"UPDATE runtime.template_builds SET status='deprecated' WHERE node_id=$1 AND template_slug=$2 AND status='active' AND id<>$3",
 		[input.nodeId, build.rows[0].template_slug, input.buildId],

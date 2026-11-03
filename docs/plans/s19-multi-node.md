@@ -33,11 +33,11 @@ Files: create `db/migrations/0600_multi_node.sql`, `packages/core/src/node-maint
 
 Interfaces: `beginNodeBuild(tx,{nodeId,jobId,templateSlug})`; `finishNodeBuild(tx,{nodeId,jobId,status})` called only after verified host cleanup; `interruptNodeBuild(tx,nodeId,jobId)` keeps reservation; `nodeRemovalBlockers(tx,nodeId)`; `retireNode(tx,nodeId)` returns blockers or retired result. `admit` accepts optional `{storageId,templateBuildId}` placement validation in addition to existing RAM arguments. `nodes.retired_at`; `node_build_jobs` keeps history, unique open job per node.
 
-- [ ] Write real-Postgres tests for each removal blocker, retirement/re-add history, idle build reservation, interrupted build fencing, and admission of a stale candidate.
-- [ ] Run `mise exec -- pnpm --filter @umiak/core test`; confirm new assertions fail before implementation.
-- [ ] Implement migration and primitives under `lockNode`; reject retired/build-reserved nodes in admission and powered-start gates. New-disk callers validate active node/provider/storage/build under admission lock. Resume on ordinary cordoned nodes retains existing behavior.
-- [ ] Test two-node fallback and build reservation race in real transactions; run core and worker suites and typecheck.
-- [ ] Commit isolated core change.
+- [x] Write real-Postgres tests for each removal blocker, retirement/re-add history, idle build reservation, interrupted build fencing, and admission of a stale candidate.
+- [x] Run `mise exec -- pnpm --filter @umiak/core test`; confirm new assertions fail before implementation.
+- [x] Implement migration and primitives under `lockNode`; reject retired/build-reserved nodes in admission and powered-start gates. New-disk callers validate active node/provider/storage/build under admission lock. Resume on ordinary cordoned nodes retains existing behavior.
+- [x] Test two-node fallback and build reservation race in real transactions; run core and worker suites and typecheck.
+- [x] Commit isolated core change.
 
 ### Task 2: Per-node worker clients and builder RAM
 
@@ -45,20 +45,20 @@ Files: `apps/worker/src/adapters/pve-infra.ts`, its tests, `apps/worker/src/cont
 
 Interfaces: worker DB `node_agent_ref` is authoritative; registry cache detects topology changes and retirement. Builder RamGuard accounts only its selected node.
 
-- [ ] Add failing tests with two pinned SSH hosts and a misleading global SSH env, cache invalidation after endpoint change, retired nodes, and unrelated-node running VMs.
-- [ ] Run worker/template-builder tests to observe failures.
-- [ ] Implement per-node routing/cache refresh, retirement exclusion in reconciliation, node-local builder accounting.
-- [ ] Run both suites and typecheck, commit.
+- [x] Add failing tests with two pinned SSH hosts and a misleading global SSH env, cache invalidation after endpoint change, retired nodes, and unrelated-node running VMs.
+- [x] Run worker/template-builder tests to observe failures.
+- [x] Implement per-node routing/cache refresh, retirement exclusion in reconciliation, node-local builder accounting.
+- [x] Run both suites and typecheck, commit.
 
 ### Task 3: Catalog availability and operator inventory
 
-Files: `apps/api/src/routes/catalog.ts`, `apps/api/src/schemas/catalog.ts`, `apps/api/test/catalog-limits.test.ts`; OpenAPI/SDK generated outputs; operator node inventory module under core.
+Files: `apps/api/src/routes/catalog.ts`, `apps/api/src/schemas/catalog.ts`, `apps/api/test/catalog-limits.test.ts`; OpenAPI/SDK generated outputs; operator node inventory `packages/core/src/node-inventory.ts` with per-node media storage (`0601_node_media_storage.sql`).
 
 Interfaces: additive template `availability` array with node ID/name, version, VMID, eligible flag; preserve newest active summary fields. Node inventory contains no secrets and is restricted to operator context; member/API-key catalog exposes only scheduling availability, never SSH endpoints.
 
-- [ ] Add failing tests for two nodes/different versions, unbuilt node, cordoned/retired nodes and disabled-template operator boundary.
-- [ ] Run API tests; implement availability from node/build topology and regenerate OpenAPI/SDKs using existing scripts.
-- [ ] Run API/core/SDK tests and typecheck, commit.
+- [x] Add failing tests for two nodes/different versions, unbuilt node, cordoned/retired nodes and disabled-template operator boundary.
+- [x] Run API tests; implement availability from node/build topology and regenerate OpenAPI/SDKs using existing scripts.
+- [x] Run API/core/SDK tests and typecheck, commit.
 
 ### Task 4: Integrate S18 setup/build and installer (after S18 code merge)
 
@@ -81,3 +81,9 @@ Files: spec evidence and roadmap S19 row; architecture locality note.
 - [ ] Run `mise exec -- pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`; Node setup tests and Python installer tests. Run mise Go build/vet/test(-race)/golangci-lint for all go.work modules, Linux/Windows checks from CI where supported. Report unavailable checks; do not claim them passed.
 - [ ] Fresh independent acceptance subagent gets spec and diff, not conclusions; fix blockers and recheck affected tests.
 - [ ] Update roadmap and evidence; merge branch into main without squash, push, report SHA/live results/open items to coordinator.
+
+## Implementation notes (2026-11-04)
+
+- Catalog availability is optional in OpenAPI/SDK models to support existing server responses during upgrades; S19 always emits it.
+- Node registration is a trusted core primitive, not a public HTTP mutation. It rejects local storage changes (disk migration is out of scope), RAM caps below existing reservations, and changes while a build reservation is open.
+- Initial full workspace test caught the new Drizzle table missing from the aggregate schema export; fixed and DB schema-drift checks pass. Full workspace build/typecheck pass; remaining full test run is in progress. Installer integration/live/Go gate/final acceptance remain outstanding until S18 implementation merges.

@@ -10,7 +10,7 @@ Adding a node prepares it, makes its template availability visible, and lets
 the scheduler use it when an appropriate local template is ready. Removing
 a node must never orphan guests, local disks, builds or saved snapshots.
 
-## Approaches and pending decisions
+## Approaches and decisions
 
 Proposed approach: keep S6 §8.4 automatic placement by available RAM and
 independently build the same logical template on each selected node. No

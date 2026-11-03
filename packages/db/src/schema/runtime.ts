@@ -157,6 +157,7 @@ export const nodes = runtime.table("nodes", {
 	ramCapMb: integer("ram_cap_mb").notNull(),
 	cloneConcurrency: integer("clone_concurrency").notNull().default(4),
 	nodeAgentRef: text("node_agent_ref").notNull(),
+	mediaStorage: text("media_storage").notNull().default("local"),
 	retiredAt: tstz("retired_at"),
 	lastSeenAt: tstz("last_seen_at"),
 	createdAt: createdAt(),

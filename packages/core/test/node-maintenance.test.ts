@@ -32,6 +32,23 @@ const reserve = (nodeId: string, jobId = randomUUID()) =>
 	);
 
 describe("node maintenance (S19)", () => {
+	it("cannot use a Linux job reservation to promote another logical template", async () => {
+		const a = await createTopology(db.pool, {
+			build: { templateSlug: "windows", status: "building" },
+		});
+		const jobId = randomUUID();
+		await reserve(a.nodeId, jobId);
+		await expect(
+			withTx(db.pool, (tx) =>
+				promoteNodeTemplate(tx, {
+					nodeId: a.nodeId,
+					buildId: a.templateBuildId,
+					jobId,
+				}),
+			),
+		).rejects.toThrow(/template/);
+	});
+
 	it("an admission waiting for the node lock observes a newly committed build reservation", async () => {
 		const a = await createTopology(db.pool);
 		let admission: Promise<unknown> | undefined;
