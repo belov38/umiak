@@ -161,14 +161,100 @@ test("sessions retain creation hostname and record last HTTP use", async () => {
 	let now = 1000;
 	const store = new OwnerStore(new MemoryOwnerRepository(), { now: () => now });
 	const token = await store.claim(await store.init(), "first.example");
-	now = 2000;
+	now = 62000;
 	await store.touch(token);
 	const session = (await store.sessions())[0];
 	assert.equal(session.hostname, "first.example");
 	assert.equal(session.created, 1000);
-	assert.equal(session.lastUsed, 2000);
+	assert.equal(session.lastUsed, 62000);
 	const pair = await store.pairStart({ hostname: "cli.example" });
 	await store.pairApprove(pair.id, pair.code);
 	const cli = await store.pairPoll(pair.id, pair.secret);
 	assert.equal((await store.session(cli)).hostname, "cli.example");
+});
+
+test("full source map never causes per-request owner writes; touch is minute-coalesced", async () => {
+	let now = 1000;
+	const repo = new MemoryOwnerRepository();
+	const store = new OwnerStore(repo, { now: () => now });
+	const token = await store.claim(await store.init());
+	repo.state.signinSources = {};
+	for (let i = 0; i < 10000; i++)
+		repo.state.signinSources[i] = { count: 1, expires: now + 600000 };
+	for (let i = 0; i < 10000; i++)
+		store.signinSources.set(String(i), { count: 1, expires: now + 600000 });
+	let writes = 0;
+	const transaction = repo.transaction.bind(repo);
+	repo.transaction = (fn) => {
+		writes++;
+		return transaction(fn);
+	};
+	for (let i = 0; i < 1000; i++) {
+		assert.ok(await store.authenticate(token));
+		await store.touch(token);
+	}
+	assert.equal(writes, 0);
+	now += 60001;
+	await store.touch(token);
+	assert.equal(writes, 1);
+	await store.touch(token);
+	assert.equal(writes, 1);
+});
+
+test("source buckets expire, cap new sources and never enter durable owner state", async () => {
+	let now = 1000;
+	const repo = new MemoryOwnerRepository();
+	const store = new OwnerStore(repo, { now: () => now });
+	await store.claim(await store.init());
+	for (let i = 0; i < 10000; i++)
+		await assert.rejects(store.signin("bad", String(i)), /invalid_signin/);
+	assert.equal(Object.keys(repo.state.signinSources ?? {}).length, 0);
+	await assert.rejects(
+		store.signin("bad", "overflow"),
+		(e) => e.message === "signin_limited" && e.retryAfter === 600,
+	);
+	now += 600001;
+	await assert.rejects(store.signin("bad", "overflow"), /invalid_signin/);
+});
+
+test("audit records source, hostname and issuer without code material", async () => {
+	const events = [];
+	const store = new OwnerStore(new MemoryOwnerRepository(), {
+		audit: (e) => events.push(e),
+	});
+	await store.claim(await store.init());
+	const issued = await store.signinCode({
+		source: "192.0.2.1",
+		hostname: "first.example",
+		issuer: "browser",
+	});
+	await store.signin(issued.code, "192.0.2.2", "second.example");
+	assert.deepEqual(events, [
+		{
+			event: "owner_signin_issued",
+			source: "192.0.2.1",
+			hostname: "first.example",
+			issuer: "browser",
+		},
+		{
+			event: "owner_signin_used",
+			source: "192.0.2.2",
+			hostname: "second.example",
+			issuer: "browser",
+		},
+	]);
+	assert.ok(!JSON.stringify(events).includes(issued.code));
+});
+
+test("startup drops legacy buckets while preserving the exact sessions object", async () => {
+	const repo = new MemoryOwnerRepository();
+	const store = new OwnerStore(repo);
+	await store.claim(await store.init());
+	const sessions = JSON.stringify(repo.state.sessions);
+	repo.state.signinSources = {
+		old: { count: 20, expires: Date.now() + 600000 },
+	};
+	assert.equal(await new OwnerStore(repo).init(), null);
+	assert.equal(JSON.stringify(repo.state.sessions), sessions);
+	assert.equal(repo.state.signinSources, undefined);
 });

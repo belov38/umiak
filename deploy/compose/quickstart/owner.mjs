@@ -4,13 +4,15 @@ const random = () => randomBytes(32).toString("base64url");
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const validPairId = (id) =>
 	typeof id === "string" && /^[A-Za-z0-9_-]{43}$/.test(id);
+const sourceMaps = new WeakMap();
+const limited = (seconds = 600) =>
+	Object.assign(Error("signin_limited"), { retryAfter: Math.max(1, seconds) });
 const empty = () => ({
 	claimed: false,
 	claim: null,
 	sessions: {},
 	pairs: {},
 	signins: {},
-	signinSources: {},
 });
 
 /** Serial in-memory repository for protocol tests; production uses row locking. */
@@ -75,9 +77,17 @@ export class PgOwnerRepository {
 export class OwnerStore {
 	constructor(
 		repo,
-		{ now = Date.now, sessionMs = 180 * 86400000, pairMs = 300000 } = {},
+		{
+			now = Date.now,
+			sessionMs = 180 * 86400000,
+			pairMs = 300000,
+			audit = (event) => console.info(JSON.stringify(event)),
+		} = {},
 	) {
 		this.repo = repo;
+		if (!sourceMaps.has(repo)) sourceMaps.set(repo, new Map());
+		this.signinSources = sourceMaps.get(repo);
+		this.audit = audit;
 		this.now = now;
 		this.sessionMs = sessionMs;
 		this.pairMs = pairMs;
@@ -85,6 +95,7 @@ export class OwnerStore {
 	async init() {
 		await this.repo.init?.();
 		return this.repo.transaction((state) => {
+			this.pruneSignin(state);
 			if (state.claimed) return null;
 			const code = random();
 			state.claim = digest(code);
@@ -99,45 +110,60 @@ export class OwnerStore {
 			return code;
 		});
 	}
-	async signinCode() {
+	async signinCode({
+		source = "console",
+		hostname = "unknown",
+		issuer = "console",
+	} = {}) {
 		return this.repo.transaction((state) => {
 			if (!state.claimed) throw Error("owner_unclaimed");
 			this.pruneSignin(state);
 			if (Object.keys(state.signins).length >= 10)
-				throw Error("signin_limited");
+				throw limited(
+					Math.ceil(
+						(Math.min(...Object.values(state.signins).map((x) => x.expires)) -
+							this.now()) /
+							1000,
+					),
+				);
 			const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 			const raw = [...randomBytes(24)].map((x) => alphabet[x & 31]).join("");
 			const expires = this.now() + 600000;
-			state.signins[digest(raw)] = { expires, failures: 0 };
-			console.info("owner_signin_issued");
+			state.signins[digest(raw)] = { expires, failures: 0, issuer };
+			this.audit({ event: "owner_signin_issued", source, hostname, issuer });
 			return { code: raw.match(/.{4}/g).join("-"), expires };
 		});
 	}
 	pruneSignin(state) {
 		state.signins ??= {};
-		state.signinSources ??= {};
+		delete state.signinSources; // Discard legacy durable buckets on the next mutation.
 		for (const [key, value] of Object.entries(state.signins))
 			if (value.expires <= this.now()) delete state.signins[key];
-		for (const [key, value] of Object.entries(state.signinSources))
-			if (value.expires <= this.now()) delete state.signinSources[key];
 	}
 	async signin(code, source, hostname = "unknown") {
-		// Return errors from the transaction so failed-attempt counters commit in Postgres.
+		// Map insertion order matches expiry order: prune only the expired prefix.
+		for (const [key, bucket] of this.signinSources) {
+			if (bucket.expires > this.now()) break;
+			this.signinSources.delete(key);
+		}
+		const key = digest(String(source));
+		let bucket = this.signinSources.get(key);
+		if (bucket?.count >= 20 || (!bucket && this.signinSources.size >= 10000))
+			throw limited(
+				Math.ceil(
+					((bucket ?? this.signinSources.values().next().value).expires -
+						this.now()) /
+						1000,
+				),
+			);
+		if (!bucket) {
+			bucket = { count: 0, expires: this.now() + 600000 };
+			this.signinSources.set(key, bucket);
+		}
+		bucket.count++;
+		// Failed global counters must commit even when the attempt is rejected.
 		const result = await this.repo.transaction((state) => {
 			this.pruneSignin(state);
-			const key = digest(String(source));
-			const bucket = state.signinSources[key] ?? {
-				expires: this.now() + 600000,
-				count: 0,
-			};
-			if (
-				bucket.count >= 20 ||
-				(!state.signinSources[key] &&
-					Object.keys(state.signinSources).length >= 10000)
-			)
-				return { error: "signin_limited" };
-			state.signinSources[key] = bucket;
-			bucket.count++;
 			const normalized =
 				typeof code === "string"
 					? code.toUpperCase().replace(/[-\s]/g, "")
@@ -145,8 +171,9 @@ export class OwnerStore {
 			const id = digest(normalized);
 			if (state.claimed && state.signins[id]) {
 				const token = this.issue(state, "browser", hostname);
+				const issuer = state.signins[id].issuer ?? "console";
 				delete state.signins[id];
-				console.info("owner_signin_used");
+				this.audit({ event: "owner_signin_used", source, hostname, issuer });
 				return { token };
 			}
 			// Unknown guesses count against every live code, preventing distributed guessing.
@@ -158,12 +185,15 @@ export class OwnerStore {
 		return result.token;
 	}
 	async touch(token) {
+		const current = await this.session(token);
+		if (!current || this.now() - (current.lastUsed ?? 0) < 60000) return;
 		return this.repo.transaction((state) => {
 			const session = state.sessions[digest(token)];
 			if (
 				session &&
 				typeof session === "object" &&
-				session.expires > this.now()
+				session.expires > this.now() &&
+				this.now() - (session.lastUsed ?? 0) >= 60000
 			)
 				session.lastUsed = this.now();
 		});
@@ -224,11 +254,12 @@ export class OwnerStore {
 	async canApprove(token) {
 		return (await this.session(token))?.kind === "browser";
 	}
-	async sessions() {
+	async sessions(token) {
 		return this.repo.read((state) =>
 			Object.entries(state.sessions)
 				.map(([id, raw]) => ({
 					id,
+					current: typeof token === "string" && id === digest(token),
 					...(typeof raw === "number"
 						? { expires: raw, kind: "browser" }
 						: raw),
