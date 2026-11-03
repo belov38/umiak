@@ -50,6 +50,7 @@ services:
       UMIAK_API_URL: http://localhost:4180
     volumes:
       - ./deploy/compose/meta-proxy.mjs:/meta-proxy.mjs:ro
+      - ./deploy/compose/canonical-fetch.mjs:/canonical-fetch.mjs:ro
     networks: [control, web-internal]
     depends_on:
       api: { condition: service_healthy }

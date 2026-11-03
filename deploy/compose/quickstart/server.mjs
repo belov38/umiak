@@ -3,6 +3,7 @@ import http from "node:http";
 import net from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { canonicalFetch } from "../canonical-fetch.mjs";
 import { clientGuard } from "../local/ingress.mjs";
 import { requestContext } from "./origin.mjs";
 import { OwnerStore, PgOwnerRepository } from "./owner.mjs";
@@ -102,6 +103,7 @@ export function createQuickstartServer({
 	env = process.env,
 	transport = http,
 	proxyListener = false,
+	metadataFetch = canonicalFetch,
 }) {
 	const allowed = clientGuard(
 		env.UMIAK_LOCAL_ALLOWED_CIDRS ??
@@ -167,8 +169,8 @@ export function createQuickstartServer({
 			if (path.startsWith("/owner/") && !rate(req, owner))
 				return fail(res, 429, "rate_limited");
 			if (path === "/v1/meta" && req.method === "GET") {
-				const reply = await fetch(
-					`http://${env.UMIAK_QUICKSTART_API_HOST ?? "api"}:8080/v1/meta`,
+				const reply = await metadataFetch(
+					`http://${env.UMIAK_QUICKSTART_API_HOST ?? "api"}:${env.UMIAK_QUICKSTART_API_PORT ?? 8080}/v1/meta`,
 					{
 						headers: upstreamHeaders(req, appOrigin),
 						signal: AbortSignal.timeout(10000),

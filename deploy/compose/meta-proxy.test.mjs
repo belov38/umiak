@@ -40,9 +40,13 @@ test("metadata bridge uses configured canonical API authority instead of interna
 			? Response.json({ authMode: "none" })
 			: new Response("local_host_forbidden", { status: 403 });
 	});
-	const server = createMetaProxy(undefined, {
-		UMIAK_API_URL: "http://localhost:4180",
-	});
+	const server = createMetaProxy(
+		undefined,
+		{
+			UMIAK_API_URL: "http://localhost:4180",
+		},
+		fetch,
+	);
 	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 	t.after(() => new Promise((resolve) => server.close(resolve)));
 	const response = await fetchServer(

@@ -59,3 +59,15 @@ the fixed internal API URL but set Host to the configured canonical
 metadata bridge explicitly receives that URL. OIDC behavior remains unchanged.
 Regression tests cover metadata bridging with a malicious inbound Host and MCP
 initialization against the real local API Host guard, with no extra Host allowance.
+
+### Node 26 wire transport correction
+
+A real CT590 metadata request exposed that Node 26 fetch rewrites Host to the URL
+host even when the caller sets a Host header. The earlier mocked/Hono tests did
+not exercise that wire behavior. The canonical authority now uses a shared
+native `node:http`/`node:https` fetch-compatible transport, with explicit Host,
+request bodies, streamed responses, cancellation and no redirect following.
+Quickstart metadata, the metadata bridge and local MCP all use that transport.
+Real socket regressions cover quickstart/metadata bridge and MCP initialization;
+the helper also verifies POST body and aborted requests. Docker mounts/copies
+include the helper for both quickstart and legacy metadata bridge deployments.

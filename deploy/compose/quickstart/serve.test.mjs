@@ -11,7 +11,11 @@ test("trusted HTTPS proxy preserves legacy secure cookie, origin, and CLI bearer
 	});
 	const store = new OwnerStore(new MemoryOwnerRepository());
 	const token = await store.claim(await store.init());
-	const server = createQuickstartServer({ store, proxyListener: true });
+	const server = createQuickstartServer({
+		metadataFetch: fetch,
+		store,
+		proxyListener: true,
+	});
 	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const call = (path, headers = {}) =>
 		new Promise((resolve, reject) => {
@@ -124,6 +128,7 @@ test("public socket spoofing cannot change origin, cookie selection or client IP
 	const code = await store.init();
 	let client;
 	const server = createQuickstartServer({
+		metadataFetch: fetch,
 		store,
 		env: { UMIAK_TRUSTED_PROXY_CIDRS: "127.0.0.0/8" },
 		setupHandler: async (req) => {
