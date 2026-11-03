@@ -1,4 +1,5 @@
 import { gatewayCertificates } from "./certificates.mjs";
+import { windowsDesktop } from "./setup-desktop.mjs";
 import { prepareWindowsMedia, validateWindowsMedia } from "./setup-iso.mjs";
 // Owner-only setup orchestration. PVE adoption never writes to the host API.
 
@@ -531,6 +532,16 @@ export function createSetupHandler({
 							.includes("umiak-tpl"),
 					`VM ${build.pveVmid} is not a tagged Umiak template`,
 				);
+				if (build.templateSlug === "windows")
+					requireValue(
+						await windowsDesktop(
+							config,
+							connection.node,
+							build.pveVmid,
+							join(secretsDir, "template-registry"),
+						),
+						"This legacy headless Windows build has no verified desktop marker and cannot be adopted",
+					);
 				const existing = await query(
 					`SELECT id,version,status,(template_slug='windows' AND headless IS DISTINCT FROM false) AS headless FROM runtime.template_builds WHERE node_id=$1 AND template_slug=$2 AND pve_vmid=$3 AND (status IN ('active','retired') OR (template_slug='windows' AND headless IS DISTINCT FROM false)) ORDER BY (status='active') DESC,created_at DESC`,
 					[limits.nodeId, build.templateSlug, build.pveVmid],
@@ -1081,6 +1092,16 @@ export function createSetupHandler({
 										? "linux-desktop"
 										: "linux");
 						if (slug === "windows-desktop") slug = "windows";
+						if (
+							slug === "windows" &&
+							!(await windowsDesktop(
+								config,
+								connectionOf(state).node,
+								vm.vmid,
+								join(secretsDir, "template-registry"),
+							))
+						)
+							continue;
 						const registered = await query(
 							"SELECT status,(template_slug='windows' AND headless IS DISTINCT FROM false) AS headless FROM runtime.template_builds WHERE node_id=$1 AND pve_vmid=$2 ORDER BY (status='active') DESC,created_at DESC LIMIT 1",
 							[state.steps.limits?.data?.nodeId, Number(vm.vmid)],

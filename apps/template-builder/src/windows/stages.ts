@@ -18,6 +18,7 @@ import {
 } from "@umiak/pve";
 import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
+import { DESKTOP_MARKER } from "../../../../packages/config/src/desktop-marker.ts";
 import { verifyAgentPackage } from "../agent-package.ts";
 import type { Manifest, WindowsFacts } from "../manifest.ts";
 import {
@@ -262,6 +263,7 @@ export function prepareWindows(
 		templateSlug: o.slug,
 		version,
 		os: "windows",
+		...(isDesktopRecipe(recipe) ? { desktopMarker: DESKTOP_MARKER } : {}),
 		status: "building",
 		node: o.node,
 		storage: o.storage,
@@ -614,7 +616,9 @@ export async function stageWindowsVm(
 	});
 	await api.waitTask(o.node, upid, { timeoutMs: TASK_TIMEOUT_MS });
 	// Tags after the create, as in stageVm (pool-scoped token).
-	await api.put(`/nodes/${o.node}/qemu/${vmid}/config`, { tags: BUILD_TAG });
+	await api.put(`/nodes/${o.node}/qemu/${vmid}/config`, {
+		tags: st.m.desktopMarker ? `${BUILD_TAG};${DESKTOP_MARKER}` : BUILD_TAG,
+	});
 	await waitIpam(deps, mac, deps.pollMs ?? DEFAULT_POLL_MS);
 	await configureVmFirewall(api, o.node, vmid, mac, { ipfilter: true });
 }

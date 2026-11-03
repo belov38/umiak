@@ -95,6 +95,7 @@ export interface ProviderTopology {
 }
 
 export interface TemplateBuildTopology {
+	desktopMarker?: "umiak-desktop" | undefined;
 	templateSlug: string;
 	version: string;
 	os: TemplateOs;

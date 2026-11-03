@@ -91,6 +91,7 @@ export interface Manifest {
 	/** YYYYMMDD.n */
 	version: string;
 	os: "linux" | "windows";
+	desktopMarker?: "umiak-desktop";
 	status: BuildStatus;
 	node: string;
 	storage: string;

@@ -101,3 +101,57 @@ The deployed tree also includes owner-signin commits `74a35b17` and `e96b5efa`
   production capability contract. Retired/headless artifact deletion requires
   explicit force, regardless of VMID. Starting pages retain the request ID and
   shared brand mark.
+
+### Windows follow-up rulings (2026-11-04)
+
+- New Windows desktop artifacts carry `desktopMarker: "umiak-desktop"` in
+  their manifest and `umiak-desktop` in PVE tags. Names and absent runtime rows
+  never establish desktop capability. Adoption checks PVE evidence even on an
+  empty database, and checks again at registration; retired/headless DB guards
+  still apply independently.
+- Unmarked legacy artifacts may be adopted only with a ready, verified manifest
+  in `/pve-secrets/template-registry/<buildId>.json`. The PVE description build ID,
+  node, VMID and exact VM name must match. Legacy verification must include PASS
+  for `desktop_sunshine`, `desktop_display` and `desktop_agent_config`. Missing,
+  invalid or mismatched evidence fails closed. This supports VM595 from its
+  original `.7` manifest without changing PVE; VM598 has no desktop checks.
+- Retire uses the same manifest marker for Windows; Linux desktop pins are not
+  a Windows capability flag. Configured/newest/slot guards remain independent.
+- Bootstrap rejects a newly inserted Windows build without `desktopMarker` once
+  runtime 0501 exists. Operators must verify the artifact before adding the
+  explicit marker to topology config. Existing build identities and pre-0501
+  upgrade ordering remain intact.
+- Normalize shipped Windows names (`windows`, `windows-desktop`, `Windows 11
+  Desktop`, `Windows 11`) to `Windows 11`; preserve operator names, including a
+  custom old desktop name. A forward migration handles already consolidated DBs.
+  Templates continues to display the catalog name.
+- A console sign-in that issues no code exits 2. Sign-in commands wrap and their
+  copy button occupies a separate line, including at 390px.
+
+### Follow-up validation (2026-11-04)
+
+- Final build, lint and typecheck passed. Node quickstart/local/meta-proxy:
+  175 passed. Playwright OIDC: 27 passed; local: 2 passed; quickstart UI passed,
+  including a 390px command/button geometry assertion. Screenshot inspected:
+  `/tmp/windows-followup-visuals/signin-dark-390.png` (outside git).
+- Regression suites: template-builder 597, Payload 220, worker 426 passed
+  (7 pre-existing skips). Python SDK: 83 passed plus Ruff checks. No Go touched.
+- Raw shellcheck reports existing main-branch SC1091/SC2155/SC2012 diagnostics
+  in dev-cp helper scripts and the Linux verification script. The same inputs
+  pass with those baseline diagnostics excluded. No shell scripts changed.
+- Deployed with `infra/dev-cp/deploy-quickstart.sh` after read-only checks found
+  no active PVE task or unfinished runtime operation; all sandboxes were deleted.
+  Gateway CA/certificate checksums passed the deployment script's preservation check.
+- The original verified manifests of 595 and 598 were copied only into CT590's
+  private `/home/umiak/.config/umiak/template-registry`; no PVE tags/config changed.
+  Real PVE GETs classify 595 desktop and 598 headless. Running wizard detection
+  against those two VMs with an empty runtime-query fixture offers only 595.
+- Live Templates browser check displays `Windows 11`, active `.7`, VM595.
+  It used a temporary deployment-owner session (`local@umiak.invalid`), then
+  revoked only that session; never authenticated as `ilia@example.com`.
+  All four original sessions retain exact JSON MD5
+  `7a90f0dfafbbabc2d7692364c9e337e3` before/after (excluding `lastUsed`:
+  `4c549392fd902c5cf5ad821094f3f8a2`). Config SHA256 for each of VM595–598
+  matches before/after. No PVE guest, tag, configuration or sandbox was created.
+- Final full workspace rerun (`pnpm -r --workspace-concurrency=1 --no-bail test`)
+  exited 0: 4634 Vitest tests passed, 8 skipped, plus Python SDK 83 passed.

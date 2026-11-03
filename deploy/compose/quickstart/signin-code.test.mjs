@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { MemoryOwnerRepository, OwnerStore } from "./owner.mjs";
-import { printSigninCode } from "./signin-code.mjs";
+import { printSigninCode, runSigninCode } from "./signin-code.mjs";
 
 test("host command prints a usable code and preserves existing access", async () => {
 	const repo = new MemoryOwnerRepository();
@@ -22,7 +22,7 @@ test("ten outstanding codes produce a friendly console message", async () => {
 	await store.claim(await store.init());
 	for (let i = 0; i < 10; i++) await store.signinCode();
 	const lines = [];
-	await printSigninCode(store, (line) => lines.push(line));
+	assert.equal(await runSigninCode(store, (line) => lines.push(line)), 2);
 	assert.match(lines.join("\n"), /10 sign-in codes are already outstanding/);
 	assert.doesNotMatch(lines.join("\n"), /Error:|owner_signin_issued/);
 });

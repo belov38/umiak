@@ -129,6 +129,41 @@ describe.skipIf(skipPg())(
 			expect(row.default_size).toBe("8gb");
 			expect([...row.allowed_sizes].sort()).toEqual(["12gb", "16gb", "8gb"]);
 		});
+		it.each([
+			"Windows 11 Desktop",
+			"windows",
+			"windows-desktop",
+			"Operator Windows",
+		])("forward name migration preserves policy for %s", async (name) => {
+			await replay();
+			await t.pool.query(
+				"UPDATE payload.templates SET name=$1 WHERE slug='windows'",
+				[name],
+			);
+			await t.pool.query(
+				"DELETE FROM payload.payload_migrations WHERE name='20261104_000000_windows_name'",
+			);
+			await migrateUmiakPayload(payload);
+			expect(
+				(
+					await t.pool.query(
+						"SELECT name FROM payload.templates WHERE slug='windows'",
+					)
+				).rows[0].name,
+			).toBe(name === "Operator Windows" ? name : "Windows 11");
+		});
+
+		it("normalizes only shipped Windows names", async () => {
+			await replay();
+			expect(
+				(
+					await t.pool.query(
+						"SELECT name FROM payload.templates WHERE slug='windows'",
+					)
+				).rows[0].name,
+			).toBe("Windows 11");
+		});
+
 		it("uses the desktop operator name when the canonical name is still seeded", async () => {
 			await t.pool.query(
 				"UPDATE payload.templates SET name='My Windows desktop' WHERE slug='windows-desktop'",

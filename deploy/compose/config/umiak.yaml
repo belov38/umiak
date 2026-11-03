@@ -123,6 +123,7 @@ topology:
         rng0: source=/dev/urandom
         cloudinit: false
     - templateSlug: windows
+      desktopMarker: umiak-desktop
       version: "20261101.7"
       os: windows
       node: pve

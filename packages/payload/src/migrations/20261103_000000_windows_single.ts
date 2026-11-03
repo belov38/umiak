@@ -9,8 +9,8 @@ export async function up({ db }: MigrateUpArgs): Promise<void> {
 	await db.execute(sql`
     WITH policy AS (
       SELECT
-        COALESCE(NULLIF(CASE WHEN w.name NOT IN ('Windows 11', 'windows') THEN w.name END, ''),
-          NULLIF(d.name, ''), NULLIF(w.name, ''), 'Windows 11') AS name,
+        COALESCE(NULLIF(CASE WHEN w.name NOT IN ('Windows 11', 'Windows 11 Desktop', 'windows', 'windows-desktop') THEN w.name END, ''),
+          NULLIF(CASE WHEN d.name NOT IN ('Windows 11', 'Windows 11 Desktop', 'windows', 'windows-desktop') THEN d.name END, ''), 'Windows 11') AS name,
         CASE WHEN w.id IS NULL AND d.id IS NULL THEN true
           ELSE COALESCE(w.enabled, false) OR COALESCE(d.enabled, false) END AS enabled,
         COALESCE(NULLIF(d.default_size, ''), NULLIF(w.default_size, ''), '4gb') AS default_size,

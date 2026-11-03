@@ -130,7 +130,7 @@ test("adoption registers existing VMIDs unchanged even after configuring a new b
 		makePve: () => ({
 			get: async (path) => {
 				reads.push(path);
-				return { template: 1, tags: "umiak-tpl" };
+				return { template: 1, tags: "umiak-tpl;umiak-desktop" };
 			},
 		}),
 	});
@@ -230,7 +230,10 @@ test("detected templates omit a deprecated custom headless Windows build", async
 								name: "NEW_DESKTOP",
 							},
 						]
-					: { template: 1, tags: "umiak-tpl;umiak-template-windows" },
+					: {
+							template: 1,
+							tags: "umiak-tpl;umiak-template-windows;umiak-desktop",
+						},
 		}),
 	});
 	let html = "";

@@ -164,3 +164,26 @@ it("bootstraps the canonical YAML before Payload migration without duplicating t
 		).rows[0].n,
 	).toBe(2);
 });
+
+it("rejects stale unmarked Windows config on a fresh post-0501 DB", async () => {
+	const fresh = await createTestDatabase();
+	try {
+		const deps: AdminDeps = {
+			pool: fresh.pool,
+			config: () => config(true),
+			out: () => {},
+			err: () => {},
+			log: testLogger("warn").log,
+		};
+		expect(await runAdmin(["bootstrap"], deps)).not.toBe(0);
+		expect(
+			(
+				await fresh.pool.query(
+					"SELECT count(*)::int n FROM runtime.template_builds WHERE os='windows'",
+				)
+			).rows[0].n,
+		).toBe(0);
+	} finally {
+		await fresh.drop();
+	}
+});

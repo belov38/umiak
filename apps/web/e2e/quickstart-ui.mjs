@@ -115,6 +115,13 @@ test("quickstart appearance, focus and revoke confirmation", async () => {
 		const token = await store.claim(code);
 		const pendingPair = await store.pairStart();
 		await capture("signin", `/owner/pair?id=${pendingPair.id}`);
+		await page.setViewportSize({ width: 390, height: 844 });
+		const commandBox = await page.locator("#host-command").boundingBox();
+		const copyBox = await page
+			.getByRole("button", { name: "Copy command", exact: true })
+			.boundingBox();
+		assert.ok(copyBox.y >= commandBox.y + commandBox.height);
+		await page.setViewportSize({ width: 1440, height: 1000 });
 		assert.equal(await page.locator("nav").count(), 0);
 		assert.equal(
 			await page.locator("#host-command").textContent(),

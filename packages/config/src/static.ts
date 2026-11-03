@@ -161,6 +161,7 @@ const providerSchema = z
 	});
 
 const templateBuildSchema = z.strictObject({
+	desktopMarker: z.literal("umiak-desktop").optional(),
 	templateSlug: slug,
 	version: slug,
 	os,

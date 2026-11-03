@@ -495,7 +495,7 @@ describe("iso-install build: happy path", () => {
 			(c) => c.method === "PUT" && c.path === `${vm}/config`,
 		);
 		expect(puts.map((c) => c.params)).toEqual([
-			{ tags: "umiak-tpl" },
+			{ tags: "umiak-tpl;umiak-desktop" },
 			{
 				net0: "virtio=02:01:00:00:02:56,bridge=umiak0,firewall=1,link_down=0",
 			},
@@ -553,6 +553,7 @@ describe("iso-install build: happy path", () => {
 	it("records the Windows facts, the pinned machine and all three disks in the manifest", async () => {
 		const s = setup();
 		const m = await buildTemplate(s.deps, s.opts);
+		expect(m.desktopMarker).toBe("umiak-desktop");
 		expect(m.windows).toEqual({
 			edition: "Windows 11 Pro",
 			editionId: "Professional",

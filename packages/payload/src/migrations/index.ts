@@ -6,8 +6,8 @@ import * as m20261030_164255_initial from "./20261030_164255_initial.ts";
 import * as m20261030_171459_api_keys_team_nullable from "./20261030_171459_api_keys_team_nullable.ts";
 import * as m20261101_000000_windows_template from "./20261101_000000_windows_template.ts";
 import * as m20261101_010000_desktop_defaults from "./20261101_010000_desktop_defaults.ts";
-
 import * as m20261103_000000_windows_single from "./20261103_000000_windows_single.ts";
+import * as m20261104_000000_windows_name from "./20261104_000000_windows_name.ts";
 
 export interface PayloadMigration {
 	name: string;
@@ -41,4 +41,5 @@ export const migrations: PayloadMigration[] = [
 		down: m20261103_000000_windows_single.down,
 		name: "20261103_000000_windows_single",
 	},
+	{ ...m20261104_000000_windows_name, name: "20261104_000000_windows_name" },
 ];

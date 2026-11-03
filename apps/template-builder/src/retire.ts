@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { Allocator, NodeOps, PveClient } from "@umiak/pve";
 import { parse as parseYaml } from "yaml";
+import { DESKTOP_MARKER } from "../../../packages/config/src/desktop-marker.ts";
 import type { FileRegistry } from "./registry.ts";
 import { isProtectedVmid } from "./vmid-guard.ts";
 
@@ -100,7 +101,7 @@ export async function retire(
 		opts.deleteVm &&
 		!opts.force &&
 		m.os === "windows" &&
-		m.desktop === undefined
+		m.desktopMarker !== DESKTOP_MARKER
 	)
 		throw new Error(
 			`build ${buildId} is a legacy headless Windows build; --force allows deleting its retained VM`,

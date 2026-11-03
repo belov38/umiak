@@ -290,12 +290,12 @@ describe("retire", () => {
 		s.registry.update(ID_LIVE, {
 			os: "windows",
 			templateSlug: "windows",
-			desktop: DESKTOP,
+			desktopMarker: "umiak-desktop",
 		});
 		s.registry.update(ID_NEWEST, {
 			os: "windows",
 			templateSlug: "windows",
-			desktop: DESKTOP,
+			desktopMarker: "umiak-desktop",
 		});
 		await retire(s.deps, ID_LIVE, { deleteVm: true });
 		expect(s.pve.vms.has(598)).toBe(false);

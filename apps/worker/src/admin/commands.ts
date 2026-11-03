@@ -574,6 +574,15 @@ async function cmdBootstrap(args: string[], d: AdminDeps): Promise<void> {
 			let status = existing.rows[0]?.status ?? "building";
 			const created = id === undefined;
 			if (id === undefined) {
+				if (b.os === "windows" && b.desktopMarker !== "umiak-desktop") {
+					const column = await tx.client.query(
+						"SELECT 1 FROM information_schema.columns WHERE table_schema='runtime' AND table_name='template_builds' AND column_name='headless'",
+					);
+					if (column.rows.length)
+						throw new AdminError(
+							`Windows build ${b.version}: no umiak-desktop marker; legacy headless builds cannot be bootstrapped. Verify the artifact manifest before adding desktopMarker: umiak-desktop.`,
+						);
+				}
 				id = await insertBuild(tx, {
 					templateSlug: b.templateSlug,
 					version: b.version,

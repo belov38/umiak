@@ -34,6 +34,7 @@ topology:
       pveVmid: 596
       bootTimeoutS: 300
     - templateSlug: windows
+      desktopMarker: umiak-desktop
       version: e2e-1
       os: windows
       node: pve

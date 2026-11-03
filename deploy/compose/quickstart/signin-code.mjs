@@ -26,6 +26,10 @@ export async function printSigninCode(store, write = console.log) {
 	);
 	return issued;
 }
+export async function runSigninCode(store, write = console.log) {
+	return (await printSigninCode(store, write)) ? 0 : 2;
+}
+
 if (
 	process.argv[1] &&
 	resolve(process.argv[1]) === fileURLToPath(import.meta.url)
@@ -38,7 +42,7 @@ if (
 		const { default: pg } = await import("pg");
 		const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 		try {
-			await printSigninCode(
+			process.exitCode = await runSigninCode(
 				new OwnerStore(new PgOwnerRepository(pool), {
 					audit: (event) =>
 						appendFileSync("/proc/1/fd/1", `${JSON.stringify(event)}\n`),
