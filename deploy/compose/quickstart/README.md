@@ -280,6 +280,18 @@ curl -fsSL http://HOST:4180/install.sh | UMIAK_INSTALL_SKIP_LOGIN=1 sh
 A native Darwin arm64 build measured 90,976,226 bytes before gzip and 40,887,362
 bytes downloaded (55.1% smaller); exact release sizes are in `/downloads/DOWNLOADS`.
 
+### Adopting an existing Windows template
+
+The single `windows` template is the desktop build. Setup adopts an existing
+Windows template only with positive desktop evidence: the PVE tag
+`umiak-desktop` (set by current builds), or the build manifest in
+`template-registry/<buildId>.json` of the PVE secrets with a passed verify that
+includes `desktop_sunshine`, `desktop_display` and `desktop_agent_config`. A
+Windows template without either is treated as a legacy headless build and is
+not offered. For a desktop template built outside this stack, copy its manifest
+into `template-registry/` or add the `umiak-desktop` tag in PVE, then re-run the
+Templates step. A VM is never adopted under a template of another OS.
+
 ### Windows ISO URLs
 
 The Windows and Windows desktop build forms accept an uploaded ISO file name

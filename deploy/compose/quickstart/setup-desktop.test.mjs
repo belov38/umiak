@@ -130,4 +130,17 @@ test("fresh DB wizard offers only desktop and refuses legacy registration", asyn
 		}),
 		/legacy headless/,
 	);
+	vms.push({
+		vmid: 603,
+		name: "umiak-tpl-windows-legacy-2",
+		template: 1,
+		tags: "umiak-tpl",
+		ostype: "win11",
+	});
+	await assert.rejects(
+		handler.wizard.run("templates", {
+			builds: [{ templateSlug: "linux", pveVmid: 603 }],
+		}),
+		/OS does not match template linux/,
+	);
 });

@@ -532,6 +532,13 @@ export function createSetupHandler({
 							.includes("umiak-tpl"),
 					`VM ${build.pveVmid} is not a tagged Umiak template`,
 				);
+				// PVE always reports ostype for our templates; absent means unknown.
+				requireValue(
+					!config.ostype ||
+						(build.templateSlug === "windows") ===
+							String(config.ostype).startsWith("win"),
+					`VM ${build.pveVmid} OS does not match template ${build.templateSlug}`,
+				);
 				if (build.templateSlug === "windows")
 					requireValue(
 						await windowsDesktop(

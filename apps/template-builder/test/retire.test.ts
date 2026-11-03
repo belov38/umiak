@@ -301,6 +301,28 @@ describe("retire", () => {
 		expect(s.pve.vms.has(598)).toBe(false);
 	});
 
+	it("allows deleting a pre-marker Windows desktop build proven by its verify checks", async () => {
+		const s = await setup();
+		const checks = [
+			"desktop_sunshine",
+			"desktop_display",
+			"desktop_agent_config",
+		].map((id) => ({ id, status: "PASS" as const }));
+		const verify = { ...s.registry.get(ID_LIVE)?.verify, ok: true, checks };
+		s.registry.update(ID_LIVE, {
+			os: "windows",
+			templateSlug: "windows",
+			verify,
+		} as never);
+		s.registry.update(ID_NEWEST, {
+			os: "windows",
+			templateSlug: "windows",
+			desktopMarker: "umiak-desktop",
+		});
+		await retire(s.deps, ID_LIVE, { deleteVm: true });
+		expect(s.pve.vms.has(598)).toBe(false);
+	});
+
 	it("refuses deleting an already retired build without --force", async () => {
 		const s = await setup();
 		const retiredAt = "2026-10-30T11:00:00.000Z";

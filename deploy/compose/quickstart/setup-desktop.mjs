@@ -1,6 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { DESKTOP_MARKER } from "../../../packages/config/src/desktop-marker.ts";
+import {
+	DESKTOP_MARKER,
+	hasDesktopEvidence,
+} from "../../../packages/config/src/desktop-marker.ts";
 
 // Never infer capability from a Windows name, catalog slug, or missing DB row.
 export async function windowsDesktop(config, node, vmid, registry) {
@@ -23,12 +26,7 @@ export async function windowsDesktop(config, node, vmid, registry) {
 			m.vmName === config.name &&
 			m.os === "windows" &&
 			m.status === "ready" &&
-			m.verify?.ok === true &&
-			(m.desktopMarker === DESKTOP_MARKER ||
-				["desktop_sunshine", "desktop_display", "desktop_agent_config"].every(
-					(id) =>
-						m.verify.checks?.some((c) => c.id === id && c.status === "PASS"),
-				))
+			hasDesktopEvidence(m)
 		);
 	} catch (error) {
 		if (error.code === "ENOENT" || error instanceof SyntaxError) return false;
