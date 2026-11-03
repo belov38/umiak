@@ -32,7 +32,7 @@ export async function desktopSandbox(
 	if (opts.write && s.blocked && !hasOperatorRights(principal))
 		throw sandboxBlocked();
 	const build = await poolOf(deps).query<{ headless: boolean }>(
-		"SELECT os = 'windows' AND pve_vmid = 598 AS headless FROM runtime.template_builds WHERE id = $1",
+		"SELECT os = 'windows' AND headless IS DISTINCT FROM false AS headless FROM runtime.template_builds WHERE id = $1",
 		[s.templateBuildId],
 	);
 	if (
@@ -152,7 +152,7 @@ export async function lookupDesktopRoute(deps: ApiDeps, label: string) {
 		blocked: boolean;
 		block_reason: string | null;
 	}>(
-		"SELECT id,slug,machine_id,state,team_id,template_slug,blocked,block_reason FROM runtime.sandboxes WHERE slug=$1 AND state NOT IN ('deleting','deleted') AND NOT EXISTS (SELECT 1 FROM runtime.template_builds b WHERE b.id=runtime.sandboxes.template_build_id AND b.os='windows' AND b.pve_vmid=598)",
+		"SELECT id,slug,machine_id,state,team_id,template_slug,blocked,block_reason FROM runtime.sandboxes WHERE slug=$1 AND state NOT IN ('deleting','deleted') AND NOT EXISTS (SELECT 1 FROM runtime.template_builds b WHERE b.id=runtime.sandboxes.template_build_id AND b.os='windows' AND b.headless IS DISTINCT FROM false)",
 		[parsed.slug],
 	);
 	const s = r.rows[0];

@@ -570,8 +570,8 @@ describe.skipIf(skipPg())(
 				[storage, provider, node],
 			);
 			await t.pool.query(
-				`INSERT INTO runtime.template_builds (id,template_slug,version,os,provider_id,node_id,storage_id,pve_vmid,disk_layout,hw,boot_timeout_s,status)
-  VALUES ($1,'windows','headless','windows',$3,$4,$5,598,'{}','{}',1200,'active'), ($2,'windows-desktop','20261101.7','windows',$3,$4,$5,595,'{}','{}',1200,'active')`,
+				`INSERT INTO runtime.template_builds (id,template_slug,version,os,provider_id,node_id,storage_id,pve_vmid,disk_layout,hw,boot_timeout_s,status,headless)
+  VALUES ($1,'windows','headless','windows',$3,$4,$5,598,'{}','{}',1200,'active',NULL), ($2,'windows-desktop','20261101.7','windows',$3,$4,$5,595,'{}','{}',1200,'active',NULL)`,
 				[headless, desktop, provider, node, storage],
 			);
 			await t.pool.query(
@@ -660,9 +660,9 @@ describe.skipIf(skipPg())(
 					[storage, provider, node],
 				);
 				await t.pool.query(
-					`INSERT INTO runtime.template_builds (id,template_slug,version,os,provider_id,node_id,storage_id,pve_vmid,disk_layout,hw,boot_timeout_s,status)
-   VALUES ($1,'windows',$6,'windows',$3,$4,$5,$7,'{}','{}',1200,'active'),
-          ($2,'windows-desktop',$6,'windows',$3,$4,$5,$8,'{}','{}',1200,'active')`,
+					`INSERT INTO runtime.template_builds (id,template_slug,version,os,provider_id,node_id,storage_id,pve_vmid,disk_layout,hw,boot_timeout_s,status,headless)
+   VALUES ($1,'windows',$6,'windows',$3,$4,$5,$7,'{}','{}',1200,'active',NULL),
+          ($2,'windows-desktop',$6,'windows',$3,$4,$5,$8,'{}','{}',1200,'active',NULL)`,
 					[
 						canonical,
 						desktop,

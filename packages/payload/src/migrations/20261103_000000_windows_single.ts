@@ -22,10 +22,12 @@ export async function up({ db }: MigrateUpArgs): Promise<void> {
     BEGIN
       -- Empty installs can migrate Payload before the runtime schema exists.
       IF to_regclass('runtime.template_builds') IS NOT NULL THEN
-        -- Retain every primary key: machines, sandboxes and snapshots still use
-        -- their exact original build, including the headless image on VM 598.
+        -- Snapshot the original identity once, before changing catalog slugs.
+        -- NULL denotes a build that existed before the metadata column.
+        UPDATE runtime.template_builds SET headless = (os = 'windows' AND template_slug = 'windows')
+          WHERE headless IS NULL;
         UPDATE runtime.template_builds SET status = 'retired'
-          WHERE template_slug = 'windows' AND pve_vmid = 598;
+          WHERE os = 'windows' AND headless = true;
         UPDATE runtime.template_builds b SET status = 'deprecated'
           WHERE b.template_slug IN ('windows', 'windows-desktop') AND b.status = 'active'
           AND EXISTS (SELECT 1 FROM runtime.template_builds d WHERE d.node_id = b.node_id

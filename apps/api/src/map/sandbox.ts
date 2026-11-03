@@ -19,7 +19,7 @@ import { iso, isoOrNull, toOperationResource } from "./operation.ts";
 export interface SandboxExtras {
 	/** Version of `template_builds`; null if the build is gone. */
 	templateVersion: string | null;
-	/** S9 build on VM 598 remains headless after the catalog consolidation. */
+	/** Build capability snapshot remains headless after catalog consolidation. */
 	legacyHeadlessWindows?: boolean;
 	/** Name of the origin snapshot while it is ready; null once deleted or replaced. */
 	snapshotName: string | null;
@@ -139,7 +139,7 @@ export async function loadSandboxExtras(
 		updated_at: Date | null;
 	}>(
 		`SELECT s.id, b.version, s.updated_at,
-                (b.os = 'windows' AND b.pve_vmid = 598) AS legacy_headless_windows,
+                (b.os = 'windows' AND b.headless IS DISTINCT FROM false) AS legacy_headless_windows,
 		        CASE WHEN sn.state = 'ready' THEN sn.name END AS snapshot_name
 		 FROM runtime.sandboxes s
 		 LEFT JOIN runtime.template_builds b ON b.id = s.template_build_id

@@ -26,6 +26,21 @@ describe.skipIf(skipPg())("single Windows template compatibility", () => {
 		await w?.close();
 		await db?.drop();
 	});
+	it("desktop builds in the former headless slot still expose desktop", async () => {
+		await db.pool.query(
+			"UPDATE runtime.template_builds SET pve_vmid=598, headless=false WHERE id=$1",
+			[w.env.topo.templateBuildId],
+		);
+		const h = w.harness();
+		const created = await h.request("POST", "/v1/sandboxes", {
+			json: { template: "windows" },
+		});
+		expect(created.status).toBe(202);
+		expect(
+			(created.body as { sandbox: { endpoints: { desktop?: string } } }).sandbox
+				.endpoints.desktop,
+		).toBeTruthy();
+	});
 	it("creates using the alias, returns canonical identity and filters by either slug", async () => {
 		const h = w.harness();
 		const created = await h.request("POST", "/v1/sandboxes", {
@@ -36,7 +51,9 @@ describe.skipIf(skipPg())("single Windows template compatibility", () => {
 		for (const slug of ["windows", "windows-desktop"]) {
 			const listed = await h.request("GET", `/v1/sandboxes?template=${slug}`);
 			expect(listed.status).toBe(200);
-			expect(listed.body).toMatchObject({ data: [{ template: "windows" }] });
+			expect(
+				(listed.body as { data: { template: string }[] }).data,
+			).toContainEqual(expect.objectContaining({ template: "windows" }));
 		}
 	});
 	it("retired headless builds retain snapshot create, resume, fork and deletion", async () => {
@@ -44,11 +61,11 @@ describe.skipIf(skipPg())("single Windows template compatibility", () => {
 			templateSlug: "windows",
 			os: "windows",
 			status: "retired",
-			version: "headless-598",
+			version: "headless-custom",
 		});
 		const topo = { ...w.env.topo, templateBuildId: retired };
 		await db.pool.query(
-			"UPDATE runtime.template_builds SET pve_vmid = 598 WHERE id = $1",
+			"UPDATE runtime.template_builds SET pve_vmid = 600, headless = true WHERE id = $1",
 			[retired],
 		);
 		const snapshot = await insertSavedSnapshot(db.pool, topo, {
@@ -65,7 +82,7 @@ describe.skipIf(skipPg())("single Windows template compatibility", () => {
 		};
 		expect(body.sandbox).toMatchObject({
 			template: "windows",
-			templateVersion: "headless-598",
+			templateVersion: "headless-custom",
 		});
 		const id = decodeUuid("sandbox", body.sandbox.id) as string;
 		expect(
