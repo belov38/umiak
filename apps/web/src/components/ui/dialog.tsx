@@ -63,10 +63,10 @@ function DialogContent({
 			<DialogPrimitive.Content
 				data-slot="dialog-content"
 				className={cn(
-					"fixed z-50 grid w-full gap-4 rounded-none border border-border bg-popover p-6 text-sm text-popover-foreground outline-none",
+					"fixed z-50 grid w-full gap-4 [&>*]:min-w-0 tracking-normal rounded-none border border-border bg-popover p-6 text-sm text-popover-foreground outline-none",
 					placement === "center"
 						? "top-1/2 left-1/2 max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 duration-100 sm:max-w-lg data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
-						: "inset-y-0 left-0",
+						: "inset-y-0 left-0 block w-[min(18rem,82vw)] max-w-none h-dvh max-h-none p-0 border-0 border-r",
 					className,
 				)}
 				{...props}

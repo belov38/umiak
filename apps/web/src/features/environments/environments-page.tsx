@@ -151,12 +151,12 @@ export function EnvironmentsPage({
 						data-selected={e.id === selected?.id}
 					>
 						<header className="flex flex-wrap items-center gap-2">
-							<h2>
+							<h2 className="min-w-0 max-w-full">
 								<Button
-									variant="ghost"
+									variant={e.id === selected?.id ? "secondary" : "ghost"}
 									size="sm"
 									type="button"
-									className="environment-name"
+									className="h-auto max-w-full min-w-0 whitespace-normal break-all text-left"
 									aria-expanded={e.id === selected?.id}
 									onClick={() => setSelectedId(e.id)}
 								>

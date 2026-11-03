@@ -271,7 +271,7 @@ export function SandboxHeader({
 			{s.blocked && (
 				<div
 					role="status"
-					className="flex items-center gap-2 rounded-none border border-warning/35 bg-warning-tint p-3 text-sm text-warning"
+					className="flex items-center gap-2 border border-warning/35 bg-warning-tint p-3 text-sm text-warning"
 				>
 					<LockIcon className="size-4 shrink-0" />
 					<p>
@@ -402,7 +402,7 @@ function Facts({
 					{labels.length === 0
 						? "—"
 						: labels.map(([k, v]) => (
-								<code key={k} className="rounded-none bg-muted px-1 text-xs">
+								<code key={k} className="bg-muted px-1 text-xs">
 									{k}={v}
 								</code>
 							))}
@@ -439,7 +439,7 @@ function OperationBar({ sandbox: s }: { sandbox: SandboxData }) {
 		<div
 			role="status"
 			data-testid="operation-bar"
-			className="flex items-center gap-2 rounded-none border bg-muted/40 p-2 text-sm"
+			className="flex items-center gap-2 border bg-muted/40 p-2 text-sm"
 		>
 			<LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
 			<span className="font-medium">{op.kind.replace("_", " ")}</span>
@@ -447,8 +447,8 @@ function OperationBar({ sandbox: s }: { sandbox: SandboxData }) {
 				{op.state}
 				{op.step ? ` · ${op.step}` : ""}
 			</span>
-			<div className="ml-2 h-1 flex-1 overflow-hidden rounded-none bg-muted">
-				<div className="h-full w-1/3 animate-pulse rounded-none bg-primary/60" />
+			<div className="ml-2 h-1 flex-1 overflow-hidden bg-muted">
+				<div className="h-full w-1/3 animate-pulse bg-primary/60" />
 			</div>
 		</div>
 	);
@@ -468,7 +468,7 @@ function ErrorBlock({
 		<div
 			role="alert"
 			data-testid="sandbox-error"
-			className="flex flex-wrap items-center gap-3 rounded-none border border-destructive/40 bg-destructive/5 p-3 text-sm"
+			className="flex flex-wrap items-center gap-3 border border-destructive/40 bg-destructive/5 p-3 text-sm"
 		>
 			<div className="flex-1">
 				<p className="font-medium text-destructive">
@@ -598,7 +598,7 @@ function ExtendDialog({
 		>
 			<Field label="Extend by">
 				<NativeSelect
-					className="h-8 rounded-none border bg-transparent px-2 text-sm"
+					size="xs"
 					value={choice}
 					onChange={(e) => setChoice(Number(e.target.value))}
 				>

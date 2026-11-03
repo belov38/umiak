@@ -241,7 +241,7 @@ export function FilesTab({
 		<section
 			aria-label="Files; drop files here to upload them"
 			className={cn(
-				"space-y-3 rounded-none",
+				"space-y-3 ",
 				dragging && "outline-2 outline-dashed outline-primary",
 			)}
 			onDragOver={(e) => {
@@ -264,7 +264,7 @@ export function FilesTab({
 								variant="ghost"
 								size="sm"
 								type="button"
-								className="rounded-none px-0.5 hover:underline"
+								className="px-0.5 hover:underline"
 								onClick={() => setDir(c.path)}
 							>
 								{c.name}
@@ -273,12 +273,8 @@ export function FilesTab({
 					))}
 				</nav>
 				<div className="ml-auto flex flex-wrap items-center gap-2">
-					<label
-						htmlFor="files-choice-1"
-						className="flex items-center gap-1 text-sm"
-					>
+					<label className="flex items-center gap-1 text-sm">
 						<Checkbox
-							id="files-choice-1"
 							checked={hidden}
 							onChange={(e) => setHidden(e.target.checked)}
 						/>
@@ -500,18 +496,15 @@ function Uploads({
 }) {
 	if (items.length === 0) return null;
 	return (
-		<ul
-			className="space-y-1 rounded-none border p-2 text-sm"
-			data-testid="uploads"
-		>
+		<ul className="space-y-1 border p-2 text-sm" data-testid="uploads">
 			{items.map((u) => (
 				<li key={u.key} className="flex items-center gap-2">
 					<span className="w-48 truncate font-mono text-xs">{u.name}</span>
 					{u.state === "uploading" ? (
 						<>
-							<div className="h-1.5 flex-1 overflow-hidden rounded-none bg-muted">
+							<div className="h-1.5 flex-1 overflow-hidden bg-muted">
 								<div
-									className="h-full rounded-none bg-primary transition-all"
+									className="h-full bg-primary transition-all"
 									style={{
 										width: `${u.size === 0 ? 0 : Math.round((u.sent / u.size) * 100)}%`,
 									}}
@@ -626,7 +619,7 @@ function PreviewDialog({
 					{typeof q.data === "string" && (
 						<CodeBlock
 							data-testid="file-preview"
-							className="max-h-[60vh] overflow-auto rounded-none bg-muted p-3 font-mono text-xs whitespace-pre"
+							className="max-h-[60vh] overflow-auto bg-muted p-3 font-mono text-xs whitespace-pre"
 						>
 							{q.data}
 						</CodeBlock>

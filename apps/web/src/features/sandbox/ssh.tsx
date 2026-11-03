@@ -51,7 +51,7 @@ export function SshTab({
 			)}
 			{!s.hasKeys && (
 				<p
-					className="rounded-none border border-warning/35 bg-warning-tint p-3 text-warning"
+					className="border border-warning/35 bg-warning-tint p-3 text-warning"
 					data-testid="ssh-no-keys"
 				>
 					You have no SSH keys yet.{" "}

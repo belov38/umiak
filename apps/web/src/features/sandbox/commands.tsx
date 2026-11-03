@@ -113,7 +113,7 @@ export function CommandsTab({
 			<div className="flex flex-wrap items-center gap-2">
 				<NativeSelect
 					aria-label="Status"
-					className="h-8 rounded-none border bg-transparent px-2 text-sm"
+					size="xs"
 					value={status}
 					onChange={(e) => setStatus(e.target.value)}
 				>
@@ -203,10 +203,7 @@ export function CommandsTab({
 								<TableCell>
 									<div className="flex flex-wrap gap-1">
 										{Object.entries(c.tags).map(([k, v]) => (
-											<code
-												key={k}
-												className="rounded-none bg-muted px-1 text-xs"
-											>
+											<code key={k} className="bg-muted px-1 text-xs">
 												{k}={v}
 											</code>
 										))}
@@ -354,7 +351,8 @@ function RunDialog({
 		>
 			<Field label="Command">
 				<Textarea
-					className="min-h-16 rounded-none border bg-transparent px-2.5 py-1.5 font-mono text-sm"
+					size="xs"
+					className="font-mono"
 					spellCheck={false}
 					value={cmd}
 					placeholder="npm test"
@@ -383,7 +381,8 @@ function RunDialog({
 				hint="KEY=value per line; not stored"
 			>
 				<Textarea
-					className="min-h-14 rounded-none border bg-transparent px-2.5 py-1.5 font-mono text-xs"
+					size="xs"
+					className="font-mono"
 					spellCheck={false}
 					autoComplete="off"
 					value={envText}

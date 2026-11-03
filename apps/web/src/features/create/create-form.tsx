@@ -293,23 +293,15 @@ export function CreateSandboxForm({
 						>
 							<Row label="From">
 								<div className="flex flex-wrap items-center gap-4 text-sm">
-									<label
-										htmlFor="create-form-choice-1"
-										className="flex items-center gap-1.5"
-									>
+									<label className="flex items-center gap-1.5">
 										<Radio
-											id="create-form-choice-1"
 											checked={form.source === "template"}
 											onChange={() => patch({ source: "template" })}
 										/>
 										template
 									</label>
-									<label
-										htmlFor="create-form-choice-2"
-										className="flex items-center gap-1.5"
-									>
+									<label className="flex items-center gap-1.5">
 										<Radio
-											id="create-form-choice-2"
 											checked={form.source === "snapshot"}
 											disabled={readySnapshots.length === 0}
 											onChange={() =>
@@ -367,13 +359,8 @@ export function CreateSandboxForm({
 									)}
 									<div className="flex flex-col gap-1 text-sm">
 										{enabled.map((t) => (
-											<label
-												htmlFor={`create-form-choice-3-${t.slug}`}
-												key={t.slug}
-												className="flex items-center gap-1.5"
-											>
+											<label key={t.slug} className="flex items-center gap-1.5">
 												<Radio
-													id={`create-form-choice-3-${t.slug}`}
 													checked={form.template === t.slug}
 													onChange={() =>
 														patch({ template: t.slug, size: t.defaultSize })
@@ -618,7 +605,7 @@ export function CreateSandboxForm({
 									role="alert"
 									data-testid="create-error"
 									className={cn(
-										"flex flex-wrap items-center gap-2 rounded-none border p-3 text-sm",
+										"flex flex-wrap items-center gap-2 border p-3 text-sm",
 										submitError.apiUnavailable || submitError.retry
 											? "border-warning/35 bg-warning-tint text-warning"
 											: "border-destructive/30 bg-destructive/5 text-destructive",

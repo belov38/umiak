@@ -217,12 +217,8 @@ function EnvironmentForm({
 				/>
 			</Section>
 			<div className="grid gap-2 text-sm">
-				<label
-					htmlFor="environment-dialog-choice-1"
-					className="flex items-start gap-2"
-				>
+				<label className="flex items-start gap-2">
 					<Checkbox
-						id="environment-dialog-choice-1"
 						className="mt-0.5"
 						checked={form.isDefault}
 						onChange={(e) => set({ isDefault: e.target.checked })}
@@ -238,12 +234,8 @@ function EnvironmentForm({
 						</span>
 					</span>
 				</label>
-				<label
-					htmlFor="environment-dialog-choice-2"
-					className="flex items-start gap-2"
-				>
+				<label className="flex items-start gap-2">
 					<Checkbox
-						id="environment-dialog-choice-2"
 						className="mt-0.5"
 						checked={form.excludeOwnerSecrets}
 						onChange={(e) => set({ excludeOwnerSecrets: e.target.checked })}
@@ -280,12 +272,13 @@ function EnvironmentForm({
 						{original.secretKeys.map((k) => {
 							const removed = form.removedSecrets.includes(k);
 							return (
-								<Badge
-									key={k}
-									variant="outline"
-									className={removed ? "line-through opacity-60" : ""}
-								>
-									<span className="font-mono">{k}</span> •••
+								<span className="inline-flex items-center gap-1" key={k}>
+									<Badge
+										variant="outline"
+										className={removed ? "line-through opacity-60" : ""}
+									>
+										<span className="font-mono">{k}</span> •••
+									</Badge>
 									<Button
 										variant="ghost"
 										size="sm"
@@ -297,7 +290,7 @@ function EnvironmentForm({
 									>
 										{removed ? "keep" : "remove"}
 									</Button>
-								</Badge>
+								</span>
 							);
 						})}
 					</div>

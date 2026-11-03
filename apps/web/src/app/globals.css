@@ -292,15 +292,6 @@ body {
 	border: 1px solid var(--border);
 	margin-top: 0.75rem;
 }
-.dashboard-theme [data-slot="button"] {
-	min-width: 0;
-	width: 100%;
-	padding-inline: 0.5rem;
-	height: 3rem;
-}
-.dashboard-theme [data-slot="button"] + [data-slot="button"] {
-	border-left: 1px solid var(--border);
-}
 .dashboard-content {
 	margin-left: 17.5rem;
 	padding: 2rem;
@@ -530,9 +521,6 @@ h3 {
 .sandbox-row-name:hover {
 	text-decoration: underline;
 }
-.sandbox-desktop-table [data-slot="table-cell"] {
-	height: 5.25rem;
-}
 @media (max-width: 1399px) {
 	.sandbox-desktop-table {
 		display: none;
@@ -558,9 +546,6 @@ h3 {
 		max-width: 11rem;
 	}
 }
-.create-dialog [data-slot="select-trigger"] {
-	width: 100%;
-}
 [data-sonner-toast] {
 	box-shadow: none;
 	font-family: var(--font-sans);
@@ -571,10 +556,6 @@ h3 {
 	margin-top: 0.5rem;
 	flex-wrap: wrap;
 }
-[data-slot="dialog-header"] {
-	border-bottom: 1px solid var(--border);
-	padding-bottom: 1rem;
-}
 .key-form fieldset {
 	margin-block: 0;
 }
@@ -584,23 +565,8 @@ h3 {
 .key-form .key-preset {
 	gap: 0.75rem;
 }
-.dashboard-shell *,
-[data-slot="dialog-content"] * {
+.dashboard-shell * {
 	letter-spacing: 0;
-}
-[data-slot="dropdown-menu-content"],
-[data-slot="select-content"],
-[data-slot="tooltip-content"] {
-	border-radius: 0;
-	box-shadow: none;
-}
-
-[data-slot="dialog-content"] {
-	padding: 1rem 1.5rem 1.5rem;
-}
-[data-slot="dialog-header"] {
-	margin-inline: -1.5rem;
-	padding-inline: 1.5rem;
 }
 
 /* Secondary field labels measured independently from the input's text. */
@@ -613,19 +579,6 @@ h3 {
 .create-dialog [data-testid="create-form"] > div > div:first-child {
 	font-size: 0.875rem;
 	line-height: 1.4;
-}
-
-.dashboard-drawer[data-slot="dialog-content"] {
-	position: fixed;
-	inset: 0 auto 0 0;
-	display: block;
-	width: min(18rem, 82vw);
-	max-width: none;
-	height: 100dvh;
-	max-height: none;
-	padding: 0;
-	border: 0;
-	border-right: 1px solid var(--border);
 }
 .dashboard-drawer .desktop-team-switcher {
 	display: block;
@@ -642,62 +595,16 @@ h3 {
 	margin-left: 0;
 }
 
-input[type="checkbox"] {
-	appearance: none;
-	display: inline-grid;
-	place-items: center;
-	width: 1rem;
-	height: 1rem;
-	flex: none;
-	border: 1px solid #9e9e9e;
-	border-radius: 0;
-	background: var(--background);
-	vertical-align: middle;
-}
-input[type="checkbox"]::after {
-	content: "";
-	width: 0.5rem;
-	height: 0.28rem;
-	border-left: 2px solid var(--primary-foreground);
-	border-bottom: 2px solid var(--primary-foreground);
-	transform: translateY(-0.06rem) rotate(-45deg);
-	opacity: 0;
-}
-input[type="checkbox"]:checked {
-	background: var(--primary);
-	border-color: var(--primary);
-}
-input[type="checkbox"]:checked::after {
-	opacity: 1;
-}
-input[type="checkbox"]:focus-visible,
-input[type="radio"]:focus-visible {
-	outline: 2px solid var(--ring);
-	outline-offset: 2px;
-}
-input[type="radio"] {
-	width: 1rem;
-	height: 1rem;
-	flex: none;
-	accent-color: var(--primary);
-}
-
 /* The display heading keeps the reference's measured -0.02em tracking. */
 .dashboard-page h1:not(.sandbox-detail-heading) {
 	letter-spacing: -0.02em;
 }
-[data-slot="select-trigger"] > svg {
-	width: 18px;
-	height: 18px;
-}
-
 /* Acceptance fixes: preserve intrinsic content without growing the viewport. */
 .dashboard-page,
 .dashboard-page > *,
 .dashboard-page dd,
 .sandbox-overview > section,
 .sandbox-workspace,
-[data-slot="dialog-content"] > *,
 .create-field > * {
 	min-width: 0;
 }
@@ -755,9 +662,6 @@ input[type="radio"] {
 	min-width: 0;
 }
 
-.environment-summary[data-selected="true"] .environment-name {
-	color: var(--secondary-foreground);
-}
 .environment-summary dt,
 .environment-summary dd {
 	padding-block: 0.25rem;
@@ -771,10 +675,6 @@ input[type="radio"] {
 .create-dialog [data-testid="create-form"] > .create-field {
 	margin-block-end: 0.75rem;
 }
-.create-dialog [data-slot="input"],
-.create-dialog [data-slot="select-trigger"] {
-	max-width: 100%;
-}
 .create-dialog .create-field label {
 	flex-wrap: wrap;
 }
@@ -782,16 +682,6 @@ input[type="radio"] {
 	overflow-wrap: anywhere;
 }
 @media (max-width: 639px) {
-	[data-slot="page-header"] > h1 {
-		flex: 1;
-	}
-	[data-slot="page-header"] > [data-testid="quota-line"] {
-		order: 3;
-		width: 100%;
-	}
-	.sandbox-filters > [data-slot="input"] {
-		width: 100%;
-	}
 	.create-dialog {
 		width: calc(100% - 3rem);
 	}

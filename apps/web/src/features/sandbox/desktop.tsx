@@ -115,12 +115,11 @@ export function DesktopTab({
 				>
 					Full screen
 				</Button>
-				<label htmlFor="desktop-choice-1" className="text-sm">
+				<label className="text-sm">
 					Access{" "}
 					<NativeSelect
-						id="desktop-choice-1"
 						aria-label="Desktop access"
-						className="rounded-none border p-1"
+						size="xs"
 						value={status.data?.access ?? "token"}
 						disabled={busy || !status.data}
 						onChange={async (event) => {

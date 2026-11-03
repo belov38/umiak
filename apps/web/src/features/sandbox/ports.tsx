@@ -132,7 +132,7 @@ export function PortsTab({
 				{ports.data && hosted.length === 0 && (
 					<p className="text-sm text-muted-foreground">No published ports.</p>
 				)}
-				<ul className="divide-y rounded-none border" data-testid="hosted-ports">
+				<ul className="divide-y border" data-testid="hosted-ports">
 					{hosted.map((p) => (
 						<li
 							key={p.port}
@@ -158,11 +158,11 @@ export function PortsTab({
 								{p.url}
 								<ExternalLinkIcon className="size-3" />
 							</a>
-							<span className="rounded-none bg-muted px-1.5 text-xs">
+							<span className="bg-muted px-1.5 text-xs">
 								access: {p.access}
 							</span>
 							{p.hostRewrite === "localhost" && (
-								<span className="rounded-none bg-muted px-1.5 text-xs">
+								<span className="bg-muted px-1.5 text-xs">
 									Host → localhost
 								</span>
 							)}
@@ -227,7 +227,7 @@ export function PortsTab({
 						.
 					</p>
 				)}
-				<ul className="divide-y rounded-none border">
+				<ul className="divide-y border">
 					{listening.map((l) => (
 						<li key={l.port} className="flex items-center gap-2 p-2 text-sm">
 							<span className="w-14 font-mono font-medium">{l.port}</span>
@@ -380,7 +380,6 @@ function PublishDialog({
 					.filter((a) => !localMode || a !== "sso")
 					.map((a) => (
 						<label
-							htmlFor={`ports-choice-1-${a}`}
 							key={a}
 							className={
 								a === "public" && publicOff
@@ -389,7 +388,6 @@ function PublishDialog({
 							}
 						>
 							<Radio
-								id={`ports-choice-1-${a}`}
 								name="access"
 								className="mr-2"
 								checked={access === a}
@@ -406,7 +404,7 @@ function PublishDialog({
 				hint="localhost: for dev servers that check the Host (Vite, webpack)"
 			>
 				<NativeSelect
-					className="h-8 rounded-none border bg-transparent px-2 text-sm"
+					size="xs"
 					value={rewrite}
 					onChange={(e) => setRewrite(e.target.value as HostRewrite)}
 				>

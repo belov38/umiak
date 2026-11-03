@@ -11,8 +11,11 @@ import {
 	MenuIcon,
 	MoonIcon,
 	SettingsIcon,
+	ShieldIcon,
+	SlidersHorizontalIcon,
 	SunIcon,
 	UserIcon,
+	WrenchIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -259,7 +262,7 @@ export function AppShell({
 					<>
 						<NavItem asChild variant="ghost" size="sm">
 							<a href="/setup">
-								<SettingsIcon />
+								<WrenchIcon />
 								Setup
 							</a>
 						</NavItem>
@@ -282,12 +285,16 @@ export function AppShell({
 								href="/app/operator"
 								aria-current={pathname === "/app/operator" ? "page" : undefined}
 							>
+								<ShieldIcon />
 								Operator
 							</Link>
 						</NavItem>
 						<NavItem asChild variant="ghost" size="sm">
 							{/* The admin is another root layout: a full page load. */}
-							<a href="/admin">Admin</a>
+							<a href="/admin">
+								<SlidersHorizontalIcon />
+								Admin
+							</a>
 						</NavItem>
 					</>
 				)}
@@ -392,6 +399,7 @@ function ThemeSwitch({
 		<fieldset className="dashboard-theme" aria-label="Appearance">
 			<NavItem
 				variant={!dark ? "secondary" : "ghost"}
+				className="min-w-0 px-2 h-12"
 				aria-pressed={!dark}
 				onClick={() => onChange(false)}
 			>
@@ -400,6 +408,7 @@ function ThemeSwitch({
 			</NavItem>
 			<NavItem
 				variant={dark ? "secondary" : "ghost"}
+				className="min-w-0 px-2 h-12 border-l border-border"
 				aria-pressed={dark}
 				onClick={() => onChange(true)}
 			>

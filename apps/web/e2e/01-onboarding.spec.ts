@@ -36,7 +36,7 @@ test("new user: personal team, sandbox ready, terminal survives a reload", async
 		onboarding.getByRole("link", { name: "Create a sandbox", exact: true }),
 	).toHaveAttribute("href", `/app/t/${team}/sandboxes/new`);
 	await expect(
-		onboarding.getByRole("link", { name: "New sandbox", exact: true }),
+		page.getByRole("link", { name: "New sandbox", exact: true }),
 	).toHaveAttribute("href", `/app/t/${team}/sandboxes/new`);
 
 	await createSandbox(page, team, { slug: `term-${state.run}` });

@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../../../..", import.meta.url));
 const compose = [
 	"compose",
+	"--project-name",
+	process.env.UMIAK_E2E_PROJECT ?? "umiak-local-e2e",
 	"--env-file",
 	"deploy/compose/e2e.env",
 	...["compose.yaml", "e2e.yaml", "local.yaml", "local-e2e.yaml"].flatMap(
