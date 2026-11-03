@@ -59,9 +59,10 @@ const ownerCookie = (value, maxAge) =>
 	`${COOKIE}=${value}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${maxAge}`;
 // Port 4180 serves only loopback Host names; everything else belongs on the tailnet HTTPS listener.
 const LOOPBACK_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i;
+const TAILNET_MESSAGE =
+	"Open the tailnet HTTPS address of this deployment instead of this port. Port 4180 is for ssh -L access via localhost only.";
 const useTailnet = (req, res) => {
-	const message =
-		"Open the tailnet HTTPS address of this deployment instead of this port. Port 4180 is for ssh -L access via localhost only.";
+	const message = TAILNET_MESSAGE;
 	if (req.headers.accept?.includes("text/html")) {
 		res.writeHead(403, {
 			"content-type": "text/html; charset=utf-8",
@@ -443,9 +444,21 @@ export function createQuickstartServer({
 	server.requestTimeout = 30000;
 	server.headersTimeout = 15000;
 	server.on("upgrade", async (req, socket, head) => {
+		if (!proxyListener && !LOOPBACK_HOST.test(req.headers.host ?? "")) {
+			const body = JSON.stringify({
+				error: {
+					code: "use_tailnet_https",
+					message: TAILNET_MESSAGE,
+					retryable: false,
+				},
+			});
+			socket.end(
+				`HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`,
+			);
+			socket.destroy();
+			return;
+		}
 		try {
-			if (!proxyListener && !LOOPBACK_HOST.test(req.headers.host ?? ""))
-				throw new Error("denied");
 			const { origin, clientAddress } = requestContext(req, env, proxyListener);
 			req.umiakClientAddress = clientAddress;
 			if (
@@ -473,6 +486,7 @@ export function createQuickstartServer({
 			socket.on("close", () => upstream.destroy());
 		} catch {
 			socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+			socket.destroy();
 		}
 	});
 	return server;

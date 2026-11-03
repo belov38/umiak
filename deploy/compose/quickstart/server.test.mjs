@@ -665,17 +665,21 @@ test("the 4180 Host gate also covers WebSocket upgrades", async () => {
 				},
 			});
 			req.on("response", (res) => {
-				resolve(res.statusCode);
-				res.resume();
+				let body = "";
+				res.on("data", (x) => (body += x));
+				res.on("end", () => resolve({ status: res.statusCode, body }));
 			});
-			req.on("error", () => resolve("closed"));
+			req.on("error", () => resolve({ status: "closed", body: "" }));
 			req.end();
 		});
 	try {
-		assert.equal(await upgrade("192.168.68.50:4180"), 401);
+		const denied = await upgrade("192.168.68.50:4180");
+		assert.equal(denied.status, 403);
+		assert.match(denied.body, /use_tailnet_https/);
 		// Loopback Host passes the gate and fails later only because no upstream exists.
 		const served = await upgrade(`127.0.0.1:${port}`);
-		assert.notEqual(served, 401);
+		assert.notEqual(served.status, 403);
+		assert.doesNotMatch(served.body, /use_tailnet_https/);
 	} finally {
 		await new Promise((resolve) => server.close(resolve));
 	}
