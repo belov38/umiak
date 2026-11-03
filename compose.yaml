@@ -46,6 +46,8 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     command: [node, /meta-proxy.mjs]
+    environment:
+      UMIAK_API_URL: http://localhost:4180
     volumes:
       - ./deploy/compose/meta-proxy.mjs:/meta-proxy.mjs:ro
     networks: [control, web-internal]

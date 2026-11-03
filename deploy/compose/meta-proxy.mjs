@@ -5,9 +5,13 @@ import { fileURLToPath } from "node:url";
 export function createMetaProxy(
 	readMeta = () =>
 		fetch("http://api:8080/v1/meta", {
+			headers: env.UMIAK_API_URL
+				? { host: new URL(env.UMIAK_API_URL).host }
+				: {},
 			redirect: "error",
 			signal: AbortSignal.timeout(3000),
 		}),
+	env = process.env,
 ) {
 	return http.createServer(async (req, res) => {
 		res.setHeader("cache-control", "no-store");
