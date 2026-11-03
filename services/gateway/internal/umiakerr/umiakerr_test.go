@@ -172,19 +172,29 @@ func TestDesktopStartingPage(t *testing.T) {
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	r.Header.Set("Accept", "text/html")
 	w := httptest.NewRecorder()
-	Write(w, r, Error{Status: 503, Code: "desktop_starting", Retryable: true, RetryAfter: 5, Refresh: true})
+	Write(w, r, Error{Status: 503, Code: "desktop_starting", Retryable: true, RetryAfter: 5, Refresh: true, RequestID: "req<desktop>"})
 	body := w.Body.String()
-	for _, want := range []string{"Starting the desktop…", "This takes up to a minute", `http-equiv="refresh" content="5"`, "prefers-color-scheme:dark", "prefers-reduced-motion", `role="status"`} {
+	for _, want := range []string{"Starting the desktop…", "This takes up to a minute", `http-equiv="refresh" content="5"`, "prefers-color-scheme:dark", "prefers-reduced-motion", `role="status"`, `<small>Request ID: req&lt;desktop&gt;</small>`, `<svg`, `aria-label="Umiak"`, `M2 12L10 17H37L46 10`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q", want)
 		}
 	}
-	for _, bad := range []string{"503", "Service Unavailable", "could not be completed"} {
+	for _, bad := range []string{"503", "Service Unavailable", "could not be completed", "req<desktop>", "src=", "@import", "url("} {
 		if strings.Contains(body, bad) {
 			t.Errorf("loading page contains %q", bad)
 		}
 	}
 	if w.Code != 503 || w.Header().Get("Retry-After") != "5" || w.Header().Get("Umiak-Error") != "desktop_starting" {
 		t.Fatal("startup protocol changed")
+	}
+}
+
+func TestDesktopStartingPageWithoutRequestID(t *testing.T) {
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	r.Header.Set("Accept", "text/html")
+	w := httptest.NewRecorder()
+	Write(w, r, Error{Status: 503, Code: CodeDesktopStarting})
+	if strings.Contains(w.Body.String(), "Request ID:") {
+		t.Error("empty request id should be omitted")
 	}
 }

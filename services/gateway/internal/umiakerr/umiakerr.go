@@ -63,7 +63,8 @@ var defaultMessages = map[string]string{
 const fallbackMessage = "The request could not be completed."
 
 // Dashboard brand tokens from apps/web/src/app/globals.css. Keep this page
-// self-contained: the sandbox origin cannot depend on dashboard assets.
+// self-contained: the sandbox origin cannot depend on dashboard assets. The inline
+// logo is apps/web/public/brand/mark-square.svg.
 var desktopStartingPage = template.Must(template.New("desktop-starting").Parse(`<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -73,16 +74,17 @@ var desktopStartingPage = template.Must(template.New("desktop-starting").Parse(`
 <style>
 :root{color-scheme:light dark;--background:#fefefe;--foreground:#060606;--muted-foreground:#4d4d4d;--primary:#263fa9;--border:#e0e0e0}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--background);color:var(--foreground);font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
-main{width:min(100%,36rem);padding:3rem 2rem}.brand{font-family:"Funnel Display",system-ui,sans-serif;font-size:1.5rem;font-weight:600;letter-spacing:-.04em;margin-bottom:3rem}
-h1{font-size:1.5rem;font-weight:500;letter-spacing:-.03em;margin:1.5rem 0 .75rem}p{line-height:1.6;margin:.5rem 0;color:var(--muted-foreground)}.hint{margin-top:2rem;font-size:.875rem}
+main{width:min(100%,36rem);padding:3rem 2rem}.brand{width:3rem;height:3rem;margin-bottom:3rem}.brand svg{display:block;width:100%;height:100%}
+h1{font-size:1.5rem;font-weight:500;letter-spacing:-.03em;margin:1.5rem 0 .75rem}p{line-height:1.6;margin:.5rem 0;color:var(--muted-foreground)}.hint{margin-top:2rem;font-size:.875rem}.request-id{margin-top:2rem;overflow-wrap:anywhere}
 .spinner{width:2rem;height:2rem;border:2px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-color-scheme:dark){:root{--background:#060606;--foreground:#fefefe;--muted-foreground:#b8b8b8;--border:#2e2e2e;--primary:#929fd3}}
 @media (prefers-reduced-motion:reduce){.spinner{animation:none}}
 </style></head><body><main>
-<div class="brand">umiak</div>
+<div class="brand"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="Umiak" ><g transform="translate(0.727273 6.613636) scale(.636363636)"><path fill="currentColor" d="M2 12L10 17H37L46 10L42 19L39 21.5H11L8 19.5ZM11 8H18V15H11ZM21 8H28V15H21ZM31 8H38V15H31Z"/></g></svg></div>
 <div role="status" aria-live="polite"><div class="spinner" aria-hidden="true"></div>
 <h1>Starting the desktop…</h1><p>This takes up to a minute.</p></div>
 {{if .Refresh}}<p class="hint">You can stay here. Your desktop will open automatically.</p>{{end}}
+{{if .RequestID}}<p class="request-id"><small>Request ID: {{.RequestID}}</small></p>{{end}}
 </main></body></html>`))
 
 var page = template.Must(template.New("page").Parse(`<!doctype html>
