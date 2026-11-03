@@ -153,9 +153,14 @@ export function createQuickstartServer({
 			)
 				return fail(res, 403, "local_network_forbidden");
 			if (preparation && !rate(req)) return fail(res, 429, "rate_limited");
-			const ownerPrivateCA = !(env.UMIAK_QUICKSTART_SERVE_PEERS ?? "")
-				.split(",")
-				.includes(req.socket.remoteAddress?.replace(/^::ffff:/, ""));
+			const publicUrl = new URL(origin);
+			const ownerPrivateCA = !(
+				(env.UMIAK_QUICKSTART_SERVE_PEERS ?? "")
+					.split(",")
+					.includes(req.socket.remoteAddress?.replace(/^::ffff:/, "")) &&
+				publicUrl.hostname.endsWith(".ts.net") &&
+				(publicUrl.port || "443") === (env.UMIAK_QUICKSTART_SERVE_PORT ?? "443")
+			);
 			const safe = ["GET", "HEAD", "OPTIONS"].includes(req.method);
 			const token = bearer(req);
 			const owner = token ? await store.authenticate(token) : false;
@@ -185,9 +190,7 @@ export function createQuickstartServer({
 					apiUrl: origin,
 					appUrl: origin,
 					ownerClaimed: await store.claimed(),
-					ownerPrivateCA: !(env.UMIAK_QUICKSTART_SERVE_PEERS ?? "")
-						.split(",")
-						.includes(req.socket.remoteAddress?.replace(/^::ffff:/, "")),
+					ownerPrivateCA,
 				});
 			}
 			if (

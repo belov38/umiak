@@ -101,11 +101,24 @@ test("meta uses the Serve external Host and fixed socket peer to select public C
 			assert.equal(meta.apiUrl, `https://${externalHost}`);
 			assert.equal(meta.appUrl, `https://${externalHost}`);
 			assert.equal(meta.ownerPrivateCA, privateCA);
+			const direct = JSON.parse(
+				(
+					await request(server, "/v1/meta", {
+						host: `${externalHost}:8444`,
+						...identity,
+					})
+				).body,
+			);
+			assert.equal(
+				direct.ownerPrivateCA,
+				true,
+				"NAT must not make direct private HTTPS look publicly trusted",
+			);
 		} finally {
 			await new Promise((resolve) => server.close(resolve));
 		}
 	}
-	assert.equal(seen.length, 2);
+	assert.equal(seen.length, 4);
 	assert.equal(seen[0].headers["tailscale-user-login"], undefined);
 });
 
