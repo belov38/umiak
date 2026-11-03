@@ -19,6 +19,7 @@ async function runInstaller({
 	badArchiveChecksum = false,
 	tty = false,
 	skipLogin = false,
+	interrupt = false,
 } = {}) {
 	const dir = await mkdtemp(join(tmpdir(), "umiak-install-test-"));
 	const bin = join(dir, "bin");
@@ -68,7 +69,7 @@ async function runInstaller({
 	const realCurl = execFileSync("which", ["curl"], { encoding: "utf8" }).trim();
 	await writeFile(
 		join(bin, "curl"),
-		`#!/bin/sh\nprintf '%s\\n' "$@" >> '${curlLog}'\nexec '${realCurl}' "$@"\n`,
+		`#!/bin/sh\nprintf '%s\\n' "$@" >> '${curlLog}'\n${interrupt ? 'kill -INT "$PPID"; exit 0' : `exec '${realCurl}' "$@"`}\n`,
 	);
 	await chmod(join(bin, "curl"), 0o755);
 	const installer = join(dir, "installer.sh");
@@ -193,4 +194,15 @@ test("skip login installs verified bytes and prints manual pairing without start
 		),
 		r.output,
 	);
+});
+
+test("interrupt exits 130, cleans temporary downloads and preserves existing installation", async () => {
+	const r = await runInstaller({ interrupt: true });
+	assert.equal(r.status, 130, r.output);
+	assert.equal(r.installed, "old-binary");
+	assert.equal(r.login, null);
+	assert.deepEqual(r.downloads, []);
+	const scratchFile = r.curlArgs.trim().split("\n").at(-1);
+	const { access } = await import("node:fs/promises");
+	await assert.rejects(access(join(scratchFile, "..")), { code: "ENOENT" });
 });

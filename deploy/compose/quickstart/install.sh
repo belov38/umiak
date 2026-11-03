@@ -33,7 +33,10 @@ cleanup() {
  rm -f "$scratch/binary" "$scratch/archive.gz" "$scratch/SHA256SUMS" "$scratch/DOWNLOADS"
  rmdir "$scratch"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 ca=${UMIAK_CA_CERT:-${CURL_CA_BUNDLE:-}}
 fetch() {
  # Metadata remains quiet; only the large archive displays terminal progress.
