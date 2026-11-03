@@ -28,3 +28,19 @@ rulings in S9/S10; Linux retains `linux` and `linux-desktop`.
   approval. No template rebuilds, ISO downloads, network or firewall changes.
 - Deployment must preserve owner sessions and guest CA, include current main,
   and occur only after checking CT590/origin and active operations.
+
+## Upgrade ordering and legacy UI
+
+Compose runs runtime bootstrap before Payload migrations. Bootstrap recognizes
+an existing `windows-desktop` build by node, version and VMID and reuses its ID;
+Payload performs the identity change after retiring the headless build. The
+migration also handles custom desktop versions/slots and duplicate historical
+registrations without activating two builds on a node. It never deletes builds.
+The down migration is intentionally a no-op: restore the previous application,
+config and catalog backup together for a full rollback.
+
+A legacy VM 598 sandbox has no desktop endpoint or Desktop tab, even though its
+canonical catalog identity is now `windows`; its original disk/build is retained.
+
+The deployed tree also includes owner-signin commits `74a35b17` and `e96b5efa`
+(cherry-picked), to preserve the parallel feature on CT590.
