@@ -368,6 +368,8 @@ func (a *Auth) sessionCookie(s Session, ttl time.Duration) *http.Cookie {
 }
 
 // HTTP cookies use a separate name: browsers require Secure for __Host-.
+// Host-only issuance and the signed exact-label check in validSession keep
+// sibling previews isolated even if one injects a parent-domain cookie.
 func (a *Auth) authCookieName() string {
 	if a.cfg.PreviewScheme == "http" {
 		return "umiak_auth"
@@ -375,7 +377,8 @@ func (a *Auth) authCookieName() string {
 	return AuthCookie
 }
 
-// cookie builds a gateway cookie. ttl <= 0 clears it (Max-Age=0).
+// cookie builds a host-only gateway cookie: never add a Domain attribute.
+// ttl <= 0 clears it (Max-Age=0).
 func (a *Auth) cookie(name, value string, ttl time.Duration) *http.Cookie {
 	c := &http.Cookie{
 		Name:     name,

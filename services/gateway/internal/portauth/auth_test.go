@@ -457,3 +457,34 @@ func TestLocalModeRejectsSSOPreview(t *testing.T) {
 		t.Fatalf("unexpected local SSO response: %+v %d %s", res, w.Code, w.Body.String())
 	}
 }
+
+// HTTP cannot use the browser-enforced __Host- prefix. Its signed label must
+// still isolate siblings, including a cookie planted using a parent Domain.
+func TestHTTPPreviewCookieIsHostOnlyAndRejectsSibling(t *testing.T) {
+	h := newHarness(t, func(c *Config) { c.PreviewScheme = "http"; c.PreviewPort = 8085 })
+	a, b := label("quiet-otter-3000"), label("quiet-otter-4000")
+	_, grant := h.check(fetchRequest(http.MethodGet, "http://quiet-otter-3000."+testDomain+":8085/?_token="+testToken), a, tokenRoute(a.Raw))
+	if !grant.Proceed || grant.SetCookie == nil {
+		t.Fatal("token did not issue a preview session")
+	}
+	cookie := grant.SetCookie
+	if cookie.Name != "umiak_auth" || cookie.Domain != "" || cookie.Secure || cookie.Path != "/" || !cookie.HttpOnly {
+		t.Fatalf("HTTP cookie must be host-only: %s", cookie)
+	}
+	if strings.Contains(strings.ToLower(cookie.String()), "domain=") {
+		t.Fatal("HTTP cookie serializes a Domain attribute")
+	}
+	request := func(host string) *http.Request {
+		r := fetchRequest(http.MethodGet, "http://"+host+"."+testDomain+":8085/")
+		r.AddCookie(cookie)
+		return r
+	}
+	if _, res := h.check(request(a.Raw), a, tokenRoute(a.Raw)); !res.Proceed {
+		t.Fatal("own label rejected its valid cookie")
+	}
+	w, res := h.check(request(b.Raw), b, tokenRoute(b.Raw))
+	assertDenied(t, w, http.StatusUnauthorized, "auth_required")
+	if res.Proceed || res.AuthResult != ResultInvalid {
+		t.Fatal("sibling accepted a cookie signed for another label")
+	}
+}
