@@ -145,7 +145,27 @@ test("dashboard navigation, appearance, responsive layout and page captures", as
 	await expect(
 		page.getByRole("button", { name: "Create", exact: true }),
 	).toBeEnabled();
+	const limitsResponse = await session.request.get("/api/v1/limits", {
+		headers: apiHeaders(team),
+	});
+	const defaults = (await limitsResponse.json()).defaults;
+	expect(defaults).toEqual({ ttlSeconds: null, idleTimeoutSeconds: 900 });
+	await expect(
+		page.getByRole("combobox", { name: "TTL", exact: true }),
+	).toContainText("Platform default (no TTL)");
+	await expect(
+		page.getByRole("combobox", { name: "Idle stop after", exact: true }),
+	).toContainText("Platform default (15 min)");
+	await expect(
+		page.getByRole("combobox", { name: "Environment", exact: true }),
+	).toContainText("base");
+	await expect(
+		page.getByRole("combobox", { name: "Size", exact: true }),
+	).toContainText("template default");
 	await capture("create");
+	await page.evaluate(() => document.documentElement.classList.add("dark"));
+	await capture("create-dark");
+	await page.evaluate(() => document.documentElement.classList.remove("dark"));
 	await ensureSandbox(session, team, `visual-${state.run}`);
 	await capture("sandbox-detail-ready");
 	for (const name of ["Terminal", "Commands", "Files", "Ports", "SSH", "Env"]) {

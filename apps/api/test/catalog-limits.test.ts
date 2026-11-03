@@ -99,6 +99,8 @@ describe.skipIf(skipPg())("templates, sizes and limits", () => {
 			loginUser: "user",
 			capabilities: ["exec", "files", "ssh"],
 			version: expect.stringMatching(/^v\d+$/),
+			buildCreatedAt: expect.any(String),
+			pveVmid: expect.any(Number),
 		});
 		expect(data.find((t) => t.slug === old)).toMatchObject({
 			capabilities: ["exec"],
@@ -166,6 +168,7 @@ describe.skipIf(skipPg())("templates, sizes and limits", () => {
 			],
 		});
 		expect((b.templates as Body[]).map((t) => t.slug)).not.toContain(off);
+		expect(b.defaults).toEqual({ ttlSeconds: null, idleTimeoutSeconds: 900 });
 		expect(b.rateLimits).toEqual({
 			requestsPerSecond: 20,
 			burst: 100_000,

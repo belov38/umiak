@@ -2027,6 +2027,11 @@ export interface components {
         Limits: {
             /** @description A sandbox of at least one allowed size fits the quota now */
             canCreate: boolean;
+            /** @description Effective platform lifecycle defaults; null disables the policy. Omitted by older servers. */
+            defaults?: {
+                idleTimeoutSeconds: number | null;
+                ttlSeconds: number | null;
+            };
             quota: {
                 maxActiveSandboxes: number;
                 maxRamMb: number;
@@ -2703,6 +2708,11 @@ export interface components {
         };
         Template: {
             allowedSizes: string[];
+            /**
+             * Format: date-time
+             * @description Creation date of the active build
+             */
+            buildCreatedAt?: string | null;
             /** @description What the template supports: exec, files, ssh, desktop */
             capabilities: string[];
             /** @example 2gb */
@@ -2717,6 +2727,8 @@ export interface components {
             name: string;
             /** @enum {string} */
             os: "linux" | "windows" | (string & {});
+            /** @description VMID of the active sealed template */
+            pveVmid?: number | null;
             /** @example linux */
             slug: string;
             /** @description Version of the active build; null while none is active */

@@ -317,3 +317,24 @@ export function parsePrefill(
 	}
 	return out;
 }
+
+/** Render only server-provided defaults; never guess when an old API omits them. */
+export function platformDefaultLabel(
+	seconds: number | null | undefined,
+	disabled: string,
+): string {
+	if (seconds === undefined) return "Platform default (unavailable)";
+	if (seconds === null) return `Platform default (${disabled})`;
+	const units = [
+		[86400, "day"],
+		[3600, "hour"],
+		[60, "min"],
+	] as const;
+	for (const [unit, name] of units) {
+		if (seconds % unit === 0) {
+			const count = seconds / unit;
+			return `Platform default (${count} ${name}${count !== 1 && name !== "min" ? "s" : ""})`;
+		}
+	}
+	return `Platform default (${seconds} s)`;
+}

@@ -80,8 +80,13 @@ export function registerLimitsRoutes(app: ApiApp, deps: ApiDeps): void {
 				sizes,
 			});
 		}
+		const defaults = await deps.config.defaults();
 		const rate = deps.settings.rate;
 		const body: Limits = {
+			defaults: {
+				ttlSeconds: defaults.ttlSeconds,
+				idleTimeoutSeconds: defaults.idleTimeoutSeconds,
+			},
 			quota: {
 				maxActiveSandboxes: quota.maxActiveSandboxes,
 				maxRamMb: quota.maxRamMb,

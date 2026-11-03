@@ -172,6 +172,7 @@ from .hosted_port_write_block_reason_type_3_type_1 import HostedPortWriteBlockRe
 from .hosted_port_write_host_rewrite import HostedPortWriteHostRewrite
 from .labels import Labels
 from .limits import Limits
+from .limits_defaults import LimitsDefaults
 from .limits_quota import LimitsQuota
 from .limits_rate_limits import LimitsRateLimits
 from .limits_remaining import LimitsRemaining
@@ -451,6 +452,7 @@ __all__ = (
     "HostPortRequestHostRewrite",
     "Labels",
     "Limits",
+    "LimitsDefaults",
     "LimitsQuota",
     "LimitsRateLimits",
     "LimitsRemaining",

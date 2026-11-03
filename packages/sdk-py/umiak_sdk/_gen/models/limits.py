@@ -6,7 +6,10 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
+from ..types import UNSET, Unset
+
 if TYPE_CHECKING:
+    from ..models.limits_defaults import LimitsDefaults
     from ..models.limits_quota import LimitsQuota
     from ..models.limits_rate_limits import LimitsRateLimits
     from ..models.limits_remaining import LimitsRemaining
@@ -29,6 +32,8 @@ class Limits:
         templates (list[LimitsTemplatesItem]):
         usage (LimitsUsage): Counted like the quota: sandboxes and their RAM while creating, ready, starting or
             stopping; saved snapshots creating or ready
+        defaults (LimitsDefaults | Unset): Effective platform lifecycle defaults; null disables the policy. Omitted by
+            older servers.
     """
 
     can_create: bool
@@ -37,6 +42,7 @@ class Limits:
     remaining: LimitsRemaining
     templates: list[LimitsTemplatesItem]
     usage: LimitsUsage
+    defaults: LimitsDefaults | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -55,6 +61,10 @@ class Limits:
 
         usage = self.usage.to_dict()
 
+        defaults: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.defaults, Unset):
+            defaults = self.defaults.to_dict()
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
@@ -67,11 +77,14 @@ class Limits:
                 "usage": usage,
             }
         )
+        if defaults is not UNSET:
+            field_dict["defaults"] = defaults
 
         return field_dict
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.limits_defaults import LimitsDefaults  # noqa: PLC0415
         from ..models.limits_quota import LimitsQuota  # noqa: PLC0415
         from ..models.limits_rate_limits import LimitsRateLimits  # noqa: PLC0415
         from ..models.limits_remaining import LimitsRemaining  # noqa: PLC0415
@@ -96,6 +109,13 @@ class Limits:
 
         usage = LimitsUsage.from_dict(d.pop("usage"))
 
+        _defaults = d.pop("defaults", UNSET)
+        defaults: LimitsDefaults | Unset
+        if isinstance(_defaults, Unset):
+            defaults = UNSET
+        else:
+            defaults = LimitsDefaults.from_dict(_defaults)
+
         limits = cls(
             can_create=can_create,
             quota=quota,
@@ -103,6 +123,7 @@ class Limits:
             remaining=remaining,
             templates=templates,
             usage=usage,
+            defaults=defaults,
         )
 
         limits.additional_properties = d
