@@ -73,3 +73,31 @@ The deployed tree also includes owner-signin commits `74a35b17` and `e96b5efa`
   `/tmp/windows-single-visuals/desktop-starting-dark.png`,
   `/tmp/windows-single-visuals/live-desktop-starting.png`,
   `/tmp/windows-single-visuals/live-desktop-ready.png`.
+
+### Acceptance follow-up rulings (2026-11-03)
+
+- A build carries `runtime.template_builds.headless`. Existing rows start NULL;
+  new registrations default false because current Windows recipes include desktop.
+  Before rekeying, the consolidation migration snapshots every original Windows
+  headless identity as true and the old desktop identity as false. Only true
+  builds retire. Replay never reclassifies a previously snapshotted build.
+- API capability and preview admission use the build flag, independent of slot.
+  An unclassified legacy Windows build is conservatively headless until its
+  original metadata has been verified. Quickstart excludes headless/unknown
+  Windows records from both detection and registration, including deprecated ones.
+- The consolidated enabled flag is the OR of both old flags. Keep a customized
+  canonical name; otherwise use the desktop name. Union both allowed-size lists
+  and the selected default; prefer the desktop default when set, then canonical.
+  Fallback 4gb/8gb applies only to unset size policies. Never revive an inactive
+  historical build. If duplicate desktop identities are active on one node,
+  preserve the newest active build and deprecate the other before rekeying.
+- Pre-release stands that already ran the faulty consolidation have lost the old
+  slug distinction. Do not infer it from VMID or re-run catalog conversion.
+  Classify those build IDs from verified original artifact metadata before
+  upgrading. On CT590 read-only PVE names identify `.7` as desktop and `.2` as
+  headless; record only the corresponding build flags, preserving owner sessions.
+- Legacy prefill accepts `windows-desktop`; catalog headings use operator names.
+  The OIDC visual fixture supplies an explicit desktop endpoint, matching the
+  production capability contract. Retired/headless artifact deletion requires
+  explicit force, regardless of VMID. Starting pages retain the request ID and
+  shared brand mark.
