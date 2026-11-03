@@ -185,3 +185,47 @@ SSH metadata reads also refresh the CLI tenancy cache without another request.
 - Claimed CT590 is an active owner deployment: preserve DB/owner volume, credentials
   and sandbox state. Test pairing on the isolated local ingress only; live checks
   are anonymous. Do not reset claim or use owner recovery during this round.
+
+### Round 4 rulings (s16-fix3, 2026-11-03)
+
+- Templates are base OS images; snapshots are saved sandbox disks. Dashboard
+  catalog is visible to members, with mutations restricted to owners/operators.
+  Rebuild requires explicit confirmation and a new free VMID; active versions and
+  running sandboxes must remain intact. The dev stand's 595–598 are read-only.
+- Template allocation has its own configurable range, disjoint from sandbox IDs.
+  Adoption preserves discovered VMIDs; inventory and nextid checks precede allocation.
+- Effective lifecycle defaults come from ConfigReader via additive optional
+  `/v1/limits.defaults` (`ttlSeconds`, `idleTimeoutSeconds`). Null disables a policy;
+  old servers without the field display unavailable rather than guessed defaults.
+  Template size and environment defaults use their existing API catalogs.
+- Windows media stays user supplied and licensed. HTTPS ISO downloads accept optional
+  SHA256 (Ilia update, 2026-11-03) and require explicit opt-in for internal
+  destinations. They run directly on PVE storage and report PVE task logs.
+  Missing checksums show "Not verified: the ISO will be used as downloaded";
+  computed hashes are recorded without claiming source verification. No media is shipped or hosted by Umiak.
+- Verification on claimed CT590 preserves owner credentials and sessions. No new
+  sandboxes, template builds, ISO downloads, firewall/network changes or host prep.
+
+### Round-3 acceptance incorporated in round 4
+
+- New owner CAs last ten years. Leaf expiry is capped at CA expiry, including
+  legacy one-year CAs. Thirty days before expiry, status/UI/logs require explicit
+  rotation; expiry never silently changes client trust.
+- TLS credentials are complete versioned generations selected by one atomic pointer.
+  Orphan staging directories are ignored after a crash. Console rotation suppresses
+  the obsolete pending-names warning; ingress reloads a changed pointer within
+  sixty seconds, before attempting renewal. Restart it for immediate activation.
+- Fresh prep and both adoption paths explicitly request pending SDN metadata for
+  zones, VNets and subnets. Any new/changed/deleted state blocks continuation;
+  the fake hides this metadata unless pending=1 was passed.
+- Installer signals terminate with conventional signal exit codes and clean once.
+  Public installer/download HEAD returns GET headers without ownership or a body.
+- Serve has a private configured upstream and no shared control-plane network,
+  but Docker routing can reach public host-published listeners. This is not a
+  firewall against published ports; their own authorization remains mandatory.
+
+Fresh preparation passes the configured template range into `/etc/umiak-node.toml`
+(default600–699, legacy-template override disabled). Later range expansion on an
+adopted host also requires the administrator to update the restricted node-agent
+range; build validation reports this before downloading media or creating a VM.
+Adoption never rewrites host configuration. Existing templates stay where they are.

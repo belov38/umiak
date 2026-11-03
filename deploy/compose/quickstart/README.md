@@ -143,11 +143,13 @@ Open the node's `https://umiak.YOUR-TAILNET.ts.net` URL (see
 Claim with the Docker log code, then `curl -fsSL https://umiak.YOUR-TAILNET.ts.net/install.sh | sh`
 and enter the CLI short code in the owner browser. No CA download or `--cacert` is needed.
 The state volume retains node identity; protect the auth key and do not commit it.
-Serve uses userspace networking and connects only to the private owner ingress;
+Serve uses userspace networking and its configured upstream is the private owner ingress;
 its internal HTTPS target skips certificate verification within a dedicated network
 shared only with quickstart. It connects by a fixed internal IP without SNI, so
 enabling Serve requires no new owner-CA name. The sidecar has no network in common
-with api, mcp, web or postgres. It never bypasses the owner gate. Tailscale identity headers are stripped,
+with api, mcp, web or postgres. Docker routing can still reach host-published
+quickstart and gateway ports; those are public listeners with their own authentication.
+This network arrangement is not a firewall against published host ports. It never bypasses the owner gate. Tailscale identity headers are stripped,
 not used as authentication. Funnel is disabled. The fixed sidecar address is used
 only to report public certificate handling in metadata, never to grant access.
 
