@@ -14,7 +14,10 @@ import {
 	test,
 } from "./fixtures.ts";
 
-const PROJECT = process.env.UMIAK_E2E_PROJECT ?? "umiak-e2e";
+const PROJECT =
+	process.env.UMIAK_E2E_PROJECT ??
+	process.env.COMPOSE_PROJECT_NAME ??
+	"umiak-e2e";
 
 function docker(args: string[]): {
 	ok: boolean;

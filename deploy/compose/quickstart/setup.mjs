@@ -213,7 +213,11 @@ export class SetupWizard {
 		const action = async () => {
 			const state = await this.store.read();
 			state.steps ??= {};
-			state.complete = false;
+			const preserveCompletion =
+				state.complete === true &&
+				name === "templates" &&
+				context.dashboardBuild === true;
+			state.complete = preserveCompletion;
 			if (!Object.hasOwn(this.steps, name))
 				throw new Error("Unknown setup step");
 			if (STEPS.includes(name)) {
@@ -235,7 +239,9 @@ export class SetupWizard {
 					delete state.hostReportAt;
 					delete state.preparation;
 				}
-				for (const next of STEPS.slice(STEPS.indexOf(name) + 1))
+				for (const next of preserveCompletion
+					? []
+					: STEPS.slice(STEPS.indexOf(name) + 1))
 					if (state.steps[next]) state.steps[next].status = "stale";
 				state.complete = STEPS.every(
 					(step) => state.steps[step]?.status === "ready",
@@ -243,6 +249,7 @@ export class SetupWizard {
 				await this.store.write(state);
 				return state;
 			} catch (error) {
+				if (preserveCompletion) throw error;
 				state.steps[name] = {
 					status: "error",
 					error: error.message,
@@ -777,7 +784,7 @@ export function createSetupHandler({
 							(
 								await nodeCheck(connectionOf(state), secretsDir, {
 									op: "media.sha256",
-									args: { name, storage },
+									args: { name, ...(storage !== "local" ? { storage } : {}) },
 								})
 							).sha256,
 					},
@@ -815,7 +822,7 @@ export function createSetupHandler({
 						manifest,
 					],
 				},
-				context,
+				{ ...context, dashboardBuild: true },
 			);
 		},
 	});

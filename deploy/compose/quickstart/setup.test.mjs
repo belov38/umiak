@@ -543,3 +543,28 @@ test("API adoption reads pending SDN metadata and refuses staged zone changes", 
 	);
 	assert.ok(paths.includes("/cluster/sdn/zones/umiak?pending=1"));
 });
+
+test("dashboard template registration preserves completion and smoke; wizard registration invalidates smoke", async () => {
+	for (const dashboardBuild of [true, false]) {
+		let state = {
+			complete: true,
+			steps: Object.fromEntries(
+				["connection", "host", "limits", "network", "templates", "smoke"].map(
+					(name) => [name, { status: "ready", data: {} }],
+				),
+			),
+		};
+		const wizard = new SetupWizard({
+			store: {
+				read: async () => structuredClone(state),
+				write: async (next) => {
+					state = next;
+				},
+			},
+			steps: { templates: async () => ({ builds: [] }) },
+		});
+		await wizard.run("templates", {}, { dashboardBuild });
+		assert.equal(state.complete, dashboardBuild);
+		assert.equal(state.steps.smoke.status, dashboardBuild ? "ready" : "stale");
+	}
+});

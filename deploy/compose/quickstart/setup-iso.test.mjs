@@ -35,7 +35,12 @@ test("URL accepts public HTTPS and rejects credentials, private DNS and invalid 
 		allowInternal: true,
 	});
 });
-function fake({ files = [], exitstatus = "OK", permission = true } = {}) {
+function fake({
+	files = [],
+	exitstatus = "OK",
+	permission = true,
+	log = [{ t: "download progress 100%" }],
+} = {}) {
 	const posts = [];
 	return {
 		posts,
@@ -50,7 +55,7 @@ function fake({ files = [], exitstatus = "OK", permission = true } = {}) {
 						}
 					: {};
 			if (path.endsWith("/content")) return files;
-			if (path.endsWith("/log")) return [{ t: "download progress 100%" }];
+			if (path.includes("/log")) return log;
 			if (path.endsWith("/status")) return { status: "stopped", exitstatus };
 			throw Error(path);
 		},
@@ -180,4 +185,70 @@ test("download preflight rejects internal redirect before PVE starts", async () 
 		/internal/,
 	);
 	assert.equal(api.posts.length, 0);
+});
+
+test("IPv6 transition ranges cannot bypass private IPv4 rules", async () => {
+	for (const host of ["2002:7f00:1::", "2001:0:1234::"])
+		await assert.rejects(validateMediaUrl(`https://[${host}]/a.iso`, sha));
+});
+for (const target of [
+	"https://127.0.0.1/a.iso",
+	"http://example.com/a.iso",
+	"https://example.com/a.iso",
+])
+	test(`PVE GET redirect audit: ${target}`, async () => {
+		const api = fake({
+			log: [
+				{ t: `Location: ${target} [following]` },
+				{
+					t: "Connecting to example.com (example.com)|93.184.216.34|:443... connected.",
+				},
+			],
+		});
+		const deleted = [];
+		api.delete = async (path) => deleted.push(path);
+		const action = prepareWindowsMedia(api, "pve", input, { resolve, head });
+		if (target.startsWith("https://example")) {
+			await action;
+			assert.equal(deleted.length, 0);
+		} else {
+			await assert.rejects(action, /download.*audit/i);
+			assert.equal(deleted.length, 1);
+			assert.match(deleted[0], /storage\/local\/content\/local%3Aiso/);
+		}
+	});
+test("PVE connecting address is audited even when DNS preflight is public", async () => {
+	const api = fake({
+		log: [
+			{
+				t: "Connecting to example.com (example.com)|10.0.0.1|:443... connected.",
+			},
+		],
+	});
+	let deleted = false;
+	api.delete = async () => {
+		deleted = true;
+	};
+	await assert.rejects(
+		prepareWindowsMedia(api, "pve", input, { resolve, head }),
+		/download.*audit/i,
+	);
+	assert.equal(deleted, true);
+});
+
+test("HEAD unavailable remains advisory; GET task log is audited before accepting download", async () => {
+	for (const headResult of [
+		async () => ({ ok: false, status: 405, headers: new Headers() }),
+		async () => {
+			throw Error("HEAD unsupported");
+		},
+	]) {
+		const api = fake();
+		const result = await prepareWindowsMedia(api, "pve", input, {
+			resolve,
+			head: headResult,
+		});
+		assert.equal(result.mediaVerification, "verified");
+		assert.equal(api.posts.length, 1);
+	}
 });

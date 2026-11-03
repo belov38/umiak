@@ -69,8 +69,15 @@ export function pinnedPve(connection, tokenSecret) {
 		post(path, data) {
 			return this.request("POST", path, data);
 		},
+		delete(path) {
+			return this.request("DELETE", path);
+		},
 		request(method, path, data) {
-			if (!/^\/[a-zA-Z0-9_@!./%-]+(?:\?pending=1)?$/.test(path))
+			if (
+				!/^\/[a-zA-Z0-9_@!./%-]+(?:\?pending=1|\?start=\d+&limit=500)?$/.test(
+					path,
+				)
+			)
 				throw new Error("Invalid PVE API path");
 			const url = new URL(`/api2/json${path}`, connection.apiUrl);
 			return new Promise((resolve, reject) => {
@@ -179,7 +186,14 @@ export async function checkNode(
 				);
 			try {
 				const result = JSON.parse(output);
-				if (result.error) throw new Error("node-agent rejected operation");
+				if (result.error)
+					return reject(
+						new Error(
+							typeof result.error === "string"
+								? result.error
+								: result.error.message || JSON.stringify(result.error),
+						),
+					);
 				resolve(result.result ?? result);
 			} catch {
 				reject(new Error("Node-agent returned an invalid version response"));

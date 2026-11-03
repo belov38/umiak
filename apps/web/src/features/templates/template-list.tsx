@@ -94,7 +94,7 @@ export function TemplateList({
 				Rebuilding creates a new version in a free slot; existing sandboxes and
 				snapshots keep their original disks.
 			</p>
-			{error && (
+			{error && !selected && (
 				<p role="alert" className="text-sm text-destructive">
 					{error}
 				</p>
@@ -312,8 +312,7 @@ export function TemplateList({
 							<p className="text-sm text-muted-foreground">
 								This starts a VM build and uses host RAM. A rebuild requires
 								another free template slot. The active template and running
-								sandboxes are preserved. On the dev stand, rebuilding templates
-								595–598 requires the master's approval.
+								sandboxes are preserved. Confirm below to start the build.
 							</p>
 							{selected.windows && (
 								<>
@@ -375,6 +374,7 @@ export function TemplateList({
 										<Input
 											id="tpl-virtioSha256"
 											name="virtioSha256"
+											defaultValue="bbe6166ad86a490caefad438fef8aa494926cb0a1b37fa1212925cfd81656429"
 											pattern="[a-fA-F0-9]{64}"
 										/>
 									</label>

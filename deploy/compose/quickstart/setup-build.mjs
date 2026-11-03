@@ -6,6 +6,8 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
+import { validateUploadedIso } from "./setup-iso.mjs";
+
 import { templateRange, validateTemplateRange } from "./setup-vmids.mjs";
 
 const exec = promisify(execFile);
@@ -88,11 +90,15 @@ export function buildInvocation(
 	];
 	if (slug.startsWith("windows")) {
 		if (
-			!/^[A-Za-z0-9._()+-]+\.iso$/i.test(input.iso || "") ||
+			!validateUploadedIso(input.iso) ||
 			!/^[a-fA-F0-9]{64}$/.test(input.isoSha256 || "")
 		)
 			throw new Error("Windows needs an uploaded ISO file name and its SHA256");
-		args.push("--iso", input.iso, "--iso-sha256", input.isoSha256);
+		const [storage, name] = input.iso.includes(":iso/")
+			? input.iso.split(":iso/")
+			: [null, input.iso];
+		if (storage) env.UMIAK_PVE_MEDIA_STORAGE = storage;
+		args.push("--iso", name, "--iso-sha256", input.isoSha256);
 		if (input.virtioIso)
 			args.push(
 				"--virtio-iso",
@@ -284,7 +290,6 @@ export class TemplateBuildJobs {
 			if (current.buildJob?.status === "running")
 				throw new Error("A template build is already running");
 			current.buildJob = job;
-			current.complete = false;
 		});
 		this.pending = (async () => {
 			try {

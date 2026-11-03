@@ -203,3 +203,41 @@ test("ISO verification is retained in a build record after a later build", async
 	);
 	assert.equal(data.buildRecords[first.id].manifest.isoSha256, "a".repeat(64));
 });
+
+for (const fails of [false, true])
+	test(`completed setup survives a ${fails ? "failed" : "successful"} dashboard build`, async () => {
+		let data = { ...structuredClone(state), complete: true };
+		const jobs = new TemplateBuildJobs({
+			store: {
+				read: async () => structuredClone(data),
+				write: async (x) => {
+					data = x;
+				},
+			},
+			run: async () => {
+				if (fails) throw Error("failed");
+				return { templateSlug: "linux" };
+			},
+		});
+		await jobs.start("linux");
+		assert.equal(data.complete, true);
+		await jobs.settled();
+		assert.equal(data.complete, true);
+	});
+test("build accepts the documented PVE ISO volume", () => {
+	const invocation = buildInvocation(
+		"windows",
+		state,
+		"/secrets",
+		"https://stack",
+		"/assets",
+		"build",
+		{
+			templateVmid: 702,
+			iso: "images:iso/windows.iso",
+			isoSha256: "a".repeat(64),
+		},
+	);
+	assert.ok(invocation.args.includes("windows.iso"));
+	assert.equal(invocation.env.UMIAK_PVE_MEDIA_STORAGE, "images");
+});
