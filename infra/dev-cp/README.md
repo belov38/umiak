@@ -348,7 +348,7 @@ agent state through QGA as SYSTEM and retries `503 desktop_starting` with a fres
 Create 139–146 s, first stream open ~22 s. `UMIAK_E2E_SANDBOX=<slug>` reuses an existing sandbox
 for diagnostics (it is not deleted; idle observation needs the `e2e=desktop` label).
 
-## S16 quickstart stand (2026-11-03, s16-fix)
+## S16 quickstart stand (2026-11-03, s16-fix2)
 
 Primary URL (Tailscale Serve, public Let's Encrypt TLS):
 **https://umiak-dev-cp.tail0000.ts.net:8443/app**.
@@ -357,8 +357,10 @@ Your sandboxes directly and uses plain Settings; teams remain internal. Existing
 localhost8444; Docker guest gateway remains bound to0.0.0.0:443, with unchanged
 certificates and CA. Serve identity headers do not grant access.
 
-The stand is configured and left **unclaimed** after testing. All test owner
-browser/CLI sessions were revoked and the exposed old claim code invalidated.
+The stand is **claimed** by its owner. Round-3 redeployment preserved the owner
+state and both existing sessions byte-for-byte; no recovery, claim or test pairing
+was performed. Open it using your existing signed-in browser. The bootstrap steps
+below apply only to a new/unclaimed deployment.
 
 1. Read the newest one-time code privately:
 
@@ -391,10 +393,11 @@ ssh umiak@100.64.10.7 'docker exec umiak-quickstart-1 cat /var/lib/umiak/owner/t
 openssl x509 -in ~/.config/umiak/quickstart-ca.pem -noout -fingerprint -sha256
 ```
 
-Owner CA SHA256 (rotated for s16-fix):
-`7F:3A:CA:91:3B:D1:E6:B3:FA:2C:11:9E:C1:32:A0:0A:09:91:45:13:36:6A:2A:F4:48:E0:E7:85:51:52:20:F5`.
-The earlier downloaded CA is obsolete; it must not be trusted. This CA permits only
-configured/local names. Adding a name in `/owner/tls` requires explicit CA rotation
+Owner CA SHA256 (rotated for s16-fix2 Bun compatibility):
+`3D:9E:7C:CA:2F:C2:A8:78:51:3E:D3:99:80:E3:10:03:F5:1D:B9:02:68:54:A3:95:F2:51:42:70:6E:E2:E6:64`.
+The earlier downloaded CA is obsolete; it must not be trusted. This CA constrains DNS names only; IP names are unconstrained at the CA level
+because Bun 1.4.4 rejects IP constraints. Leaf issuance remains restricted to
+configured names, and the signing key stays in the owner volume. Adding a name in `/owner/tls` requires explicit CA rotation
 and renewed trust. CA lifetime365 days; rotate before expiry. LAN reachability was
 not tested from the off-LAN Mac; direct tailnet TLS and arbitrary-SNI rejection were.
 
@@ -409,3 +412,10 @@ Deploy: `infra/dev-cp/deploy-quickstart.sh`. Generic optional sidecar:
 `deploy/compose/quickstart/README.md`. No new Tailscale node/key is needed on CT590.
 Rollback: `UMIAK_DEVCP_SSH=umiak@100.64.10.7 UMIAK_DEVCP_AUTH_MODE=none infra/dev-cp/deploy.sh`
 (or `oidc`), reusing S15 DB and secrets. Rollback restores its Serve configuration.
+
+Round-3 checks: public Serve8443 installer with gzip and TTY/non-TTY progress;
+compiled native CLI anonymous metadata through tailnet4180, compiled Linux CLI
+anonymous metadata on LAN192.168.68.90:4180; unauthorized owner API remains401.
+No new pairing request or sandbox was created. Guest gateway443 and its three TLS
+file checksums are unchanged. For install-only checks use
+`UMIAK_INSTALL_SKIP_LOGIN=1`; pair only from an owner-approved interactive login.

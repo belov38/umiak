@@ -281,3 +281,58 @@ Final screenshots (single-owner dashboard, actual CT590):
 - Light: /Users/ib/.t3/userdata/browser-artifacts/browser-screenshot-umiak-dev-cp-tail0000-ts-net-mvzzbv8h-0681e7de.png
 - Dark: /Users/ib/.t3/userdata/browser-artifacts/browser-screenshot-umiak-dev-cp-tail0000-ts-net-mvzzbvds-571f9c06.png
 - Empty onboarding: /Users/ib/.t3/userdata/browser-artifacts/browser-screenshot-umiak-dev-cp-tail0000-ts-net-mvzzd4d1-12ed4007.png
+
+## Round 3 — s16-fix2
+
+Technical rulings: see the round-3 spec section. Preserve claimed CT590 owner state;
+no test pairing, session recovery or sandbox lifecycle on this active stand.
+
+- [x] Reproduce compiled Bun IP-constraint failure; DNS-only CA constraints and IP SANs.
+- [x] Compile-native CLI TLS regression through actual quickstart ingress.
+- [x] Pass initial TLS names, keep serving on expansion, expose rotation warning/action.
+- [x] Dedicated Serve network, no upstream access; runtime leaf renewal.
+- [x] Prep storage/subnet/media/atexit fixes with generated-script tests.
+- [x] Collapsible wizard, consistent network instructions and local template docs.
+- [x] gzip installer with archive/final hashes, TTY progress and install-only mode.
+- [x] Final gate and state-preserving stand redeploy/live checks (evidence below).
+
+### Round-3 verification evidence
+
+- Bun latest release API returned `bun-v1.4.4`, matching every existing pin.
+  Before the fix, the compiled native binary failed GET /v1/meta with
+  `unsupported name constraint type (network_error)`, exit75. With DNS-only
+  constraints the same compiled binary starts pairing over localhost and127.0.0.1.
+- `pnpm build`, lint and typecheck: PASS. Sequential workspace suite:4538 TS
+  passed,8 skipped; Python SDK83 passed. Five Go modules build/vet/test-p1/lint:
+  PASS. OIDC Playwright22/22 and local1/1 PASS; both stacks/volumes removed.
+- Node quickstart/local/meta-proxy87/87 PASS, including compiled CLI, one-day leaf
+  runtime renewal, first-boot configured names, pending-name restart/rotation,
+  sidecar network assertion, browser-vs-JSON unauthorized guide and prep atexit.
+  Shellcheck PASS, including generated prep shell. Root and Serve compose config PASS.
+- Full Node gate caught an outdated callback fixture lacking newly required
+  mediaStorage; updated it. Compiled TLS test uses isolated XDG config/state paths.
+- Live CT590 was already claimed. DB owner state MD5 remained identical before/
+  after redeployment, with two existing sessions. No claim/recovery/test pairing,
+  VM creation/deletion, fresh prep, template rebuild or firewall change occurred.
+  PVE had no sandbox500–589; DB had no unfinished operations immediately before
+  each short ingress restart. Rebuilt only quickstart and recreated it without
+  dependencies; other running services and named volumes were preserved.
+- Owner CA explicitly rotated to DNS-only constraints, SHA256
+  `3D:9E:7C:CA:2F:C2:A8:78:51:3E:D3:99:80:E3:10:03:F5:1D:B9:02:68:54:A3:95:F2:51:42:70:6E:E2:E6:64`.
+  Old trust must be replaced on private paths. Guest CA/tunnel/preview certificates
+  remained byte-identical, and guest gateway443 was not restarted.
+- Anonymous compiled native CLI refreshed tenancy to single over tailnetIP4180
+  with the owner CA, then received expected owner_required from /v1/me. Compiled
+  Linux binary did the same on https://192.168.68.90:4180. curl verified the LAN IP
+  certificate through a tailnet connection alias. No pairing POST was performed.
+- Public Serve https://umiak-dev-cp.tail0000.ts.net:8443 remained available and
+  reported ownerClaimed=true. Installer live checks use install-only mode, preserving
+  sessions. Native gzip size90,976,226→40,887,362 bytes (55.1% smaller).
+- Real Serve check caught missing Content-Length: curl displayed an indeterminate
+  animation. Added exact asset size with a failing-then-passing regression, then
+  repeated the full Node suite and live TTY/non-TTY installer checks.
+
+Remaining scope limits: owner-only live pairing/lifecycle intentionally omitted on
+claimed stand; covered by local compiled-ingress tests and existing lifecycle gates.
+Fresh-host prep and template builds remain faked/dry-run (forbidden on this stand).
+Independent acceptance/master merge remains outstanding.

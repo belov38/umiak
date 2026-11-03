@@ -153,3 +153,34 @@ bridge on both networks forwards only exact anonymous GET /v1/meta, with no
 credentials/identity headers and no host-published port. It exposes no other API
 route. The dashboard consumes the same API tenancy through this bridge. Existing
 SSH metadata reads also refresh the CLI tenancy cache without another request.
+
+### Round 3 rulings (s16-fix2, 2026-11-03)
+
+- Latest stable Bun is 1.4.4 (checked upstream releases). The compiled CLI rejects
+  any IP name constraint; retain the pinned runtime and standard TLS verification.
+  New owner CAs constrain DNS subtrees only. IPs remain leaf SANs, but the CA is
+  **unconstrained for IP names**. The ingress issues only configured names and
+  keeps the signing key inside its owner volume. Existing IP-constrained CAs need
+  explicit rotation and replacement of client trust; sessions are unaffected.
+- New configured names never crash the ingress: retain its existing CA/allowlist,
+  warn in logs, certificates and setup, then require owner UI or Docker console
+  rotation. Check leaf expiry daily and renew under the same CA without restart.
+- Serve sidecars share a dedicated network only with ingress; they cannot reach
+  API, MCP, web or Postgres. An always-present ingress IP SAN avoids CA expansion
+  when enabling Serve. Source addresses may be Docker NAT addresses; approval
+  relies on the short code and client details, never source identity.
+- Wizard uses collapsible sequential steps. Apply network settings with
+  `docker compose up -d --force-recreate gateway-secrets && docker compose restart gateway worker api web`.
+  Manual template instructions refer to the operator's checkout.
+- Fresh preparation validates storage before any writes, checks pending subnet
+  objects as well as zones/VNets, discovers node-eligible ISO/import media storage,
+  and uses its actual ID for ACLs, node-agent paths and builder configuration.
+  Atexit owns a single quiet rollback-timer cancellation.
+- Installer uses gzip, available by default on macOS and common Linux distributions.
+  DOWNLOADS supplies version and compressed byte size; SHA256SUMS verifies both
+  archive and final executable before atomic replacement. TTY stderr gets curl's
+  progress bar; redirected stderr gets a quiet transfer with a size announcement.
+  `UMIAK_INSTALL_SKIP_LOGIN=1` supports install-only verification without pairing.
+- Claimed CT590 is an active owner deployment: preserve DB/owner volume, credentials
+  and sandbox state. Test pairing on the isolated local ingress only; live checks
+  are anonymous. Do not reset claim or use owner recovery during this round.
