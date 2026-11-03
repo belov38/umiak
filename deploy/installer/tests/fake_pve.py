@@ -1,233 +1,230 @@
-# Test harness: run the real generated Python program against a fake PVE/host.
-import atexit
-import base64
-import hashlib
-import io
+# Fake Proxmox VE host for installer tests: an in-memory pvesh/pveum model plus
+# a sandboxed filesystem root. Every argv the library runs is recorded.
 import json
-import os
 from pathlib import Path
-import pathlib
-import socket
-import ssl
-import subprocess
-import sys
-import tempfile
-import urllib.request
 
-source = Path(sys.argv[1]).read_text()
-scenario = sys.argv[2] if len(sys.argv) > 2 else "success"
-fail_callback = scenario in ["partial-failure-rerun", "nonempty-delete"]
-roles, users, tokens, acls = [], [], [], []
-original_path = Path
-sandbox = original_path(tempfile.mkdtemp(prefix="umiak-prep-fake-"))
-commands = []
-objects = {"/cluster/firewall/options": {"enable": 0 if scenario == "disabled-firewall" else 1}, "/nodes/pve/firewall/options": {"enable": 1}, "/cluster/sdn/zones": [], "/cluster/sdn/vnets": [], "/access/acl": acls, "/storage": [{"storage":"media","type":"dir","content":"iso,import","path":"/srv/media"}], "/storage/fast": {"type":"lvmthin","vgname":"custom-vg","thinpool":"custom-pool"}}
-if scenario == "pending-sdn": objects["/cluster/sdn/zones"] = [{"zone":"foreign","pending":1}]
-if scenario == "pending-subnet":
-    objects["/cluster/sdn/vnets"] = [{"vnet":"foreign"}]
-    objects["/cluster/sdn/vnets/foreign/subnets"] = [{"subnet":"foreign-10.9.0.0-24","state":"changed"}]
-if scenario.startswith("pending-state-"):
-    _, _, kind, state = scenario.split("-", 3)
-    if kind == "zone": objects["/cluster/sdn/zones"] = [{"zone":"foreign", "state":state}]
-    elif kind == "vnet": objects["/cluster/sdn/vnets"] = [{"vnet":"foreign", "state":state}]
-    else:
-        objects["/cluster/sdn/vnets"] = [{"vnet":"foreign"}]
-        objects["/cluster/sdn/vnets/foreign/subnets"] = [{"subnet":"foreign-10.9.0.0-24", "state":state}]
-agent = b"fake-node-agent"
-report = {}
-config = {"origin": "http://stack.example:4180", "token": "a" * 64, "node": "pve", "gateway": "192.168.68.90", "publicKey": "ssh-ed25519 AAAA test", "tokenId": "developer@pve!quickstart", "nodeSha256": hashlib.sha256(agent).hexdigest(), "storage": "fast", "templateVmidMin": 700, "templateVmidMax": 704}
+from umiak_installer.pve import CommandError, Runner
+
+HOST_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHostKeyOfPve root@pve"
+
+# Commands that change host or cluster state (used to assert "no writes").
+MUTATING = {
+    ("pvesh", "create"),
+    ("pvesh", "set"),
+    ("pvesh", "delete"),
+    ("systemd-run",),
+    ("ssh-keygen",),
+    ("ip", "link"),
+    ("apt-get",),
+}
 
 
-def mapped(value="."):
-    text = str(value)
-    return original_path(text) if text.startswith(str(sandbox)) else sandbox / text.lstrip("/") if text.startswith("/") else original_path(value)
+def is_mutation(argv):
+    if argv[0] == "pveum":
+        return argv[1:3] not in (["role", "list"], ["user", "list"]) and argv[1:4] != ["user", "token", "list"]
+    return any(tuple(argv[: len(prefix)]) == prefix for prefix in MUTATING)
 
 
-for name, value in {
-    "/usr/sbin/dnsmasq": "fake",
-    "/sys/class/net/vmbr0/bridge/mcast_hash_max": "1024",
-    "/etc/ssl/certs/ca-certificates.crt": "fake-ca",
-    "/etc/pve/pve-root-ca.pem": "fake-pve-ca",
-    "/etc/pve/priv/authorized_keys": "existing-management-key\n",
-    "/etc/ssh/ssh_host_ed25519_key.pub": "ssh-ed25519 AAAA host\n",
-}.items():
-    file = mapped(name)
-    file.parent.mkdir(parents=True, exist_ok=True)
-    file.write_text(value)
+class FakeRunner(Runner):
+    def __init__(
+        self,
+        root: Path,
+        *,
+        dnsmasq=True,
+        ip_forward="1",
+        firewall=1,
+        euid=0,
+        hostname="pve",
+        version="9.0.11",
+        quorate=1,
+        guests=None,
+    ):
+        super().__init__(root)
+        self.commands = []
+        self.inputs = []
+        self._euid = euid
+        self._hostname = hostname
+        self.fail_on = None  # predicate(argv) -> bool: inject a command failure
+        self.token_counter = 0
+        self.roles, self.users, self.tokens, self.acls = [], [], [], []
+        self.objects = {
+            "/version": {"version": version, "release": version.rsplit(".", 1)[0]},
+            "/cluster/status": [
+                {"type": "cluster", "name": "ms02", "quorate": quorate, "nodes": 2},
+                {"type": "node", "name": "pve", "ip": "192.168.68.10", "local": 1, "online": 1},
+                {"type": "node", "name": "pve2", "ip": "192.168.68.11", "local": 0, "online": 1},
+            ],
+            "/cluster/resources": list(guests or [{"vmid": 103, "type": "qemu", "name": "ilia-vm"}]),
+            "/cluster/firewall/options": {"enable": firewall},
+            "/nodes/pve/firewall/options": {"enable": 1},
+            "/nodes/pve/qemu": [],
+            "/cluster/sdn/zones": [],
+            "/cluster/sdn/vnets": [],
+            "/access/acl": self.acls,
+            "/storage": [
+                {"storage": "local", "type": "dir", "content": "iso,vztmpl,backup,import", "path": "/var/lib/vz"},
+                {"storage": "local-lvm", "type": "lvmthin", "content": "rootdir,images", "vgname": "pve", "thinpool": "data"},
+            ],
+            "/storage/local-lvm": {"type": "lvmthin", "vgname": "pve", "thinpool": "data"},
+            "/storage/local": {"type": "dir", "path": "/var/lib/vz"},
+        }
+        files = {
+            "/sys/class/net/vmbr0/bridge/mcast_hash_max": "1024",
+            "/etc/pve/pve-root-ca.pem": "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n",
+            "/etc/pve/priv/authorized_keys": "ssh-rsa AAAA existing-management-key\n",
+            "/etc/ssh/ssh_host_ed25519_key.pub": HOST_KEY + "\n",
+        }
+        if dnsmasq:
+            files["/usr/sbin/dnsmasq"] = "fake"
+        self.ip_forward = ip_forward
+        for name, value in files.items():
+            path = self.path(name)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(value)
+        for name in ["/var/lib", "/usr/local/bin", "/etc"]:
+            self.path(name).mkdir(parents=True, exist_ok=True)
 
+    def euid(self):
+        return self._euid
 
-for name in ["/var/lib", "/usr/local/bin"]:
-    mapped(name).mkdir(parents=True, exist_ok=True)
+    def hostname(self):
+        return self._hostname
 
+    def mutations(self):
+        return [argv for argv in self.commands if is_mutation(argv)]
 
-class Reply:
-    status = 200
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_):
-        return None
-
-    def read(self):
-        return agent
-
-
-def urlopen(request, **_kwargs):
-    if isinstance(request, urllib.request.Request):
-        if fail_callback:
-            raise RuntimeError("injected callback failure")
-        report.update(json.loads(request.data))
-    else:
-        assert request == config["origin"] + "/pve-setup.sh?token=" + config["token"] + "&asset=node-agent"
-    return Reply()
-
-
-def run(args, **kwargs):
-    args = list(args)
-    commands.append(args)
-    out = ""
-    if scenario == "collected-timer" and args[:2] == ["systemctl", "stop"]:
-        assert not kwargs.get("check")
-        assert kwargs.get("stderr") == subprocess.DEVNULL
-        return subprocess.CompletedProcess(args, 5, stdout="", stderr="timer already collected")
-    if args[:3] == ["pvesh", "get", "/cluster/sdn/zones/umiak"] and "/cluster/sdn/zones/umiak" not in objects:
-        raise subprocess.CalledProcessError(2, args)
-    if args[:2] == ["pvesh", "get"]:
-        path = args[2]
-        if path not in objects:
-            raise subprocess.CalledProcessError(2, args)
-        value = objects[path]
-        if "--pending" not in args:
-            if isinstance(value, list): value = [{key: item for key,item in row.items() if key not in ["pending", "state"]} for row in value]
-            elif isinstance(value, dict): value = {key:item for key,item in value.items() if key not in ["pending", "state"]}
-        else:
-            assert args[args.index("--pending") + 1] == "1"
-        out = json.dumps(value)
-    elif args[:2] == ["pvesh", "create"]:
-        path = args[2]
-        values = dict(zip(args[3::2], args[4::2], strict=True))
-        child = values.get("--zone") if path.endswith("zones") else values.get("--vnet") if path.endswith("vnets") else values.get("--subnet") or values.get("--name") or values.get("--group")
-        if child:
-            child_path = path + "/" + child
-            if "subnets" in path: child_path = path + "/umiak-10.88.0.0-24"
-            if child_path in objects: raise subprocess.CalledProcessError(2,args)
-            objects[child_path] = [] if "/firewall/" in path else {key.removeprefix("--"): value for key,value in values.items()}
-        elif path in objects and isinstance(objects[path],list):
-            row = {key.removeprefix("--"): value for key,value in values.items()}
-            if "cidr" in row:
-                if any(old.get("cidr") == row["cidr"] for old in objects[path]): raise subprocess.CalledProcessError(2,args)
-                objects[path].append(row)
+    def run(self, argv, input=None):
+        argv = list(argv)
+        assert all(isinstance(part, str) for part in argv), argv
+        self.commands.append(argv)
+        self.inputs.append(input)
+        if self.fail_on and self.fail_on(argv):
+            raise CommandError(argv, 1, "", "injected failure")
+        out = ""
+        head = argv[:2]
+        if head == ["pvesh", "get"]:
+            path = argv[2]
+            if path not in self.objects:
+                raise CommandError(argv, 2, "", "no such object")
+            value = self.objects[path]
+            if "--pending" not in argv:
+                if isinstance(value, list):
+                    value = [{k: v for k, v in row.items() if k not in ["pending", "state"]} for row in value]
+                elif isinstance(value, dict):
+                    value = {k: v for k, v in value.items() if k not in ["pending", "state"]}
             else:
-                objects[path].insert(int(values.get("--pos",0)),row)
-                for pos,row in enumerate(objects[path]): row["pos"] = pos
-        out = "{}"
-    elif args[:2] == ["pvesh", "delete"]:
-        path = args[2]
-        if path in objects:
-            if isinstance(objects[path],list) and objects[path]: raise subprocess.CalledProcessError(2,args)
-            del objects[path]
-        else:
-            parent, key = path.rsplit("/",1)
-            rows = objects.get(parent,[])
-            objects[parent] = [row for row in rows if str(row.get("cidr",row.get("pos"))) != key]
-    elif args[:3] == ["pvesh", "set", "/cluster/sdn"]:
-        mapped("/sys/class/net/vmbr0/bridge/mcast_hash_max").write_text("8192")
-    elif args[:3] == ["ip", "link", "set"]:
-        mapped("/sys/class/net/vmbr0/bridge/mcast_hash_max").write_text(args[-1])
-    elif args[:2] == ["sysctl", "-n"]:
-        out = "1"
-    elif args[:2] == ["pveum", "role"]:
-        if args[2] == "list": out = json.dumps(roles)
-        elif args[2] == "add": roles.append({"roleid":args[3]})
-        elif args[2] == "delete": roles[:] = [x for x in roles if x["roleid"] != args[3]]
-    elif args[:3] == ["pveum", "pool", "add"]:
-        objects["/pools/"+args[3]] = {}
-    elif args[:3] == ["pveum", "pool", "delete"]:
-        objects.pop("/pools/"+args[3],None)
-    elif args[:2] == ["pveum", "user"]:
-        if args[2] == "list": out = json.dumps(users)
-        elif args[2] == "add": users.append({"userid":args[3]})
-        elif args[2] == "delete": users[:] = [x for x in users if x["userid"] != args[3]]
-        elif args[2:4] == ["token","list"]: out = json.dumps(tokens)
-        elif args[2:4] == ["token","add"]:
-            tokens.append({"tokenid":args[5]}); out = json.dumps({"value":"fake-secret"})
-        elif args[2:4] == ["token","remove"]: tokens[:] = [x for x in tokens if x["tokenid"] != args[5]]
-    elif args[:2] == ["pveum", "acl"]:
-        acl = {"path":args[3], "ugid":args[5], "roleid":args[7]}
-        if args[2] == "modify": acls.append(acl)
-        elif args[2] == "delete": acls[:] = [x for x in acls if x != acl]
-    elif args[-1] == "--stdio":
-        out = json.dumps({"ok": True, "result": {"version": "fake"}})
-    return subprocess.CompletedProcess(args, 0, stdout=out, stderr="")
-
-
-pathlib.Path = mapped
-subprocess.run = run
-os.geteuid = lambda: 0
-socket.gethostname = lambda: "pve"
-ssl.create_default_context = lambda **_: object()
-urllib.request.urlopen = urlopen
-sys.argv = ["setup-prep.py", base64.b64encode(json.dumps(config).encode()).decode()]
-def execute():
-    namespace = {"__name__": "__main__"}
-    try:
-        exec(compile(source, "setup-prep.py", "exec"), namespace)
-    except BaseException:
-        if "rollback_on_exit" in namespace:
-            atexit.unregister(namespace["rollback_on_exit"])
-            namespace["rollback_on_exit"]()
-        raise
-    finally:
-        pass
-    return namespace
-
-if scenario == "disabled-firewall" or scenario.startswith("pending-"):
-    try: execute()
-    except SystemExit as error: assert "firewall" in str(error) or "Pending SDN" in str(error)
-    else: raise AssertionError("Disabled firewall accepted")
-    assert not any(args[0] in ["pveum","systemd-run"] or args[:2] == ["pvesh","create"] for args in commands)
-    assert not mapped("/var/lib/umiak-quickstart").exists()
-    print("SCENARIO PASS: " + scenario)
-    sys.exit(0)
-if fail_callback:
-    before_objects = json.loads(json.dumps(objects))
-    try: execute()
-    except RuntimeError as error: assert "injected" in str(error)
-    else: raise AssertionError("Failure not injected")
-    assert not roles and not users and not tokens and not acls
-    assert objects == before_objects, (objects, before_objects)
-    assert not mapped("/usr/local/bin/umiak-node").exists()
-    assert not mapped("/etc/umiak-node.toml").exists()
-    assert mapped("/etc/pve/priv/authorized_keys").read_text() == "existing-management-key\n"
-    fail_callback = False
-namespace = execute()
-# Run the real registered atexit callback before retrying in this test process.
-atexit._run_exitfuncs()
-# A successful rerun tolerates every pre-existing object, CIDR, ACL and token.
-namespace = execute()
-atexit._run_exitfuncs()
-assert 'vg = "custom-vg"' in mapped("/etc/umiak-node.toml").read_text()
-assert 'templateVmidMin = 700' in mapped('/etc/umiak-node.toml').read_text()
-assert 'templateVmidMax = 704' in mapped('/etc/umiak-node.toml').read_text()
-assert 'templateVmid = 0' in mapped('/etc/umiak-node.toml').read_text()
-assert 'storage = "fast"' in mapped("/etc/umiak-node.toml").read_text()
-if scenario != "success": print("SCENARIO PASS: " + scenario)
-assert mapped("/sys/class/net/vmbr0/bridge/mcast_hash_max").read_text() == "1024"
-assert mapped("/etc/pve/priv/authorized_keys").read_text().startswith("existing-management-key\n")
-assert any(command[:2] == ["systemd-run", "--quiet"] for command in commands)
-assert sum(command == ["systemctl", "stop", "umiak-quickstart-rollback.timer"] for command in commands) == (3 if scenario in ["partial-failure-rerun", "nonempty-delete"] else 2)
-assert report["tokenSecret"] == "fake-secret"
-assert any("UmiakTemplateMedia" in command and "/storage/media" in command for command in commands)
-assert not any("/storage/local" in command for command in commands)
-assert report["mediaStorage"] == "media"
-assert 'isoDir = "/srv/media/template/iso"' in mapped("/etc/umiak-node.toml").read_text()
-assert any("VM.GuestAgent.Unrestricted" in " ".join(command) for command in commands)
-assert not any("VM.Monitor" in " ".join(command) for command in commands)
-assert report["sshPublicKey"] == "ssh-ed25519 AAAA"
-assert any(command[:6] == ["pveum", "user", "token", "add", "developer@pve", "quickstart"] for command in commands)
-# Both the user and its separated token need root-only read access to proxy options.
-assert ["pveum", "role", "add", "UmiakDatacenterAudit", "--privs", "Sys.Audit"] in commands
-for flag, principal in [("--users", "developer@pve"), ("--tokens", "developer@pve!quickstart")]:
-    assert ["pveum", "acl", "modify", "/", flag, principal, "--roles", "UmiakDatacenterAudit", "--propagate", "0"] in commands
-print("FAKE FRESH HOST PASS: role/token/pool/SDN/IPSet/rules/node-agent/callback, rollback and bridge preservation")
+                assert argv[argv.index("--pending") + 1] == "1"
+            out = json.dumps(value)
+        elif head == ["pvesh", "create"]:
+            path = argv[2]
+            values = dict(zip(argv[3::2], argv[4::2], strict=True))
+            child = (
+                values.get("--zone") if path.endswith("zones")
+                else values.get("--vnet") if path.endswith("vnets")
+                else values.get("--subnet") or values.get("--name") or values.get("--group")
+            )
+            if child:
+                child_path = path + "/" + child
+                if "subnets" in path:
+                    child_path = path + "/umiak-10.88.0.0-24"
+                if child_path in self.objects:
+                    raise CommandError(argv, 2, "", "exists")
+                self.objects[child_path] = [] if "/firewall/" in path else {
+                    k.removeprefix("--"): v for k, v in values.items()
+                }
+                if path.endswith("subnets"):
+                    self.objects.setdefault(path, []).append({"subnet": "umiak-10.88.0.0-24"})
+                elif path.endswith(("zones", "vnets")):
+                    self.objects[path].append({path.rsplit("/", 1)[1][:-1]: child})
+                    if path.endswith("vnets"):
+                        self.objects[child_path + "/subnets"] = []
+            elif path in self.objects and isinstance(self.objects[path], list):
+                row = {k.removeprefix("--"): v for k, v in values.items()}
+                if "cidr" in row:
+                    if any(old.get("cidr") == row["cidr"] for old in self.objects[path]):
+                        raise CommandError(argv, 2, "", "exists")
+                    self.objects[path].append(row)
+                else:
+                    self.objects[path].insert(int(values.get("--pos", 0)), row)
+                    for pos, item in enumerate(self.objects[path]):
+                        item["pos"] = pos
+            out = "{}"
+        elif head == ["pvesh", "delete"]:
+            path = argv[2]
+            if path in self.objects:
+                if isinstance(self.objects[path], list) and self.objects[path]:
+                    raise CommandError(argv, 2, "", "not empty")
+                del self.objects[path]
+                self.objects.pop(path + "/subnets", None)
+                parent, key = path.rsplit("/", 1)
+                if isinstance(self.objects.get(parent), list):
+                    self.objects[parent] = [
+                        row for row in self.objects[parent]
+                        if key not in (row.get("zone"), row.get("vnet"), row.get("subnet"))
+                    ]
+            else:
+                parent, key = path.rsplit("/", 1)
+                rows = self.objects.get(parent, [])
+                kept = [row for row in rows if str(row.get("cidr", row.get("pos"))) != key]
+                for pos, item in enumerate(kept):
+                    if "pos" in item:
+                        item["pos"] = pos
+                self.objects[parent] = kept
+        elif argv[:3] == ["pvesh", "set", "/cluster/sdn"]:
+            self.path("/sys/class/net/vmbr0/bridge/mcast_hash_max").write_text("8192")
+        elif head == ["pvesh", "set"]:
+            values = dict(zip(argv[3::2], argv[4::2], strict=True))
+            self.objects[argv[2]].update({k.removeprefix("--"): int(v) for k, v in values.items()})
+        elif argv[:3] == ["ip", "link", "set"]:
+            self.path("/sys/class/net/vmbr0/bridge/mcast_hash_max").write_text(argv[-1])
+        elif head == ["sysctl", "-n"]:
+            out = self.ip_forward
+        elif head == ["ifquery", "--check"]:
+            out = "auto vmbr0\niface vmbr0 inet static  [pass]\n"
+        elif head == ["pveum", "role"]:
+            if argv[2] == "list":
+                out = json.dumps(self.roles)
+            elif argv[2] == "add":
+                self.roles.append({"roleid": argv[3], "privs": argv[5]})
+                self.objects["/access/roles/" + argv[3]] = {"privs": argv[5]}
+            elif argv[2] == "delete":
+                self.roles[:] = [x for x in self.roles if x["roleid"] != argv[3]]
+                self.objects.pop("/access/roles/" + argv[3], None)
+        elif argv[:3] == ["pveum", "pool", "add"]:
+            self.objects["/pools/" + argv[3]] = {"poolid": argv[3], "members": []}
+        elif argv[:3] == ["pveum", "pool", "delete"]:
+            self.objects.pop("/pools/" + argv[3], None)
+        elif head == ["pveum", "user"]:
+            if argv[2] == "list":
+                out = json.dumps(self.users)
+            elif argv[2] == "add":
+                self.users.append({"userid": argv[3]})
+                self.objects["/access/users/" + argv[3]] = {"enable": 1}
+            elif argv[2] == "delete":
+                self.users[:] = [x for x in self.users if x["userid"] != argv[3]]
+                self.objects.pop("/access/users/" + argv[3], None)
+            elif argv[2:4] == ["token", "list"]:
+                out = json.dumps(self.tokens)
+            elif argv[2:4] == ["token", "add"]:
+                self.token_counter += 1
+                self.tokens.append({"tokenid": argv[5]})
+                self.objects[f"/access/users/{argv[4]}/token/{argv[5]}"] = {"privsep": 1}
+                out = json.dumps({"full-tokenid": f"{argv[4]}!{argv[5]}", "value": f"fake-secret-{self.token_counter}"})
+            elif argv[2:4] == ["token", "remove"]:
+                self.tokens[:] = [x for x in self.tokens if x["tokenid"] != argv[5]]
+                self.objects.pop(f"/access/users/{argv[4]}/token/{argv[5]}", None)
+        elif head == ["pveum", "acl"]:
+            acl = {"path": argv[3], "ugid": argv[5], "roleid": argv[7]}
+            if argv[2] == "modify":
+                self.acls.append(acl)
+            elif argv[2] == "delete":
+                self.acls[:] = [x for x in self.acls if x != acl]
+        elif argv[0] == "ssh-keygen":
+            key = Path(argv[argv.index("-f") + 1])
+            assert not key.exists(), "ssh-keygen must not overwrite a key"
+            key.write_text("-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----\n")
+            key.with_name(key.name + ".pub").write_text("ssh-ed25519 AAAAgeneratedNodeKey umiak-node\n")
+        elif argv[-1] == "--stdio":
+            assert json.loads(input) == {"op": "version", "args": {}}
+            out = json.dumps({"ok": True, "result": {"version": "fake"}})
+        return out

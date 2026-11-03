@@ -1,317 +1,472 @@
-# Fresh Proxmox preparation, embedded into the one-time setup script.
-# No shell interpolation: commands are argv lists. Existing managed objects are
-# verified/adopted; the prepared dev stand uses only read-only wizard adoption.
-import atexit
-import fcntl
-import ipaddress
+"""Local Proxmox host preparation for Umiak (run as root on the PVE node).
+
+Creates or verifies only Umiak-scoped objects: umiak@pve, its roles, token and
+ACLs, pool `umiak`, SDN zone `umiak` / VNet `umiak0` / subnet 10.88.0.0/24,
+IPSet `umiak-gateway` and security group `umiak-egress`. It never touches
+vmbr0's configuration, other guests or non-Umiak objects, and refuses to run
+while foreign SDN changes are pending (applying SDN would commit them).
+
+Every check runs before the first change. Changes are journaled and a systemd
+timer rolls them back if the run does not finish; a failing run rolls back
+in-process. Commands are argv lists only. Secrets go to `out_dir` with mode
+0600 and are never printed.
+"""
+
 import base64
+import fcntl
 import hashlib
+import ipaddress
 import json
 import os
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
-import shlex
-import socket
-import subprocess
-import sys
-import urllib.request
-import ssl
 
-config = json.loads(base64.b64decode(sys.argv[1]))
-user_id, token_name = config.get("tokenId", "umiak@pve!dev").split("!")
-dry = "--dry-run" in sys.argv[2:]
-plan = [
-    "Verify Proxmox prerequisites and existing Umiak objects",
-    "Create/adopt umiak@pve, UmiakPoC role, dev token and umiak pool",
-    "Create/adopt restricted node-agent SSH key, pinned host key and configuration",
-    "Arm automatic rollback before scoped Umiak SDN/firewall changes",
-    "Create/adopt umiak zone, umiak0 VNet, 10.88.0.0/24 subnet and DHCP/SNAT",
-    "Create/adopt umiak-gateway IPSet and umiak-egress security group",
-    "Verify host state and report credentials via one-time HTTPS callback",
-    "Cancel rollback only after callback and verification succeed",
+from . import rollback
+from .pve import CommandError, InstallerError, Runner, exists, get, media_storages, pending_sdn, write_secret
+
+USER_ID = "umiak@pve"
+TOKEN_NAME = "umiak"
+TOKEN_ID = USER_ID + "!" + TOKEN_NAME
+STATE_DIR = "/var/lib/umiak-installer"
+ROLLBACK_UNIT = "umiak-installer-rollback"
+NODE_BINARY = "/usr/local/bin/umiak-node"
+NODE_CONFIG = "/etc/umiak-node.toml"
+AUTHORIZED_KEYS = "/etc/pve/priv/authorized_keys"
+STAGED_NODE_CONFIG = "umiak-node.toml"
+NAME = re.compile(r"[a-zA-Z][a-zA-Z0-9_-]*")
+PUBLIC_KEY = re.compile(r"ssh-ed25519 [A-Za-z0-9+/]+={0,3}( [^\s]+)?")
+
+POC_PRIVS = (
+    "VM.Allocate VM.Audit VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk "
+    "VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.PowerMgmt VM.GuestAgent.Audit "
+    "VM.GuestAgent.FileRead VM.GuestAgent.FileWrite VM.GuestAgent.FileSystemMgmt VM.GuestAgent.Unrestricted Pool.Audit"
+)
+EXTRA_ROLES = [
+    ("UmiakTemplateMedia", "Datastore.AllocateTemplate Datastore.Audit"),
+    ("UmiakConsole", "VM.Console"),
+    ("UmiakMediaDownload", "Sys.AccessNetwork"),
+    ("UmiakDatacenterAudit", "Sys.Audit"),
 ]
-if dry:
-    print("DRY RUN: no commands executed, no files written, no callback sent")
-    for item in plan:
-        print(item)
-    sys.exit(0)
-if os.geteuid() != 0:
-    raise SystemExit("Run this script as root on the intended Proxmox node")
-if socket.gethostname().split(".")[0] != config["node"]:
-    raise SystemExit("Node name does not match the wizard; refusing to prepare another host")
-for executable in ["pvesh", "pveum", "openssl", "ssh-keygen", "systemd-run", "ifquery"]:
-    subprocess.run(["which", executable], check=True, stdout=subprocess.DEVNULL)
-
-
-def command(*args, capture=True):
-    result = subprocess.run(args, check=True, text=True, capture_output=capture)
-    return result.stdout.strip() if capture else ""
-
-
-def get(path, *options):
-    return json.loads(command("pvesh", "get", path, *options, "--output-format", "json"))
-
-
-def exists(path):
-    try:
-        get(path)
-        return True
-    except subprocess.CalledProcessError:
-        return False
-
-
-# Complete prerequisite checks precede every mutation, including credentials.
-if "[fail]" in subprocess.run(["ifquery", "--check", "-a"], capture_output=True, text=True).stdout:
-    raise SystemExit("Host network configuration differs from live state; refusing SDN apply")
-if not Path("/usr/sbin/dnsmasq").exists():
-    raise SystemExit("Install dnsmasq and dnsmasq-utils with its system service disabled before preparation")
-if command("sysctl", "-n", "net.ipv4.ip_forward") != "1":
-    raise SystemExit("Enable IPv4 forwarding for Proxmox SDN before preparation")
-if int(get("/cluster/firewall/options").get("enable", 0)) != 1:
-    raise SystemExit("Cluster firewall must already be enabled and verified")
-# Read host-rule options without changing them: they do not gate VM isolation.
-node_firewall = get(f"/nodes/{config['node']}/firewall/options")
-# Applying SDN commits all pending changes, so refuse any unrelated transaction.
-vnets = get("/cluster/sdn/vnets", "--pending", "1")
-for path in ["/cluster/sdn/zones", "/cluster/sdn/vnets", *["/cluster/sdn/vnets/" + row["vnet"] + "/subnets" for row in vnets]]:
-    if any(row.get("pending") or row.get("state") in ["new", "changed", "deleted"] for row in get(path, "--pending", "1")):
-        raise SystemExit("Pending SDN changes must be applied or reverted by the administrator first")
-for path, expected in [
+DENY_CIDRS = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16",
+              "224.0.0.0/4", "::/1", "8000::/1"]
+EGRESS_RULES = [
+    {"type": "out", "action": "ACCEPT", "proto": "tcp", "dport": "443", "dest": "+umiak-gateway", "enable": 1},
+    *[{"type": "out", "action": "DROP", "dest": cidr, "enable": 1} for cidr in DENY_CIDRS],
+]
+TOPOLOGY = [
     ("/cluster/sdn/zones/umiak", {"type": "simple", "ipam": "pve", "dhcp": "dnsmasq"}),
     ("/cluster/sdn/vnets/umiak0", {"zone": "umiak", "isolate-ports": 1}),
-]:
-    if exists(path):
-        existing = get(path)
-        if any(str(existing.get(key)) != str(value) for key, value in expected.items()):
-            raise SystemExit("Existing Umiak topology differs; use read-only adoption: " + path)
-desired_rules = [
-    {"type": "out", "action": "ACCEPT", "proto": "tcp", "dport": "443", "dest": "+umiak-gateway", "enable": 1},
-    *[{"type": "out", "action": "DROP", "dest": cidr, "enable": 1} for cidr in ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16", "224.0.0.0/4", "::/1", "8000::/1"]],
 ]
-if exists("/cluster/firewall/groups/umiak-egress"):
-    cursor = 0
-    for row in sorted(get("/cluster/firewall/groups/umiak-egress"), key=lambda row: int(row.get("pos", 0))):
-        while cursor < len(desired_rules) and not all(str(row.get(key, "")) == str(value) for key, value in desired_rules[cursor].items()):
-            cursor += 1
-        if cursor == len(desired_rules):
-            raise SystemExit("Existing Umiak firewall group differs; use read-only adoption")
-        cursor += 1
-storage_name = config.get("storage", "local-lvm")
-if not isinstance(storage_name, str) or not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_-]*", storage_name):
-    raise SystemExit("Invalid storage name")
-# Match the media ACL, node-agent paths and template-builder storage to the same
-# existing directory storage. Do not assume its administrator chose 'local'.
-media_candidates = [row for row in get("/storage") if row.get("type") == "dir"
-                    and {"import", "iso"}.issubset(set(row.get("content", "").split(",")))
-                    and not row.get("disable")
-                    and (not row.get("nodes") or config["node"] in row["nodes"].split(","))]
-media_candidates.sort(key=lambda row: (row["storage"] != "local", row["storage"]))
-if not media_candidates:
-    raise SystemExit("An enabled directory storage with import and iso content is required")
-media = media_candidates[0]
-media_name = media["storage"]
-media_path = media.get("path", "")
-if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_-]*", media_name) or not media_path.startswith("/"):
-    raise SystemExit("Invalid template media storage configuration")
-storage = get("/storage/" + storage_name)
-if storage.get("type") != "lvmthin" or not storage.get("vgname") or not storage.get("thinpool"):
-    raise SystemExit("Selected storage must be an existing LVM-thin storage with VG and thinpool")
-guest_dns = str(ipaddress.ip_address(config.get("guestDns", "1.1.1.1")))
-ca = Path(config.get("caPath", "/etc/ssl/certs/ca-certificates.crt"))
-context = None
-if config["origin"].startswith("https://"):
-    if not ca.exists():
-        raise SystemExit("HTTPS proxy trust store is missing: " + str(ca))
-    context = ssl.create_default_context(cafile=str(ca))
-binary = urllib.request.urlopen(config["origin"] + "/pve-setup.sh?token=" + config["token"] + "&asset=node-agent", context=context, timeout=30).read()
-if not config.get("nodeSha256") or hashlib.sha256(binary).hexdigest() != config["nodeSha256"]:
-    raise SystemExit("Node-agent checksum mismatch or unavailable manifest")
-roles = json.loads(command("pveum", "role", "list", "--output-format", "json"))
-users = json.loads(command("pveum", "user", "list", "--output-format", "json"))
-user_exists = any(x["userid"] == user_id for x in users)
-tokens = json.loads(command("pveum", "user", "token", "list", user_id, "--output-format", "json")) if user_exists else []
-token_path = Path("/var/lib/umiak-quickstart/pve-token")
-if any(x["tokenid"] == token_name for x in tokens) and not token_path.exists():
-    raise SystemExit("Existing API token secret is unavailable: use read-only adoption with the existing secret")
-acls = get("/access/acl")
-
-bridge_hash_file = Path("/sys/class/net/vmbr0/bridge/mcast_hash_max")
-bridge_hash = bridge_hash_file.read_text().strip() if bridge_hash_file.exists() else None
+SUBNET = "/cluster/sdn/vnets/umiak0/subnets/umiak-10.88.0.0-24"
+SECRET_FILES = ("pve-token", "pve-token-id", "pve-root-ca.pem", "umiak-node_ed25519", "umiak-node_ed25519.pub",
+                "known_hosts")
 
 
-def restore_bridge():
-    # Proxmox SDN reload may reset ifupdown2's multicast hash default.
-    # Restore only a value changed by our apply; never rewrite bridge config.
-    if bridge_hash and bridge_hash_file.read_text().strip() != bridge_hash:
-        command("ip", "link", "set", "dev", "vmbr0", "type", "bridge", "mcast_hash_max", bridge_hash)
+@dataclass(frozen=True)
+class PrepareConfig:
+    node: str
+    storage: str
+    gateway_ip: str
+    guest_dns: str = "1.1.1.1"
+    vmid_min: int = 500
+    vmid_max: int = 589
+    tpl_min: int = 600
+    tpl_max: int = 699
+    # Address the control plane uses for SSH to this node; default: the node's
+    # cluster address from /cluster/status.
+    node_ip: str | None = None
 
 
-def apply_sdn():
+@dataclass(frozen=True)
+class PrepareResult:
+    token_id: str
+    media_storage: str
+    node_ip: str
+    public_key: str
+    files: dict[str, Path] = field(default_factory=dict)
+
+
+def _rule_matches(row, rule):
+    return all(str(row.get(key, "")) == str(value) for key, value in rule.items())
+
+
+def _validate(cfg: PrepareConfig) -> None:
+    if not NAME.fullmatch(cfg.node) or not NAME.fullmatch(cfg.storage):
+        raise InstallerError("Invalid node or storage name")
     try:
-        command("pvesh", "set", "/cluster/sdn")
-    finally:
-        restore_bridge()
+        ipaddress.IPv4Address(cfg.gateway_ip)
+        ipaddress.ip_address(cfg.guest_dns)
+        if cfg.node_ip is not None:
+            ipaddress.ip_address(cfg.node_ip)
+    except ValueError as error:
+        raise InstallerError(f"Invalid address: {error}") from error
+    for low, high in [(cfg.vmid_min, cfg.vmid_max), (cfg.tpl_min, cfg.tpl_max)]:
+        if not (isinstance(low, int) and isinstance(high, int) and 100 <= low <= high <= 999_999_999):
+            raise InstallerError("Invalid VMID range")
+    if cfg.vmid_min <= cfg.tpl_max and cfg.tpl_min <= cfg.vmid_max:
+        raise InstallerError("Sandbox and template VMID ranges overlap")
 
 
-state = Path("/var/lib/umiak-quickstart")
-state.mkdir(mode=0o700, exist_ok=True)
-lock = (state / "prepare.lock").open("a")
-fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-if (state / "active").exists():
-    raise SystemExit("Previous preparation rollback is pending; wait for its timer before retrying")
-rollback = state / "rollback.py"
-undo_file = state / "undo.json"
-active_file = state / "active"
-undo = []
-# The timer waits for this run's lock and checks a success marker. A slow run
-# cannot be rolled back after a successful callback, even if its timer fired.
-rollback_program = r'''import base64, fcntl, json, pathlib, subprocess, sys
-state = pathlib.Path(sys.argv[1])
-with (state / "prepare.lock").open("a") as lock:
- fcntl.flock(lock, fcntl.LOCK_EX)
- if not (state / "active").exists(): sys.exit(0)
- actions = json.loads((state / "undo.json").read_text())
- failed = False
- for action in reversed(actions):
-  try:
-   if action[0] == "command": subprocess.run(action[1], check=True)
-   elif action[0] == "file":
-    path = pathlib.Path(action[1])
-    if action[2] is None: path.unlink(missing_ok=True)
-    else:
-     path.write_bytes(base64.b64decode(action[2])); path.chmod(action[3])
-   elif action[0] == "collection":
-    path = action[1]
-    rows = json.loads(subprocess.run(["pvesh","get",path,"--output-format","json"],capture_output=True,text=True,check=True).stdout)
-    for row in sorted(rows,key=lambda row:int(row.get("pos",0)),reverse=True):
-     subprocess.run(["pvesh","delete",path+"/"+str(row.get("cidr",row.get("pos")))],check=True)
-    subprocess.run(["pvesh","delete",path],check=True)
-  except (OSError, subprocess.CalledProcessError) as error:
-   failed = True
-   print("Rollback action failed:", action[0], file=sys.stderr)
- subprocess.run(["pvesh","set","/cluster/sdn"],check=True)
- bridge = BRIDGE_HASH
- if bridge: subprocess.run(["ip","link","set","dev","vmbr0","type","bridge","mcast_hash_max",bridge],check=True)
- if failed: raise SystemExit("Rollback incomplete; inspect failures and retry rollback.py")
- (state / "active").unlink(missing_ok=True)
-'''
-rollback_program = rollback_program.replace('BRIDGE_HASH', repr(bridge_hash))
-rollback.write_text("#!/usr/bin/env python3\n" + rollback_program)
-rollback.chmod(0o700)
-active_file.write_text("active")
-
-def record(action):
-    undo.append(action)
-    undo_file.write_text(json.dumps(undo))
-    undo_file.chmod(0o600)
-
-def backup(path):
-    record(["file", str(path), base64.b64encode(path.read_bytes()).decode() if path.exists() else None, path.stat().st_mode & 0o777 if path.exists() else 0o600])
-
-def mutate(args, reverse):
-    record(["command", list(reverse)])
-    return command(*args)
-
-def create(path, delete_path, *args):
-    if exists(delete_path):
-        return False
-    record(["collection" if "/firewall/" in delete_path else "command", delete_path if "/firewall/" in delete_path else ["pvesh", "delete", delete_path]])
-    command("pvesh", "create", path, *args)
-    return True
-
-record(["command", ["true"]])
-def rollback_on_exit():
-    if active_file.exists():
-        fcntl.flock(lock, fcntl.LOCK_UN)
-        previous = sys.argv
+def _preflight(runner: Runner, cfg: PrepareConfig) -> dict:
+    """All checks, strictly read-only. Raises InstallerError before any change."""
+    _validate(cfg)
+    if runner.euid() != 0:
+        raise InstallerError("Run the installer as root on the Proxmox node")
+    if runner.hostname() != cfg.node:
+        raise InstallerError("Node name does not match this host; refusing to prepare another node")
+    for executable in ["pvesh", "pveum", "ssh-keygen", "systemd-run", "ifquery", "ip"]:
         try:
-            sys.argv = [str(rollback), str(state)]
-            exec(compile(rollback_program, str(rollback), "exec"), {"__name__": "__main__"})
+            runner.run(["which", executable])
+        except CommandError as error:
+            raise InstallerError(f"Required program {executable} is missing") from error
+    try:
+        check = runner.run(["ifquery", "--check", "-a"])
+    except CommandError as error:
+        check = error.stdout
+    if "[fail]" in check:
+        raise InstallerError("Host network configuration differs from live state; refusing SDN apply")
+    if not runner.path("/usr/sbin/dnsmasq").exists():
+        raise InstallerError("Install dnsmasq and dnsmasq-utils with its system service disabled first")
+    if runner.run(["sysctl", "-n", "net.ipv4.ip_forward"]) != "1":
+        raise InstallerError("Enable IPv4 forwarding first")
+    if int(get(runner, "/cluster/firewall/options").get("enable", 0)) != 1:
+        raise InstallerError("The cluster firewall must be enabled first")
+    if pending_sdn(runner):
+        raise InstallerError("Pending SDN changes must be applied or reverted by the administrator first")
+    for path, expected in TOPOLOGY:
+        if exists(runner, path):
+            current = get(runner, path)
+            if any(str(current.get(key)) != str(value) for key, value in expected.items()):
+                raise InstallerError("Existing Umiak topology differs from the expected one: " + path)
+    if exists(runner, "/cluster/firewall/groups/umiak-egress"):
+        # Existing rules must be the expected ones in order (missing ones are added).
+        cursor = 0
+        for row in sorted(get(runner, "/cluster/firewall/groups/umiak-egress"), key=lambda row: int(row.get("pos", 0))):
+            while cursor < len(EGRESS_RULES) and not _rule_matches(row, EGRESS_RULES[cursor]):
+                cursor += 1
+            if cursor == len(EGRESS_RULES):
+                raise InstallerError("Existing umiak-egress firewall group differs from the expected rules")
+            cursor += 1
+    media = media_storages(runner, cfg.node)
+    if not media:
+        raise InstallerError("An enabled directory storage with import and iso content is required")
+    media_name, media_path = media[0]["storage"], str(media[0].get("path", ""))
+    if not NAME.fullmatch(media_name) or not media_path.startswith("/"):
+        raise InstallerError("Invalid template media storage configuration")
+    try:
+        storage = get(runner, "/storage/" + cfg.storage)
+    except CommandError as error:
+        raise InstallerError("Storage not found: " + cfg.storage) from error
+    if storage.get("type") != "lvmthin" or not storage.get("vgname") or not storage.get("thinpool"):
+        raise InstallerError("Selected storage must be an existing LVM-thin storage with VG and thinpool")
+    if not NAME.fullmatch(str(storage["vgname"])) or not NAME.fullmatch(str(storage["thinpool"])):
+        raise InstallerError("Unexpected LVM names on the selected storage")
+    node_ip = cfg.node_ip or next(
+        (row.get("ip") for row in get(runner, "/cluster/status") if row.get("type") == "node" and row.get("name") == cfg.node),
+        None,
+    )
+    if not node_ip:
+        raise InstallerError("Cannot determine this node's address; pass it explicitly")
+    ipaddress.ip_address(node_ip)
+    host_key = runner.path("/etc/ssh/ssh_host_ed25519_key.pub").read_text().split()
+    if len(host_key) < 2 or host_key[0] != "ssh-ed25519":
+        raise InstallerError("This node's ed25519 SSH host key is missing")
+    users = json.loads(runner.run(["pveum", "user", "list", "--output-format", "json"]))
+    user_exists = any(row["userid"] == USER_ID for row in users)
+    tokens = json.loads(runner.run(["pveum", "user", "token", "list", USER_ID, "--output-format", "json"])) if user_exists else []
+    bridge = runner.path("/sys/class/net/vmbr0/bridge/mcast_hash_max")
+    return {
+        "media_name": media_name,
+        "media_path": media_path,
+        "storage": storage,
+        "node_ip": node_ip,
+        "host_key": " ".join(host_key[:2]),
+        "roles": {row["roleid"] for row in json.loads(runner.run(["pveum", "role", "list", "--output-format", "json"]))},
+        "user_exists": user_exists,
+        "token_exists": any(row["tokenid"] == TOKEN_NAME for row in tokens),
+        "acls": get(runner, "/access/acl"),
+        "bridge": {"path": str(bridge), "value": bridge.read_text().strip() if bridge.exists() else None},
+    }
+
+
+class _Journal:
+    def __init__(self, runner: Runner, state: Path):
+        self.runner = runner
+        self.state = state
+        self.actions = []
+
+    def record(self, action):
+        self.actions.append(action)
+        write_secret(self.state / rollback.JOURNAL, json.dumps(self.actions))
+
+    def backup(self, path: Path):
+        if path.exists():
+            self.record(["file", str(path), base64.b64encode(path.read_bytes()).decode(), path.stat().st_mode & 0o777])
+        else:
+            self.record(["file", str(path), None, 0o600])
+
+    def mutate(self, argv, reverse):
+        self.record(["command", list(reverse)])
+        return self.runner.run(argv)
+
+    def create(self, path, child, *args):
+        if exists(self.runner, child):
+            return
+        if "/firewall/" in child:
+            self.record(["collection", child])
+        else:
+            self.record(["command", ["pvesh", "delete", child]])
+        self.runner.run(["pvesh", "create", path, *args])
+
+
+def _arm(runner: Runner, state: Path, bridge: dict) -> None:
+    script = state / "rollback.py"
+    script.write_text(Path(rollback.__file__).read_text())
+    script.chmod(0o700)
+    write_secret(state / rollback.BRIDGE, json.dumps(bridge))
+    write_secret(state / rollback.JOURNAL, "[]")
+    (state / rollback.ACTIVE).write_text("active")
+    runner.run(["systemd-run", "--quiet", "--collect", f"--unit={ROLLBACK_UNIT}", "--on-active=5min",
+                "/usr/bin/python3", str(script), str(state)])
+
+
+def _stop_timer(runner: Runner) -> None:
+    # The timer may already have fired or been collected; stopping is best effort.
+    try:
+        runner.run(["systemctl", "stop", ROLLBACK_UNIT + ".timer"])
+    except CommandError:
+        pass
+
+
+def _apply(runner: Runner, cfg: PrepareConfig, facts: dict, out_dir: Path, journal: _Journal) -> None:
+    roles, acls = facts["roles"], facts["acls"]
+    if "UmiakPoC" not in roles:
+        journal.mutate(["pveum", "role", "add", "UmiakPoC", "--privs", POC_PRIVS], ["pveum", "role", "delete", "UmiakPoC"])
+    if not exists(runner, "/pools/umiak"):
+        journal.mutate(["pveum", "pool", "add", "umiak", "--comment", "Umiak"], ["pveum", "pool", "delete", "umiak"])
+    if not facts["user_exists"]:
+        journal.mutate(["pveum", "user", "add", USER_ID, "--comment", "Umiak"], ["pveum", "user", "delete", USER_ID])
+
+    # PVE shows a token secret only once. Reuse the stored one; if it is lost,
+    # rotate the installer-owned token instead of dead-ending (old setup-prep).
+    token_file = out_dir / "pve-token"
+    if not (facts["token_exists"] and token_file.exists()):
+        journal.backup(token_file)
+        if facts["token_exists"]:
+            runner.run(["pveum", "user", "token", "remove", USER_ID, TOKEN_NAME])
+        added = journal.mutate(
+            ["pveum", "user", "token", "add", USER_ID, TOKEN_NAME, "--privsep", "1", "--output-format", "json"],
+            ["pveum", "user", "token", "remove", USER_ID, TOKEN_NAME],
+        )
+        write_secret(token_file, json.loads(added)["value"])
+
+    for role, privileges in EXTRA_ROLES:
+        if role not in roles:
+            journal.mutate(["pveum", "role", "add", role, "--privs", privileges], ["pveum", "role", "delete", role])
+    grants = [
+        ("/pool/umiak", "UmiakPoC"),
+        ("/storage/" + cfg.storage, "PVEDatastoreUser"),
+        ("/sdn/zones/umiak", "PVESDNUser"),
+        ("/storage/" + facts["media_name"], "UmiakTemplateMedia"),
+        ("/pool/umiak", "UmiakConsole"),
+        ("/nodes/" + cfg.node, "UmiakMediaDownload"),
+    ]
+
+    def granted(path, principal, role):
+        return any(x.get("path") == path and x.get("ugid") == principal and x.get("roleid") == role for x in acls)
+
+    for flag, principal in [("--users", USER_ID), ("--tokens", TOKEN_ID)]:
+        for path, role in grants:
+            if not granted(path, principal, role):
+                journal.mutate(["pveum", "acl", "modify", path, flag, principal, "--roles", role],
+                               ["pveum", "acl", "delete", path, flag, principal, "--roles", role])
+        # Root-only read access is needed because PVE otherwise omits http_proxy.
+        if not granted("/", principal, "UmiakDatacenterAudit"):
+            journal.mutate(
+                ["pveum", "acl", "modify", "/", flag, principal, "--roles", "UmiakDatacenterAudit", "--propagate", "0"],
+                ["pveum", "acl", "delete", "/", flag, principal, "--roles", "UmiakDatacenterAudit"],
+            )
+
+    journal.create("/cluster/sdn/zones", "/cluster/sdn/zones/umiak",
+                   "--zone", "umiak", "--type", "simple", "--ipam", "pve", "--dhcp", "dnsmasq")
+    journal.create("/cluster/sdn/vnets", "/cluster/sdn/vnets/umiak0",
+                   "--vnet", "umiak0", "--zone", "umiak", "--isolate-ports", "1")
+    journal.create("/cluster/sdn/vnets/umiak0/subnets", SUBNET,
+                   "--subnet", "10.88.0.0/24", "--type", "subnet", "--gateway", "10.88.0.1", "--snat", "1",
+                   "--dhcp-range", "start-address=10.88.0.100,end-address=10.88.0.250",
+                   "--dhcp-dns-server", str(ipaddress.ip_address(cfg.guest_dns)))
+    journal.create("/cluster/firewall/ipset", "/cluster/firewall/ipset/umiak-gateway", "--name", "umiak-gateway")
+    ipset = "/cluster/firewall/ipset/umiak-gateway"
+    if not any(row.get("cidr") == cfg.gateway_ip for row in get(runner, ipset)):
+        journal.mutate(["pvesh", "create", ipset, "--cidr", cfg.gateway_ip, "--comment", "Umiak guest gateway"],
+                       ["pvesh", "delete", ipset + "/" + cfg.gateway_ip])
+    group = "/cluster/firewall/groups/umiak-egress"
+    journal.create("/cluster/firewall/groups", group, "--group", "umiak-egress", "--comment", "Umiak sandbox egress")
+    rules = sorted(get(runner, group), key=lambda row: int(row.get("pos", 0)))
+    for position, rule in enumerate(EGRESS_RULES):
+        if position < len(rules) and _rule_matches(rules[position], rule):
+            continue
+        args = [part for key, value in rule.items() for part in ["--" + key, str(value)]]
+        journal.mutate(["pvesh", "create", group, *args, "--pos", str(position)], ["pvesh", "delete", f"{group}/{position}"])
+        rules.insert(position, rule)
+
+    # Apply only if something changed: a no-op rerun must not reload SDN.
+    if any(action[0] != "file" for action in journal.actions):
+        try:
+            runner.run(["pvesh", "set", "/cluster/sdn"])
         finally:
-            sys.argv = previous
-    lock.close()
-    # The timer may already have fired or been collected. Exit cleanup is quiet.
-    subprocess.run(["systemctl", "stop", "umiak-quickstart-rollback.timer"],
-                   check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-atexit.register(rollback_on_exit)
-command("systemd-run", "--quiet", "--collect", "--unit=umiak-quickstart-rollback", "--on-active=5min", str(rollback), str(state))
-privs = "VM.Allocate VM.Audit VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.PowerMgmt VM.GuestAgent.Audit VM.GuestAgent.FileRead VM.GuestAgent.FileWrite VM.GuestAgent.FileSystemMgmt VM.GuestAgent.Unrestricted Pool.Audit"
-if not any(x["roleid"] == "UmiakPoC" for x in roles):
-    mutate(["pveum", "role", "add", "UmiakPoC", "--privs", privs], ["pveum", "role", "delete", "UmiakPoC"])
-if not exists("/pools/umiak"):
-    mutate(["pveum", "pool", "add", "umiak", "--comment", "Umiak quickstart"], ["pveum", "pool", "delete", "umiak"])
-if not any(x["userid"] == user_id for x in users):
-    mutate(["pveum", "user", "add", user_id, "--comment", "Umiak quickstart"], ["pveum", "user", "delete", user_id])
-if not token_path.exists():
-    backup(token_path)
-    token = json.loads(mutate(["pveum", "user", "token", "add", user_id, token_name, "--privsep", "1", "--output-format", "json"], ["pveum", "user", "token", "remove", user_id, token_name]))["value"]
-    token_path.write_text(token)
-    token_path.chmod(0o600)
-for role, privileges in [("UmiakTemplateMedia", "Datastore.AllocateTemplate Datastore.Audit"), ("UmiakConsole", "VM.Console"), ("UmiakMediaDownload", "Sys.AccessNetwork"), ("UmiakDatacenterAudit", "Sys.Audit")]:
-    if not any(x["roleid"] == role for x in roles):
-        mutate(["pveum", "role", "add", role, "--privs", privileges], ["pveum", "role", "delete", role])
-for principal_flag, principal in [("--users", user_id), ("--tokens", user_id + "!" + token_name)]:
-    for path, role in [("/pool/umiak", "UmiakPoC"), ("/storage/" + storage_name, "PVEDatastoreUser"), ("/sdn/zones/umiak", "PVESDNUser"), ("/storage/" + media_name, "UmiakTemplateMedia"), ("/pool/umiak", "UmiakConsole"), ("/nodes/" + config["node"], "UmiakMediaDownload")]:
-        if not any(x.get("path") == path and x.get("ugid") == principal and x.get("roleid") == role for x in acls):
-            mutate(["pveum", "acl", "modify", path, principal_flag, principal, "--roles", role], ["pveum", "acl", "delete", path, principal_flag, principal, "--roles", role])
+            rollback.restore_bridge(journal.state, runner.run)
 
-    # Root-only read access is needed because PVE otherwise omits http_proxy.
-    if not any(x.get("path") == "/" and x.get("ugid") == principal and x.get("roleid") == "UmiakDatacenterAudit" for x in acls):
-        mutate(["pveum", "acl", "modify", "/", principal_flag, principal, "--roles", "UmiakDatacenterAudit", "--propagate", "0"], ["pveum", "acl", "delete", "/", principal_flag, principal, "--roles", "UmiakDatacenterAudit"])
 
-create("/cluster/sdn/zones", "/cluster/sdn/zones/umiak", "--zone", "umiak", "--type", "simple", "--ipam", "pve", "--dhcp", "dnsmasq")
-create("/cluster/sdn/vnets", "/cluster/sdn/vnets/umiak0", "--vnet", "umiak0", "--zone", "umiak", "--isolate-ports", "1")
-create("/cluster/sdn/vnets/umiak0/subnets", "/cluster/sdn/vnets/umiak0/subnets/umiak-10.88.0.0-24", "--subnet", "10.88.0.0/24", "--type", "subnet", "--gateway", "10.88.0.1", "--snat", "1", "--dhcp-range", "start-address=10.88.0.100,end-address=10.88.0.250", "--dhcp-dns-server", guest_dns)
-if not exists("/cluster/firewall/ipset/umiak-gateway"):
-    create("/cluster/firewall/ipset", "/cluster/firewall/ipset/umiak-gateway", "--name", "umiak-gateway")
-if not any(x.get("cidr") == config["gateway"] for x in get("/cluster/firewall/ipset/umiak-gateway")):
-    mutate(["pvesh", "create", "/cluster/firewall/ipset/umiak-gateway", "--cidr", config["gateway"], "--comment", "Umiak guest gateway"], ["pvesh", "delete", "/cluster/firewall/ipset/umiak-gateway/" + config["gateway"]])
-if not exists("/cluster/firewall/groups/umiak-egress"):
-    create("/cluster/firewall/groups", "/cluster/firewall/groups/umiak-egress", "--group", "umiak-egress", "--comment", "Umiak sandbox egress")
-existing_rules = sorted(get("/cluster/firewall/groups/umiak-egress"), key=lambda row: int(row.get("pos", 0)))
-for position, rule in enumerate(desired_rules):
-    if position < len(existing_rules) and all(str(existing_rules[position].get(key, "")) == str(value) for key, value in rule.items()):
-        continue
-    args = [part for key, value in rule.items() for part in ["--" + key, str(value)]]
-    mutate(["pvesh", "create", "/cluster/firewall/groups/umiak-egress", *args, "--pos", str(position)], ["pvesh", "delete", "/cluster/firewall/groups/umiak-egress/" + str(position)])
-    existing_rules.insert(position, rule)
-apply_sdn()
+def _verify(runner: Runner, cfg: PrepareConfig) -> None:
+    for path, expected in TOPOLOGY:
+        current = get(runner, path)
+        if any(str(current.get(key)) != str(value) for key, value in expected.items()):
+            raise InstallerError("Verification failed: " + path)
+    get(runner, SUBNET)
+    if not any(row.get("cidr") == cfg.gateway_ip for row in get(runner, "/cluster/firewall/ipset/umiak-gateway")):
+        raise InstallerError("Verification failed: gateway IPSet")
+    rules = sorted(get(runner, "/cluster/firewall/groups/umiak-egress"), key=lambda row: int(row.get("pos", 0)))
+    if len(rules) < len(EGRESS_RULES) or not all(_rule_matches(r, e) for r, e in zip(rules, EGRESS_RULES, strict=False)):
+        raise InstallerError("Verification failed: umiak-egress rules")
+    if pending_sdn(runner):
+        raise InstallerError("Verification failed: SDN changes are still pending")
 
-node_binary = Path("/usr/local/bin/umiak-node")
-backup(node_binary)
-node_binary.write_bytes(binary)
-node_binary.chmod(0o755)
-node_config = f'''node = "{config['node']}"
-vg = "{storage['vgname']}"
-thinPool = "{storage['thinpool']}"
-storage = "{storage_name}"
-isoDir = {json.dumps(media_path.rstrip("/") + "/template/iso")}
-importDir = {json.dumps(media_path.rstrip("/") + "/import")}
-vmidMin = 500
-vmidMax = 589
-templateVmidMin = {config.get("templateVmidMin", 600)}
-templateVmidMax = {config.get("templateVmidMax", 699)}
-templateVmid = 0
-sdnZone = "umiak"
-vnet = "umiak0"
-clusterId = 1
-'''
-backup(Path("/etc/umiak-node.toml"))
-Path("/etc/umiak-node.toml").write_text(node_config)
-line = 'restrict,command="/usr/local/bin/umiak-node --stdio" ' + config["publicKey"]
-authorized = Path("/etc/pve/priv/authorized_keys")
-content = authorized.read_text() if authorized.exists() else ""
-if line not in content.splitlines():
-    backup(authorized)
-    authorized.write_text(content.rstrip() + "\n" + line + "\n")
-probe = subprocess.run([str(node_binary), "--stdio"], input=json.dumps({"op": "version", "args": {}}), text=True, capture_output=True, check=True)
-if not json.loads(probe.stdout).get("ok"):
-    raise SystemExit("Node-agent verification failed; rollback timer remains armed")
-host_key = Path("/etc/ssh/ssh_host_ed25519_key.pub").read_text().split()
-report = {"token": config["token"], "mediaStorage": media_name, "tokenSecret": token_path.read_text().strip(), "caPem": Path("/etc/pve/pve-root-ca.pem").read_text(), "sshPublicKey": " ".join(host_key[:2])}
-request = urllib.request.Request(config["origin"] + "/quickstart/setup/callback", data=json.dumps(report).encode(), headers={"Content-Type": "application/json"}, method="POST")
-with urllib.request.urlopen(request, context=context, timeout=30) as response:
-    if response.status != 200:
-        raise SystemExit("Callback failed; rollback timer remains armed")
-active_file.unlink(missing_ok=True)
-print("Host prepared and credentials reported. Re-run Adopt in the owner dashboard.")
+
+def _node_key(runner: Runner, out_dir: Path) -> str:
+    key = out_dir / "umiak-node_ed25519"
+    pub = out_dir / "umiak-node_ed25519.pub"
+    if not key.exists():
+        pub.unlink(missing_ok=True)
+        runner.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "umiak-node", "-f", str(key)])
+    elif not pub.exists():
+        write_secret(pub, runner.run(["ssh-keygen", "-y", "-f", str(key)]) + "\n")
+    key.chmod(0o600)
+    pub.chmod(0o600)
+    public_key = " ".join(pub.read_text().split()[:3])
+    if not PUBLIC_KEY.fullmatch(public_key):
+        raise InstallerError("Generated node-agent key is not an ed25519 public key")
+    return public_key
+
+
+def _node_config(cfg: PrepareConfig, facts: dict) -> str:
+    media = facts["media_path"].rstrip("/")
+    q = json.dumps
+    return (
+        f"node = {q(cfg.node)}\n"
+        f"vg = {q(facts['storage']['vgname'])}\n"
+        f"thinPool = {q(facts['storage']['thinpool'])}\n"
+        f"storage = {q(cfg.storage)}\n"
+        f"isoDir = {q(media + '/template/iso')}\n"
+        f"importDir = {q(media + '/import')}\n"
+        f"vmidMin = {cfg.vmid_min}\n"
+        f"vmidMax = {cfg.vmid_max}\n"
+        f"templateVmidMin = {cfg.tpl_min}\n"
+        f"templateVmidMax = {cfg.tpl_max}\n"
+        "templateVmid = 0\n"
+        'sdnZone = "umiak"\n'
+        'vnet = "umiak0"\n'
+        "clusterId = 1\n"
+    )
+
+
+def prepare(runner: Runner, cfg: PrepareConfig, out_dir: Path) -> PrepareResult:
+    facts = _preflight(runner, cfg)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    state = runner.path(STATE_DIR)
+    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lock = (state / rollback.LOCK).open("a")
+    try:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise InstallerError("Another host preparation is running") from error
+        if (state / rollback.ACTIVE).exists():
+            raise InstallerError("A previous preparation's rollback is pending; wait for its timer and retry")
+        journal = _Journal(runner, state)
+        _arm(runner, state, facts["bridge"])
+        try:
+            _apply(runner, cfg, facts, out_dir, journal)
+            _verify(runner, cfg)
+            public_key = _node_key(runner, out_dir)
+            write_secret(out_dir / "pve-token-id", TOKEN_ID)
+            write_secret(out_dir / "pve-root-ca.pem", runner.path("/etc/pve/pve-root-ca.pem").read_text())
+            # Pin this node's own host key for both names the control plane may use.
+            write_secret(out_dir / "known_hosts", f"{facts['node_ip']},{cfg.node} {facts['host_key']}\n")
+            write_secret(state / STAGED_NODE_CONFIG, _node_config(cfg, facts))
+            (state / rollback.ACTIVE).unlink()
+        except BaseException:
+            rollback.replay(state, runner.run)
+            raise
+        finally:
+            _stop_timer(runner)
+    finally:
+        lock.close()
+    return PrepareResult(
+        token_id=TOKEN_ID,
+        media_storage=facts["media_name"],
+        node_ip=facts["node_ip"],
+        public_key=public_key,
+        files={name: out_dir / name for name in SECRET_FILES},
+    )
+
+
+def _snapshot(path: Path):
+    return (path.read_bytes(), path.stat().st_mode & 0o777) if path.exists() else None
+
+
+def _restore(path: Path, saved) -> None:
+    if saved is None:
+        path.unlink(missing_ok=True)
+    else:
+        path.write_bytes(saved[0])
+        try:
+            path.chmod(saved[1])
+        except OSError:
+            pass  # pmxcfs (/etc/pve) has fixed permissions
+
+
+def _replace(path: Path, data: bytes, mode: int) -> None:
+    # Write next to the target and rename: never truncate a running binary.
+    tmp = path.with_name("." + path.name + ".umiak-new")
+    tmp.write_bytes(data)
+    tmp.chmod(mode)
+    os.replace(tmp, path)
+
+
+def install_node_agent(runner: Runner, binary: Path, sha256: str, public_key: str) -> None:
+    """Install the restricted node-agent on this node after prepare().
+
+    Verifies the binary's SHA256 before any write, installs it with the config
+    staged by prepare(), adds the forced-command key line to the cluster-wide
+    authorized_keys (other lines untouched) and probes the agent. On failure
+    the previous files are restored.
+    """
+    staged = runner.path(STATE_DIR) / STAGED_NODE_CONFIG
+    if not staged.exists():
+        raise InstallerError("Run prepare() before installing the node-agent (no staged node configuration)")
+    public_key = " ".join(public_key.split())
+    if not PUBLIC_KEY.fullmatch(public_key):
+        raise InstallerError("Invalid node-agent public key")
+    data = Path(binary).read_bytes()
+    if not re.fullmatch(r"[0-9a-f]{64}", sha256 or "") or hashlib.sha256(data).hexdigest() != sha256:
+        raise InstallerError("Node-agent checksum mismatch")
+    target, config, keys = runner.path(NODE_BINARY), runner.path(NODE_CONFIG), runner.path(AUTHORIZED_KEYS)
+    saved = {path: _snapshot(path) for path in (target, config, keys)}
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _replace(target, data, 0o755)
+        _replace(config, staged.read_bytes(), 0o644)
+        line = f'restrict,command="{NODE_BINARY} --stdio" {public_key}'
+        content = keys.read_text() if keys.exists() else ""
+        if line not in content.splitlines():
+            keys.write_text(content.rstrip("\n") + ("\n" if content.strip() else "") + line + "\n")
+        probe = runner.run([str(target), "--stdio"], input=json.dumps({"op": "version", "args": {}}))
+        if not json.loads(probe).get("ok"):
+            raise InstallerError("Node-agent verification failed")
+    except BaseException:
+        for path, previous in saved.items():
+            _restore(path, previous)
+        raise

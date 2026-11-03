@@ -1,0 +1,25 @@
+[project]
+name = "umiak-installer"
+version = "0.1.0"
+description = "Umiak homelab installer: local Proxmox host preparation"
+# Target runtime is the Proxmox VE system Python (3.13 on PVE 9), stdlib only.
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest==9.2.0"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = [".", "tests"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 130
+target-version = "py311"
+src = [".", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "PLW"]
