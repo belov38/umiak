@@ -27,13 +27,10 @@ export const OIDC_CLI_CLIENT_ID = "umiak-cli";
 export const MetaSchema = z
 	.object({
 		authMode: z.enum(["oidc", "none", "owner"]).optional(),
-		tenancy: z
-			.enum(["single", "teams"])
-			.optional()
-			.openapi({
-				description:
-					"Presentation model for this deployment. Missing on older servers means teams; independent of credential kind.",
-			}),
+		tenancy: z.enum(["single", "teams"]).optional().openapi({
+			description:
+				"Presentation model for this deployment. Missing on older servers means teams; independent of credential kind.",
+		}),
 		apiVersion: z.string().openapi({ example: "v1" }),
 		build: z
 			.string()
