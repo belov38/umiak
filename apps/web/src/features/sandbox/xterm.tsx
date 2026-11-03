@@ -99,7 +99,8 @@ export default function XtermView({
 				<Input
 					aria-label="Search in the output"
 					placeholder="Search"
-					className="h-7 w-48"
+					size="xs"
+					className="w-48"
 					value={needle}
 					onChange={(e) => {
 						setNeedle(e.target.value);
@@ -135,7 +136,7 @@ export default function XtermView({
 			<div
 				ref={box}
 				data-testid="xterm"
-				className="min-h-0 flex-1 overflow-hidden rounded-none bg-[var(--terminal-background)] p-1"
+				className="min-h-0 flex-1 overflow-hidden bg-[var(--terminal-background)] p-1"
 			/>
 		</div>
 	);

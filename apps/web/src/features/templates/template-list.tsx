@@ -230,7 +230,7 @@ export function TemplateList({
 											{t.version ? "Rebuild…" : "Build…"}
 										</Button>
 									) : (
-										<Button asChild size="sm">
+										<Button asChild variant="outline" size="sm">
 											<Link href="/app/getting-started">
 												Build instructions
 											</Link>
@@ -250,7 +250,7 @@ export function TemplateList({
 				/>
 			)}
 			{job && (
-				<div className="space-y-3 rounded-none border p-5" aria-live="polite">
+				<div className="space-y-3 border p-5" aria-live="polite">
 					<h2 className="font-semibold">
 						Latest build: {job.slug} — {job.status}
 					</h2>
@@ -333,15 +333,11 @@ export function TemplateList({
 										licensed ISO URL or an already uploaded ISO. Without SHA256:
 										Not verified: the ISO will be used as downloaded.
 									</p>
-									<label
-										htmlFor="template-list-choice-1"
-										className="block text-sm"
-									>
+									<label className="block text-sm">
 										ISO storage
 										<NativeSelect
-											id="template-list-choice-1"
 											name="mediaStorage"
-											className="mt-1 block w-full border bg-background p-2"
+											className="mt-1 block w-full"
 											aria-label="ISO storage"
 										>
 											<option value="">First eligible ISO storage</option>
@@ -352,56 +348,39 @@ export function TemplateList({
 											))}
 										</NativeSelect>
 									</label>
-									<label htmlFor="tpl-isoUrl" className="block text-sm">
+									<label className="block text-sm">
 										Windows ISO HTTPS URL
 										<Input
-											id="tpl-isoUrl"
 											name="isoUrl"
 											type="url"
 											placeholder="https://…/windows.iso"
 										/>
 									</label>
-									<label htmlFor="tpl-iso" className="block text-sm">
+									<label className="block text-sm">
 										Or existing ISO path / PVE volume
-										<Input
-											id="tpl-iso"
-											name="iso"
-											placeholder="local:iso/windows.iso"
-										/>
+										<Input name="iso" placeholder="local:iso/windows.iso" />
 									</label>
-									<label htmlFor="tpl-isoSha256" className="block text-sm">
+									<label className="block text-sm">
 										Windows ISO SHA256 (optional)
-										<Input
-											id="tpl-isoSha256"
-											name="isoSha256"
-											pattern="[a-fA-F0-9]{64}"
-										/>
+										<Input name="isoSha256" pattern="[a-fA-F0-9]{64}" />
 									</label>
-									<label htmlFor="tpl-virtioUrl" className="block text-sm">
+									<label className="block text-sm">
 										VirtIO ISO HTTPS URL
 										<Input
-											id="tpl-virtioUrl"
 											name="virtioUrl"
-											defaultValue="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
+											defaultValue="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.271-1/virtio-win-0.1.271.iso"
 										/>
 									</label>
-									<label htmlFor="tpl-virtioSha256" className="block text-sm">
+									<label className="block text-sm">
 										VirtIO ISO SHA256 (optional)
 										<Input
-											id="tpl-virtioSha256"
 											name="virtioSha256"
 											defaultValue="bbe6166ad86a490caefad438fef8aa494926cb0a1b37fa1212925cfd81656429"
 											pattern="[a-fA-F0-9]{64}"
 										/>
 									</label>
-									<label
-										htmlFor="template-list-choice-2"
-										className="flex gap-2 text-sm"
-									>
-										<Checkbox
-											id="template-list-choice-2"
-											name="allowInternalIsoUrls"
-										/>
+									<label className="flex gap-2 text-sm">
+										<Checkbox name="allowInternalIsoUrls" />
 										Explicitly allow private/internal ISO URL targets
 									</label>
 								</>
@@ -453,12 +432,9 @@ export function TemplateList({
 									{error}
 								</p>
 							)}
-							<label
-								htmlFor="template-list-choice-3"
-								className="flex gap-2 text-sm"
-							>
-								<Checkbox id="template-list-choice-3" required />I confirm
-								starting this {selected.built ? "new version build" : "build"}.
+							<label className="flex gap-2 text-sm">
+								<Checkbox required />I confirm starting this{" "}
+								{selected.built ? "new version build" : "build"}.
 							</label>
 							<Button type="submit" disabled={busy}>
 								{busy

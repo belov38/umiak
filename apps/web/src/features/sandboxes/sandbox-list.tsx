@@ -246,12 +246,6 @@ function EmptyState({
 							<Link href="/app/getting-started#agents">Connect an agent</Link>
 						</li>
 					</ol>
-					<Button asChild>
-						<Link href={teamPath(teamId, "sandboxes/new")}>
-							<PlusIcon />
-							New sandbox
-						</Link>
-					</Button>
 				</div>
 			)}
 		</DashboardEmpty>

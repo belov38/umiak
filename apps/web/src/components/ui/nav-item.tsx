@@ -13,7 +13,10 @@ export function NavItem({
 			variant={variant}
 			size={size}
 			className={cn(
-				"w-full justify-start gap-2 border-0 px-3 text-muted-foreground aria-[current=page]:bg-secondary aria-[current=page]:text-secondary-foreground",
+				"w-full justify-start gap-2 border-0 px-3 aria-[current=page]:bg-secondary aria-[current=page]:text-secondary-foreground",
+				variant === "ghost"
+					? "text-muted-foreground"
+					: "text-secondary-foreground",
 				className,
 			)}
 			{...props}

@@ -32,6 +32,10 @@ WORKDIR /app
 COPY . .
 RUN pnpm install --frozen-lockfile --prod --filter-prod "@umiak/cli..."
 RUN cd apps/cli && bun scripts/build.ts --all
+FROM node:26.13.0-bookworm-slim AS ui-fonts
+WORKDIR /fonts
+# Same font packages and versions as the dashboard; no network dependency at runtime.
+RUN npm install --ignore-scripts --no-package-lock @fontsource-variable/inter@5.3.0 @fontsource-variable/funnel-display@5.3.0
 # Keep build dependencies and other workspace applications out of the shipped image.
 FROM node:26.13.0-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends openssl openssh-client ca-certificates xorriso gnupg git && apt-get clean
@@ -41,6 +45,10 @@ COPY . .
 RUN pnpm install --frozen-lockfile --prod --filter-prod "@umiak/template-builder..." --filter-prod "@umiak/db..."
 RUN mkdir -p /app/quickstart-assets && cp deploy/compose/quickstart/install.sh /app/quickstart-assets/install.sh && ln -s /app/packages/db/node_modules/pg /app/node_modules/pg
 COPY --from=cli-build /app/apps/cli/dist/ /app/quickstart-assets/
+COPY --from=ui-fonts /fonts/node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2 /app/quickstart-assets/inter.woff2
+COPY --from=ui-fonts /fonts/node_modules/@fontsource-variable/funnel-display/files/funnel-display-latin-wght-normal.woff2 /app/quickstart-assets/funnel.woff2
+COPY --from=ui-fonts /fonts/node_modules/@fontsource-variable/inter/LICENSE /app/quickstart-assets/LICENSE-Inter
+COPY --from=ui-fonts /fonts/node_modules/@fontsource-variable/funnel-display/LICENSE /app/quickstart-assets/LICENSE-Funnel
 COPY --from=gateway-build /out/umiak-gateway /umiak-gateway
 COPY --from=node-build /out/umiak-node-linux-amd64 /app/quickstart-assets/umiak-node-linux-amd64
 COPY --from=guest-build /out/umiak-agent-linux-amd64 /app/quickstart-assets/umiak-agent-linux-amd64
@@ -48,6 +56,6 @@ COPY --from=guest-build /out/umiak-agent-windows-amd64.exe /app/quickstart-asset
 COPY --from=guest-build /out/umiak-release /umiak-release
 ENV NODE_ENV=production UMIAK_QUICKSTART_PORT=4180 UMIAK_QUICKSTART_ASSETS=/app/quickstart-assets
 USER node
-EXPOSE 4180
+EXPOSE 4180 4181
 ENTRYPOINT ["node", "deploy/compose/quickstart/run.mjs"]
 CMD ["node", "deploy/compose/quickstart/server.mjs"]

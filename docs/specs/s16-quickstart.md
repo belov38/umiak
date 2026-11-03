@@ -27,12 +27,14 @@ LAN IP path. OIDC and S15 remain available through their existing compose files.
   be explicitly configured. Unknown DNS Hosts fail before routing. Destinations
   are fixed upstreams, never selected from Host. Exact Origin checks protect
   mutations, including claim and browser pairing approval; WebSockets are gated.
-- `UMIAK_TRUSTED_PROXY_CIDRS` defaults to loopback. Compose additionally trusts its
-  host NAT peer; the optional sidecar overlay trusts its isolated peer. Only these
-  peers may supply X-Forwarded-Proto/Host/For. A trusted proxy must reject unknown
-  Hosts; optional `UMIAK_PUBLIC_URL` pins its external origin. Ordinary direct
-  requests ignore forged forwarding headers. Forwarded client chains are walked
-  from the trusted end for rate limits and preparation peer checks.
+- Public port4180 ignores all forwarded headers, including loopback/NAT peers.
+  A separate trusted proxy listener on port4181 is published only on host loopback.
+  Host-run Serve/Caddy/nginx use `http://127.0.0.1:4181`; the optional isolated
+  sidecar also targets4181. No Docker NAT/gateway address is trusted.
+  `UMIAK_TRUSTED_PROXY_CIDRS` identifies extra trusted hops only when walking
+  forwarded client chains on that listener. A proxy must reject unknown Hosts;
+  optional `UMIAK_PUBLIC_URL` pins its external origin. Rate limits and preparation
+  peer checks use the first untrusted forwarded client from the trusted end.
 - HTTP cookies use `umiak_owner` without Secure. Trusted HTTPS proxy requests use
   `__Host-umiak_owner; Secure`, preserving existing Serve owner sessions. Both are
   HttpOnly, Path=/, SameSite=Strict. Existing CLI bearer credentials stay valid.
@@ -120,7 +122,7 @@ CT590 is claimed and in use. Preserve owner state/sessions/sandboxes and guest
 CA. Never log in as ilia@example.com, reset claim or create a pairing. No live
 builds, downloads, VM creation, host prep, firewall or network changes. Only
 read-only pvesh/qm on pve; never touch pve2/ip-hub-pve. Restart only with no active
-operations. Serve8443 forwards to HTTP4180; LAN is http://192.168.68.90:4180.
+operations. Serve8443 forwards to loopback HTTP4181; LAN is http://192.168.68.90:4180.
 
 Gate: pnpm build/lint/typecheck, sequential workspace tests, quickstart/local/
 meta-proxy Node tests including compiled HTTP CLI and custom-CA HTTPS proxy,

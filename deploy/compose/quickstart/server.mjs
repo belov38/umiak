@@ -3,9 +3,11 @@ import http from "node:http";
 import net from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { canonicalFetch } from "../canonical-fetch.mjs";
 import { clientGuard } from "../local/ingress.mjs";
 import { requestContext } from "./origin.mjs";
 import { OwnerStore, PgOwnerRepository } from "./owner.mjs";
+import { renderPage, uiAsset } from "./ui.mjs";
 
 const COOKIE = "__Host-umiak_owner";
 const esc = (value) =>
@@ -32,9 +34,7 @@ const page = (res, title, body) => {
 		"content-type": "text/html; charset=utf-8",
 		"cache-control": "no-store",
 	});
-	res.end(
-		`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${esc(title)} · Umiak</title><style>:root{color-scheme:light dark;--bg:#fefefe;--panel:#fefefe;--fg:#060606;--border:#e0e0e0;--accent:#263fa9}@media(prefers-color-scheme:dark){:root{--bg:#060606;--panel:#060606;--fg:#fefefe;--border:#2e2e2e;--accent:#aab9ff}}*{box-sizing:border-box}body{font:15px/1.6 system-ui;max-width:800px;margin:3rem auto;padding:1.5rem;background:var(--bg);color:var(--fg)}h1{font-size:2rem;letter-spacing:-.04em}input,button{font:inherit;padding:.7rem;margin:.4rem 0;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--fg)}input:not([type=checkbox]){display:block;width:100%}button{cursor:pointer;background:var(--accent);color:var(--bg);font-weight:600}section{border:1px solid var(--border);padding:1rem;border-radius:12px;margin:1rem 0}a{color:var(--accent)}code{overflow-wrap:anywhere}pre{white-space:pre-wrap}nav{display:flex;gap:1.5rem;margin-bottom:2rem}</style><nav><strong>Umiak</strong><a href="/app">Sandboxes</a><a href="/app/getting-started">Getting started</a><a href="/owner/sessions">Sessions</a></nav><h1>${esc(title)}</h1>${body}</html>`,
-	);
+	res.end(renderPage(title, `<h1>${esc(title)}</h1>${body}`));
 };
 async function body(req) {
 	let size = 0;
@@ -102,6 +102,8 @@ export function createQuickstartServer({
 	assetsDir,
 	env = process.env,
 	transport = http,
+	proxyListener = false,
+	metadataFetch = canonicalFetch,
 }) {
 	const allowed = clientGuard(
 		env.UMIAK_LOCAL_ALLOWED_CIDRS ??
@@ -134,10 +136,11 @@ export function createQuickstartServer({
 		res.setHeader("referrer-policy", "no-referrer");
 		res.setHeader("x-frame-options", "DENY");
 		try {
-			const { origin, clientAddress } = requestContext(req, env);
+			const { origin, clientAddress } = requestContext(req, env, proxyListener);
 			req.umiakClientAddress = clientAddress;
 			const url = new URL(req.url, origin);
 			const path = url.pathname;
+			if (req.method === "GET" && uiAsset(path, res, assetsDir)) return;
 			const publicOrigin = env.UMIAK_PUBLIC_URL
 				? new URL(env.UMIAK_PUBLIC_URL).origin
 				: origin;
@@ -166,8 +169,8 @@ export function createQuickstartServer({
 			if (path.startsWith("/owner/") && !rate(req, owner))
 				return fail(res, 429, "rate_limited");
 			if (path === "/v1/meta" && req.method === "GET") {
-				const reply = await fetch(
-					`http://${env.UMIAK_QUICKSTART_API_HOST ?? "api"}:8080/v1/meta`,
+				const reply = await metadataFetch(
+					`http://${env.UMIAK_QUICKSTART_API_HOST ?? "api"}:${env.UMIAK_QUICKSTART_API_PORT ?? 8080}/v1/meta`,
 					{
 						headers: upstreamHeaders(req, appOrigin),
 						signal: AbortSignal.timeout(10000),
@@ -275,7 +278,7 @@ export function createQuickstartServer({
 					return page(
 						res,
 						"Claim this Umiak deployment",
-						`<p>Enter the one-time setup code from <code>docker compose logs quickstart</code>. Network access alone grants no control.</p><form id="claim"><input id="code" type="password" autocomplete="off" required placeholder="Setup code"><button>Claim deployment</button></form><pre id="message"></pre><script>document.getElementById('claim').onsubmit=async e=>{e.preventDefault();const r=await fetch('/owner/claim',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:document.getElementById('code').value})});if(r.ok)location.reload();else document.getElementById('message').textContent='Claim failed. Check the setup code; it can only be used once.';};</script>`,
+						`<p>Enter the one-time setup code from <code>docker compose logs quickstart</code>. Network access alone grants no control.</p><form id="claim"><label>Setup code<input id="code" type="password" autocomplete="off" required placeholder="Setup code"></label><button>Claim deployment</button></form><pre id="message" role="status"></pre><script>document.getElementById('claim').onsubmit=async e=>{e.preventDefault();const r=await fetch('/owner/claim',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:document.getElementById('code').value})});if(r.ok)location.reload();else document.getElementById('message').textContent='Claim failed. Check the setup code; it can only be used once.';};</script>`,
 					);
 				}
 				return fail(res, 401, "owner_required");
@@ -296,7 +299,7 @@ export function createQuickstartServer({
 				return page(
 					res,
 					"Owner sessions",
-					`<p>CLI sessions expire after 30 days. Revoke a lost device here.</p>${sessions.map((x) => `<section><strong>${esc(x.kind)}</strong> · expires ${esc(new Date(x.expires).toISOString())} <button data-session="${esc(x.id)}">Revoke</button></section>`).join("")}<p id="result" role="status"></p><script>document.querySelectorAll('[data-session]').forEach(b=>b.onclick=async()=>{const r=await fetch('/owner/sessions/revoke',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.session})});if(r.ok)location.reload();else document.querySelector('#result').textContent='Could not revoke session';});</script>`,
+					`<p>CLI sessions expire after 30 days. Revoke a lost device here.</p>${sessions.map((x) => `<section><strong>${esc(x.kind)}</strong> · expires ${esc(new Date(x.expires).toISOString())} <button class="destructive" data-session="${esc(x.id)}">Revoke</button></section>`).join("")}<p id="result" role="status"></p><script>document.querySelectorAll('[data-session]').forEach(b=>b.onclick=async()=>{if(!confirm("Revoke this session? The device will lose access immediately."))return;b.disabled=true;const r=await fetch('/owner/sessions/revoke',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.session})});if(r.ok)location.reload();else {b.disabled=false;document.querySelector('#result').textContent='Could not revoke session';}});</script>`,
 				);
 			}
 			if (path === "/owner/sessions/revoke" && req.method === "POST") {
@@ -381,7 +384,7 @@ export function createQuickstartServer({
 	server.headersTimeout = 15000;
 	server.on("upgrade", async (req, socket, head) => {
 		try {
-			const { origin, clientAddress } = requestContext(req, env);
+			const { origin, clientAddress } = requestContext(req, env, proxyListener);
 			req.umiakClientAddress = clientAddress;
 			if (
 				!allowed(req.socket.remoteAddress) ||
@@ -426,19 +429,32 @@ async function main() {
 		setupHandler = createSetupHandler({ pool });
 		await setupHandler.init?.();
 	}
-	const server = createQuickstartServer({
+	const options = {
 		store,
 		setupHandler,
 		assetsDir: process.env.UMIAK_QUICKSTART_ASSETS ?? "/app/quickstart-assets",
-	});
+	};
+	const server = createQuickstartServer(options);
+	const proxy = createQuickstartServer({ ...options, proxyListener: true });
 	const port = Number(process.env.UMIAK_QUICKSTART_PORT ?? 4180);
 	server.listen(port, process.env.UMIAK_QUICKSTART_LISTEN ?? "0.0.0.0", () =>
-		console.log(
-			`Umiak owner HTTP ingress ready on :${port}; open http://localhost:${port}`,
-		),
+		console.log(`Umiak owner HTTP ingress ready on :${port}`),
 	);
-	const close = () =>
-		server.close(() => pool.end().then(() => process.exit(0)));
+	// Docker publishes this separately on host loopback. Never publish it publicly.
+	const proxyPort = Number(process.env.UMIAK_QUICKSTART_PROXY_PORT ?? 4181);
+	proxy.listen(
+		proxyPort,
+		process.env.UMIAK_QUICKSTART_LISTEN ?? "0.0.0.0",
+		() => console.log(`Umiak trusted proxy ingress ready on :${proxyPort}`),
+	);
+	const close = () => {
+		let remaining = 2;
+		const closed = () => {
+			if (--remaining === 0) pool.end().then(() => process.exit(0));
+		};
+		server.close(closed);
+		proxy.close(closed);
+	};
 	process.on("SIGTERM", close);
 	process.on("SIGINT", close);
 }

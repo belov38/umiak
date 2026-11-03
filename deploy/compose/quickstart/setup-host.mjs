@@ -459,7 +459,7 @@ export async function verifyAdoption(api, connection, nodeCheck) {
 			.includes("iso"),
 	);
 	checks.push({
-		name: "native ISO download permission (Datastore.AllocateTemplate + node Sys.AccessNetwork)",
+		name: "native ISO download permission (Datastore.AllocateTemplate + node Sys.AccessNetwork + root Sys.Audit for proxy options)",
 		ok: Boolean(
 			media && downloadPermission(permissions, connection.node, media.storage),
 		),

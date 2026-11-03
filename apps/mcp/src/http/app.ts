@@ -13,6 +13,7 @@ import {
 import { authMode, isLocalClientAllowed, TrustedProxies } from "@umiak/auth";
 import { Umiak } from "@umiak/sdk";
 import { type Context, Hono } from "hono";
+import { canonicalFetch } from "../../../../deploy/compose/canonical-fetch.mjs";
 import { type ClientInfo, userAgentOf } from "../context.ts";
 import { apiCallLogger, type Logger } from "../log.ts";
 import type { Metrics } from "../metrics.ts";
@@ -182,7 +183,18 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 		}) as typeof fetch;
 	}
 	const log = o.log;
-	const apiFetch = apiCallLogger(o.fetch ?? fetch, log);
+	const canonicalApi =
+		o.localEnv?.UMIAK_AUTH_MODE === "none" && o.localEnv.UMIAK_API_URL;
+	// Connect to fixed internal DNS while presenting the configured API authority.
+	// Never derive this Host from an incoming browser or MCP header.
+	const apiTransport = canonicalApi
+		? ((async (input: RequestInfo | URL, init?: RequestInit) => {
+				const request = new Request(input, init);
+				request.headers.set("host", new URL(canonicalApi).host);
+				return (o.fetch ?? canonicalFetch)(request);
+			}) as typeof fetch)
+		: (o.fetch ?? fetch);
+	const apiFetch = apiCallLogger(apiTransport, log);
 	const mcpPath = new URL(o.publicUrl).pathname.replace(/(.)\/+$/, "$1");
 	const metadataUrl = prmUrl(o.publicUrl);
 	const metadata = protectedResourceMetadata(o);

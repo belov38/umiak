@@ -115,13 +115,13 @@ export function OutputView({
 	return (
 		<div className="flex flex-col gap-2" data-testid="output-view">
 			<div className="flex flex-wrap items-center gap-2 text-sm">
-				<code className="max-w-md truncate rounded-none bg-muted px-1.5 py-0.5 text-xs">
+				<code className="max-w-md truncate bg-muted px-1.5 py-0.5 text-xs">
 					{c.command ?? c.argv?.join(" ") ?? c.id}
 				</code>
 				{!pty && (
 					<NativeSelect
 						aria-label="Streams"
-						className="h-7 rounded-none border bg-transparent px-1 text-xs"
+						size="xs"
 						value={filter}
 						onChange={(e) => setFilter(e.target.value as OutputFilter)}
 					>
@@ -133,7 +133,7 @@ export function OutputView({
 				{hasLongOutput(c) && (
 					<NativeSelect
 						aria-label="From"
-						className="h-7 rounded-none border bg-transparent px-1 text-xs"
+						size="xs"
 						value={from}
 						onChange={(e) => setFrom(e.target.value as "start" | "tail")}
 					>
@@ -154,7 +154,7 @@ export function OutputView({
 					<div className="ml-auto flex items-center gap-1">
 						<NativeSelect
 							aria-label="Send a signal"
-							className="h-7 rounded-none border bg-transparent px-1 text-xs"
+							size="xs"
 							value=""
 							disabled={busy || controlOff !== null}
 							title={controlOff ?? undefined}
@@ -221,7 +221,7 @@ function Downloads({
 			<span>Download up to 4 MiB of</span>
 			<NativeSelect
 				aria-label="Stream to download"
-				className="h-7 rounded-none border bg-transparent px-1"
+				size="xs"
 				value={stream}
 				onChange={(e) => setStream(e.target.value as (typeof streams)[number])}
 			>
@@ -234,7 +234,8 @@ function Downloads({
 			<span>from byte</span>
 			<Input
 				aria-label="Offset"
-				className="h-7 w-28 text-xs"
+				size="xs"
+				className="w-28"
 				inputMode="numeric"
 				placeholder={String(dflt)}
 				value={offset}

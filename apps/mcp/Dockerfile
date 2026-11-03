@@ -39,6 +39,7 @@ RUN pnpm install --frozen-lockfile --prod --filter "@umiak/mcp..."
 COPY packages/auth/src packages/auth/src
 COPY packages/sdk-ts/src packages/sdk-ts/src
 COPY apps/mcp/src apps/mcp/src
+COPY deploy/compose/canonical-fetch.mjs deploy/compose/canonical-fetch.mjs
 
 ENV NODE_ENV=production
 USER node

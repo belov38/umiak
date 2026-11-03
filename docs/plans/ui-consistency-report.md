@@ -209,3 +209,29 @@ not modify anything outside apps/web and docs, does not merge main and does not
 claim screenshots of external claim/pairing/session screens. The source rule is
 lexical and the contrast checks cover semantic tokens, not every possible
 composited colour or complete WCAG conformance.
+
+
+## S16 UI follow-up — 2026-11-03
+
+The external-renderer debt above is superseded by this follow-up. Bootstrap
+claim/pair/approval/sessions/setup retain their pre-session server renderer but
+share `deploy/compose/quickstart/ui.mjs`: it reads the actual dashboard tokens,
+uses bundled Inter/Funnel fonts, the same square layout frame, persisted theme,
+focus outlines and action hierarchy. Revoke/build/smoke require confirmation.
+Keeping bootstrap rendering independent of Next preserves first claim during
+startup; no auth/CSRF capability is moved to the browser.
+
+Dashboard primitives now explicitly set solid focus outlines; NavItem owns its
+selected appearance. NativeSelect/Input/Textarea size variants replace local
+restyling. Checkbox owns its token border and checkmark. Globals contain no
+`[data-slot]` overrides. Wrapping labels no longer need hard-coded ID pairs.
+Environment names wrap at 390px; empty Sandboxes has one primary action; OIDC
+Build instructions is secondary. Footer operator/admin/setup icons are distinct.
+Policy checks cover CSS overrides, template literal radii, palette/arbitrary
+colours, shadows and callback-bearing links while allowing anchors/prose.
+
+Per-domain decisions: [dashboard](s16-ui-followup-ui.md),
+[bootstrap pages](s16-ui-followup-quickstart-ui.md),
+[security](s16-ui-followup-security.md).
+Final gates and live evidence are recorded in [the S16 plan](s16-quickstart.md).
+Screenshots (outside git): `/tmp/umiak-s16-evidence-HumwBq/{before,after,quickstart-before,quickstart-after}`.

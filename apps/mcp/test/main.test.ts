@@ -42,6 +42,22 @@ describe("loadSettings", () => {
 		});
 	});
 
+	it("retains validated canonical API URL for local internal transports", () => {
+		const settings = loadSettings({
+			...base,
+			UMIAK_AUTH_MODE: "none",
+			UMIAK_API_URL: "http://localhost:4180",
+		});
+		expect(settings.localEnv?.UMIAK_API_URL).toBe("http://localhost:4180");
+		expect(() =>
+			loadSettings({
+				...base,
+				UMIAK_AUTH_MODE: "none",
+				UMIAK_API_URL: "invalid",
+			}),
+		).toThrow(SettingsError);
+	});
+
 	it("reads every variable", () => {
 		const s = loadSettings({
 			...base,

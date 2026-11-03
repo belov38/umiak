@@ -45,7 +45,7 @@ export function PageHeader({
 		>
 			<h1
 				className={cn(
-					"min-w-0",
+					"min-w-0 max-sm:flex-1",
 					compact && "sandbox-detail-heading flex items-center gap-2",
 				)}
 			>

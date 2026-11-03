@@ -102,7 +102,7 @@ export function OverviewTab({
 						<p className="text-sm text-muted-foreground">None yet.</p>
 					)}
 					<ul
-						className="divide-y rounded-none border text-sm"
+						className="divide-y border text-sm"
 						data-testid="overview-commands"
 					>
 						{(commands.data ?? []).map((c) => (
@@ -141,7 +141,7 @@ export function OverviewTab({
 					{ports.data?.hosted.length === 0 && (
 						<p className="text-sm text-muted-foreground">None.</p>
 					)}
-					<ul className="divide-y rounded-none border text-sm">
+					<ul className="divide-y border text-sm">
 						{(ports.data?.hosted ?? []).map((p) => (
 							<li key={p.port} className="flex items-center gap-2 p-1.5">
 								<span className="w-14 font-mono">{p.port}</span>

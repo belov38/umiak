@@ -21,15 +21,14 @@ function authority(value, protocol) {
 		throw Error("invalid_host");
 	return url;
 }
-export function requestContext(req, env = process.env) {
+export function requestContext(req, env = process.env, proxyListener = false) {
 	const trusted = clientGuard(
 		env.UMIAK_TRUSTED_PROXY_CIDRS || "127.0.0.0/8,::1/128",
 		"",
 		{ UMIAK_LOCAL_DENIED_CIDRS: "" },
 	);
 	const proxied =
-		trusted(req.socket?.remoteAddress) &&
-		req.headers["x-forwarded-proto"] !== undefined;
+		proxyListener && req.headers["x-forwarded-proto"] !== undefined;
 	const proto = proxied ? req.headers["x-forwarded-proto"] || "http" : "http";
 	if (!["http", "https"].includes(proto)) throw Error("invalid_proxy_protocol");
 	const host = proxied
@@ -57,7 +56,7 @@ export function requestContext(req, env = process.env) {
 		...(publicUrl ? [publicUrl.hostname] : []),
 	]);
 	const literal = net.isIP(url.hostname.replace(/^\[|\]$/g, ""));
-	// A configured proxy is an origin boundary. Pin its external Host with PUBLIC_URL
+	// The dedicated proxy listener is an origin boundary. Pin its external Host with PUBLIC_URL
 	// when the proxy itself does not restrict incoming hosts.
 	if (proxied && publicUrl && url.origin !== publicUrl.origin)
 		throw Error("proxy_host_forbidden");

@@ -100,7 +100,7 @@ export function EnvTab({
 				<p
 					role="status"
 					data-testid="env-undelivered"
-					className="rounded-none border border-warning/35 bg-warning-tint p-3 text-warning"
+					className="border border-warning/35 bg-warning-tint p-3 text-warning"
 				>
 					Saved. It applies at the next start: the sandbox is not ready or its
 					agent did not answer.
@@ -405,7 +405,8 @@ function EditDialog({
 					</div>
 				) : (
 					<Textarea
-						className="min-h-16 rounded-none border bg-transparent px-2.5 py-1.5 font-mono text-xs"
+						size="xs"
+						className="font-mono"
 						spellCheck={false}
 						value={v}
 						onChange={(e) => setValue(e.target.value)}

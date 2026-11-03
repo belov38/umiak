@@ -39,17 +39,21 @@ function fake({
 	files = [],
 	exitstatus = "OK",
 	permission = true,
+	proxy,
+	clusterAudit = true,
 	log = [{ t: "download progress 100%" }],
 } = {}) {
 	const posts = [];
 	return {
 		posts,
 		async get(path) {
+			if (path === "/cluster/options") return { http_proxy: proxy };
 			if (path.endsWith("/storage"))
 				return [{ storage: "local", content: "iso,backup", active: 1 }];
 			if (path === "/access/permissions")
 				return permission
 					? {
+							"/": clusterAudit ? { "Sys.Audit": 1 } : {},
 							"/nodes/pve": { "Sys.AccessNetwork": 1 },
 							"/storage/local": { "Datastore.AllocateTemplate": 1 },
 						}
@@ -251,4 +255,65 @@ test("HEAD unavailable remains advisory; GET task log is audited before acceptin
 		assert.equal(result.mediaVerification, "verified");
 		assert.equal(api.posts.length, 1);
 	}
+});
+
+test("only configured PVE proxy connection is exempt from destination audit", async () => {
+	const { auditDownloadLog } = await import("./setup-iso.mjs");
+	const log = [
+		{ t: "Resolving proxy.internal (proxy.internal)... 10.2.3.4" },
+		{
+			t: "Connecting to proxy.internal (proxy.internal)|10.2.3.4|:3128... connected.",
+		},
+		{ t: "Proxy request sent, awaiting response... 200 OK" },
+	];
+	await auditDownloadLog(log, input.isoUrl, {
+		resolve,
+		proxy: "http://proxy.internal:3128",
+	});
+	await assert.rejects(
+		auditDownloadLog(log, input.isoUrl, { resolve }),
+		/internal/,
+	);
+	await assert.rejects(
+		auditDownloadLog(
+			[
+				...log,
+				{
+					t: "Connecting to private.example (private.example)|10.0.0.9|:443... connected.",
+				},
+			],
+			input.isoUrl,
+			{ resolve, proxy: "http://proxy.internal:3128" },
+		),
+		/internal/,
+	);
+	await assert.rejects(
+		auditDownloadLog(
+			[...log, { t: "Location: https://127.0.0.1/secret.iso [following]" }],
+			input.isoUrl,
+			{ resolve, proxy: "http://proxy.internal:3128" },
+		),
+		/internal/,
+	);
+});
+
+test("native download reads datacenter proxy before auditing wget task", async () => {
+	const api = fake({
+		proxy: "http://10.2.3.4:3128",
+		log: [{ t: "Connecting to 10.2.3.4:3128... connected." }],
+	});
+	const result = await prepareWindowsMedia(api, "pve", input, {
+		resolve,
+		head,
+	});
+	assert.equal(result.isoSha256, sha);
+});
+
+test("download refuses a partial cluster-options view without root Sys.Audit", async () => {
+	const api = fake({ clusterAudit: false, proxy: "http://10.2.3.4:3128" });
+	await assert.rejects(
+		prepareWindowsMedia(api, "pve", input, { resolve, head }),
+		/Sys.Audit.*cluster options/,
+	);
+	assert.equal(api.posts.length, 0);
 });

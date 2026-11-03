@@ -2,12 +2,19 @@
 import http from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { canonicalFetch } from "./canonical-fetch.mjs";
 export function createMetaProxy(
 	readMeta = () =>
-		fetch("http://api:8080/v1/meta", {
+		fetchApi(`${apiUrl}/v1/meta`, {
+			headers: env.UMIAK_API_URL
+				? { host: new URL(env.UMIAK_API_URL).host }
+				: {},
 			redirect: "error",
 			signal: AbortSignal.timeout(3000),
 		}),
+	env = process.env,
+	fetchApi = canonicalFetch,
+	apiUrl = "http://api:8080",
 ) {
 	return http.createServer(async (req, res) => {
 		res.setHeader("cache-control", "no-store");

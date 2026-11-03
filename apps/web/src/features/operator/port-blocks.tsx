@@ -61,7 +61,7 @@ export function PortBlocks({ sandbox }: { sandbox: SandboxData }) {
 			{hosted.length === 0 ? (
 				<p className="text-sm text-muted-foreground">No published ports.</p>
 			) : (
-				<ul className="divide-y rounded-none border bg-background">
+				<ul className="divide-y border bg-background">
 					{hosted.map((p) => (
 						<li
 							key={p.port}

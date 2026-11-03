@@ -80,13 +80,9 @@ export function NewKeyForm({
 			aria-label={singleOwner ? "New API key" : "New team API key"}
 		>
 			<div className="grid gap-4 sm:grid-cols-2">
-				<label
-					htmlFor="new-key-name"
-					className="grid min-w-0 content-start gap-2"
-				>
+				<label className="grid min-w-0 content-start gap-2">
 					Key name
 					<Input
-						id="new-key-name"
 						aria-label="Key name"
 						placeholder="Name, e.g. ci-main"
 						maxLength={64}
@@ -119,13 +115,8 @@ export function NewKeyForm({
 				</p>
 				<fieldset aria-labelledby="key-access-label" className="text-sm">
 					{PRESET_NAMES.map((p) => (
-						<label
-							htmlFor={`new-key-form-choice-1-${p}`}
-							key={p}
-							className="key-preset flex items-start gap-3"
-						>
+						<label key={p} className="key-preset flex items-start gap-3">
 							<Radio
-								id={`new-key-form-choice-1-${p}`}
 								className="mt-1"
 								checked={form.preset === p}
 								onChange={() => setForm((f) => ({ ...f, preset: p }))}
@@ -147,12 +138,8 @@ export function NewKeyForm({
 							</span>
 						</label>
 					))}
-					<label
-						htmlFor="new-key-form-choice-2"
-						className="key-preset flex items-center gap-3"
-					>
+					<label className="key-preset flex items-center gap-3">
 						<Radio
-							id="new-key-form-choice-2"
 							checked={form.preset === "custom"}
 							onChange={() =>
 								setForm((f) => ({
@@ -170,13 +157,8 @@ export function NewKeyForm({
 					{form.preset === "custom" && (
 						<div className="grid grid-cols-2 gap-x-4 gap-y-1 pl-6">
 							{SCOPES.map((s) => (
-								<label
-									htmlFor={`new-key-form-choice-3-${s}`}
-									key={s}
-									className="flex items-center gap-1.5"
-								>
+								<label key={s} className="flex items-center gap-1.5">
 									<Checkbox
-										id={`new-key-form-choice-3-${s}`}
 										checked={form.scopes.includes(s)}
 										onChange={(e) => toggleScope(s, e.target.checked)}
 									/>

@@ -102,6 +102,7 @@ const origins = csv.pipe(
 const schema = z.object({
 	UMIAK_MCP_PORT: port(8080),
 	UMIAK_MCP_OPS_PORT: port(9090),
+	UMIAK_API_URL: optionalUrl,
 	UMIAK_MCP_API_URL: url("the api's public listener, e.g. http://api:8080"),
 	UMIAK_MCP_PUBLIC_URL: url("e.g. https://api.example.com/mcp"),
 	UMIAK_OIDC_ISSUER: optionalUrl,
@@ -132,6 +133,7 @@ export function loadSettings(
 			? {
 					localEnv: {
 						UMIAK_AUTH_MODE: "none",
+						UMIAK_API_URL: e.UMIAK_API_URL,
 						UMIAK_LOCAL_DENIED_CIDRS: localDeniedCidrs(env).join(","),
 						UMIAK_LOCAL_ALLOWED_CIDRS: env.UMIAK_LOCAL_ALLOWED_CIDRS,
 						UMIAK_API_TRUSTED_PROXY_CIDRS: env.UMIAK_API_TRUSTED_PROXY_CIDRS,

@@ -306,7 +306,8 @@ export function SshKeys() {
 					required
 					rows={3}
 					spellCheck={false}
-					className="w-full rounded-none border border-input bg-transparent px-2.5 py-1.5 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+					size="xs"
+					className="font-mono"
 					value={publicKey}
 					onChange={(e) => setPublicKey(e.target.value)}
 				/>

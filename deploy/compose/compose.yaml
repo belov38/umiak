@@ -73,6 +73,7 @@ services:
     command: [node, /meta-proxy.mjs]
     volumes:
       - ./meta-proxy.mjs:/meta-proxy.mjs:ro
+      - ./canonical-fetch.mjs:/canonical-fetch.mjs:ro
     networks: [umiak, web-internal]
     depends_on:
       api: { condition: service_healthy }

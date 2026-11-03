@@ -827,6 +827,39 @@ export function createSetupHandler({
 			);
 		},
 	});
+	const preparationScript = async (prep, connection, token) => {
+		const publicKey = (
+			await readOptional(secretsDir, "umiak-node_ed25519.pub")
+		).trim();
+		let nodeSha256;
+		try {
+			nodeSha256 = digest(
+				await readFile(join(assetsDir, "umiak-node-linux-amd64")),
+			);
+		} catch {}
+		if (prep.mode === "fresh")
+			requireValue(
+				nodeSha256,
+				"Node-agent build asset is missing; rebuild the quickstart image before preparing a host",
+			);
+		const config = {
+			origin: prep.origin,
+			token,
+			publicKey,
+			gateway: prep.gateway,
+			node: connection.node,
+			tokenId: connection.tokenId,
+			nodeSha256,
+			storage: prep.storage,
+			templateVmidMin: prep.templateVmidMin,
+			templateVmidMax: prep.templateVmidMax,
+			guestDns: prep.guestDns,
+			caPath: prep.caPath,
+		};
+		return prep.mode === "fresh"
+			? renderPreparation(config)
+			: renderAdoption(config);
+	};
 	const handler = async (req, res, context) => {
 		const path = new URL(req.url, context.origin).pathname;
 		if (
@@ -886,38 +919,11 @@ export function createSetupHandler({
 							res.end(binary);
 							return;
 						}
-						const publicKey = (
-							await readOptional(secretsDir, "umiak-node_ed25519.pub")
-						).trim();
-						let nodeSha256;
-						try {
-							nodeSha256 = digest(
-								await readFile(join(assetsDir, "umiak-node-linux-amd64")),
-							);
-						} catch {}
-						if (prep.mode === "fresh")
-							requireValue(
-								nodeSha256,
-								"Node-agent build asset is missing; rebuild the quickstart image before preparing a host",
-							);
-						const config = {
-							origin: prep.origin,
-							token: input.token,
-							publicKey,
-							gateway: prep.gateway,
-							node: connection.node,
-							tokenId: connection.tokenId,
-							nodeSha256,
-							storage: prep.storage,
-							templateVmidMin: prep.templateVmidMin,
-							templateVmidMax: prep.templateVmidMax,
-							guestDns: prep.guestDns,
-							caPath: prep.caPath,
-						};
-						const script =
-							prep.mode === "fresh"
-								? renderPreparation(config)
-								: renderAdoption(config);
+						const script = await preparationScript(
+							prep,
+							connection,
+							input.token,
+						);
 						res.writeHead(200, {
 							"Content-Type": "text/x-shellscript",
 							"Cache-Control": "no-store",
@@ -1206,10 +1212,25 @@ export function createSetupHandler({
 					origin: context.origin,
 					gateway,
 				};
-				await store.write(state);
 				const url = `${context.origin}/pve-setup.sh?token=${token}`;
+				const script = await preparationScript(
+					state.preparation,
+					connectionOf(state),
+					token,
+				);
+				const sha256 = digest(script);
+				await store.write(state);
+				const host = new URL(context.origin).hostname;
+				const insecure =
+					context.origin.startsWith("http:") &&
+					!["localhost", "127.0.0.1", "[::1]"].includes(host);
+				const warning = insecure
+					? "WARNING: HTTP delivers a script executed as root and sends the PVE API token secret, CA and host key back without encryption. Use Tailscale Serve or HTTPS for preparation. The SHA256 below only pins the displayed script; HTTP cannot authenticate this page or protect the callback."
+					: undefined;
 				json(res, 200, {
-					command: `curl -fsSL '${url}' | bash -s -- --dry-run\n# After inspection, run without --dry-run:\ncurl -fsSL '${url}' | bash`,
+					warning,
+					sha256,
+					command: `# SHA256: ${sha256}\ncurl -fsSL '${url}' -o pve-setup.sh\nprintf '%s  %s\\n' '${sha256}' 'pve-setup.sh' | sha256sum -c - && bash pve-setup.sh --dry-run\n# Inspect pve-setup.sh, then execute:\nprintf '%s  %s\\n' '${sha256}' 'pve-setup.sh' | sha256sum -c - && bash pve-setup.sh`,
 					expiresIn: 900,
 				});
 			} catch (error) {

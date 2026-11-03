@@ -36,7 +36,8 @@ export function NoteInput({
 			aria-label="Note"
 			rows={3}
 			maxLength={MAX_BLOCK_NOTE + 100}
-			className="w-full rounded-none border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+			size="xs"
+			className=""
 			value={value}
 			onChange={(e) => onChange(e.target.value)}
 		/>

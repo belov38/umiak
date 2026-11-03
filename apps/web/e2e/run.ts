@@ -13,6 +13,8 @@ const compose = fileURLToPath(
 const web = fileURLToPath(new URL("..", import.meta.url));
 const base = [
 	"compose",
+	"-p",
+	process.env.UMIAK_E2E_PROJECT ?? "umiak-e2e",
 	"--env-file",
 	`${compose}e2e.env`,
 	"-f",
@@ -40,7 +42,7 @@ if (code === 0) {
 	run("docker", [...base, "logs", "--tail", "100"]);
 }
 if (process.env.UMIAK_E2E_KEEP === "1") {
-	console.error("UMIAK_E2E_KEEP=1: the stack umiak-e2e keeps running");
+	console.error("UMIAK_E2E_KEEP=1: the E2E stack keeps running");
 } else {
 	run("docker", [...base, "down", "-v", "--remove-orphans"]);
 }
