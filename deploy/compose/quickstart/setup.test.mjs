@@ -280,7 +280,12 @@ test("adoption callback token expires, is single use, and setup denies the confi
 		},
 	};
 	const handler = createSetupHandler({ pool: {}, store });
-	async function request(path, input, owner = true) {
+	async function request(
+		path,
+		input,
+		owner = true,
+		origin = "https://stack.example",
+	) {
 		const req = Readable.from(
 			input === undefined ? [] : [JSON.stringify(input)],
 		);
@@ -297,9 +302,12 @@ test("adoption callback token expires, is single use, and setup denies the confi
 		};
 		await handler(req, res, {
 			owner,
-			origin: "https://stack.example",
+			origin,
 		});
-		return { status, data: JSON.parse(data) };
+		return {
+			status,
+			data: path.startsWith("/pve-setup.sh") ? data : JSON.parse(data),
+		};
 	}
 	for (const storage of ["../local", "bad/name", "bad;name", 123]) {
 		const rejected = await request("/quickstart/setup/prepare", { storage });
@@ -310,7 +318,7 @@ test("adoption callback token expires, is single use, and setup denies the confi
 		"/quickstart/setup/prepare",
 		{},
 		true,
-		false,
+		"https://stack.example",
 	);
 	assert.equal(publicPrepared.status, 200);
 	assert.doesNotMatch(
@@ -319,11 +327,33 @@ test("adoption callback token expires, is single use, and setup denies the confi
 	);
 	assert.equal(state.preparation.caPath, "/etc/ssl/certs/ca-certificates.crt");
 
+	const httpPrepared = await request(
+		"/quickstart/setup/prepare",
+		{},
+		true,
+		"http://192.168.1.10:4180",
+	);
+	assert.match(httpPrepared.data.warning, /HTTP.*root.*secret/i);
+	assert.match(httpPrepared.data.warning, /Serve.*HTTPS/);
+	assert.match(httpPrepared.data.command, /sha256sum -c/);
+	assert.match(httpPrepared.data.command, /curl -fsSL .* -o pve-setup.sh/);
+	assert.doesNotMatch(httpPrepared.data.command, /curl[^\n]*\| bash/);
 	const prepared = await request("/quickstart/setup/prepare", {});
 	assert.equal(prepared.status, 200);
 	assert.doesNotMatch(prepared.data.command, /--cacert/);
 	assert.equal(state.preparation.caPath, "/etc/ssl/certs/ca-certificates.crt");
 	const token = prepared.data.command.match(/token=([a-f0-9]{64})/)[1];
+	const script = await request(
+		`/pve-setup.sh?token=${token}`,
+		undefined,
+		false,
+	);
+	assert.equal(script.status, 200);
+	const { createHash } = await import("node:crypto");
+	assert.equal(
+		createHash("sha256").update(script.data).digest("hex"),
+		prepared.data.sha256,
+	);
 	const report = { zone: { type: "simple" }, vnet: { zone: "umiak" } };
 	const accepted = await request(
 		"/quickstart/setup/callback",
@@ -426,7 +456,8 @@ test("wizard UI has themes, progress and template selections without raw JSON", 
 	);
 	assert.match(html, /prefers-color-scheme/);
 	assert.match(html, /umiak-theme/);
-	assert.match(html, /Toggle light and dark theme/);
+	assert.match(html, /aria-label="Appearance"/);
+	assert.match(html, /data-theme="dark"/);
 	assert.match(html, /progress/);
 	assert.match(html, /type="checkbox"/);
 	assert.doesNotMatch(

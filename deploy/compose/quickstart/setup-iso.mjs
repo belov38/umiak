@@ -3,8 +3,8 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
 export const VIRTIO_STABLE_URL =
-	"https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso";
-// The known recipe pin is shown for confirmation; stable may move and must then be updated.
+	"https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.271-1/virtio-win-0.1.271.iso";
+// Immutable archive version matches the recipe checksum.
 export const VIRTIO_SHA256 =
 	"bbe6166ad86a490caefad438fef8aa494926cb0a1b37fa1212925cfd81656429";
 const HASH = /^[a-f0-9]{64}$/i;
@@ -72,6 +72,10 @@ export function validateUploadedIso(value) {
 // Audit wget's GET path separately from the advisory HEAD preflight.
 export async function auditDownloadLog(lines, initialUrl, options = {}) {
 	let url = initialUrl;
+	const proxy = options.proxy ? new URL(options.proxy) : null;
+	const proxyHost = proxy?.hostname.replace(/^\[|\]$/g, "");
+	const proxyPort =
+		proxy?.port || (proxy?.protocol === "https:" ? "443" : "80");
 	for (const line of lines) {
 		const text = String(line.t || "");
 		const location = text.match(/Location:\s*(.*?)\s*(?:\[following\])?$/i);
@@ -79,6 +83,19 @@ export async function auditDownloadLog(lines, initialUrl, options = {}) {
 			url = new URL(location[1], url).href;
 			await validateMediaUrl(url, undefined, options);
 		}
+		// Only the cluster-configured proxy transport is exempt, never redirect targets.
+		const resolvedHost = text.match(/Resolving ([^\s]+) \(/i)?.[1];
+		const connected =
+			text.match(/Connecting to ([^\s]+)(?: \([^)]*\))?\|[^|]+\|:(\d+)/i) ||
+			text.match(/Connecting to (\[[^\]]+\]|[0-9.]+):(\d+)/i);
+		if (
+			proxyHost &&
+			(resolvedHost === proxyHost ||
+				(connected &&
+					connected[1].replace(/^\[|\]$/g, "") === proxyHost &&
+					connected[2] === proxyPort))
+		)
+			continue;
 		const resolving = text.match(/Resolving .*?\)\.\.\.\s*(.*)/i);
 		const connecting =
 			text.match(/Connecting to .*?\|([^|]+)\|/i) ||
@@ -180,6 +197,8 @@ export async function prepareWindowsMedia(
 		throw Error(
 			`ISO downloads require Datastore.AllocateTemplate on /storage/${storage} and Sys.AccessNetwork on /nodes/${node}; ask the host administrator to grant this scoped permission`,
 		);
+	const clusterOptions =
+		input.isoUrl || input.virtioUrl ? await api.get("/cluster/options") : {};
 	const files = await api.get(`/nodes/${node}/storage/${storage}/content`);
 	const ensure = async (kind, url, hash, existing) => {
 		let metadata;
@@ -288,6 +307,7 @@ export async function prepareWindowsMedia(
 					}
 					await auditDownloadLog(completeLog, url, {
 						resolve,
+						proxy: clusterOptions.http_proxy,
 						allowInternal: input.allowInternalIsoUrls === true,
 					});
 				} catch (error) {
