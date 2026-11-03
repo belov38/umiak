@@ -465,7 +465,15 @@ test("isolation permits disabled host rules and sealed templates but checks sand
 			tags: "umiak",
 			net0: "virtio=00:11:22:33:44:55,bridge=umiak0,firewall=1",
 		},
-		"/nodes/pve/qemu/500/firewall/options": { enable: 1 },
+		"/nodes/pve/qemu/500/firewall/options": {
+			enable: 1,
+			policy_in: "DROP",
+			macfilter: 1,
+			ipfilter: 1,
+		},
+		"/nodes/pve/qemu/500/firewall/rules": [
+			{ type: "group", action: "umiak-egress", enable: 1, iface: "net0" },
+		],
 	};
 	const reads = [];
 	const api = {
@@ -477,6 +485,19 @@ test("isolation permits disabled host rules and sealed templates but checks sand
 	const result = await verifyFirewall(api, { node: "pve" });
 	assert.equal(result.nodeFirewall.enable, 0);
 	assert.ok(!reads.some((path) => path.includes("/597/")));
+	data["/nodes/pve/qemu/500/firewall/options"].policy_in = "ACCEPT";
+	await assert.rejects(
+		() => verifyFirewall(api, { node: "pve" }),
+		/VM 500 isolation/,
+	);
+	data["/nodes/pve/qemu/500/firewall/options"].policy_in = "DROP";
+	const rules = data["/nodes/pve/qemu/500/firewall/rules"];
+	data["/nodes/pve/qemu/500/firewall/rules"] = [];
+	await assert.rejects(
+		() => verifyFirewall(api, { node: "pve" }),
+		/VM 500 net0 egress/,
+	);
+	data["/nodes/pve/qemu/500/firewall/rules"] = rules;
 	data["/nodes/pve/qemu/500/firewall/options"].enable = 0;
 	await assert.rejects(
 		() => verifyFirewall(api, { node: "pve" }),

@@ -75,6 +75,7 @@ test("meta uses the Serve external Host and fixed socket peer to select public C
 		seen.push({ url, headers: options.headers });
 		return Response.json({
 			authMode: "none",
+			tenancy: "teams",
 			apiUrl: "http://internal:8080",
 			appUrl: "http://web:3000",
 		});
@@ -96,6 +97,7 @@ test("meta uses the Serve external Host and fixed socket peer to select public C
 			assert.equal(reply.status, 200);
 			const meta = JSON.parse(reply.body);
 			assert.equal(meta.authMode, "owner");
+			assert.equal(meta.tenancy, "single");
 			assert.equal(meta.apiUrl, `https://${externalHost}`);
 			assert.equal(meta.appUrl, `https://${externalHost}`);
 			assert.equal(meta.ownerPrivateCA, privateCA);

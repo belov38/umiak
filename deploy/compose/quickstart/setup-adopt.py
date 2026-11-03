@@ -55,8 +55,13 @@ for vm in get("/nodes/" + config["node"] + "/qemu"):
     options = get(f"/nodes/{config['node']}/qemu/{vmid}/firewall/options")
     if int(options.get("enable", 0)) != 1:
         report["vmFirewallsValid"] = False
+    if options.get("policy_in") != "DROP" or int(options.get("macfilter", 0)) != 1 or int(options.get("ipfilter", 0)) != 1:
+        report["vmFirewallsValid"] = False
+    rules = get(f"/nodes/{config['node']}/qemu/{vmid}/firewall/rules")
     for key, value in vm_config.items():
         if key.startswith("net") and key[3:].isdigit() and "firewall=1" not in value.split(","):
+            report["vmFirewallsValid"] = False
+        if key.startswith("net") and key[3:].isdigit() and not any(rule.get("type") == "group" and rule.get("action") == "umiak-egress" and int(rule.get("enable", 0)) == 1 and rule.get("iface", key) == key for rule in rules):
             report["vmFirewallsValid"] = False
 node = subprocess.run(["/usr/local/bin/umiak-node", "--stdio"], input=json.dumps({"op": "version", "args": {}}), text=True, capture_output=True, check=True)
 report["nodeAgent"] = json.loads(node.stdout)

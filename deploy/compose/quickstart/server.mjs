@@ -180,6 +180,7 @@ export function createQuickstartServer({
 				return json(res, 200, {
 					...meta,
 					authMode: "owner",
+					tenancy: "single",
 					oidc: null,
 					apiUrl: origin,
 					appUrl: origin,

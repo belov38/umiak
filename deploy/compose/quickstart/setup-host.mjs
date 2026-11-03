@@ -352,12 +352,37 @@ export async function verifyFirewall(api, connection) {
 		);
 		if (Number(options.enable ?? 0) !== 1)
 			throw new Error(`VM ${id} firewall must be enabled`);
+		if (
+			options.policy_in !== "DROP" ||
+			Number(options.macfilter) !== 1 ||
+			Number(options.ipfilter) !== 1
+		)
+			throw new Error(
+				`VM ${id} isolation options must enforce inbound DROP, MAC and IP filtering`,
+			);
+		const rules = await api.get(
+			`/nodes/${connection.node}/qemu/${id}/firewall/rules`,
+		);
 		for (const [key, value] of Object.entries(config)) {
 			if (
 				/^net\d+$/.test(key) &&
 				!/(?:^|,)firewall=1(?:,|$)/.test(String(value))
 			)
 				throw new Error(`VM ${id} ${key} firewall must be enabled`);
+			if (
+				/^net\d+$/.test(key) &&
+				!(
+					Array.isArray(rules) &&
+					rules.some(
+						(rule) =>
+							rule.type === "group" &&
+							rule.action === "umiak-egress" &&
+							Number(rule.enable) === 1 &&
+							(!rule.iface || rule.iface === key),
+					)
+				)
+			)
+				throw new Error(`VM ${id} ${key} egress group must be enabled`);
 		}
 	}
 	return { firewall, nodeFirewall };
