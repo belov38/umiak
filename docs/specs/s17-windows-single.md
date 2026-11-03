@@ -44,3 +44,32 @@ canonical catalog identity is now `windows`; its original disk/build is retained
 
 The deployed tree also includes owner-signin commits `74a35b17` and `e96b5efa`
 (cherry-picked), to preserve the parallel feature on CT590.
+
+## Validation (2026-11-03)
+
+- Build, lint, typecheck passed after including owner-signin. Sequential workspace
+  suites passed; MCP's changed descriptions required refreshing its golden list
+  and compacting copy to retain the fixed tools/list budget (715 passed, 1 skipped).
+  Worker/Payload upgrade-order regressions passed (15 and 23 tests).
+- Node quickstart/local/meta-proxy: 162 passed; Python SDK: 83 passed;
+  gateway build/vet/test/golangci-lint: passed, 0 lint issues; shellcheck passed.
+- Playwright: OIDC 27 passed, local 2 passed, quickstart UI passed.
+  Initial isolated runs hit occupied default ports / mismatched configured API
+  URL; reruns used a unique project and consistent alternate API/host ports.
+- CT590 deployed with `infra/dev-cp/deploy-quickstart.sh` after owner-signin's done
+  notice. Read-only PVE inventory and runtime operations were idle before deploy.
+  Catalog: linux, linux-desktop, windows. Windows `.7`/595 active, `.2`/598 retired.
+  Guest gateway certificate checksums retained. All four owner sessions retained:
+  excluding the CLI-updated `lastUsed`, sessions MD5 stayed
+  `4c549392fd902c5cf5ad821094f3f8a2`.
+- Live CLI `create --template windows-desktop --size 4gb` created exactly one
+  sandbox (`windows-single-check`, VM500): canonical windows `.7`, ready in
+  124.775 seconds. First desktop navigation showed the friendly HTTP503 loading
+  page and automatically advanced to a real Windows desktop stream.
+  `umiak rm windows-single-check --yes` completed; DB state deleted and VM500 gone.
+  No other sandbox was deleted; VM598 remains present and unchanged.
+- Screenshot artifacts (local, outside git):
+  `/tmp/windows-single-visuals/desktop-starting-light.png`,
+  `/tmp/windows-single-visuals/desktop-starting-dark.png`,
+  `/tmp/windows-single-visuals/live-desktop-starting.png`,
+  `/tmp/windows-single-visuals/live-desktop-ready.png`.
