@@ -32,6 +32,7 @@ class FakeRunner(Runner):
         *,
         dnsmasq=True,
         dnsmasq_enabled=False,
+        strict_deletes=True,
         ip_forward="1",
         firewall=1,
         euid=0,
@@ -79,6 +80,8 @@ class FakeRunner(Runner):
             files["/usr/sbin/dnsmasq"] = "fake"
         self.ip_forward = ip_forward
         self.dnsmasq_enabled = dnsmasq_enabled
+        # Like real pvesh/pveum: deleting a missing object exits non-zero.
+        self.strict_deletes = strict_deletes
         for name, value in files.items():
             path = self.path(name)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,6 +94,19 @@ class FakeRunner(Runner):
 
     def hostname(self):
         return self._hostname
+
+    def _missing(self, argv):
+        if argv[:3] == ["pveum", "role", "delete"]:
+            return not any(x["roleid"] == argv[3] for x in self.roles)
+        if argv[:3] == ["pveum", "pool", "delete"]:
+            return "/pools/" + argv[3] not in self.objects
+        if argv[:3] == ["pveum", "user", "delete"]:
+            return not any(x["userid"] == argv[3] for x in self.users)
+        if argv[:4] == ["pveum", "user", "token", "remove"]:
+            return not any(x["tokenid"] == argv[5] for x in self.tokens)
+        if argv[:3] == ["pveum", "acl", "delete"]:
+            return {"path": argv[3], "ugid": argv[5], "roleid": argv[7]} not in self.acls
+        return False
 
     def mutations(self):
         return [argv for argv in self.commands if is_mutation(argv)]
@@ -167,6 +183,8 @@ class FakeRunner(Runner):
             else:
                 parent, key = path.rsplit("/", 1)
                 rows = self.objects.get(parent, [])
+                if self.strict_deletes and not any(str(row.get("cidr", row.get("pos"))) == key for row in rows):
+                    raise CommandError(argv, 2, "", "no such entry")
                 kept = [row for row in rows if str(row.get("cidr", row.get("pos"))) != key]
                 for pos, item in enumerate(kept):
                     if "pos" in item:
@@ -187,6 +205,8 @@ class FakeRunner(Runner):
             out = self.ip_forward
         elif head == ["ifquery", "--check"]:
             out = "auto vmbr0\niface vmbr0 inet static  [pass]\n"
+        elif self.strict_deletes and self._missing(argv):
+            raise CommandError(argv, 255, "", "does not exist")
         elif head == ["pveum", "role"]:
             if argv[2] == "list":
                 out = json.dumps(self.roles)

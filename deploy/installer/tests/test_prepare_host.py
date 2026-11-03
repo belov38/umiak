@@ -295,16 +295,26 @@ def test_incomplete_rollback_keeps_timer_and_explains_retry(host):
     runner.fail_on = None
     with pytest.raises(InstallerError, match="rollback.py") as refused:
         prepare_host.prepare(runner, config(), out)
-    assert f"python3 {state_dir / 'rollback.py'} {state_dir}" in str(refused.value)
+    assert f"systemctl stop umiak-installer-rollback.timer; python3 {state_dir / 'rollback.py'} {state_dir}" in str(
+        refused.value
+    )
 
 
 def test_relative_out_dir_is_journaled_absolute(host, monkeypatch):
     runner, out = host
     monkeypatch.chdir(out.parent)
-    runner.fail_on = lambda argv: argv[:3] == ["pvesh", "create", "/cluster/sdn/zones"]
+    seen = []
+
+    def fail_zone(argv):
+        if argv[:3] == ["pvesh", "create", "/cluster/sdn/zones"]:
+            seen.append(json.loads(runner.path("/var/lib/umiak-installer/undo.json").read_text()))
+            return True
+        return False
+
+    runner.fail_on = fail_zone
     with pytest.raises(CommandError):
         prepare_host.prepare(runner, config(), prepare_host.Path("out"))
-    journal = json.loads(runner.path("/var/lib/umiak-installer/undo.json").read_text())
+    journal = seen[0]
     files = [action[1] for action in journal if action[0] == "file"]
     assert files == [str(out.resolve() / "pve-token")]
 
@@ -384,3 +394,51 @@ def test_restore_failure_does_not_mask_error_or_skip_other_files(host, monkeypat
     assert target.read_bytes() == AGENT
     assert stat.S_IMODE(target.stat().st_mode) == 0o755
     assert not any(p.name.endswith(".umiak-new") for p in target.parent.iterdir())
+
+
+def test_partial_rollback_resumes_and_clears_active(host):
+    runner, out = host
+    transient = {"role delete": 1}
+
+    def fail(argv):
+        if argv[:4] == ["pveum", "user", "token", "add"]:
+            return True  # forward failure mid-run: no token was created
+        if argv[:4] == ["pveum", "role", "delete", "UmiakPoC"] and transient["role delete"]:
+            transient["role delete"] -= 1
+            return True  # one undo fails during the in-process rollback
+        return False
+
+    runner.fail_on = fail
+    with pytest.raises(CommandError):
+        prepare_host.prepare(runner, config(), out)
+    state_dir = runner.path("/var/lib/umiak-installer")
+    assert (state_dir / "active").exists()
+    # Undone actions were trimmed; the failed forward's undo never stayed in.
+    journal = json.loads((state_dir / "undo.json").read_text())
+    assert journal == [["command", ["pveum", "role", "delete", "UmiakPoC"]]]
+    assert runner.users == [] and "/pools/umiak" not in runner.objects
+
+    # The timer (or the manual command) retries with the same journal.
+    runner.fail_on = None
+    prepare_host.rollback.main(str(state_dir), runner.run)
+    assert not (state_dir / "active").exists()
+    assert json.loads((state_dir / "undo.json").read_text()) == []
+    assert runner.roles == [] and runner.tokens == [] and runner.acls == []
+
+    prepare_host.prepare(runner, config(), out)
+    assert (out / "pve-token").exists()
+
+
+def test_undo_of_already_missing_object_counts_as_done(host):
+    runner, _ = host
+    state_dir = runner.path("/var/lib/umiak-installer")
+    state_dir.mkdir(parents=True)
+    (state_dir / "active").write_text("active")
+    prepare_host.rollback.write_journal(state_dir, [
+        ["command", ["pveum", "role", "delete", "UmiakPoC"]],
+        ["command", ["pvesh", "delete", "/cluster/firewall/ipset/umiak-gateway/192.168.68.90"]],
+        ["collection", "/cluster/firewall/groups/umiak-egress"],
+        ["command", ["pveum", "acl", "delete", "/", "--users", "umiak@pve", "--roles", "UmiakDatacenterAudit"]],
+    ])
+    prepare_host.rollback.main(str(state_dir), runner.run)
+    assert not (state_dir / "active").exists()

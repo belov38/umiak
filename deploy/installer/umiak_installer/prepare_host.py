@@ -225,7 +225,20 @@ class _Journal:
 
     def record(self, action):
         self.actions.append(action)
-        write_secret(self.state / rollback.JOURNAL, json.dumps(self.actions))
+        rollback.write_journal(self.state, self.actions)
+
+    def _forward(self, argv):
+        # The undo is journaled before the forward command so a crash right
+        # after it succeeds is still rolled back. If the command itself fails,
+        # PVE did not create the object: drop the undo again so a replay does
+        # not try to delete something that never existed. (Undoing a missing
+        # object is also tolerated by rollback, as a second line of defence.)
+        try:
+            return self.runner.run(argv)
+        except BaseException:
+            self.actions.pop()
+            rollback.write_journal(self.state, self.actions)
+            raise
 
     def backup(self, path: Path):
         if path.exists():
@@ -235,7 +248,7 @@ class _Journal:
 
     def mutate(self, argv, reverse):
         self.record(["command", list(reverse)])
-        return self.runner.run(argv)
+        return self._forward(argv)
 
     def create(self, path, child, *args) -> bool:
         if exists(self.runner, child):
@@ -244,7 +257,7 @@ class _Journal:
             self.record(["collection", child])
         else:
             self.record(["command", ["pvesh", "delete", child]])
-        self.runner.run(["pvesh", "create", path, *args])
+        self._forward(["pvesh", "create", path, *args])
         return True
 
 
@@ -253,7 +266,7 @@ def _arm(runner: Runner, state: Path, bridge: dict) -> None:
     script.write_text(Path(rollback.__file__).read_text())
     script.chmod(0o700)
     write_secret(state / rollback.BRIDGE, json.dumps(bridge))
-    write_secret(state / rollback.JOURNAL, "[]")
+    rollback.write_journal(state, [])
     (state / rollback.ACTIVE).write_text("active")
     try:
         runner.run(["systemd-run", "--quiet", "--collect", f"--unit={ROLLBACK_UNIT}", "--on-active=5min",
@@ -410,7 +423,7 @@ def prepare(runner: Runner, cfg: PrepareConfig, out_dir: Path) -> PrepareResult:
         if (state / rollback.ACTIVE).exists():
             raise InstallerError(
                 "A previous preparation was not rolled back completely. Its timer retries in a few minutes; "
-                f"to retry now run: python3 {state / 'rollback.py'} {state}"
+                f"to retry now run: {rollback.retry_hint(state)}"
             )
         journal = _Journal(runner, state)
         _arm(runner, state, facts["bridge"])
@@ -431,7 +444,7 @@ def prepare(runner: Runner, cfg: PrepareConfig, out_dir: Path) -> PrepareResult:
             except Exception:  # noqa: BLE001 - surface the original error
                 # Leave the timer armed: it retries the rollback from the journal.
                 keep_timer = True
-                print(f"Rollback incomplete; retry with: python3 {state / 'rollback.py'} {state}", file=sys.stderr)
+                print("Rollback incomplete; retry with: " + rollback.retry_hint(state), file=sys.stderr)
             raise
         finally:
             if not keep_timer:
@@ -473,7 +486,8 @@ def _replace(path: Path, data: bytes, mode: int | None) -> None:
 
 
 def _remove_key_line(keys: Path, line: str) -> None:
-    # Re-read: other nodes may have changed the cluster-wide file meanwhile.
+    # Re-read: other nodes may have changed the cluster-wide file meanwhile
+    # (same unavoidable read+rename race as in install_node_agent).
     content = keys.read_text() if keys.exists() else ""
     lines = content.splitlines()
     if line in lines:
@@ -509,6 +523,10 @@ def install_node_agent(runner: Runner, binary: Path, sha256: str, public_key: st
         # /etc/pve/priv/authorized_keys is cluster-wide root SSH access: append
         # only our line, atomically (pmxcfs supports rename), never rewrite others.
         content = keys.read_text() if keys.exists() else ""
+        # Unavoidable race: pmxcfs offers no lock we can hold here, so another
+        # node may rewrite this file between our read and rename and one of the
+        # two changes can be lost. We keep the window to one read+rename and
+        # only ever add (or, on failure, remove) our own line.
         if line not in content.splitlines():
             _replace(keys, (content + ("" if not content or content.endswith("\n") else "\n") + line + "\n").encode(), None)
             added_line = True
