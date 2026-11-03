@@ -6,7 +6,7 @@ import { prepareWindowsMedia, validateWindowsMedia } from "./setup-iso.mjs";
 import { randomBytes, X509Certificate } from "node:crypto";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
 	buildInvocation,
 	runTemplateBuild,
@@ -365,11 +365,16 @@ export function createSetupHandler({
 				network.gatewayAddress,
 				report.denySets,
 			);
-			await mkdir(dirname(networkFile), { recursive: true, mode: 0o755 });
-			await writeFile(`${networkFile}.new`, JSON.stringify(network), {
-				mode: 0o644,
-			});
-			await rename(`${networkFile}.new`, networkFile);
+			// Canonical form; the installer writes the same bytes before first start.
+			const content = JSON.stringify(network);
+			if (
+				(await readOptional(dirname(networkFile), basename(networkFile))) !==
+				content
+			) {
+				await mkdir(dirname(networkFile), { recursive: true, mode: 0o755 });
+				await writeFile(`${networkFile}.new`, content, { mode: 0o644 });
+				await rename(`${networkFile}.new`, networkFile);
+			}
 			return network;
 		},
 		async templates(input, state) {

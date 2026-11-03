@@ -513,6 +513,13 @@ async function main() {
 		const { createSetupHandler } = await import("./setup.mjs");
 		setupHandler = createSetupHandler({ pool });
 		await setupHandler.init?.();
+		// Import installer facts before listening; failures are logged only.
+		const { safeBootstrap } = await import("./bootstrap.mjs");
+		await safeBootstrap({
+			store: setupHandler.wizard.store,
+			steps: setupHandler.wizard.steps,
+			secretsDir: process.env.UMIAK_SECRETS_DIR || "/pve-secrets",
+		});
 	}
 	const options = {
 		store,
