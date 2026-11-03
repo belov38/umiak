@@ -118,6 +118,8 @@ export interface BuildDeps {
 }
 
 export interface BuildOptions {
+	/** Explicit fresh build slot, still checked against allocator range and occupied VMs. */
+	templateVmid?: number;
 	slug: string;
 	node: string;
 	storage: string;
@@ -142,6 +144,9 @@ export interface BuildOptions {
 	iso?: string;
 	/** iso-install: expected sha256 of the user's ISO instead of [iso] sha256. */
 	isoSha256?: string;
+	/** Verified VirtIO ISO already on PVE storage. */
+	virtioIso?: string;
+	virtioSha256?: string;
 	/** iso-install: take the sha256 the node computes and write it into versions.toml. */
 	acceptIsoSha256?: boolean;
 	/** iso-install: `/IMAGE/NAME` instead of [iso] edition. */

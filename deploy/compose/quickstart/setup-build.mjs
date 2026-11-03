@@ -6,13 +6,9 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
+import { templateRange, validateTemplateRange } from "./setup-vmids.mjs";
+
 const exec = promisify(execFile);
-const SLOTS = {
-	linux: 597,
-	"linux-desktop": 596,
-	windows: 598,
-	"windows-desktop": 595,
-};
 export function buildInvocation(
 	slug,
 	state,
@@ -22,8 +18,19 @@ export function buildInvocation(
 	jobId = "build",
 	input = {},
 ) {
-	const slot = SLOTS[slug];
-	if (!slot) throw new Error("Unknown template recipe");
+	if (!["linux", "linux-desktop", "windows", "windows-desktop"].includes(slug))
+		throw new Error("Unknown template recipe");
+	const slot = input.templateVmid;
+	const range = templateRange(state);
+	validateTemplateRange({ ...state.steps.limits.data, ...range });
+	if (
+		!Number.isInteger(slot) ||
+		slot < range.templateVmidMin ||
+		slot > range.templateVmidMax
+	)
+		throw new Error(
+			"Allocate a free VMID in the configured template range before building",
+		);
 	const connection = state.steps.connection.data;
 	const limits = state.steps.limits.data;
 	const network = state.steps.network.data;
@@ -48,11 +55,12 @@ export function buildInvocation(
 		UMIAK_TEMPLATE_VMID: "599",
 		UMIAK_CLUSTER_ID: "1",
 		UMIAK_PVE_STORAGE: limits.storage,
-		UMIAK_PVE_MEDIA_STORAGE: state.mediaStorage || "local",
+		UMIAK_PVE_MEDIA_STORAGE:
+			input.mediaStorage || state.mediaStorage || "local",
 		UMIAK_PVE_VNET: "umiak0",
 		UMIAK_PVE_POOL: "umiak",
 		UMIAK_STATE_DB: join(directory, "state.db"),
-		UMIAK_TEMPLATE_REGISTRY: join(directory, "registry"),
+		UMIAK_TEMPLATE_REGISTRY: join(secretsDir, "template-registry"),
 		UMIAK_IMAGE_CACHE: join(secretsDir, "image-cache"),
 		UMIAK_TEMPLATE_LOG_DIR: join(directory, "logs"),
 		UMIAK_UPDATE_KEYS_FILE: join(
@@ -67,6 +75,8 @@ export function buildInvocation(
 		slug,
 		"--node",
 		connection.node,
+		"--template-vmid",
+		String(slot),
 		"--agent-package",
 		agentPackage,
 		"--umiak-cli",
@@ -78,13 +88,18 @@ export function buildInvocation(
 	];
 	if (slug.startsWith("windows")) {
 		if (
-			!/^\/[^\0]+\.iso$/i.test(input.iso || "") ||
+			!/^[A-Za-z0-9._()+-]+\.iso$/i.test(input.iso || "") ||
 			!/^[a-fA-F0-9]{64}$/.test(input.isoSha256 || "")
 		)
-			throw new Error(
-				"Windows needs an absolute ISO path mounted into the stack and its SHA256",
-			);
+			throw new Error("Windows needs an uploaded ISO file name and its SHA256");
 		args.push("--iso", input.iso, "--iso-sha256", input.isoSha256);
+		if (input.virtioIso)
+			args.push(
+				"--virtio-iso",
+				input.virtioIso,
+				"--virtio-sha256",
+				input.virtioSha256,
+			);
 		if (input.edition) args.push("--edition", String(input.edition));
 	}
 	return {
@@ -147,9 +162,34 @@ async function packageAgent(invocation, secretsDir, assetsDir) {
 }
 export async function runTemplateBuild(
 	invocation,
-	{ secretsDir, assetsDir, launch = spawn } = {},
+	{
+		secretsDir,
+		assetsDir,
+		launch = spawn,
+		onProgress = async () => {},
+		existingVersions = [],
+	} = {},
 ) {
 	await mkdir(invocation.directory, { recursive: true, mode: 0o700 });
+	await mkdir(invocation.env.UMIAK_TEMPLATE_REGISTRY, {
+		recursive: true,
+		mode: 0o700,
+	});
+	for (const row of existingVersions) {
+		if (
+			/^[a-z0-9-]+$/.test(row.template_slug) &&
+			/^\d{8}\.\d+$/.test(row.version)
+		) {
+			await writeFile(
+				join(
+					invocation.env.UMIAK_TEMPLATE_REGISTRY,
+					`${row.template_slug}@${row.version}.claim`,
+				),
+				"",
+				{ mode: 0o600 },
+			);
+		}
+	}
 	await packageAgent(invocation, secretsDir, assetsDir);
 	const token = (await readFile(join(secretsDir, "pve-token"), "utf8")).trim();
 	await new Promise((resolvePromise, reject) => {
@@ -160,7 +200,9 @@ export async function runTemplateBuild(
 		});
 		let tail = "";
 		const append = (chunk) => {
-			tail = (tail + String(chunk)).slice(-12000);
+			const safe = String(chunk).replaceAll(token, "[redacted]");
+			tail = (tail + safe).slice(-12000);
+			void onProgress(safe);
 		};
 		child.stdout.on("data", append);
 		child.stderr.on("data", append);
@@ -184,6 +226,7 @@ export async function runTemplateBuild(
 		const manifest = JSON.parse(await readFile(join(registry, file), "utf8"));
 		if (
 			manifest.templateSlug === invocation.slug &&
+			Number(manifest.pveVmid) === invocation.slot &&
 			manifest.status === "ready" &&
 			manifest.verify?.ok
 		)
@@ -229,6 +272,8 @@ export class TemplateBuildJobs {
 		if (state.buildJob?.status === "running")
 			throw new Error("A template build is already running");
 		await this.validate(slug, state, input);
+		if (input.dryRun === true)
+			return { status: "dry-run", slug, templateVmid: input.templateVmid };
 		const job = {
 			id: randomBytes(12).toString("hex"),
 			slug,
@@ -243,11 +288,31 @@ export class TemplateBuildJobs {
 		});
 		this.pending = (async () => {
 			try {
-				const manifest = await this.run(slug, state, job, input, context);
+				let progressWrites = Promise.resolve();
+				const onProgress = (chunk) => {
+					progressWrites = progressWrites.then(() =>
+						this.update((current) => {
+							if (current.buildJob?.id === job.id)
+								current.buildJob.log = (
+									(current.buildJob.log || "") + chunk
+								).slice(-24000);
+						}),
+					);
+					return progressWrites;
+				};
+				const manifest = await this.run(
+					slug,
+					state,
+					job,
+					input,
+					context,
+					onProgress,
+				);
+				await progressWrites;
 				await this.register(manifest, context);
 				await this.update((current) => {
 					current.buildJob = {
-						...job,
+						...current.buildJob,
 						status: "ready",
 						finishedAt: new Date().toISOString(),
 						manifest,
@@ -256,7 +321,7 @@ export class TemplateBuildJobs {
 			} catch (error) {
 				await this.update((current) => {
 					current.buildJob = {
-						...job,
+						...current.buildJob,
 						status: "error",
 						finishedAt: new Date().toISOString(),
 						error: error.message,

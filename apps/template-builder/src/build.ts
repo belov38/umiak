@@ -80,6 +80,8 @@ function prepare(
 	for (const [flag, v] of [
 		["--iso", o.iso],
 		["--iso-sha256", o.isoSha256],
+		["--virtio-iso", o.virtioIso],
+		["--virtio-sha256", o.virtioSha256],
 		["--accept-iso-sha256", o.acceptIsoSha256 ? true : undefined],
 		["--edition", o.edition],
 		["--product-key-file", o.productKeyFile],
@@ -283,7 +285,13 @@ export async function buildTemplate(
 	deps: BuildDeps,
 	o: BuildOptions,
 ): Promise<Manifest> {
-	const job = newJob(deps, o, loadRecipe(o.templatesDir, o.slug));
+	const recipe = loadRecipe(o.templatesDir, o.slug);
+	if (o.templateVmid !== undefined) {
+		if (isProtectedVmid(o.templateVmid))
+			throw new Error("Explicit template VMID is protected");
+		recipe.vmids = [o.templateVmid];
+	}
+	const job = newJob(deps, o, recipe);
 	deps.registry.create(job.manifest);
 	const st: State = {
 		m: job.manifest,
