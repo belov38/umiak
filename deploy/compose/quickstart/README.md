@@ -368,7 +368,7 @@ enter a one-time sign-in code. Existing sessions and CLI pairings remain valid.
 On the Docker host, from the repository directory:
 
 ```sh
-docker compose exec quickstart node deploy/compose/quickstart/run.mjs node deploy/compose/quickstart/signin-code.mjs
+docker compose exec quickstart umiak-signin
 ```
 
 The wrapper reads the generated database credential inside the container. Or use
@@ -379,3 +379,12 @@ minutes. CLI credentials cannot issue broader browser credentials.
 
 Use **Lost every session? Reset owner access** only as a last resort: recovery
 revokes all browsers, CLI credentials and pending pairings.
+
+Sign-in admission allows 20 attempts per source address per 10 minutes. Docker
+Desktop and userland-proxy NAT can put all clients in one shared bucket: one
+attacker can block new sign-ins for 10 minutes. Existing sessions remain usable.
+Source buckets live in the single quickstart process, expire after 10 minutes,
+and are capped at 10,000. At capacity, new sources are rejected with HTTP 429
+until the earliest bucket expires; existing sources keep their remaining attempts.
+A process restart clears these buckets. Durable global failure counters still
+invalidate each outstanding code after 20 wrong guesses across all sources.

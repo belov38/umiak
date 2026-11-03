@@ -29,10 +29,7 @@ it("installs Windows desktop with manual services, private config and verified d
 				"-Root",
 				root,
 				"-Files",
-				resolve(
-					import.meta.dirname,
-					"../../../infra/templates/windows-desktop/files",
-				),
+				resolve(import.meta.dirname, "../../../infra/templates/windows/files"),
 			],
 			{ encoding: "utf8", timeout: 30_000 },
 		);
@@ -52,24 +49,19 @@ function windowsRecipe(slug: string) {
 	return r;
 }
 
-it("windows-desktop extends windows in slot 595 and adds the streamer step", () => {
-	const r = windowsRecipe("windows-desktop");
-	const parent = windowsRecipe("windows");
-	expect(r.extends).toBe("windows");
+it("windows is the single desktop recipe in slot 595", () => {
+	const r = windowsRecipe("windows");
+	expect(r.extends).toBe(null);
 	expect(r.vmids).toEqual([595]);
-	expect(parent.vmids).toEqual([598]);
-	expect(r.verify).toBe("windows-desktop");
+	expect(r.verify).toBe("windows");
 	expect(isDesktopRecipe(r)).toBe(true);
-	expect(isDesktopRecipe(parent)).toBe(false);
-	expect(r.steps.filter((s) => s !== "65-streamer")).toEqual(parent.steps);
 	expect(r.steps.slice(-2)).toEqual(["65-streamer", "90-cleanup"]);
-	expect(r.hw).toEqual(parent.hw);
-	expect(loadVersions(r)).toEqual(loadVersions(parent));
-	expect(stepFile(r, "65-streamer")).toContain("/windows-desktop/steps/");
+	expect(stepFile(r, "65-streamer")).toContain("/windows/steps/");
 	expect(stepFile(r, "60-desktop")).toContain("/_windows/steps/");
+	expect(windowsRecipe("windows-desktop").slug).toBe("windows");
 });
 
-it("only the desktop build ISO carries the streamer installer", () => {
+it("the Windows build ISO carries the streamer installer", () => {
 	const iso = (slug: string) => {
 		const recipe = windowsRecipe(slug);
 		return buildIsoFiles({
@@ -82,15 +74,13 @@ it("only the desktop build ISO carries the streamer installer", () => {
 			buildId: "test",
 		});
 	};
-	const desktop = iso("windows-desktop");
-	const headless = iso("windows");
+	const desktop = iso("windows");
 	for (const f of [
 		"build/steps/65-streamer.ps1",
 		"build/files/desktop-install.ps1",
 		"build/files/desktop-pins.json",
 	]) {
 		expect(desktop.has(f), f).toBe(true);
-		expect(headless.has(f), f).toBe(false);
 	}
 	const toml = parse(String(desktop.get("build/agent.toml"))) as {
 		desktop: { enabled: boolean };
@@ -107,11 +97,6 @@ it("only the desktop build ISO carries the streamer installer", () => {
 	expect(toml.ports.exclude).toEqual([
 		22, 135, 47800, 47984, 47989, 47990, 48010,
 	]);
-	const plain = parse(String(headless.get("build/agent.toml"))) as Record<
-		string,
-		unknown
-	>;
-	expect(plain.desktop).toBeUndefined();
 });
 
 it("windows-desktop verify runs the full Windows baseline plus the desktop group", () => {
@@ -124,7 +109,7 @@ it("windows-desktop verify runs the full Windows baseline plus the desktop group
 	expect(script.indexOf("function Test-Desktop")).toBeLessThan(
 		script.indexOf("# --- main ---"),
 	);
-	expect(base).not.toContain("Test-Desktop");
+	expect(script).toBe(base);
 	const dir = mkdtempSync(join(tmpdir(), "desktop-verify-"));
 	try {
 		const file = join(dir, "verify.ps1");

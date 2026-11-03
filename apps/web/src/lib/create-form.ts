@@ -315,6 +315,8 @@ export function parsePrefill(
 		const v = Array.isArray(raw) ? raw[0] : raw;
 		if (typeof v === "string" && v !== "") out[k] = v.slice(0, 128);
 	}
+	// Keep links from before the Windows template slug was shortened working.
+	if (out.template === "windows-desktop") out.template = "windows";
 	return out;
 }
 

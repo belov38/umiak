@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { canonicalTemplateSlug } from "./template-slug.ts";
 import type {
 	ConfigReader,
 	PlatformDefaults,
@@ -328,7 +329,7 @@ export class StaticConfigReader implements ConfigReader {
 	}
 
 	async template(slug: string): Promise<TemplateConfig | null> {
-		return this.#templates.get(slug) ?? null;
+		return this.#templates.get(canonicalTemplateSlug(slug)) ?? null;
 	}
 
 	async size(slug: string): Promise<SizeConfig | null> {

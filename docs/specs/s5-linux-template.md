@@ -1,5 +1,7 @@
 # S5. Шаблон Linux: спецификация
 
+> S17 update (2026-11-03): `windows` now includes desktop; `windows-desktop` is a compatibility alias. VM 598 is retired and read-only; VM 595 is the active Windows build. Historical build notes below do not authorize template mutations. See [S17](s17-windows-single.md).
+
 Статус: согласовано (master-сессия), 2026-10-29; ревью исполнителем пройдено, замечания внесены. Дополнено MVP-рекомендациями R5, R6 (`docs/roadmap-phase2.md` §6, решения master-сессии 2026-10-29). Область S5 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§4 агент, §5 хранилище, §6 warm pool). Опирается на `docs/specs/s1-proxmox-foundation.md` (примитивы, `packages/pve`, `umiak-bench`), `docs/specs/s3-guest-agent.md` (§7.3 `seal`, §17 пакет, §20 требования к шаблону), `docs/specs/s6-control-plane.md` (§5.2 `template_builds`, §9 warm pool, §14.3 регистрация), `docs/specs/s2-tunnel-protocol.md` (§5.2 smbios, §5.4 TLS).
 
 Решения в разделах 1–4 вопросов согласованы с master-сессией 2026-10-29. Пометка **[S5]** — решение автора спеки в рамках согласованного; его можно менять без нового согласования, если причина записана.

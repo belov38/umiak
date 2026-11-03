@@ -241,3 +241,41 @@ test("build accepts the documented PVE ISO volume", () => {
 	assert.ok(invocation.args.includes("windows.iso"));
 	assert.equal(invocation.env.UMIAK_PVE_MEDIA_STORAGE, "images");
 });
+
+test("Windows desktop legacy build alias invokes the canonical recipe", () => {
+	const invocation = buildInvocation(
+		"windows-desktop",
+		state,
+		"/secrets",
+		"https://stack",
+		"/assets",
+		"build",
+		{
+			templateVmid: 702,
+			iso: "windows.iso",
+			isoSha256: "a".repeat(64),
+		},
+	);
+	assert.equal(invocation.slug, "windows");
+	assert.equal(invocation.args[2], "windows");
+	assert.ok(!invocation.args.includes("windows-desktop"));
+});
+
+test("legacy build alias validates canonical rebuild confirmation before any launch", async () => {
+	let validated;
+	const jobs = new TemplateBuildJobs({
+		store: { read: async () => state },
+		validate: async (slug, _state, input) => {
+			validated = { slug, confirmRebuild: input.confirmRebuild };
+		},
+		run: async () => {
+			throw new Error("must not launch");
+		},
+	});
+	const result = await jobs.start("windows-desktop", {
+		dryRun: true,
+		confirmRebuild: "windows-desktop",
+	});
+	assert.deepEqual(validated, { slug: "windows", confirmRebuild: "windows" });
+	assert.equal(result.slug, "windows");
+});

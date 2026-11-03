@@ -11,11 +11,7 @@ plan: `docs/plans/s5-linux-template.md`). The build VM is driven only through th
 - Host runbook steps done: `infra/pve/setup.sh media` (role `UmiakTemplateMedia` on `/storage/local`) and
   `infra/pve/setup.sh node` (an `umiak-node` with `media.list`/`media.remove` and template origins in its range).
 - The S1 client config (`UMIAK_PVE_URL`, `UMIAK_PVE_TLS_NAME`, `UMIAK_NODE_SSH_HOST`, `~/.config/umiak/`).
-- VMIDs: a build takes the first free slot of its recipe (`vmids` in `template.yaml`: Linux 597 and 599,
-  Windows 598) inside `UMIAK_TEMPLATE_VMID_RANGE` (default `597-599`); 599 is skipped while it is the PoC
-  template (`UMIAK_TEMPLATE_VMID`). Sandboxes stay in `UMIAK_VMID_RANGE` (`500-589`). With one free Linux
-  slot, `umiak-tpl retire <buildId> --delete-vm` the previous build (refused for the build the worker
-  config uses and the newest ready one unless `--force`, for the PoC slot unless `--force-poc`).
+- Dev template slots: `linux` 597, `linux-desktop` 596, `windows` 595. Templates 595–598 are read-only on the active stand: no rebuilds or deletes. VM 598 is the retired headless Windows build; freeing it needs Ilia's explicit approval. Fresh installations allocate empty template slots separately from sandbox VMIDs 500–589. Rebuilds need another empty slot and preserve the active version.
 
 ## Build
 
@@ -47,7 +43,7 @@ Other commands: `versions <slug> [--update]`, `verify <buildId>`, `list`, `show 
 ## Windows build
 
 Spec: `docs/specs/s9-windows.md`. Recipe `infra/templates/windows` (Windows 11), shared steps, unattend files
-and keys in `infra/templates/_windows`. Template slot 598.
+and keys in `infra/templates/_windows`. Windows includes Sunshine, moonlight-web and cua-driver (`60-desktop` / `65-streamer`). Services remain Manual and start on first desktop open. `verify: windows` runs baseline and desktop checks. The legacy `windows-desktop` builder argument resolves to `windows`; only one recipe is stored. Dev template slot 595; VM 598 stays retired and read-only.
 
 Host prerequisites on top of the Linux ones: `infra/pve/setup.sh console` (role `UmiakConsole` with
 `VM.Console` on `/pool/umiak`, needed for `sendkey`), an `umiak-node` with `media.sha256`, and the user's
@@ -71,6 +67,8 @@ ISOs) → build VM (OVMF, Secure Boot, vTPM, network down) → install (`sendkey
 setup, wait for QGA) → steps as SYSTEM scheduled tasks (`run-step.ps1`) → `umiak-agent seal` and sysprep → offline
 WinPE stage (Defender, WaaSMedic off) → template → verify (a clone through specialize, then a fork with a new
 identity). Build and verify times: `docs/specs/s9-windows.md` section 24.4 (filled after the pve runs).
+
+Build the patched moonlight-web executable first with `infra/templates/windows/moonlight-web/build.sh`. The quickstart wizard and Templates page accept a licensed Windows ISO HTTPS URL or an uploaded ISO, following S16. No ISO is bundled.
 
 ## How a build runs
 

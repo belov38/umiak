@@ -2,7 +2,7 @@
 // websocket (or webrtc) viewer N times on one sandbox, right after create by
 // default, and saves viewer counters plus guest logs for every attempt.
 //
-//   UMIAK_PROBE_TEMPLATE=windows-desktop UMIAK_PROBE_ATTEMPTS=3 node infra/dev-cp/desktop-media-probe.ts
+//   UMIAK_PROBE_TEMPLATE=windows UMIAK_PROBE_ATTEMPTS=3 node infra/dev-cp/desktop-media-probe.ts
 //
 // UMIAK_PROBE_SANDBOX reuses a sandbox; UMIAK_PROBE_KEEP=1 keeps a created one;
 // UMIAK_PROBE_SUNSHINE_LOG sets Sunshine's min_log_level before the first open
@@ -20,7 +20,7 @@ import { waitForDesktopBudget } from "./desktop-budget.ts";
 import { guestRoot, pwsh } from "./guest-root.ts";
 
 const client = new Umiak();
-const template = process.env.UMIAK_PROBE_TEMPLATE ?? "windows-desktop";
+const template = process.env.UMIAK_PROBE_TEMPLATE ?? "windows";
 const windows = template.startsWith("windows");
 const attempts = Number(process.env.UMIAK_PROBE_ATTEMPTS ?? 3);
 const transport = (process.env.UMIAK_PROBE_TRANSPORT ?? "websocket") as

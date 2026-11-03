@@ -2,6 +2,7 @@
 // version, the size and the error of a failed save are not on the core row;
 // they are read for a whole list in one query.
 import { encodeUuid } from "@umiak/auth";
+import { canonicalTemplateSlug } from "@umiak/config";
 import type { SavedSnapshot } from "@umiak/core";
 import type pg from "pg";
 import type { SnapshotResource } from "../schemas/snapshot.ts";
@@ -81,7 +82,7 @@ export function toSnapshotResource(
 			s.sourceSandboxId === null
 				? null
 				: encodeUuid("sandbox", s.sourceSandboxId),
-		template: x?.template ?? null,
+		template: x?.template ? canonicalTemplateSlug(x.template) : null,
 		templateVersion: x?.templateVersion ?? null,
 		size: x?.size ?? null,
 		consistency: s.consistency,

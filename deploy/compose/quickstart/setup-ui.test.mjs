@@ -134,3 +134,12 @@ test("setup displays current gateway CA and leaf certificate expiry status", asy
 	assert.match(status.textContent, /Preview certificate expires: 2026-12-02/);
 	assert.match(status.textContent, /rebuilding agent packages and templates/);
 });
+
+test("setup offers three recipes and one Windows desktop with ISO URL inputs", () => {
+	const html = renderSetup({ steps: {} }, "http://localhost");
+	const select = html.match(/<select id="build-slug">(.*?)<\/select>/)[1];
+	assert.equal((select.match(/<option /g) || []).length, 3);
+	assert.match(select, /value="windows">Windows 11 \(with desktop\)/);
+	assert.doesNotMatch(select, /windows-desktop/);
+	assert.match(html, /id="build-iso-url"/);
+});

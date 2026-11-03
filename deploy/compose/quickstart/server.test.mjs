@@ -497,3 +497,60 @@ test("sign-in POST checks Origin and Host; only browser owners mint codes", asyn
 		await new Promise((r) => server.close(r));
 	}
 });
+
+test("sign-in limits have retry metadata; JSON owner gate and self revoke behave correctly", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	const token = await store.claim(await store.init());
+	const server = createQuickstartServer({ store });
+	await new Promise((r) => server.listen(0, "127.0.0.1", r));
+	const origin = `http://127.0.0.1:${server.address().port}`;
+	const post = (path, data, auth = false) =>
+		fetch(origin + path, {
+			method: "POST",
+			headers: {
+				origin,
+				"content-type": "application/json",
+				...(auth ? { cookie: `umiak_owner=${token}` } : {}),
+			},
+			body: JSON.stringify(data),
+		});
+	try {
+		assert.equal(
+			(
+				await fetch(`${origin}/owner/sessions`, {
+					headers: { accept: "application/json" },
+				})
+			).status,
+			401,
+		);
+		for (let i = 0; i < 20; i++)
+			assert.equal((await post("/owner/signin", { code: "bad" })).status, 403);
+		const limited = await post("/owner/signin", { code: "bad" });
+		assert.equal(limited.status, 429);
+		assert.ok(Number(limited.headers.get("retry-after")) > 0);
+		assert.deepEqual((await limited.json()).error, {
+			code: "signin_limited",
+			message: "signin_limited",
+			retryable: true,
+		});
+		const html = await (
+			await fetch(`${origin}/owner/sessions`, {
+				headers: { cookie: `umiak_owner=${token}` },
+			})
+		).text();
+		assert.match(html, /This browser/);
+		assert.match(html, /aria-label="Revoke browser session created/);
+		const bogus = await fetch(`${origin}/owner/pair?id=bogus`, {
+			headers: { cookie: `umiak_owner=${token}` },
+		});
+		assert.match(await bogus.text(), /Pairing unavailable/);
+		const revoked = await post(
+			"/owner/sessions/revoke",
+			{ id: (await store.sessions())[0].id },
+			true,
+		);
+		assert.match(revoked.headers.get("set-cookie"), /Max-Age=0/);
+	} finally {
+		await new Promise((r) => server.close(r));
+	}
+});

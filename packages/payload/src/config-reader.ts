@@ -12,6 +12,7 @@ import type {
 	TemplateConfig,
 	TemplateOs,
 } from "@umiak/config";
+import { canonicalTemplateSlug } from "@umiak/config";
 import type { Payload } from "payload";
 import { ChannelListener, CONFIG_CHANNEL } from "./config-listener.ts";
 
@@ -173,7 +174,9 @@ export class PayloadConfigReader implements ConfigReader {
 	}
 
 	async template(slug: string): Promise<TemplateConfig | null> {
-		const t = (await this.#templates()).find((x) => x.slug === slug);
+		const t = (await this.#templates()).find(
+			(x) => x.slug === canonicalTemplateSlug(slug),
+		);
 		return t ? copyTemplate(t) : null;
 	}
 

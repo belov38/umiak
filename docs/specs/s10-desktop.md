@@ -1,5 +1,7 @@
 # S10. Рабочий стол и computer-use: спецификация
 
+> Superseded template selection (2026-11-03): [S17](s17-windows-single.md) makes `windows` the single Windows 11 desktop recipe (VM 595). `windows-desktop` is an input alias. VM 598 is retired, read-only, and retained for existing sandboxes/snapshots. Historical build evidence below is unchanged.
+
 Статус: согласовано master-сессией 2026-10-29 (решения Ильи уточнены 2026-10-31, §26). Область S10 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§7, §8, §10). Опирается на S2 (туннель), S3 (агент), S4 (gateway), S5 (шаблон Linux), S6 (control plane), S7 (публичное API), S8 (дашборд), S9 (Windows). Граница с фазой 2 — S29 «рабочий стол v2» в `docs/roadmap-phase2.md`.
 
 Пометка **[S10]** — решение автора спеки в рамках брифа master-сессии; его можно менять без нового согласования, если причина записана. Пометка **[исполнитель]** — деталь, которую исполнитель выбирает сам по результатам спайков и тестов. Решения master и открытые вопросы — §26.
@@ -328,7 +330,7 @@ moonlight-web (`config.json`): шаблон получает его команд
 
 Доказательство (`infra/dev-cp/desktop-media-probe.ts`, Sunshine `min_log_level = verbose`): в чёрной попытке `Received ping [v2] from 127.0.0.1:57337` дважды, хотя video ping шёл с 57338 (`Recv: 127.0.0.1:57338 :: VIDEO`); Sunshine кодирует и отправляет кадры (`Sent Frame`), в логе moonlight-web нет `received first video packet`, в браузере 0 видеосообщений WebSocket и 0 вызовов `VideoDecoder.decode`. Linux этой ошибки в прогонах не показал.
 
-**Исправление.** Шаблон `windows-desktop` ставит `web-server.exe`, собранный из того же релиза moonlight-web v3.0.1 с патчем `infra/templates/windows-desktop/moonlight-web/ping-order.patch` к закреплённому moonlight-common-rust: аудиопоток (и его ping) не опрашивается, пока видеопоток не получил первый пакет (Sunshine уже записал адрес видео), но не дольше 3 s (тайм-аут ping Sunshine — 10 s). Аудио в потоке выключено (`stream_audio = disabled`), поэтому ошибочный адрес аудио безвреден. Сборка — `moonlight-web/build.sh` (Docker, `rust:1.99.0-trixie` + mingw-w64, без PE-метки времени); выход `files/moonlight-web/{web-server.exe,build.json}` не хранится в git. Установщик заменяет сервер из закреплённого zip и проверяет SHA256 из `build.json`; веб-ресурсы остаются из zip. Verify: `desktop_moonlight_patch`. Linux остаётся на upstream-сборке. Исправление в Sunshine (отдельный `endpoint` на сокет) — кандидат в upstream, после него патч снимается.
+**Исправление.** Шаблон `windows-desktop` ставит `web-server.exe`, собранный из того же релиза moonlight-web v3.0.1 с патчем `infra/templates/windows/moonlight-web/ping-order.patch` к закреплённому moonlight-common-rust: аудиопоток (и его ping) не опрашивается, пока видеопоток не получил первый пакет (Sunshine уже записал адрес видео), но не дольше 3 s (тайм-аут ping Sunshine — 10 s). Аудио в потоке выключено (`stream_audio = disabled`), поэтому ошибочный адрес аудио безвреден. Сборка — `moonlight-web/build.sh` (Docker, `rust:1.99.0-trixie` + mingw-w64, без PE-метки времени); выход `files/moonlight-web/{web-server.exe,build.json}` не хранится в git. Установщик заменяет сервер из закреплённого zip и проверяет SHA256 из `build.json`; веб-ресурсы остаются из zip. Verify: `desktop_moonlight_patch`. Linux остаётся на upstream-сборке. Исправление в Sunshine (отдельный `endpoint` на сокет) — кандидат в upstream, после него патч снимается.
 
 Диагностика (s10-followups): служба `umiak-moonlight-web` сохраняет лог прошлого запуска как `web-server.log.1` (`EndStreams` перезапускает её); `e2e-desktop.ts` при сбое потока до `EndStreams` снимает лог moonlight-web, лог Sunshine, скриншот через агент и счётчики просмотрщика (видеосообщения и IDR WebSocket, вызовы и ошибки `VideoDecoder`, `inbound-rtp` WebRTC).
 
@@ -1097,7 +1099,7 @@ behaviour are not characterised by this acceptance.
   фаза `desktop` в `[readiness] required`, порты стримера в `[ports] exclude`. Установщик
   `desktop-install.ps1` больше не правит `agent.toml` регулярными выражениями.
 - **Пины Windows-артефактов** (Sunshine MSI, moonlight-web zip, cua-driver zip, cosign) — в
-  `windows-desktop/files/desktop-pins.json` с sha256; cua-driver дополнительно проверяется
+  `windows/files/desktop-pins.json` с sha256; cua-driver дополнительно проверяется
   `cosign verify-blob`. Перенос в типизированный `versions.toml [desktop]` для Windows — follow-up.
 - **Edge**: политики `HideFirstRunExperience`, `BrowserSignin=0`, `SyncDisabled`,
   `DefaultBrowserSettingEnabled=0`, без промо и рекомендаций.

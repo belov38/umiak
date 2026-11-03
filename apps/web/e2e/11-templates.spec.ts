@@ -3,10 +3,21 @@ import { expect, test } from "./fixtures.ts";
 test("Templates explain snapshots and show read-only member catalog", async ({
 	as,
 }) => {
-	const { page } = await as("alice");
+	const { page, request } = await as("alice");
+	const catalog = await (await request.get("/api/v1/templates")).json();
+	const windowsName = catalog.data.find(
+		(t: { slug: string }) => t.slug === "windows",
+	).name;
 	await page.getByRole("link", { name: "Templates", exact: true }).click();
 	await expect(
 		page.getByRole("heading", { name: "Templates", exact: true }),
+	).toBeVisible();
+	await expect(page.getByTestId("template-card")).toHaveCount(3);
+	await expect(
+		page.getByRole("heading", {
+			name: windowsName,
+			exact: true,
+		}),
 	).toBeVisible();
 	const card = page.getByTestId("template-card").first();
 	await expect(card).toBeVisible();

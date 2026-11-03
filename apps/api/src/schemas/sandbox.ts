@@ -200,7 +200,8 @@ const slugField = z.string().optional().openapi({
 export const CreateSandboxRequest = z
 	.strictObject({
 		template: z.string().optional().openapi({
-			description: "Template slug (GET /v1/templates); ignored with `from`",
+			description:
+				"Template slug (GET /v1/templates); `windows-desktop` is a compatibility alias for `windows`; ignored with `from`",
 			example: "linux",
 		}),
 		size: z.string().optional().openapi({

@@ -43,8 +43,8 @@ build-logs/
 /apps/web/playwright-report/
 /apps/web/e2e/.state/
 
-# Built by infra/templates/windows-desktop/moonlight-web/build.sh
-/infra/templates/windows-desktop/files/moonlight-web/
+# Built by infra/templates/windows/moonlight-web/build.sh
+/infra/templates/windows/files/moonlight-web/
 
 # Python bytecode
 __pycache__/

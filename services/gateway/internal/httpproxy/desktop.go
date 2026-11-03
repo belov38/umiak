@@ -18,7 +18,7 @@ func (h *handler) desktopOpen(x *exchange) bool {
 	}
 	opened, err := h.cfg.DesktopAPI.OpenDesktop(x.r.Context(), x.label.Raw)
 	if err != nil {
-		x.fail(umiakerr.Error{Status: http.StatusServiceUnavailable, Code: "desktop_starting", Retryable: true, RetryAfter: 5, Refresh: true})
+		x.fail(umiakerr.Error{Status: http.StatusServiceUnavailable, Code: umiakerr.CodeDesktopStarting, Retryable: true, RetryAfter: 5, Refresh: true})
 		return true
 	}
 	q := url.Values{"hostId": {opened.HostID}, "appId": {opened.AppID}}

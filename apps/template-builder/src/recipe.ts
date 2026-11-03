@@ -16,12 +16,15 @@ const PARENT_TOKEN = "@parent";
 // Desktop profiles extend a headless profile and must pass its complete baseline as well.
 const VERIFY_BASE: Record<string, string> = {
 	"linux-desktop": "linux",
-	"windows-desktop": "windows",
 };
 
 /** A desktop recipe gets the desktop readiness phase and the streamer port exclusions. */
 export function isDesktopRecipe(recipe: { verify: string }): boolean {
-	return Object.hasOwn(VERIFY_BASE, recipe.verify);
+	return (
+		recipe.verify === "windows" ||
+		recipe.verify === "windows-desktop" ||
+		Object.hasOwn(VERIFY_BASE, recipe.verify)
+	);
 }
 
 /** The verify script of `profile`, prefixed with its headless baseline. */
@@ -30,6 +33,7 @@ export function loadVerifyScript(
 	profile: string,
 	os: "linux" | "windows" = "linux",
 ): string {
+	if (profile === "windows-desktop") profile = "windows";
 	const file = os === "windows" ? "verify.ps1" : "verify.sh";
 	const script = readFileSync(join(templatesDir, profile, file), "utf8");
 	const base = VERIFY_BASE[profile];
@@ -430,7 +434,11 @@ export function loadRecipe(
 	slug: string,
 	os?: RecipeOs,
 ): Recipe {
-	const recipe = loadRecipeChain(templatesDir, slug, []);
+	const recipe = loadRecipeChain(
+		templatesDir,
+		slug === "windows-desktop" ? "windows" : slug,
+		[],
+	);
 	if (os !== undefined && recipe.os !== os)
 		throw new Error(`recipe "${slug}" is for ${recipe.os}, expected ${os}`);
 	return recipe;

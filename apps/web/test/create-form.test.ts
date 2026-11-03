@@ -264,6 +264,26 @@ describe("search params of the create page", () => {
 			}),
 		).toEqual({ snapshot: "web-stack", template: "linux" });
 	});
+
+	it.each([
+		{ template: "windows-desktop" },
+		{ template: ["windows-desktop", "linux"] },
+	])(
+		"parsePrefill maps the legacy Windows template $template to its catalog slug",
+		({ template }) => {
+			expect(
+				parsePrefill({
+					template,
+					size: "windows-desktop",
+					snapshot: "windows-desktop",
+				}),
+			).toEqual({
+				template: "windows",
+				size: "windows-desktop",
+				snapshot: "windows-desktop",
+			});
+		},
+	);
 });
 
 describe("helpers", () => {

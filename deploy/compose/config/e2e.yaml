@@ -26,13 +26,6 @@ topology:
       storage: local-lvm
       pveVmid: 597
       bootTimeoutS: 300
-    - templateSlug: windows
-      version: e2e-1
-      os: windows
-      node: pve
-      storage: local-lvm
-      pveVmid: 598
-      bootTimeoutS: 300
     - templateSlug: linux-desktop
       version: e2e-1
       os: linux
@@ -40,7 +33,7 @@ topology:
       storage: local-lvm
       pveVmid: 596
       bootTimeoutS: 300
-    - templateSlug: windows-desktop
+    - templateSlug: windows
       version: e2e-1
       os: windows
       node: pve

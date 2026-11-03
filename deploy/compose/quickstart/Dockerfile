@@ -55,6 +55,7 @@ COPY --from=guest-build /out/umiak-agent-linux-amd64 /app/quickstart-assets/umia
 COPY --from=guest-build /out/umiak-agent-windows-amd64.exe /app/quickstart-assets/umiak-agent-windows-amd64.exe
 COPY --from=guest-build /out/umiak-release /umiak-release
 ENV NODE_ENV=production UMIAK_QUICKSTART_PORT=4180 UMIAK_QUICKSTART_ASSETS=/app/quickstart-assets
+COPY --chmod=755 deploy/compose/quickstart/umiak-signin /usr/local/bin/umiak-signin
 USER node
 EXPOSE 4180 4181
 ENTRYPOINT ["node", "deploy/compose/quickstart/run.mjs"]

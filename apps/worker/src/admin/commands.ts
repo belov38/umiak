@@ -559,11 +559,16 @@ async function cmdBootstrap(args: string[], d: AdminDeps): Promise<void> {
 				node.id,
 				b.storage,
 			);
+			// Compose bootstraps runtime before Payload's S17 migration. Reuse
+			// the legacy desktop row without rekeying it while headless Windows
+			// may still be active; the migration consolidates both atomically.
 			const existing = await tx.client.query<{ id: string; status: string }>(
 				`SELECT id, status FROM runtime.template_builds
-				 WHERE template_slug = $1 AND version = $2 AND node_id = $3
-				 ORDER BY created_at LIMIT 1`,
-				[b.templateSlug, b.version, node.id],
+				 WHERE (template_slug = $1 OR
+                    ($1 = 'windows' AND template_slug = 'windows-desktop' AND os = 'windows' AND pve_vmid = $4))
+                   AND version = $2 AND node_id = $3
+                 ORDER BY (template_slug = $1) DESC, created_at LIMIT 1`,
+				[b.templateSlug, b.version, node.id, b.pveVmid],
 			);
 			let id = existing.rows[0]?.id;
 			let status = existing.rows[0]?.status ?? "building";

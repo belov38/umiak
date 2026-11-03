@@ -144,7 +144,6 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 				"linux",
 				"windows",
 				"linux-desktop",
-				"windows-desktop",
 			]);
 			// A change through Payload reaches the cached reader (LISTEN umiak_config).
 			const payload = await getUmiakPayload({

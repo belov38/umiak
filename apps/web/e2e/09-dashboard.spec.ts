@@ -233,9 +233,17 @@ test("dashboard navigation, appearance, responsive layout and page captures", as
 		!url.searchParams.has("waitSeconds");
 	await page.route(desktopRef, async (route) => {
 		const response = await route.fetch();
+		const sandbox = await response.json();
 		await route.fulfill({
 			response,
-			json: { ...(await response.json()), template: "linux-desktop" },
+			json: {
+				...sandbox,
+				template: "linux-desktop",
+				endpoints: {
+					...sandbox.endpoints,
+					desktop: "http://desktop.umiak.localhost/",
+				},
+			},
 		});
 	});
 	await page.goto(`${base}/sandboxes/visual-${state.run}?tab=desktop`);

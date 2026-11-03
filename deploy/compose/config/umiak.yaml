@@ -11,25 +11,14 @@ templates:
     enabled: true
     defaultSize: 2gb
     allowedSizes: [2gb]
-  # S9: Windows 11 Pro 26H2 (template build below). 4 GB is the Windows 11 minimum.
-  # Like the rest of this section, api and worker read it from Payload. Migration
-  # 20261101_000000_windows_template inserts missing catalog entries there;
-  # existing operator settings are preserved. The build below is separate.
-  - slug: windows
-    os: windows
-    enabled: true
-    defaultSize: 4gb
-    allowedSizes: [4gb]
-
-  # S10: desktop templates. Migration 20261101_010000_desktop_defaults inserts
-  # them, 8gb and 4 vCPU for 4gb (S10 section 15.1) into Payload.
+  # S17: Windows includes desktop; Linux retains its separate desktop recipe.
   - slug: linux-desktop
     os: linux
     enabled: true
     defaultSize: 4gb
     allowedSizes: [4gb, 8gb]
     capabilities: [exec, files, ssh, desktop]
-  - slug: windows-desktop
+  - slug: windows
     os: windows
     enabled: true
     defaultSize: 4gb
@@ -79,7 +68,7 @@ topology:
               driver: lvmthin
               dataMaxPct: 80
               metaMaxPct: 70
-  # Verified Umiak builds; catalog remains disabled on the stand until all four are ready.
+  # Verified Umiak builds; catalog remains disabled on the stand until all three are ready.
   templateBuilds:
     - templateSlug: linux
       version: "20261101.1"
@@ -133,47 +122,12 @@ topology:
         tablet: "0"
         rng0: source=/dev/urandom
         cloudinit: false
-    - templateSlug: windows-desktop
+    - templateSlug: windows
       version: "20261101.7"
       os: windows
       node: pve
       storage: local-lvm
       pveVmid: 595
-      bootTimeoutS: 1200
-      agentVersion: 0.1.0+20261101.087b3f3a
-      diskLayout:
-        efidisk0:
-          index: "0"
-          efitype: 4m
-          pre-enrolled-keys: "1"
-          ms-cert: 2023k
-        scsi0:
-          index: "1"
-          size: 96G
-          discard: on
-          iothread: "1"
-          ssd: "1"
-        tpmstate0:
-          index: "2"
-          version: v2.0
-      hw:
-        machine: pc-q35-11.0+pve2
-        cpu: host
-        bios: ovmf
-        ostype: win11
-        scsihw: virtio-scsi-single
-        agent: enabled=1
-        vga: std
-        tablet: "1"
-        localtime: "0"
-        rng0: source=/dev/urandom
-        cloudinit: false
-    - templateSlug: windows
-      version: "20261101.2"
-      os: windows
-      node: pve
-      storage: local-lvm
-      pveVmid: 598
       bootTimeoutS: 1200
       agentVersion: 0.1.0+20261101.087b3f3a
       diskLayout:

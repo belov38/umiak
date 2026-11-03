@@ -37,6 +37,7 @@ steps:
     reboot,
     50-umiak-agent,
     60-desktop,
+    65-streamer,
     90-cleanup,
   ]
 seal: sysprep
@@ -47,5 +48,6 @@ install_timeout_s: 2400
 # Minutes per script step; the others get 60. DISM /ResetBase alone can take an hour.
 step_timeouts: { 30-toolchains: 60, 40-coding-agents: 45, 90-cleanup: 120 }
 verify: windows
-# Template slot on pve: 598 is headless Windows; 597 is headless Linux.
-vmids: [598]
+# Streamer services stay Manual and start on first Desktop/Open.
+# VM 598 is the retired headless template; never rebuild or delete it.
+vmids: [595]

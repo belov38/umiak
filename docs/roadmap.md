@@ -1,5 +1,7 @@
 # Roadmap: области для brainstorm
 
+S17 (Ilia, 2026-11-03): S9/S10 now expose one Windows 11 template, `windows` with desktop on VM 595; `windows-desktop` remains a compatibility alias. VM 598 is retired in the catalog and retained read-only. See [S17](specs/s17-windows-single.md). Earlier S9/S10 rows below retain historical build evidence.
+
 Каждая область — отдельный тред T3 Code (независимые области идут параллельно, каждая в своём git worktree и ветке): brainstorm → спецификация в `docs/specs/` → согласование с пользователем. После согласования спецификации brainstorm-тред закрывается (settle), реализация идёт в отдельном треде и ветке `sN-impl` (план в `docs/plans/`), master сливает ветки в main. Архитектура: `docs/architecture.md`.
 
 Ограничения PoC на `pve`: VMID от 500, не больше 8 GB RAM на всё, хранилище `local-lvm`. Разрешено создать пользователя, токен, pool и SDN Simple zone + VNet. Существующие VM, LXC и `vmbr0` не трогать.

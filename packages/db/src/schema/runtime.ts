@@ -185,6 +185,7 @@ export const templateBuilds = runtime.table("template_builds", {
 	nodeId: uuid("node_id").notNull(),
 	storageId: uuid("storage_id").notNull(),
 	pveVmid: integer("pve_vmid").notNull(),
+	headless: boolean("headless").default(false),
 	diskLayout: jsonb("disk_layout").notNull(),
 	hw: jsonb("hw").notNull(),
 	agentVersion: text("agent_version"),

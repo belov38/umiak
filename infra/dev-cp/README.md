@@ -228,13 +228,9 @@ export UMIAK_VMID_RANGE=580-589
 ssh -o BatchMode=yes -o HostKeyAlias=pve.tail0000.ts.net root@100.64.10.2 qm list
 ```
 
-Desktop template slots: **596** `linux-desktop`, **595** `windows-desktop` (one slot each,
-like `windows` in 598); sandbox clones use **500–589**.
-R1 retains CT 590 in place and rebuilds only the four slots: Linux 597, Linux desktop 596,
-Windows desktop 595 and Windows 598, one at a time. Slot 599 is empty and stays reserved;
-never touch 9000/9001 or any VM/LXC below 500. Before starting any VM inspect `qm list`: all
-running 500–599 VMs together may use at most 8 GiB. Stop the source before booting a desktop
-fork. Never stop an unrelated VM to make room.
+Current template slots (S17): **597** `linux`, **596** `linux-desktop`, **595** `windows` (Windows 11 with desktop). **598** is the retired headless Windows build, retained for existing sandboxes and snapshots. All four template VMs are read-only on the active stand. No rebuilds or deletes; freeing 598 needs Ilia's explicit approval. Sandbox clones use **500–589**, with at most 8 GiB RAM total. Never touch 9000/9001 or VMs below 500; never stop another user's VM to make room.
+
+The build/verification notes below are historical R1 evidence, not authorization to rebuild the live stand.
 
 After a Linux desktop build with `--no-verify`, run
 `mise exec -- node infra/dev-cp/verify-desktop.ts <buildId>` and
@@ -252,14 +248,10 @@ The R1 checked builds all pin the new dev CA and agent `0.1.0+20261101.087b3f3a`
 |---|---|---|---|---|
 | `linux` | 597 | `20261101.1` | `01a1991c-0aa8-77af-94fa-6e4ec1e9a24f` | 99 / 2 / 0 |
 | `linux-desktop` | 596 | `20261101.3` | `01a1992c-8cdc-7036-802a-fa52d23f7056` | 107 / 2 / 0 |
-| `windows-desktop` | 595 | `20261101.7` | `01a1993d-3986-7c3e-ab41-4408207656c4` | 112 / 5 / 0 |
-| `windows` | 598 | `20261101.2` | `01a19983-d967-7ea4-bd34-233e58dbce4d` | 101 / 5 / 0 |
+| `windows` (desktop; formerly `windows-desktop`) | 595 | `20261101.7` | `01a1993d-3986-7c3e-ab41-4408207656c4` | 112 / 5 / 0 |
+| retired headless `windows` | 598 | `20261101.2` | `01a19983-d967-7ea4-bd34-233e58dbce4d` | 101 / 5 / 0 |
 
-Before a `windows-desktop` build run `infra/templates/windows-desktop/moonlight-web/build.sh`.
-`deploy.sh` generates the dev topology from this same config. A rebuild of a one-slot
-recipe needs its old template retired first. Always limit cleanup/retire to the one slot
-being rebuilt with `UMIAK_TEMPLATE_VMID_RANGE` (`595-595`, `596-596`, `597-597` or
-`598-598`); never run it across the other template slots.
+For future builds on a fresh installation, run `infra/templates/windows/moonlight-web/build.sh` before `umiak-tpl build windows`. Rebuilds require a new empty template slot. Do not rebuild or delete any current stand template.
 
 `verify-desktop.ts` passed the Linux baseline, restart and fork checks. The direct
 `spike-desktop.ts` passed1920x1080 capture, mouse/Unicode keyboard proof, clipboard,
@@ -431,9 +423,11 @@ From a signed-in browser use **Owner sessions → Sign in another browser**.
 Alternatively, run this on CT 590; it preserves all current owner sessions:
 
 ```sh
-cd ~/umiak
-docker compose -p umiak --env-file deploy/compose/.env -f compose.yaml -f infra/dev-cp/compose.quickstart.yaml exec quickstart node deploy/compose/quickstart/run.mjs node deploy/compose/quickstart/signin-code.mjs
+docker compose -p umiak exec quickstart umiak-signin
 ```
+
+The explicit project name works from any directory; no `-f` or `--env-file`
+is needed for exec. Use `umiak-signin --help` for a read-only check.
 
 Enter the printed one-time code at the deployment's Sign in page within ten
 minutes. Use the same hostname thereafter. Never run `recover.mjs` for ordinary

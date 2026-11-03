@@ -140,11 +140,15 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 			title: "Desktops",
 			blocks: [
 				text(
-					"Use an available desktop template for a graphical session. Desktop templates need more RAM than a headless Linux sandbox. The dashboard's Desktop tab has the same viewer. The embedded viewer needs a secure browser context for WebCodecs: use Tailscale Serve (recommended), localhost or your own HTTPS proxy. For localhost, run ssh -L 4180:localhost:4180 <docker-host> and open http://localhost:4180. From LAN HTTP, open the HTTPS viewer in a new tab. For a quick Chrome test only, add this origin at chrome://flags/#unsafely-treat-insecure-origin-as-secure; this weakens browser protection.",
+					"Windows 11 (`windows`) includes the desktop; Linux offers `linux` and `linux-desktop`. Use `linux-desktop` or `windows` for a graphical session. The old `windows-desktop` slug is accepted as an alias of `windows`. Desktop templates need more RAM than a headless Linux sandbox. The dashboard's Desktop tab has the same viewer. The embedded viewer needs a secure browser context for WebCodecs: use Tailscale Serve (recommended), localhost or your own HTTPS proxy. For localhost, run ssh -L 4180:localhost:4180 <docker-host> and open http://localhost:4180. From LAN HTTP, open the HTTPS viewer in a new tab. For a quick Chrome test only, add this origin at chrome://flags/#unsafely-treat-insecure-origin-as-secure; this weakens browser protection.",
 				),
 				code(
 					"Create a desktop",
 					"umiak create --template linux-desktop --wait",
+				),
+				code(
+					"Create a Windows desktop",
+					"umiak create --template windows --size 4gb --wait",
 				),
 				code("Open the viewer", "umiak desktop open <slug>"),
 				code(

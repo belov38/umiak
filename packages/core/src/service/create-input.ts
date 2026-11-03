@@ -3,6 +3,7 @@ import type {
 	SizeConfig,
 	TemplateConfig,
 } from "@umiak/config";
+import { canonicalTemplateSlug } from "@umiak/config";
 import {
 	templateUnavailable,
 	type ValidationIssue,
@@ -140,7 +141,9 @@ export async function checkTemplateEnabled(
 	deps: SandboxServiceDeps,
 	templateSlug: string,
 ): Promise<TemplateConfig> {
-	const template = await deps.config.template(templateSlug);
+	const template = await deps.config.template(
+		canonicalTemplateSlug(templateSlug),
+	);
 	if (template === null || !template.enabled) {
 		throw templateUnavailable(templateSlug);
 	}

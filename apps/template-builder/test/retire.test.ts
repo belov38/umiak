@@ -15,6 +15,14 @@ afterEach(() => {
 });
 
 const NOW = new Date("2026-10-31T12:00:00Z");
+const DESKTOP: Manifest["desktop"] = {
+	pins: {
+		sunshine: { version: "1.0.0", sha256: "a".repeat(64) },
+		moonlight_web: { version: "1.0.0", sha256: "b".repeat(64) },
+		cua_driver: { version: "1.0.0", sha256: "c".repeat(64) },
+	},
+	sources: {},
+};
 const ID_LIVE = "0192f000-0000-7000-8000-000000000011";
 const ID_GONE = "0192f000-0000-7000-8000-000000000012";
 const ID_REUSED = "0192f000-0000-7000-8000-000000000013";
@@ -229,6 +237,84 @@ describe("retire", () => {
 		expect(s.pve.vms.has(598)).toBe(false);
 		expect(report.join("\n")).toMatch(/lease 598: .*forbidden/);
 		expect(s.registry.get(ID_LIVE)?.status).toBe("retired");
+	});
+
+	it.each([597, 598])(
+		"preserves a legacy headless Windows build in slot %s without --force",
+		async (vmid) => {
+			const s = await setup();
+			s.registry.update(ID_LIVE, {
+				os: "windows",
+				templateSlug: "windows",
+				pveVmid: vmid,
+			});
+			const template = s.pve.vms.get(598);
+			if (!template) throw new Error("missing template fixture");
+			s.pve.vms.set(vmid, template);
+			// A newer desktop build means the newest-ready guard no longer protects this build.
+			s.registry.update(ID_NEWEST, {
+				os: "windows",
+				templateSlug: "windows",
+				desktop: DESKTOP,
+			});
+			await expect(retire(s.deps, ID_LIVE, { deleteVm: true })).rejects.toThrow(
+				/headless Windows.*--force/,
+			);
+			expect(s.pve.calls.filter((c) => c.method !== "GET")).toEqual([]);
+			expect(s.pve.vms.has(vmid)).toBe(true);
+			expect(s.registry.get(ID_LIVE)?.status).toBe("ready");
+			expect((await s.allocator.list()).some((l) => l.vmid === vmid)).toBe(
+				true,
+			);
+			await retire(s.deps, ID_LIVE, { deleteVm: true, force: true });
+			expect(s.pve.vms.has(vmid)).toBe(false);
+			expect(s.registry.get(ID_LIVE)?.status).toBe("retired");
+		},
+	);
+
+	it("retires a headless Windows build whose VM is gone without requesting deletion", async () => {
+		const s = await setup();
+		s.registry.update(ID_GONE, { os: "windows", templateSlug: "windows" });
+		s.registry.update(ID_NEWEST, {
+			os: "windows",
+			templateSlug: "windows",
+			desktop: DESKTOP,
+		});
+		await retire(s.deps, ID_GONE, { deleteVm: false });
+		expect(s.registry.get(ID_GONE)?.status).toBe("retired");
+		expect(s.pve.calls.filter((c) => c.method !== "GET")).toEqual([]);
+	});
+
+	it("allows deleting a superseded Windows desktop build without --force", async () => {
+		const s = await setup();
+		s.registry.update(ID_LIVE, {
+			os: "windows",
+			templateSlug: "windows",
+			desktop: DESKTOP,
+		});
+		s.registry.update(ID_NEWEST, {
+			os: "windows",
+			templateSlug: "windows",
+			desktop: DESKTOP,
+		});
+		await retire(s.deps, ID_LIVE, { deleteVm: true });
+		expect(s.pve.vms.has(598)).toBe(false);
+	});
+
+	it("refuses deleting an already retired build without --force", async () => {
+		const s = await setup();
+		const retiredAt = "2026-10-30T11:00:00.000Z";
+		s.registry.update(ID_LIVE, { status: "retired", retiredAt });
+		await expect(retire(s.deps, ID_LIVE, { deleteVm: true })).rejects.toThrow(
+			/retired.*--force/,
+		);
+		expect(s.pve.calls).toEqual([]);
+		expect(s.pve.vms.has(598)).toBe(true);
+		expect(
+			await retire(s.deps, ID_LIVE, { deleteVm: true, force: true }),
+		).toEqual([`build ${ID_LIVE} is already retired`]);
+		expect(s.pve.vms.has(598)).toBe(true);
+		expect(s.registry.get(ID_LIVE)?.retiredAt).toBe(retiredAt);
 	});
 
 	it("refuses failed and unknown builds, and is idempotent", async () => {

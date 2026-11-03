@@ -10,12 +10,13 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
 	isBuiltinStep,
 	loadRecipe,
 	loadVersions,
+	recipeFile,
 	stepFile,
 	WINDOWS_TOOLS,
 	type WindowsRecipe,
@@ -35,6 +36,7 @@ const PWSH7_STEPS = [
 	"40-coding-agents",
 	"50-umiak-agent",
 	"60-desktop",
+	"65-streamer",
 	"90-cleanup",
 ];
 const PS51_STEPS = ["00-base", "10-system"];
@@ -85,7 +87,7 @@ const KEPT_APPX = [
 ];
 
 function read(rel: string): string {
-	return readFileSync(join(shared, rel), "utf8");
+	return readFileSync(recipeFile(recipe(), rel), "utf8");
 }
 
 /** Lines without comments, so a mention in a comment does not count. */
@@ -129,12 +131,14 @@ function psArray(src: string, name: string): string[] {
 }
 
 describe("windows steps: files", () => {
-	it("every script step of the recipe has a file in _windows/steps", () => {
+	it("every script step resolves from shared or Windows recipe files", () => {
 		const r = recipe();
 		const steps = scriptSteps();
 		expect(steps).toEqual([...PS51_STEPS, ...PWSH7_STEPS]);
 		for (const s of steps)
-			expect(relative(shared, stepFile(r, s))).toBe(join("steps", `${s}.ps1`));
+			expect(stepFile(r, s)).toBe(
+				join(s === "65-streamer" ? r.dir : shared, "steps", `${s}.ps1`),
+			);
 	});
 
 	it("pwsh steps start with #requires -Version 7, the 5.1 steps do not", () => {
