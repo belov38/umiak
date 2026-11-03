@@ -107,7 +107,7 @@ export function renderSetup(state, origin) {
 	];
 	const current = order.find((name) => steps[name]?.status !== "ready");
 	const section = (name, title, fields) =>
-		`<details name="setup-step"${name === current ? " open" : ""}><summary>${steps[name]?.status === "ready" ? "✓ " : ""}${title}</summary>${status(name)}<form data-step="${name}">${fields}<button>Verify and save</button></form></details>`;
+		`<details name="setup-step"${name === current ? " open" : ""}><summary>${steps[name]?.status === "ready" ? "✓ " : ""}${title}</summary>${status(name)}<form data-step="${name}">${fields}<button${name === "templates" ? ' class="outline"' : ""}>Verify and save</button></form></details>`;
 	return page(
 		"Setup",
 		`<h1>Set up your sandbox platform</h1><p id="certificate-status" role="status"></p><script>${showCertificateStatus.toString()};void showCertificateStatus();</script>${tailnet ? '<p class="error" role="status">Tailscale: if you use Funnel, this is public. Use Tailscale Serve to keep this dashboard private to your tailnet.</p>' : ""}<p>Quickstart uses HTTP on your trusted LAN by default. For HTTPS, use Tailscale Serve or your own reverse proxy.</p><p>${Object.values(steps).filter((step) => step.status === "ready").length} of 6 steps verified</p><progress max="6" value="${Object.values(steps).filter((step) => step.status === "ready").length}" aria-label="Setup progress"></progress><p>Each step is saved. Re-run a step to verify it again. Existing PVE objects and templates are adopted without creating a parallel setup.</p>${state.complete ? '<p class="ready">You are ready. Setup and smoke test passed. <a href="/app/getting-started">Get started with Umiak</a> · <a href="/app">Open your sandboxes</a></p>' : ""}
