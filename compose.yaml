@@ -36,6 +36,20 @@ x-web-build: &web-build
   dockerfile: apps/web/Dockerfile
 
 services:
+  web-meta:
+    image: node:26.13.0-bookworm-slim
+    user: "1000:1000"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: [node, /meta-proxy.mjs]
+    volumes:
+      - ./deploy/compose/meta-proxy.mjs:/meta-proxy.mjs:ro
+    networks: [control, web-internal]
+    depends_on:
+      api: { condition: service_healthy }
+
   gateway-secrets:
     image: umiak-quickstart:dev
     build: *quickstart-build

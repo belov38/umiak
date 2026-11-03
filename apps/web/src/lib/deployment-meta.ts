@@ -6,7 +6,7 @@ import { metaTenancy } from "./tenancy";
 export const getDeploymentMeta = cache(async () => {
 	try {
 		const response = await fetch(
-			process.env.UMIAK_WEB_META_URL ?? "http://api:8080/v1/meta",
+			process.env.UMIAK_WEB_META_URL ?? "http://web-meta:8080/v1/meta",
 			{
 				cache: "no-store",
 				redirect: "error",
