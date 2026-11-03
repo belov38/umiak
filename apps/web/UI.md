@@ -89,7 +89,7 @@ shadows. It scans every CSS file for primitive selectors, rejects arbitrary
 slot variants, dynamic radii and inline colour/background/border/shadow styles
 outside `components/ui`, and forbids raw controls and action-styled links.
 Payload admin retains its host palette through its own CSS. Applicable class,
-inline style and embedded CSS checks also cover all three quickstart renderers. It is part of `pnpm test`.
+inline style and embedded CSS checks also cover all quickstart renderers. It is part of `pnpm test`.
 Browser coverage records both themes and checks hierarchy, geometry, theme sync,
 focus and palette contrast. Screenshots go to test output or `UMIAK_VISUAL_DIR`;
 no customer data or live stand is needed. Source checks are deliberately lexical,

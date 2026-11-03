@@ -424,3 +424,20 @@ origin. The flag weakens browser protection for that origin.
 
 Rollback remains `UMIAK_DEVCP_AUTH_MODE=none|oidc infra/dev-cp/deploy.sh`. It reuses
 S15 DB and guest secrets. Never use `down -v` or broad cleanup on the active stand.
+
+### Quickstart: new browser or hostname (CT 590)
+
+From a signed-in browser use **Owner sessions → Sign in another browser**.
+Alternatively, run this on CT 590; it preserves all current owner sessions:
+
+```sh
+cd ~/umiak
+docker compose -p umiak --env-file deploy/compose/.env -f compose.yaml -f infra/dev-cp/compose.quickstart.yaml exec quickstart node deploy/compose/quickstart/run.mjs node deploy/compose/quickstart/signin-code.mjs
+```
+
+Enter the printed one-time code at the deployment's Sign in page within ten
+minutes. Use the same hostname thereafter. Never run `recover.mjs` for ordinary
+sign-in: it revokes all browsers and CLI credentials. Before redeploying, inspect
+`qm list` and `qm config <vmid>` for locks on 500–589 read-only on `pve`; wait if
+any sandbox operation is in progress. Coordinate file uploads: `~/umiak` has no
+Git checkout, so a later deployment must include all preceding feature commits.

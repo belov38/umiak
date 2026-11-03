@@ -129,3 +129,36 @@ meta-proxy Node tests including compiled HTTP CLI and custom-CA HTTPS proxy,
 shellcheck, Go build/vet/test/lint, Python SDK, OIDC23 and local Playwright.
 Use unique Compose projects/ports. Fresh-host prep/build remains fake/dry-run
 because the active stand forbids those mutations. No main merge in this branch.
+
+### Owner sign-in rulings (2026-11-03)
+
+- A claimed deployment presents Sign in to anonymous browser navigations, including
+  setup and pairing links. Claim, sign-in and anonymous errors expose no dashboard
+  menu. Brand, appearance and a minimal footer remain available.
+- Sign-in uses 24 uniformly random base32 characters (120 bits), grouped in fours,
+  case-insensitive with spaces/hyphens ignored. Only SHA256 digests persist in the
+  existing locked owner row. Codes expire after 10 minutes and are consumed in the
+  same transaction that creates a normal browser session. No existing session or
+  pending CLI pairing is reset; upgrades add fields without resetting owner state.
+- Only the Docker operator or a browser owner may issue codes. CLI tokens cannot
+  mint browser access: that would escalate their deliberately narrower authority.
+  Browser issuance requires the exact Origin even when using a bearer credential.
+- Per-source admission is 20 attempts per 10 minutes; keys are hashed validated
+  client addresses. Each incorrect attempt increments every outstanding code's
+  global failure counter; 20 failures invalidate that code. Thus distributed
+  guesses are bounded too. Invalid guesses can deny use of outstanding codes;
+  issue a fresh code, while existing sessions continue working. Source buckets
+  expire and are capped at 10,000; outstanding codes are capped at ten.
+- Failed-attempt state commits even when sign-in fails (errors are thrown outside
+  the transaction). Shared Postgres row locking prevents reuse across replicas.
+  Issue/use audit events contain no codes, credentials or digests. The console
+  command alone prints its newly issued code to its operator's terminal.
+- Sign-in POST requires exact Origin and retains Host allowlist, CIDR admission,
+  body size and ingress rate controls. HTTP uses the existing HttpOnly Strict
+  cookie; trusted HTTPS ingress uses Secure `__Host-umiak_owner`.
+- Sessions show kind, creation, last HTTP use and creation hostname. Historical
+  sessions missing metadata display unknown; metadata does not invalidate them.
+  CLI hostname is the pairing initiation hostname. WebSocket traffic does not
+  continually update last-use time. Revocation retains confirmation.
+- Recovery remains console-only, destructive and behind an explicit disclosure
+  warning that all browser and CLI sessions and pending pairings are revoked.

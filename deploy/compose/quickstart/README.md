@@ -228,8 +228,9 @@ sharing those limits. CLI sessions can be revoked at `/owner/sessions`.
 
 ## Console recovery and legacy modes
 
-If the owner browser is lost, a trusted Docker operator can invalidate all owner
-sessions and CLI pairings and print a new one-time claim code:
+For a deliberate full access reset only, a trusted Docker operator can invalidate
+all owner sessions and CLI pairings and print a new one-time claim code. For a new
+browser use non-destructive sign-in below:
 
 ```sh
 docker compose exec quickstart node deploy/compose/quickstart/run.mjs node deploy/compose/quickstart/recover.mjs
@@ -359,3 +360,22 @@ Owner state and sessions remain stored; use the same HTTPS hostname and new targ
 The two fixed `/quickstart/ui/*.woff2` font routes intentionally remain public,
 before CIDR, deny and owner checks. They contain only bundled presentation assets;
 no deployment settings, owner state or arbitrary paths are exposed.
+
+## New browser or device?
+
+Owner sessions belong to each browser and hostname. Open the deployment, then
+enter a one-time sign-in code. Existing sessions and CLI pairings remain valid.
+On the Docker host, from the repository directory:
+
+```sh
+docker compose exec quickstart node deploy/compose/quickstart/run.mjs node deploy/compose/quickstart/signin-code.mjs
+```
+
+The wrapper reads the generated database credential inside the container. Or use
+**Owner sessions → Sign in another browser** in a signed-in browser and copy the
+code. Codes last ten minutes and work once. Keep them private. After a typo or
+rate-limit error, check the code or obtain a new one; source limits reset after ten
+minutes. CLI credentials cannot issue broader browser credentials.
+
+Use **Lost every session? Reset owner access** only as a last resort: recovery
+revokes all browsers, CLI credentials and pending pairings.

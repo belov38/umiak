@@ -668,3 +668,13 @@ Evidence: `/tmp/umiak-s16-polish-9fDNWP/`; screenshot manifest
 `screenshots.txt`, forty before/after side-by-side comparisons in `comparisons/`.
 Final anonymous live verification preserves owner/session state and guest TLS;
 no login, pairing, approval, PVE mutation, firewall or network change occurred.
+
+### Owner sign-in follow-up (2026-11-03)
+
+Implementation order: persist digest-only expiring codes with atomic consumption
+and durable attempt limits; add console issuance and Origin-protected browser
+issuance/consumption; render anonymous access pages without dashboard navigation;
+add session metadata; document the non-destructive flow and CT590 invocation;
+run lifecycle/HTTP/CLI/UI and full acceptance gates before coordinated deployment.
+Security and compatibility decisions are recorded in the spec's owner sign-in
+rulings. Existing owner state is extended in place and is never reinitialized.
