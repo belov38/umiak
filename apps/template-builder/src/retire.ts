@@ -7,7 +7,8 @@ import { isProtectedVmid } from "./vmid-guard.ts";
 // `umiak-tpl retire <buildId> [--delete-vm] [--force] [--force-poc]`: a ready build that is no
 // longer used. The registry marks it `retired`; with --delete-vm its template VM goes too, with
 // the VMID lease. A build the worker config uses, or the newest ready build of its template,
-// stays unless --force; a build in the PoC slot (599) stays unless --force-poc.
+// stays unless --force; retained retired/headless Windows builds require --force for VM
+// deletion. A build in the PoC slot (599) stays unless --force-poc.
 
 const BUILD_TAG = "umiak-tpl";
 
@@ -38,7 +39,7 @@ export interface RetireDeps {
 
 export interface RetireOptions {
 	deleteVm: boolean;
-	/** Retire a build the config uses or the newest ready build. */
+	/** Override configured/newest/headless guards and acknowledge a retired build. */
 	force?: boolean;
 	/** Retire a build in the PoC slot. */
 	forcePoc?: boolean;
@@ -82,10 +83,27 @@ export async function retire(
 ): Promise<string[]> {
 	const m = d.registry.get(buildId);
 	if (!m) throw new Error(`build ${buildId} not found in ${d.registry.dir}`);
-	if (m.status === "retired") return [`build ${buildId} is already retired`];
+	if (m.status === "retired") {
+		if (opts.deleteVm && !opts.force)
+			throw new Error(
+				`build ${buildId} is retired; --delete-vm requires --force`,
+			);
+		return [`build ${buildId} is already retired`];
+	}
 	if (m.status !== "ready")
 		throw new Error(
 			`build ${buildId} is ${m.status}: only a ready build is retired (umiak-tpl cleanup removes failed ones)`,
+		);
+	// A retired catalog build can still be ready in this local registry. Its saved artifact
+	// metadata identifies legacy headless Windows images regardless of their VMID or version.
+	if (
+		opts.deleteVm &&
+		!opts.force &&
+		m.os === "windows" &&
+		m.desktop === undefined
+	)
+		throw new Error(
+			`build ${buildId} is a legacy headless Windows build; --force allows deleting its retained VM`,
 		);
 	const vmid = m.pveVmid;
 	if (vmid !== null && vmid === d.cfg.templateVmid && !opts.forcePoc)
