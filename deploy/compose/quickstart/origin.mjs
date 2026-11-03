@@ -31,7 +31,7 @@ export function requestContext(req, env = process.env, proxyListener = false) {
 	// Docker Desktop may NAT host-published traffic to the bridge gateway;
 	// see README for the limit this places on container isolation.
 	const proxyPeer = clientGuard(
-		"127.0.0.0/8,::1/128,172.29.116.1/32,172.30.116.1/32,172.30.116.12/32",
+		"127.0.0.0/8,::1/128,172.29.116.1/32,172.29.116.128/32,172.30.116.1/32,172.30.116.12/32",
 		"",
 		{ UMIAK_LOCAL_DENIED_CIDRS: "" },
 	);

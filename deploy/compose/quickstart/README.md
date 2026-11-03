@@ -334,8 +334,9 @@ node-agent when using this new optional storage argument on an existing host.
 
 Docker Engine **28 or newer** is required for loopback-publish isolation from
 other hosts on the same layer-2 network. Port 4181 also checks its socket peer:
-loopback, the fixed Compose bridge gateways (172.29.116.1 / 172.30.116.1), or
-the Serve sidecar (172.30.116.12). `UMIAK_TRUSTED_PROXY_CIDRS` controls forwarding
+loopback, the fixed Compose bridge gateways (172.29.116.1 / 172.29.116.128 / 172.30.116.1), or
+the Serve sidecar (172.30.116.12). Docker may allocate the control gateway at
+its configured ip_range start (.128); the existing CT 590 network uses this address. `UMIAK_TRUSTED_PROXY_CIDRS` controls forwarding
 chain traversal only; it cannot admit another socket peer. Port 4180 ignores
 forwarding headers from every peer.
 
