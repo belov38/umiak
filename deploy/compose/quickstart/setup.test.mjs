@@ -396,6 +396,8 @@ test("wizard UI has themes, progress and template selections without raw JSON", 
 		"https://stack.example",
 	);
 	assert.match(html, /prefers-color-scheme/);
+	assert.match(html, /umiak-theme/);
+	assert.match(html, /Toggle light and dark theme/);
 	assert.match(html, /progress/);
 	assert.match(html, /type="checkbox"/);
 	assert.doesNotMatch(
