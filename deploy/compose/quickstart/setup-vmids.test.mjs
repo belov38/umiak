@@ -95,6 +95,7 @@ test("adoption registers existing VMIDs unchanged even after configuring a new b
 		templateSlug: ["windows-desktop", "linux-desktop", "linux"][i],
 	}));
 	let retired = false;
+	let headless = false;
 	let state = {
 		steps: {
 			connection: { status: "ready", data: { node: "pve" } },
@@ -119,7 +120,8 @@ test("adoption registers existing VMIDs unchanged even after configuring a new b
 						{
 							id: args[2],
 							version: "20261101.1",
-							status: retired ? "retired" : "active",
+							status: retired ? "retired" : headless ? "deprecated" : "active",
+							headless,
 						},
 					],
 				};
@@ -138,6 +140,9 @@ test("adoption registers existing VMIDs unchanged even after configuring a new b
 		[595, 596, 597],
 	);
 	assert.equal(state.steps.templates.data.builds[0].templateSlug, "windows");
+	headless = true;
+	await assert.rejects(handler.wizard.run("templates", { builds }), /headless/);
+	headless = false;
 	retired = true;
 	await assert.rejects(handler.wizard.run("templates", { builds }), /retired/);
 	assert.deepEqual(
@@ -188,4 +193,57 @@ test("rebuild dry-run allocates a fresh free slot without starting a VM or chang
 		{ status: "dry-run", slug: "linux", templateVmid: 701 },
 	);
 	assert.deepEqual(writes, []);
+});
+
+test("detected templates omit a deprecated custom headless Windows build", async () => {
+	const { createSetupHandler } = await import("./setup.mjs");
+	const state = {
+		steps: {
+			connection: { status: "ready", data: { node: "pve" } },
+			limits: { status: "ready", data: { ...limits, nodeId: "node" } },
+		},
+	};
+	const handler = createSetupHandler({
+		store: { read: async () => structuredClone(state) },
+		pool: {
+			query: async (sql, args) => ({
+				rows:
+					args[1] === 600
+						? [{ id: "headless", status: "deprecated", headless: true }]
+						: [{ id: "desktop", status: "active", headless: false }],
+			}),
+		},
+		makePve: () => ({
+			get: async (path) =>
+				path.endsWith("/qemu")
+					? [
+							{
+								vmid: 600,
+								template: 1,
+								tags: "umiak-tpl",
+								name: "OLD_HEADLESS",
+							},
+							{
+								vmid: 601,
+								template: 1,
+								tags: "umiak-tpl",
+								name: "NEW_DESKTOP",
+							},
+						]
+					: { template: 1, tags: "umiak-tpl;umiak-template-windows" },
+		}),
+	});
+	let html = "";
+	await handler(
+		{ method: "GET", url: "/setup" },
+		{
+			writeHead: () => {},
+			end: (value) => {
+				html = value;
+			},
+		},
+		{ owner: true, origin: "http://localhost" },
+	);
+	assert.doesNotMatch(html, /OLD_HEADLESS/);
+	assert.match(html, /NEW_DESKTOP/);
 });

@@ -532,12 +532,16 @@ export function createSetupHandler({
 					`VM ${build.pveVmid} is not a tagged Umiak template`,
 				);
 				const existing = await query(
-					`SELECT id,version,status FROM runtime.template_builds WHERE node_id=$1 AND template_slug=$2 AND pve_vmid=$3 AND status IN ('active','retired') ORDER BY (status='active') DESC`,
+					`SELECT id,version,status,(template_slug='windows' AND headless IS DISTINCT FROM false) AS headless FROM runtime.template_builds WHERE node_id=$1 AND template_slug=$2 AND pve_vmid=$3 AND (status IN ('active','retired') OR (template_slug='windows' AND headless IS DISTINCT FROM false)) ORDER BY (status='active') DESC,created_at DESC`,
 					[limits.nodeId, build.templateSlug, build.pveVmid],
 				);
 				requireValue(
 					existing.rows[0]?.status !== "retired",
 					"This template build is retired and cannot be adopted for new creates",
+				);
+				requireValue(
+					!existing.rows[0]?.headless,
+					"This headless Windows build cannot be adopted for new creates",
 				);
 				if (existing.rows[0]) {
 					builds.push({
@@ -1077,11 +1081,15 @@ export function createSetupHandler({
 										? "linux-desktop"
 										: "linux");
 						if (slug === "windows-desktop") slug = "windows";
-						const retired = await query(
-							"SELECT id FROM runtime.template_builds WHERE node_id=$1 AND pve_vmid=$2 AND status='retired'",
+						const registered = await query(
+							"SELECT status,(template_slug='windows' AND headless IS DISTINCT FROM false) AS headless FROM runtime.template_builds WHERE node_id=$1 AND pve_vmid=$2 ORDER BY (status='active') DESC,created_at DESC LIMIT 1",
 							[state.steps.limits?.data?.nodeId, Number(vm.vmid)],
 						);
-						if (retired.rows.length) continue;
+						if (
+							registered.rows[0]?.status === "retired" ||
+							registered.rows[0]?.headless
+						)
+							continue;
 						state.detectedTemplates.push({
 							templateSlug: slug,
 							pveVmid: Number(vm.vmid),
