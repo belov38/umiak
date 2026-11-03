@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { StaticConfigReader } from "@umiak/config";
+import { MIGRATIONS_DIR, migrate } from "@umiak/db";
 import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import {
 	closeUmiakPayload,
@@ -11,12 +15,23 @@ import { type AdminDeps, runAdmin } from "../src/admin/commands.ts";
 import { testLogger } from "./helpers/worker.ts";
 
 let db: TestDatabase;
+let legacyDir: string;
 beforeAll(async () => {
-	db = await createTestDatabase();
+	db = await createTestDatabase({ migrated: false });
+	legacyDir = await mkdtemp(join(tmpdir(), "umiak-pre-headless-"));
+	for (const name of await readdir(MIGRATIONS_DIR)) {
+		if (name.endsWith(".sql") && name !== "0501_template_build_headless.sql")
+			await writeFile(
+				join(legacyDir, name),
+				await readFile(join(MIGRATIONS_DIR, name)),
+			);
+	}
+	await migrate(db.pool, { dir: legacyDir });
 });
 afterAll(async () => {
 	if (db) await closeUmiakPayload(db.url);
 	await db?.drop();
+	if (legacyDir) await rm(legacyDir, { recursive: true });
 });
 
 function config(legacy: boolean) {
@@ -103,6 +118,8 @@ it("bootstraps the canonical YAML before Payload migration without duplicating t
  SELECT $1, 'saved', $2, 'desktop-saved', provider_id, node_id, storage_id, id, replace($1::uuid::text, '-', ''), 'ready' FROM runtime.template_builds WHERE id=$3`,
 		[snapshot, randomUUID(), desktop],
 	);
+	// Apply the actual column upgrade to pre-existing headless/desktop rows.
+	await migrate(db.pool);
 	deps.config = () => config(false);
 	expect(await runAdmin(["bootstrap"], deps)).toBe(0);
 	expect(

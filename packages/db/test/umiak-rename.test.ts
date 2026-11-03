@@ -49,7 +49,7 @@ describe.skipIf(skipPg())("R1 namespace migration", () => {
 				"ALTER TABLE public.sbx_schema_migrations RENAME CONSTRAINT umiak_schema_migrations_pkey TO sbx_schema_migrations_pkey",
 			);
 			const result = await migrate(db.pool);
-			expect(result.applied).toEqual(["0500_umiak_names.sql"]);
+			expect(result.applied).toContain("0500_umiak_names.sql");
 			const after = await db.pool.query(
 				"SELECT * FROM public.umiak_schema_migrations WHERE version < 500 ORDER BY version",
 			);

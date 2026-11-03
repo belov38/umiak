@@ -206,7 +206,7 @@ test("detected templates omit a deprecated custom headless Windows build", async
 	const handler = createSetupHandler({
 		store: { read: async () => structuredClone(state) },
 		pool: {
-			query: async (sql, args) => ({
+			query: async (_sql, args) => ({
 				rows:
 					args[1] === 600
 						? [{ id: "headless", status: "deprecated", headless: true }]
