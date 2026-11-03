@@ -497,11 +497,16 @@ export function createSetupHandler({
 				"Register at least one Linux build",
 			);
 			const builds = [];
-			for (const build of input.builds) {
+			for (const inputBuild of input.builds) {
+				const build = {
+					...inputBuild,
+					templateSlug:
+						inputBuild.templateSlug === "windows-desktop"
+							? "windows"
+							: inputBuild.templateSlug,
+				};
 				requireValue(
-					["linux", "linux-desktop", "windows", "windows-desktop"].includes(
-						build.templateSlug,
-					),
+					["linux", "linux-desktop", "windows"].includes(build.templateSlug),
 					"Unknown template",
 				);
 				requireValue(
@@ -527,8 +532,12 @@ export function createSetupHandler({
 					`VM ${build.pveVmid} is not a tagged Umiak template`,
 				);
 				const existing = await query(
-					`SELECT id,version FROM runtime.template_builds WHERE node_id=$1 AND template_slug=$2 AND pve_vmid=$3 AND status='active'`,
+					`SELECT id,version,status FROM runtime.template_builds WHERE node_id=$1 AND template_slug=$2 AND pve_vmid=$3 AND status IN ('active','retired') ORDER BY (status='active') DESC`,
 					[limits.nodeId, build.templateSlug, build.pveVmid],
+				);
+				requireValue(
+					existing.rows[0]?.status !== "retired",
+					"This template build is retired and cannot be adopted for new creates",
 				);
 				if (existing.rows[0]) {
 					builds.push({
@@ -1048,7 +1057,7 @@ export function createSetupHandler({
 						const config = await api.get(
 							`/nodes/${connectionOf(state).node}/qemu/${vm.vmid}/config`,
 						);
-						const slug =
+						let slug =
 							String(config.tags || "")
 								.split(";")
 								.map((tag) => tag.replace(/^umiak-template-/, ""))
@@ -1067,6 +1076,12 @@ export function createSetupHandler({
 									: String(vm.name || "").includes("desktop")
 										? "linux-desktop"
 										: "linux");
+						if (slug === "windows-desktop") slug = "windows";
+						const retired = await query(
+							"SELECT id FROM runtime.template_builds WHERE node_id=$1 AND pve_vmid=$2 AND status='retired'",
+							[state.steps.limits?.data?.nodeId, Number(vm.vmid)],
+						);
+						if (retired.rows.length) continue;
 						state.detectedTemplates.push({
 							templateSlug: slug,
 							pveVmid: Number(vm.vmid),

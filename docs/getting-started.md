@@ -117,12 +117,18 @@ Quickstart previews default to `http://<slug>-<port>.<gateway-IP>.sslip.io:8085`
 
 ## Desktops
 
-Use an available desktop template for a graphical session. Desktop templates need more RAM than a headless Linux sandbox. The dashboard's Desktop tab has the same viewer.
+Windows 11 (`windows`) includes the desktop; Linux offers `linux` and `linux-desktop`. Use `linux-desktop` or `windows` for a graphical session. The old `windows-desktop` slug is accepted as an alias of `windows`. Desktop templates need more RAM than a headless Linux sandbox. The dashboard's Desktop tab has the same viewer.
 
 **Create a desktop**
 
 ```text
 umiak create --template linux-desktop --wait
+```
+
+**Create a Windows desktop**
+
+```text
+umiak create --template windows --size 4gb --wait
 ```
 
 **Open the viewer**

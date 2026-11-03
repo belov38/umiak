@@ -81,8 +81,8 @@ describe("loadRecipe: real linux recipe", () => {
 describe("loadRecipe: real windows recipe", () => {
 	const r = loadRecipe(repoTemplates, "windows", "windows");
 
-	it("builds into the Windows slot 598 only", () => {
-		expect(r.vmids).toEqual([598]);
+	it("builds into the Windows desktop slot 595 only", () => {
+		expect(r.vmids).toEqual([595]);
 	});
 
 	it("matches the spec (no pool, no size_default)", () => {
@@ -96,6 +96,7 @@ describe("loadRecipe: real windows recipe", () => {
 			"reboot",
 			"50-umiak-agent",
 			"60-desktop",
+			"65-streamer",
 			"90-cleanup",
 		]);
 		expect(r.source).toEqual({

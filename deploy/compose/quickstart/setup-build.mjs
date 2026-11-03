@@ -20,7 +20,8 @@ export function buildInvocation(
 	jobId = "build",
 	input = {},
 ) {
-	if (!["linux", "linux-desktop", "windows", "windows-desktop"].includes(slug))
+	if (slug === "windows-desktop") slug = "windows";
+	if (!["linux", "linux-desktop", "windows"].includes(slug))
 		throw new Error("Unknown template recipe");
 	const slot = input.templateVmid;
 	const range = templateRange(state);

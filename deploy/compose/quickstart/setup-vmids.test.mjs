@@ -90,10 +90,11 @@ test("range inventory reports conflicts without selecting or changing any existi
 
 test("adoption registers existing VMIDs unchanged even after configuring a new build range", async () => {
 	const { createSetupHandler } = await import("./setup.mjs");
-	const builds = [595, 596, 597, 598].map((pveVmid, i) => ({
+	const builds = [595, 596, 597].map((pveVmid, i) => ({
 		pveVmid,
-		templateSlug: ["windows-desktop", "linux-desktop", "linux", "windows"][i],
+		templateSlug: ["windows-desktop", "linux-desktop", "linux"][i],
 	}));
+	let retired = false;
 	let state = {
 		steps: {
 			connection: { status: "ready", data: { node: "pve" } },
@@ -113,7 +114,15 @@ test("adoption registers existing VMIDs unchanged even after configuring a new b
 		pool: {
 			query: async (sql, args) => {
 				assert.match(sql, /^SELECT id,version/);
-				return { rows: [{ id: args[2], version: "20261101.1" }] };
+				return {
+					rows: [
+						{
+							id: args[2],
+							version: "20261101.1",
+							status: retired ? "retired" : "active",
+						},
+					],
+				};
 			},
 		},
 		makePve: () => ({
@@ -126,10 +135,13 @@ test("adoption registers existing VMIDs unchanged even after configuring a new b
 	await handler.wizard.run("templates", { builds });
 	assert.deepEqual(
 		state.steps.templates.data.builds.map((x) => x.pveVmid),
-		[595, 596, 597, 598],
+		[595, 596, 597],
 	);
+	assert.equal(state.steps.templates.data.builds[0].templateSlug, "windows");
+	retired = true;
+	await assert.rejects(handler.wizard.run("templates", { builds }), /retired/);
 	assert.deepEqual(
-		reads,
+		reads.slice(0, builds.length),
 		builds.map((x) => `/nodes/pve/qemu/${x.pveVmid}/config`),
 	);
 });

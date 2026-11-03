@@ -184,3 +184,7 @@ mise exec -- pnpm --filter @umiak/mcp typecheck
 ## Manual client checklist (not run yet)
 
 Against a deployed server, for each of Claude Code, Codex, OpenCode, Gemini CLI: connect (stdio and remote, team key and browser sign-in), `tools/list` shows 38 tools, `sandbox_create` + `exec_run` + `files_write`/`files_read` + `sandbox_delete` with `confirm`, and the browser sign-in survives a token refresh. Results go to S11 §19.
+
+## Templates
+
+Windows 11 uses the single `windows` template and includes the desktop (4gb by default; 8gb optional). Linux offers `linux` and `linux-desktop`. The legacy `windows-desktop` slug remains an input alias of `windows`; API responses return `windows`. Existing headless Windows sandboxes and saved snapshots retain their retired build until deleted. Use `sandbox_create` with `template: "windows"` for a Windows desktop.

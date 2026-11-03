@@ -241,3 +241,22 @@ test("build accepts the documented PVE ISO volume", () => {
 	assert.ok(invocation.args.includes("windows.iso"));
 	assert.equal(invocation.env.UMIAK_PVE_MEDIA_STORAGE, "images");
 });
+
+test("Windows desktop legacy build alias invokes the canonical recipe", () => {
+	const invocation = buildInvocation(
+		"windows-desktop",
+		state,
+		"/secrets",
+		"https://stack",
+		"/assets",
+		"build",
+		{
+			templateVmid: 702,
+			iso: "windows.iso",
+			isoSha256: "a".repeat(64),
+		},
+	);
+	assert.equal(invocation.slug, "windows");
+	assert.equal(invocation.args[2], "windows");
+	assert.ok(!invocation.args.includes("windows-desktop"));
+});

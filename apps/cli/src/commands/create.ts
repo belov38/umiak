@@ -32,7 +32,10 @@ export interface CreateFlags {
 /** The options of `create` (also `run`). */
 export function addCreateOptions(c: Command): Command {
 	return c
-		.option("--template <slug>", "template (default: the platform default)")
+		.option(
+			"--template <slug>",
+			"template: linux, linux-desktop, windows (with desktop); windows-desktop is an alias (default: platform default)",
+		)
 		.option("--size <slug>", "size (default: the template's default)")
 		.option("--name <name>", "display name")
 		.option("--slug <slug>", "slug (default: three random words)")

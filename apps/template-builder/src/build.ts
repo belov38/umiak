@@ -286,6 +286,8 @@ export async function buildTemplate(
 	o: BuildOptions,
 ): Promise<Manifest> {
 	const recipe = loadRecipe(o.templatesDir, o.slug);
+	// Persist the canonical recipe slug even when invoked through a legacy alias.
+	o = { ...o, slug: recipe.slug };
 	if (o.templateVmid !== undefined) {
 		if (isProtectedVmid(o.templateVmid))
 			throw new Error("Explicit template VMID is protected");

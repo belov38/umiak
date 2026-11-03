@@ -136,7 +136,11 @@ export function TemplateList({
 							className="space-y-4"
 						>
 							<div className="flex items-center justify-between gap-3">
-								<h2 className="font-semibold">{t.name || t.slug}</h2>
+								<h2 className="font-semibold">
+									{t.slug === "windows"
+										? "Windows 11 (with desktop)"
+										: t.name || t.slug}
+								</h2>
 								<Badge
 									variant={
 										status === "failed"

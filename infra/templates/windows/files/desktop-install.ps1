@@ -26,7 +26,7 @@ function Invoke-UmiakDesktopNative {
 function Install-UmiakPatchedMoonlight {
     param([string]$Source,[string]$VersionDir)
     $exe=Join-Path $Source 'web-server.exe';$build=Join-Path $Source 'build.json'
-    if(-not (Test-Path -LiteralPath $exe) -or -not (Test-Path -LiteralPath $build)){throw 'patched moonlight-web missing: run infra/templates/windows-desktop/moonlight-web/build.sh'}
+    if(-not (Test-Path -LiteralPath $exe) -or -not (Test-Path -LiteralPath $build)){throw 'patched moonlight-web missing: run infra/templates/windows/moonlight-web/build.sh'}
     $info=Get-Content -Raw -LiteralPath $build | ConvertFrom-Json
     if((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $info.sha256){throw 'patched moonlight-web SHA256 mismatch'}
     Copy-Item -LiteralPath $exe -Destination (Join-Path $VersionDir 'web-server.exe') -Force

@@ -188,7 +188,9 @@ export const sandboxCreate = defineTool({
 		template: z
 			.string()
 			.optional()
-			.describe("Template slug (default linux); ignored with from_snapshot"),
+			.describe(
+				"Template slug: linux (default), linux-desktop or windows (Windows 11 with desktop); windows-desktop is a legacy alias of windows; ignored with from_snapshot",
+			),
 		size: sizeShape,
 		name: nameShape,
 		slug: slugShape,
@@ -269,7 +271,12 @@ export const sandboxList = defineTool({
 			.record(z.string(), z.string())
 			.optional()
 			.describe("Only sandboxes with all these labels"),
-		template: z.string().optional().describe("Only this template slug"),
+		template: z
+			.string()
+			.optional()
+			.describe(
+				"Only this template slug; windows-desktop is an alias of windows",
+			),
 		query: z.string().optional().describe("Name or slug prefix"),
 		limit: z
 			.number()

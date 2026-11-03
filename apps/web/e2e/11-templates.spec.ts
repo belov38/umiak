@@ -8,6 +8,13 @@ test("Templates explain snapshots and show read-only member catalog", async ({
 	await expect(
 		page.getByRole("heading", { name: "Templates", exact: true }),
 	).toBeVisible();
+	await expect(page.getByTestId("template-card")).toHaveCount(3);
+	await expect(
+		page.getByRole("heading", {
+			name: "Windows 11 (with desktop)",
+			exact: true,
+		}),
+	).toBeVisible();
 	const card = page.getByTestId("template-card").first();
 	await expect(card).toBeVisible();
 	for (const field of [
