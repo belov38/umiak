@@ -27,10 +27,10 @@ if (existsSync(`${pveDir}/pve-token-id`))
 		`${pveDir}/pve-token-id`,
 		"utf8",
 	).trim();
-if (existsSync(`${pveDir}/quickstart-network.json`)) {
-	const config = JSON.parse(
-		readFileSync(`${pveDir}/quickstart-network.json`, "utf8"),
-	);
+const networkFile =
+	env.UMIAK_QUICKSTART_NETWORK_FILE ?? `${pveDir}/quickstart-network.json`;
+if (existsSync(networkFile)) {
+	const config = JSON.parse(readFileSync(networkFile, "utf8"));
 	if (config.tunnelUrl) env.UMIAK_TUNNEL_URL = config.tunnelUrl;
 	if (config.previewDomain) {
 		env.UMIAK_PREVIEW_DOMAIN = config.previewDomain;

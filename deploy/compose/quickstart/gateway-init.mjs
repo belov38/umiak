@@ -9,7 +9,7 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const directory = process.env.UMIAK_GATEWAY_SECRETS_DIR ?? "/gateway-secrets";
 const pveDirectory = process.env.UMIAK_SECRETS_DIR ?? "/pve-secrets";
@@ -56,7 +56,19 @@ if (!existsSync(ca)) {
 }
 let domain = "umiak.localhost",
 	host = "tunnel.localhost";
-const network = join(pveDirectory, "quickstart-network.json");
+const legacyNetwork = join(pveDirectory, "quickstart-network.json");
+const network = process.env.UMIAK_QUICKSTART_NETWORK_FILE ?? legacyNetwork;
+// Initialization alone can read the legacy secret volume. Runtime consumers only
+// receive this separate public configuration volume. Never overwrite newer setup.
+if (
+	network !== legacyNetwork &&
+	!existsSync(network) &&
+	existsSync(legacyNetwork)
+) {
+	mkdirSync(dirname(network), { recursive: true, mode: 0o755 });
+	writeFileSync(`${network}.new`, readFileSync(legacyNetwork), { mode: 0o644 });
+	renameSync(`${network}.new`, network);
+}
 if (existsSync(network)) {
 	const config = JSON.parse(readFileSync(network, "utf8"));
 	if (config.previewDomain) domain = config.previewDomain;

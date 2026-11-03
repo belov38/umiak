@@ -66,3 +66,45 @@ test("rejects malformed database credentials before starting any consumer", () =
 	assert.equal(result.stdout, "");
 	assert.match(result.stderr, /Invalid generated database password/);
 });
+
+test("network settings load from a public config volume with no PVE secrets mount", async () => {
+	const { rmSync } = await import("node:fs");
+	const dir = mkdtempSync(join(tmpdir(), "umiak-network-test-"));
+	try {
+		writeFileSync(join(dir, "password"), "a".repeat(64));
+		writeFileSync(
+			join(dir, "network.json"),
+			JSON.stringify({
+				tunnelUrl: "wss://tunnel.example.test/v1/connect",
+				previewDomain: "preview.example.test",
+				gatewayAddress: "192.168.1.2",
+			}),
+		);
+		const result = spawnSync(
+			process.execPath,
+			[
+				launcher,
+				process.execPath,
+				"-e",
+				"console.log(JSON.stringify({preview:process.env.UMIAK_PREVIEW_DOMAIN,tunnel:process.env.UMIAK_TUNNEL_URL,host:process.env.UMIAK_SSH_HOST}))",
+			],
+			{
+				env: {
+					...process.env,
+					UMIAK_DATABASE_PASSWORD_FILE: join(dir, "password"),
+					UMIAK_SECRETS_DIR: join(dir, "unmounted-pve-secrets"),
+					UMIAK_QUICKSTART_NETWORK_FILE: join(dir, "network.json"),
+				},
+				encoding: "utf8",
+			},
+		);
+		assert.equal(result.status, 0, result.stderr);
+		assert.deepEqual(JSON.parse(result.stdout), {
+			preview: "preview.example.test",
+			tunnel: "wss://tunnel.example.test/v1/connect",
+			host: "tunnel.example.test",
+		});
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
