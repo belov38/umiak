@@ -260,3 +260,22 @@ test("Windows desktop legacy build alias invokes the canonical recipe", () => {
 	assert.equal(invocation.args[2], "windows");
 	assert.ok(!invocation.args.includes("windows-desktop"));
 });
+
+test("legacy build alias validates canonical rebuild confirmation before any launch", async () => {
+	let validated;
+	const jobs = new TemplateBuildJobs({
+		store: { read: async () => state },
+		validate: async (slug, _state, input) => {
+			validated = { slug, confirmRebuild: input.confirmRebuild };
+		},
+		run: async () => {
+			throw new Error("must not launch");
+		},
+	});
+	const result = await jobs.start("windows-desktop", {
+		dryRun: true,
+		confirmRebuild: "windows-desktop",
+	});
+	assert.deepEqual(validated, { slug: "windows", confirmRebuild: "windows" });
+	assert.equal(result.slug, "windows");
+});

@@ -275,6 +275,9 @@ export class TemplateBuildJobs {
 		});
 	}
 	async start(slug, input = {}, context = {}) {
+		if (slug === "windows-desktop") slug = "windows";
+		if (input.confirmRebuild === "windows-desktop")
+			input = { ...input, confirmRebuild: "windows" };
 		const state = await this.store.read();
 		if (state.buildJob?.status === "running")
 			throw new Error("A template build is already running");
