@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import net from "node:net";
 import { hostname } from "node:os";
 import { clientGuard } from "../local/ingress.mjs";
@@ -21,7 +22,40 @@ function authority(value, protocol) {
 		throw Error("invalid_host");
 	return url;
 }
-export function requestContext(req, env = process.env, proxyListener = false) {
+/** IPv4 gateways of the routes in a /proc/net/route table (little-endian hex). */
+export function routeGateways(table) {
+	const out = new Set();
+	for (const line of table.split("\n").slice(1)) {
+		const gateway = line.trim().split(/\s+/)[2];
+		if (!gateway || !/^[0-9A-F]{8}$/i.test(gateway) || /^0+$/.test(gateway))
+			continue;
+		const n = Number.parseInt(gateway, 16);
+		out.add([n & 255, (n >> 8) & 255, (n >> 16) & 255, n >>> 24].join("."));
+	}
+	return [...out];
+}
+
+let hostGateways;
+// The loopback-only publish of :4181 reaches the container from the gateway of
+// its network. Read the gateway the engine actually assigned instead of
+// guessing .1 or .128: on another engine either may be a container address.
+function containerGateways() {
+	if (hostGateways === undefined) {
+		try {
+			hostGateways = routeGateways(readFileSync("/proc/net/route", "utf8"));
+		} catch {
+			hostGateways = [];
+		}
+	}
+	return hostGateways;
+}
+
+export function requestContext(
+	req,
+	env = process.env,
+	proxyListener = false,
+	gateways = containerGateways(),
+) {
 	const trusted = clientGuard(
 		env.UMIAK_TRUSTED_PROXY_CIDRS || "127.0.0.0/8,::1/128",
 		"",
@@ -31,7 +65,12 @@ export function requestContext(req, env = process.env, proxyListener = false) {
 	// Docker Desktop may NAT host-published traffic to the bridge gateway;
 	// see README for the limit this places on container isolation.
 	const proxyPeer = clientGuard(
-		"127.0.0.0/8,::1/128,172.29.116.1/32,172.29.116.128/32,172.30.116.1/32,172.30.116.12/32",
+		[
+			"127.0.0.0/8",
+			"::1/128",
+			"172.30.116.12/32", // Tailscale sidecar on serve-internal
+			...gateways.map((g) => `${g}/32`),
+		].join(","),
 		"",
 		{ UMIAK_LOCAL_DENIED_CIDRS: "" },
 	);

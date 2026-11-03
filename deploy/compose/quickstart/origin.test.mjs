@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { requestContext } from "./origin.mjs";
+import { requestContext, routeGateways } from "./origin.mjs";
 
 const req = (host, headers = {}, peer = "192.168.1.5") => ({
 	headers: { host, ...headers },
@@ -111,9 +111,12 @@ test("public listener ignores forwarding even from loopback or configured Docker
 });
 
 test("proxy socket requires an expected peer, regardless of forwarding chain trust", () => {
+	const gateways = ["172.29.116.128"];
 	for (const peer of [
+		"172.29.116.1",
 		"172.29.116.129",
 		"172.29.116.11",
+		"172.30.116.1",
 		"172.30.116.13",
 		"192.168.1.5",
 	]) {
@@ -130,6 +133,7 @@ test("proxy socket requires an expected peer, regardless of forwarding chain tru
 				),
 				{ UMIAK_TRUSTED_PROXY_CIDRS: "0.0.0.0/0" },
 				true,
+				gateways,
 			),
 			{ origin: "http://localhost:4181", clientAddress: peer, proxied: false },
 		);
@@ -138,9 +142,7 @@ test("proxy socket requires an expected peer, regardless of forwarding chain tru
 		"127.0.0.1",
 		"::1",
 		"::ffff:127.0.0.1",
-		"172.29.116.1",
 		"172.29.116.128",
-		"172.30.116.1",
 		"172.30.116.12",
 	]) {
 		assert.equal(
@@ -152,8 +154,40 @@ test("proxy socket requires an expected peer, regardless of forwarding chain tru
 				),
 				{},
 				true,
+				gateways,
 			).origin,
 			"https://lab.example",
 		);
 	}
+});
+
+test("only the gateway the engine assigned is a proxy peer", () => {
+	const forwarded = (peer, gateways) =>
+		requestContext(
+			req(
+				"localhost:4181",
+				{ "x-forwarded-proto": "https", "x-forwarded-host": "lab.example" },
+				peer,
+			),
+			{},
+			true,
+			gateways,
+		).proxied;
+	// Engine that gives the network .1: .128 is then the first container.
+	assert.equal(forwarded("172.29.116.1", ["172.29.116.1"]), true);
+	assert.equal(forwarded("172.29.116.128", ["172.29.116.1"]), false);
+	assert.equal(forwarded("172.29.116.128", []), false);
+});
+
+test("routeGateways decodes /proc/net/route", () => {
+	const table = [
+		"Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT",
+		"eth0\t00000000\t8074 1DAC\t0003\t0\t0\t0\t00000000\t0\t0\t0".replace(
+			"8074 1DAC",
+			"80741DAC",
+		),
+		"eth0\t00741DAC\t00000000\t0001\t0\t0\t0\t80FFFFFF\t0\t0\t0",
+		"eth1\t00741EAC\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0",
+	].join("\n");
+	assert.deepEqual(routeGateways(table), ["172.29.116.128"]);
 });

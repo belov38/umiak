@@ -51,7 +51,8 @@ proxy access uses the Secure, host-only `__Host-umiak_owner` cookie.
    `X-Forwarded-Host` and `X-Forwarded-For`. Port 4181 is a trusted listener published
    only on host loopback: never publish it on a wildcard/LAN/tailnet address.
    Public port 4180 ignores every forwarded header, including connections arriving
-   from Docker NAT or loopback. Only fixed bridge gateway addresses are admitted on the proxy socket; application container addresses are not. The optional
+   from Docker NAT or loopback. On the proxy socket only loopback, the container's
+   actual network gateway and the sidecar are admitted. The optional
    sidecar uses port 4181 on its isolated network. Extra proxy-chain hops can be
    listed in `UMIAK_TRUSTED_PROXY_CIDRS`; this never enables forwarding on 4180.
 
@@ -334,18 +335,20 @@ node-agent when using this new optional storage argument on an existing host.
 
 Docker Engine **28 or newer** is required for loopback-publish isolation from
 other hosts on the same layer-2 network. Port 4181 also checks its socket peer:
-loopback, the fixed Compose bridge gateways (172.29.116.1 / 172.29.116.128 / 172.30.116.1), or
-the Serve sidecar (172.30.116.12). Docker may allocate the control gateway at
-its configured ip_range start (.128); the existing CT 590 network uses this address. `UMIAK_TRUSTED_PROXY_CIDRS` controls forwarding
+loopback, the gateway the engine actually assigned to the container's network
+(read from `/proc/net/route` at startup, e.g. 172.29.116.128 on CT 590), or the
+Serve sidecar (172.30.116.12). No fixed gateway address is assumed, so a
+container that happens to hold .1 or .128 is not trusted. `UMIAK_TRUSTED_PROXY_CIDRS` controls forwarding
 chain traversal only; it cannot admit another socket peer. Port 4180 ignores
 forwarding headers from every peer.
 
-Docker Desktop caveat: containers reaching a loopback publish through
-`host.docker.internal` can be translated to the same bridge gateway as host
+Docker Desktop caveat: Desktop NATs container traffic, so a container on any
+network that reaches port 4181, through `host.docker.internal` or directly at
+the quickstart container address, arrives from the same gateway as host
 traffic. The server cannot distinguish these peers. Treat containers on that
 Docker host as trusted operators, restrict accepted proxy Hosts with
 `UMIAK_PUBLIC_URL`, and do not present loopback publishing as container isolation.
-Direct container peers on control do not gain forwarding trust. Existing networks
+On Linux Docker Engine, direct container peers do not gain forwarding trust. Existing networks
 are retained; this polish makes no host firewall or network changes.
 
 After upgrading from instructions pointing host-run Serve at `localhost:4180`,
