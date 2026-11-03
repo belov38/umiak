@@ -7,6 +7,7 @@ import { canonicalFetch } from "../canonical-fetch.mjs";
 import { clientGuard } from "../local/ingress.mjs";
 import { requestContext } from "./origin.mjs";
 import { OwnerStore, PgOwnerRepository } from "./owner.mjs";
+import { signinContent, signinIssueContent } from "./signin-ui.mjs";
 import { renderPage, uiAsset } from "./ui.mjs";
 
 const COOKIE = "__Host-umiak_owner";
@@ -29,12 +30,14 @@ const fail = (res, status, code) =>
 	json(res, status, {
 		error: { code, message: code, retryable: status === 429 },
 	});
-const page = (res, title, body) => {
+const page = (res, title, body, authenticated = true) => {
 	res.writeHead(200, {
 		"content-type": "text/html; charset=utf-8",
 		"cache-control": "no-store",
 	});
-	res.end(renderPage(title, `<h1>${esc(title)}</h1>${body}`));
+	res.end(
+		renderPage(title, `<h1>${esc(title)}</h1>${body}`, { authenticated }),
+	);
 };
 async function body(req) {
 	let size = 0;
@@ -233,11 +236,21 @@ export function createQuickstartServer({
 				if (req.method === "HEAD") return res.end();
 				return createReadStream(asset).pipe(res);
 			}
-			if (path === "/owner/claim" && req.method === "POST") {
+			if (
+				["/owner/claim", "/owner/signin"].includes(path) &&
+				req.method === "POST"
+			) {
 				if (req.headers.origin !== origin)
 					return fail(res, 403, "origin_required");
 				const input = await body(req);
-				const credential = await store.claim(input.code);
+				const credential =
+					path === "/owner/claim"
+						? await store.claim(input.code, url.hostname)
+						: await store.signin(
+								input.code,
+								req.umiakClientAddress,
+								url.hostname,
+							);
 				res.setHeader(
 					"set-cookie",
 					`${origin.startsWith("https:") ? COOKIE : "umiak_owner"}=${credential}; Path=/; HttpOnly; ${origin.startsWith("https:") ? "Secure; " : ""}SameSite=Strict; Max-Age=15552000`,
@@ -251,6 +264,7 @@ export function createQuickstartServer({
 					await store.pairStart({
 						source: req.umiakClientAddress,
 						userAgent: req.headers["user-agent"],
+						hostname: url.hostname,
 					}),
 				);
 			if (path === "/owner/pair/poll" && req.method === "POST") {
@@ -274,24 +288,31 @@ export function createQuickstartServer({
 					(path === "/" ||
 						path === "/app" ||
 						(path.startsWith("/app/") &&
-							req.headers.accept?.includes("text/html")) ||
+							!req.headers.accept?.includes("application/json")) ||
 						path === "/setup" ||
-						path === "/owner/pair")
+						path.startsWith("/owner/") ||
+						req.headers.accept?.includes("text/html"))
 				) {
 					if (await store.claimed())
-						return page(
-							res,
-							"Open your signed-in deployment address",
-							"<p>This deployment is already claimed. Open this pairing link on the hostname where you signed in. Owner cookies stay on that hostname. Console recovery is available if you lost your session.</p>",
-						);
+						return page(res, "Sign in", signinContent(), false);
 					return page(
 						res,
 						"Claim this Umiak deployment",
 						`<p>Enter the one-time setup code from <code>docker compose logs quickstart</code>. Network access alone grants no control.</p><form id="claim"><label>Setup code<input id="code" type="password" autocomplete="off" required placeholder="Setup code"></label><button>Claim deployment</button></form><pre id="message" role="status"></pre><script>document.getElementById('claim').onsubmit=async e=>{e.preventDefault();const r=await fetch('/owner/claim',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:document.getElementById('code').value})});if(r.ok)location.reload();else document.getElementById('message').textContent='Claim failed. Check the setup code; it can only be used once.';};</script>`,
+						false,
 					);
 				}
 				return fail(res, 401, "owner_required");
 			}
+			await store.touch(token);
+			if (path === "/owner/signin-code" && req.method === "POST") {
+				if (req.headers.origin !== origin)
+					return fail(res, 403, "origin_required");
+				if (!(await store.canApprove(token)))
+					return fail(res, 403, "browser_session_required");
+				return json(res, 200, await store.signinCode());
+			}
+
 			if (
 				!(await store.canApprove(token)) &&
 				(path.startsWith("/quickstart/") || path === "/setup")
@@ -308,7 +329,7 @@ export function createQuickstartServer({
 				return page(
 					res,
 					"Owner sessions",
-					`<p>CLI sessions expire after 30 days. Revoke a lost device here.</p>${sessions.map((x) => `<section><strong>${esc(x.kind)}</strong> · expires ${esc(new Date(x.expires).toISOString())} <button class="destructive" data-session="${esc(x.id)}">Revoke</button></section>`).join("")}<p id="result" role="status"></p><script>document.querySelectorAll('[data-session]').forEach(b=>b.onclick=async()=>{if(!confirm("Revoke this session? The device will lose access immediately."))return;b.disabled=true;const r=await fetch('/owner/sessions/revoke',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.session})});if(r.ok)location.reload();else {b.disabled=false;document.querySelector('#result').textContent='Could not revoke session';}});</script>`,
+					`${signinIssueContent()}<p>CLI sessions expire after 30 days. Revoke a lost device here.</p>${sessions.map((x) => `<section><strong>${esc(x.kind)}</strong> · hostname ${esc(x.hostname ?? "unknown (created before upgrade)")} · created ${esc(x.created ? new Date(x.created).toISOString() : "unknown")} · last used ${esc(x.lastUsed ? new Date(x.lastUsed).toISOString() : "unknown")} · expires ${esc(new Date(x.expires).toISOString())} <button class="destructive" data-session="${esc(x.id)}">Revoke</button></section>`).join("")}<p id="result" role="status"></p><script>document.querySelectorAll('[data-session]').forEach(b=>b.onclick=async()=>{if(!confirm("Revoke this session? The device will lose access immediately."))return;b.disabled=true;const r=await fetch('/owner/sessions/revoke',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.session})});if(r.ok)location.reload();else {b.disabled=false;document.querySelector('#result').textContent='Could not revoke session';}});</script>`,
 				);
 			}
 			if (path === "/owner/sessions/revoke" && req.method === "POST") {

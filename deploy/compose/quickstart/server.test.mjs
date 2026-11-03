@@ -356,6 +356,25 @@ test("HTTPS proxy claim retains __Host cookie and direct HTTP ignores forwarded 
 			response.headers.get("set-cookie"),
 			/^__Host-umiak_owner=.*; Secure;/,
 		);
+		const issued = await store.signinCode();
+		const signin = await fetch(
+			`http://127.0.0.1:${server.address().port}/owner/signin`,
+			{
+				method: "POST",
+				headers: {
+					"x-forwarded-proto": "https",
+					"x-forwarded-host": "lab.example",
+					origin: "https://lab.example",
+					"content-type": "application/json",
+				},
+				body: JSON.stringify(issued),
+			},
+		);
+		assert.equal(signin.status, 200);
+		assert.match(
+			signin.headers.get("set-cookie"),
+			/^__Host-umiak_owner=.*; Secure;/,
+		);
 	} finally {
 		await new Promise((resolve) => server.close(resolve));
 	}
@@ -387,5 +406,94 @@ test("trusted proxies cannot bypass denied client CIDRs", async () => {
 		assert.equal(response.status, 403);
 	} finally {
 		await new Promise((resolve) => server.close(resolve));
+	}
+});
+
+test("sign-in POST checks Origin and Host; only browser owners mint codes", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	const first = await store.claim(await store.init(), "original");
+	const server = createQuickstartServer({
+		store,
+		env: { UMIAK_LOCAL_DENIED_CIDRS: "10.88.0.0/24" },
+	});
+	await new Promise((r) => server.listen(0, "127.0.0.1", r));
+	const origin = `http://127.0.0.1:${server.address().port}`;
+	const post = (path, data, headers = {}) =>
+		fetch(origin + path, {
+			method: "POST",
+			headers: { "content-type": "application/json", ...headers },
+			body: JSON.stringify(data),
+		});
+	try {
+		for (const path of [
+			"/",
+			"/app/x",
+			"/setup",
+			"/owner/sessions",
+			"/owner/pair",
+		]) {
+			const html = await (await fetch(origin + path)).text();
+			assert.match(html, /<h1>Sign in/);
+			assert.doesNotMatch(html, /<nav|Open navigation/);
+		}
+		const issued = await store.signinCode();
+		for (const headers of [{}, { origin: "https://evil" }])
+			assert.equal((await post("/owner/signin", issued, headers)).status, 403);
+		assert.equal(
+			(await post("/owner/signin", { code: "bad" }, { origin })).status,
+			403,
+		);
+		const forbiddenHost = await new Promise((resolve, reject) => {
+			const req = http.request(
+				`${origin}/owner/signin`,
+				{
+					method: "POST",
+					headers: {
+						host: "evil.example",
+						origin,
+						"content-type": "application/json",
+					},
+				},
+				(res) => {
+					res.resume();
+					res.on("end", () => resolve(res.statusCode));
+				},
+			);
+			req.on("error", reject);
+			req.end(JSON.stringify(issued));
+		});
+		assert.equal(forbiddenHost, 403);
+		const reply = await post("/owner/signin", issued, { origin });
+		assert.equal(reply.status, 200);
+		assert.match(
+			reply.headers.get("set-cookie"),
+			/^umiak_owner=.*HttpOnly; SameSite=Strict/,
+		);
+		assert.equal(await store.authenticate(first), true);
+		const pair = await store.pairStart();
+		await store.pairApprove(pair.id, pair.code);
+		const cli = await store.pairPoll(pair.id, pair.secret);
+		assert.equal(
+			(
+				await post(
+					"/owner/signin-code",
+					{},
+					{ origin, authorization: `Bearer ${cli}` },
+				)
+			).status,
+			403,
+		);
+		assert.equal(
+			(
+				await post(
+					"/owner/signin-code",
+					{},
+					{ origin, cookie: `umiak_owner=${first}` },
+				)
+			).status,
+			200,
+		);
+	} finally {
+		await new Promise((r) => server.close(r));
 	}
 });

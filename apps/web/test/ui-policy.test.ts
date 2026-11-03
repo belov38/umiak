@@ -273,7 +273,7 @@ test("focus primitives explicitly set a solid outline", () => {
 
 test("quickstart renderers use design tokens", () => {
 	const base = join(root, "../../../deploy/compose/quickstart");
-	for (const name of ["server.mjs", "setup-ui.mjs", "ui.mjs"])
+	for (const name of ["server.mjs", "setup-ui.mjs", "ui.mjs", "signin-ui.mjs"])
 		expect(
 			violations(readFileSync(join(base, name), "utf8"), `quickstart/${name}`),
 		).toEqual([]);
@@ -285,6 +285,7 @@ test("acceptance fixtures close policy gaps in every renderer", () => {
 		"quickstart/server.mjs",
 		"quickstart/setup-ui.mjs",
 		"quickstart/ui.mjs",
+		"quickstart/signin-ui.mjs",
 	]) {
 		for (const cls of [
 			"[&_[data-slot=button]]:px-8",
@@ -326,7 +327,7 @@ test("acceptance fixtures close policy gaps in every renderer", () => {
 		);
 });
 
-test.each(["server.mjs", "setup-ui.mjs", "ui.mjs"])(
+test.each(["server.mjs", "setup-ui.mjs", "ui.mjs", "signin-ui.mjs"])(
 	"quickstart CSS policy: %s",
 	(name) => {
 		for (const css of [

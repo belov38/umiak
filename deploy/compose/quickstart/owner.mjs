@@ -4,7 +4,14 @@ const random = () => randomBytes(32).toString("base64url");
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const validPairId = (id) =>
 	typeof id === "string" && /^[A-Za-z0-9_-]{43}$/.test(id);
-const empty = () => ({ claimed: false, claim: null, sessions: {}, pairs: {} });
+const empty = () => ({
+	claimed: false,
+	claim: null,
+	sessions: {},
+	pairs: {},
+	signins: {},
+	signinSources: {},
+});
 
 /** Serial in-memory repository for protocol tests; production uses row locking. */
 export class MemoryOwnerRepository {
@@ -92,6 +99,76 @@ export class OwnerStore {
 			return code;
 		});
 	}
+	async signinCode() {
+		return this.repo.transaction((state) => {
+			if (!state.claimed) throw Error("owner_unclaimed");
+			this.pruneSignin(state);
+			if (Object.keys(state.signins).length >= 10)
+				throw Error("signin_limited");
+			const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+			const raw = [...randomBytes(24)].map((x) => alphabet[x & 31]).join("");
+			const expires = this.now() + 600000;
+			state.signins[digest(raw)] = { expires, failures: 0 };
+			console.info("owner_signin_issued");
+			return { code: raw.match(/.{4}/g).join("-"), expires };
+		});
+	}
+	pruneSignin(state) {
+		state.signins ??= {};
+		state.signinSources ??= {};
+		for (const [key, value] of Object.entries(state.signins))
+			if (value.expires <= this.now()) delete state.signins[key];
+		for (const [key, value] of Object.entries(state.signinSources))
+			if (value.expires <= this.now()) delete state.signinSources[key];
+	}
+	async signin(code, source, hostname = "unknown") {
+		// Return errors from the transaction so failed-attempt counters commit in Postgres.
+		const result = await this.repo.transaction((state) => {
+			this.pruneSignin(state);
+			const key = digest(String(source));
+			const bucket = state.signinSources[key] ?? {
+				expires: this.now() + 600000,
+				count: 0,
+			};
+			if (
+				bucket.count >= 20 ||
+				(!state.signinSources[key] &&
+					Object.keys(state.signinSources).length >= 10000)
+			)
+				return { error: "signin_limited" };
+			state.signinSources[key] = bucket;
+			bucket.count++;
+			const normalized =
+				typeof code === "string"
+					? code.toUpperCase().replace(/[-\s]/g, "")
+					: "";
+			const id = digest(normalized);
+			if (state.claimed && state.signins[id]) {
+				const token = this.issue(state, "browser", hostname);
+				delete state.signins[id];
+				console.info("owner_signin_used");
+				return { token };
+			}
+			// Unknown guesses count against every live code, preventing distributed guessing.
+			for (const [id, item] of Object.entries(state.signins))
+				if (++item.failures >= 20) delete state.signins[id];
+			return { error: "invalid_signin" };
+		});
+		if (result.error) throw Error(result.error);
+		return result.token;
+	}
+	async touch(token) {
+		return this.repo.transaction((state) => {
+			const session = state.sessions[digest(token)];
+			if (
+				session &&
+				typeof session === "object" &&
+				session.expires > this.now()
+			)
+				session.lastUsed = this.now();
+		});
+	}
+
 	async claimed() {
 		return this.repo.read((state) => state.claimed);
 	}
@@ -102,13 +179,15 @@ export class OwnerStore {
 		for (const [key, pair] of Object.entries(state.pairs))
 			if (pair.expires <= this.now()) delete state.pairs[key];
 	}
-	issue(state, kind = "browser") {
+	issue(state, kind = "browser", hostname = "unknown") {
 		this.prune(state);
 		if (Object.keys(state.sessions).length >= 100)
 			throw new Error("session_limit");
 		const token = `umiak_owner_${random()}`;
 		state.sessions[digest(token)] = {
 			kind,
+			hostname,
+			lastUsed: this.now(),
 			created: this.now(),
 			expires:
 				this.now() +
@@ -118,7 +197,7 @@ export class OwnerStore {
 		};
 		return token;
 	}
-	async claim(code) {
+	async claim(code, hostname) {
 		return this.repo.transaction((state) => {
 			if (
 				state.claimed ||
@@ -128,7 +207,7 @@ export class OwnerStore {
 				throw new Error("invalid_claim");
 			state.claimed = true;
 			state.claim = null;
-			return this.issue(state);
+			return this.issue(state, "browser", hostname);
 		});
 	}
 	async session(token) {
@@ -169,7 +248,11 @@ export class OwnerStore {
 			delete state.sessions[digest(token)];
 		});
 	}
-	async pairStart({ source = "unknown", userAgent = "unknown" } = {}) {
+	async pairStart({
+		source = "unknown",
+		userAgent = "unknown",
+		hostname = "unknown",
+	} = {}) {
 		return this.repo.transaction((state) => {
 			if (!state.claimed) throw new Error("owner_unclaimed");
 			this.prune(state);
@@ -188,6 +271,7 @@ export class OwnerStore {
 					.toUpperCase()
 					.replace(/(.{4})(.{4})/, "$1-$2"),
 				source,
+				hostname,
 				userAgent: String(userAgent).slice(0, 256),
 				created: this.now(),
 				approved: false,
@@ -210,6 +294,7 @@ export class OwnerStore {
 				id,
 				approved: pair.approved,
 				source: pair.source,
+				hostname: pair.hostname,
 				userAgent: pair.userAgent,
 				created: pair.created,
 			};
@@ -236,7 +321,7 @@ export class OwnerStore {
 				throw new Error("invalid_pair");
 			if (!pair.approved) return null;
 			delete state.pairs[id];
-			return this.issue(state, "cli");
+			return this.issue(state, "cli", pair.hostname);
 		});
 	}
 }

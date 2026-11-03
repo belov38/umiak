@@ -44,21 +44,22 @@ test("trusted HTTPS proxy preserves legacy secure cookie, origin, and CLI bearer
 		const meta = JSON.parse((await call("/v1/meta")).body);
 		assert.equal(meta.apiUrl, "https://lab.example");
 		assert.equal(meta.ownerPrivateCA, undefined);
-		assert.equal(
-			(await call("/owner/sessions", { "tailscale-user-login": "owner" }))
-				.status,
-			401,
-		);
-		assert.equal(
-			(await call("/owner/sessions", { cookie: `__Host-umiak_owner=${token}` }))
-				.status,
-			200,
-		);
-		assert.equal(
-			(await call("/owner/sessions", { cookie: `umiak_owner=${token}` }))
-				.status,
-			401,
-		);
+
+		for (const headers of [
+			{ "tailscale-user-login": "owner" },
+			{ cookie: `umiak_owner=${token}` },
+		]) {
+			const reply = await call("/owner/sessions", headers);
+			assert.equal(reply.status, 200);
+			assert.match(reply.body, /<h1>Sign in<\/h1>/);
+			assert.doesNotMatch(reply.body, /<nav/);
+		}
+		const signedIn = await call("/owner/sessions", {
+			cookie: `__Host-umiak_owner=${token}`,
+		});
+		assert.equal(signedIn.status, 200);
+		assert.match(signedIn.body, /<h1>Owner sessions<\/h1>/);
+
 		assert.equal(
 			(await call("/owner/tls", { cookie: `__Host-umiak_owner=${token}` }))
 				.status,
