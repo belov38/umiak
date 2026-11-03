@@ -808,6 +808,7 @@ export function createSetupHandler({
 							nodeSha256,
 							storage: prep.storage,
 							guestDns: prep.guestDns,
+							caPath: prep.caPath,
 						};
 						const script =
 							prep.mode === "fresh"
@@ -996,6 +997,10 @@ export function createSetupHandler({
 						"Fresh preparation requires the gateway LAN IPv4 address",
 					);
 				state.preparation = {
+					caPath:
+						context.ownerPrivateCA === false
+							? "/etc/ssl/certs/ca-certificates.crt"
+							: "/root/.config/umiak/quickstart-ca.pem",
 					mode,
 					storage:
 						input.storage || state.steps.limits?.data?.storage || "local-lvm",
@@ -1009,8 +1014,12 @@ export function createSetupHandler({
 				};
 				await store.write(state);
 				const url = `${context.origin}/pve-setup.sh?token=${token}`;
+				const privateCA = context.ownerPrivateCA !== false;
+				const curl = privateCA
+					? "curl --cacert /root/.config/umiak/quickstart-ca.pem"
+					: "curl";
 				json(res, 200, {
-					command: `# Copy the verified quickstart CA to /root/.config/umiak/quickstart-ca.pem on PVE first.\ncurl --cacert /root/.config/umiak/quickstart-ca.pem -fsSL '${url}' | bash -s -- --dry-run\n# After inspection, run without --dry-run:\ncurl --cacert /root/.config/umiak/quickstart-ca.pem -fsSL '${url}' | bash`,
+					command: `${privateCA ? "# Copy the verified quickstart CA to /root/.config/umiak/quickstart-ca.pem on PVE first.\n" : ""}${curl} -fsSL '${url}' | bash -s -- --dry-run\n# After inspection, run without --dry-run:\n${curl} -fsSL '${url}' | bash`,
 					expiresIn: 900,
 				});
 			} catch (error) {

@@ -49,6 +49,7 @@ test("fresh node download uses only the expiring setup capability and expires af
 		steps: { connection: { status: "ready", data: connection } },
 		preparation: {
 			mode: "fresh",
+			caPath: "/etc/ssl/certs/ca-certificates.crt",
 			origin: "https://stack.example:8443",
 			gateway: "192.168.68.90",
 			hash: hash(token),
@@ -97,6 +98,10 @@ test("fresh node download uses only the expiring setup capability and expires af
 	assert.equal(
 		JSON.parse(Buffer.from(encoded, "base64")).nodeSha256,
 		hash(bytes),
+	);
+	assert.equal(
+		JSON.parse(Buffer.from(encoded, "base64")).caPath,
+		"/etc/ssl/certs/ca-certificates.crt",
 	);
 	const download = await request(
 		`/pve-setup.sh?token=${token}&asset=node-agent`,

@@ -274,7 +274,7 @@ test("adoption callback token expires, is single use, and setup denies the confi
 		},
 	};
 	const handler = createSetupHandler({ pool: {}, store });
-	async function request(path, input, owner = true) {
+	async function request(path, input, owner = true, ownerPrivateCA = true) {
 		const req = Readable.from(
 			input === undefined ? [] : [JSON.stringify(input)],
 		);
@@ -289,11 +289,33 @@ test("adoption callback token expires, is single use, and setup denies the confi
 				data = x;
 			},
 		};
-		await handler(req, res, { owner, origin: "https://stack.example" });
+		await handler(req, res, {
+			owner,
+			ownerPrivateCA,
+			origin: "https://stack.example",
+		});
 		return { status, data: JSON.parse(data) };
 	}
+	const publicPrepared = await request(
+		"/quickstart/setup/prepare",
+		{},
+		true,
+		false,
+	);
+	assert.equal(publicPrepared.status, 200);
+	assert.doesNotMatch(
+		publicPrepared.data.command,
+		/--cacert|Copy the verified quickstart CA/,
+	);
+	assert.equal(state.preparation.caPath, "/etc/ssl/certs/ca-certificates.crt");
+
 	const prepared = await request("/quickstart/setup/prepare", {});
 	assert.equal(prepared.status, 200);
+	assert.match(prepared.data.command, /--cacert/);
+	assert.equal(
+		state.preparation.caPath,
+		"/root/.config/umiak/quickstart-ca.pem",
+	);
 	const token = prepared.data.command.match(/token=([a-f0-9]{64})/)[1];
 	const report = { zone: { type: "simple" }, vnet: { zone: "umiak" } };
 	const accepted = await request(
