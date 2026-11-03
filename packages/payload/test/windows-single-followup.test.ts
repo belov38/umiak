@@ -39,6 +39,12 @@ describe.skipIf(skipPg())(
 		});
 		beforeEach(async () => {
 			await t.pool.query("DELETE FROM runtime.template_builds");
+			await t.pool.query(
+				"DELETE FROM payload.templates WHERE slug IN ('windows','windows-desktop')",
+			);
+			await t.pool.query(
+				`INSERT INTO payload.templates(id,slug,name,os,enabled,default_size,allowed_sizes,login_user,capabilities,sort_order) VALUES(uuidv7(),'windows','Windows 11','windows',true,'4gb','["4gb"]','user','["exec"]',1),(uuidv7(),'windows-desktop','Windows 11 Desktop','windows',true,'4gb','["4gb","8gb"]','user','["exec","desktop"]',2)`,
+			);
 		});
 		const build = async (
 			slug: string,
@@ -86,6 +92,94 @@ describe.skipIf(skipPg())(
 					)
 				).rows[0],
 			).toEqual({ headless: false, status: "active" });
+		});
+		it.each([
+			[false, true],
+			[true, false],
+			[false, false],
+		])("combines enabled policy %s / %s", async (headless, desktop) => {
+			await t.pool.query(
+				"UPDATE payload.templates SET enabled=CASE WHEN slug='windows' THEN $1::boolean ELSE $2::boolean END WHERE slug IN ('windows','windows-desktop')",
+				[headless, desktop],
+			);
+			await replay();
+			expect(
+				(
+					await t.pool.query(
+						"SELECT enabled FROM payload.templates WHERE slug='windows'",
+					)
+				).rows[0].enabled,
+			).toBe(headless || desktop);
+		});
+		it("preserves operator name and merges size policies with desktop default", async () => {
+			await t.pool.query(
+				`UPDATE payload.templates SET name='Operator Windows',default_size='16gb',allowed_sizes='["16gb"]' WHERE slug='windows'`,
+			);
+			await t.pool.query(
+				`UPDATE payload.templates SET name='Operator Desktop',default_size='8gb',allowed_sizes='["8gb","12gb"]' WHERE slug='windows-desktop'`,
+			);
+			await replay();
+			await replay();
+			const row = (
+				await t.pool.query(
+					"SELECT name,default_size,allowed_sizes FROM payload.templates WHERE slug='windows'",
+				)
+			).rows[0];
+			expect(row.name).toBe("Operator Windows");
+			expect(row.default_size).toBe("8gb");
+			expect([...row.allowed_sizes].sort()).toEqual(["12gb", "16gb", "8gb"]);
+		});
+		it("uses the desktop operator name when the canonical name is still seeded", async () => {
+			await t.pool.query(
+				"UPDATE payload.templates SET name='My Windows desktop' WHERE slug='windows-desktop'",
+			);
+			await replay();
+			expect(
+				(
+					await t.pool.query(
+						"SELECT name FROM payload.templates WHERE slug='windows'",
+					)
+				).rows[0].name,
+			).toBe("My Windows desktop");
+		});
+		it("falls back to 4gb/8gb only when size settings are unset", async () => {
+			await t.pool.query(
+				"UPDATE payload.templates SET default_size='',allowed_sizes='[]' WHERE slug IN ('windows','windows-desktop')",
+			);
+			await replay();
+			expect(
+				(
+					await t.pool.query(
+						"SELECT default_size,allowed_sizes FROM payload.templates WHERE slug='windows'",
+					)
+				).rows[0],
+			).toEqual({ default_size: "4gb", allowed_sizes: ["4gb", "8gb"] });
+		});
+		it("keeps a newer active build rather than reactivating the old 595 image", async () => {
+			const old = await build(
+				"windows-desktop",
+				595,
+				"20261101.7",
+				null,
+				"deprecated",
+			);
+			const newer = await build("windows", 595, "20261103.1", false);
+			await replay();
+			expect(
+				(
+					await t.pool.query(
+						"SELECT id FROM runtime.template_builds WHERE status='active'",
+					)
+				).rows,
+			).toEqual([{ id: newer }]);
+			expect(
+				(
+					await t.pool.query(
+						"SELECT status FROM runtime.template_builds WHERE id=$1",
+						[old],
+					)
+				).rows[0].status,
+			).toBe("deprecated");
 		});
 	},
 );
