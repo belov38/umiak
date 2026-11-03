@@ -195,7 +195,7 @@ export function createQuickstartServer({
 				});
 			}
 			if (
-				req.method === "GET" &&
+				["GET", "HEAD"].includes(req.method) &&
 				(path === "/install.sh" ||
 					path.startsWith("/downloads/") ||
 					path === "/ca.pem")
@@ -230,11 +230,16 @@ export function createQuickstartServer({
 						? "text/x-shellscript"
 						: "application/octet-stream",
 				);
-				if (file === "install.sh")
-					return res.end(
-						readFileSync(asset, "utf8").replaceAll("__UMIAK_ORIGIN__", origin),
+				if (file === "install.sh") {
+					const script = readFileSync(asset, "utf8").replaceAll(
+						"__UMIAK_ORIGIN__",
+						origin,
 					);
+					res.setHeader("content-length", Buffer.byteLength(script));
+					return res.end(req.method === "HEAD" ? undefined : script);
+				}
 				res.setHeader("content-length", statSync(asset).size);
+				if (req.method === "HEAD") return res.end();
 				return createReadStream(asset).pipe(res);
 			}
 			if (path === "/owner/claim" && req.method === "POST") {

@@ -355,3 +355,40 @@ test("download length enables determinate installer progress through Serve", asy
 	assert.equal(response.headers.get("content-length"), "16");
 	assert.equal(await response.text(), "compressed bytes");
 });
+
+test("public installer and downloads HEAD match GET headers without a body or owner session", async (t) => {
+	const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const dir = await mkdtemp(join(tmpdir(), "umiak-head-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	await writeFile(join(dir, "install.sh"), "origin=__UMIAK_ORIGIN__");
+	await writeFile(join(dir, "umiak-darwin-arm64.gz"), "compressed");
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	await store.init();
+	const server = createQuickstartServer({
+		store,
+		transport: http,
+		assetsDir: dir,
+		env: {},
+	});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	t.after(() => new Promise((resolve) => server.close(resolve)));
+	const base = `http://127.0.0.1:${server.address().port}`;
+	for (const path of ["/install.sh", "/downloads/umiak-darwin-arm64.gz"]) {
+		const get = await fetch(base + path);
+		const bytes = await get.arrayBuffer();
+		const head = await fetch(base + path, { method: "HEAD" });
+		assert.equal(head.status, 200);
+		assert.equal(
+			head.headers.get("content-type"),
+			get.headers.get("content-type"),
+		);
+		assert.equal(Number(head.headers.get("content-length")), bytes.byteLength);
+		assert.equal(await head.text(), "");
+	}
+	assert.equal(
+		(await fetch(`${base}/downloads/missing`, { method: "HEAD" })).status,
+		404,
+	);
+});
