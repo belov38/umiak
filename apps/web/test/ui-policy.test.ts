@@ -67,11 +67,15 @@ function expressionEnd(source: string, start: number): number {
 	return source.length;
 }
 /** Follow class expressions and local bindings without scanning prose. */
-function classContexts(source: string): string {
+function classContexts(source: string, style = false): string {
 	const contexts: string[] = [];
 	for (const match of source.matchAll(
-		/\bclass(?:Name)?\s*=\s*|\b(?:cva|cn|clsx)\s*(?=\()/g,
+		style
+			? /\bstyle\s*=\s*/g
+			: /\bclass(?:Name)?\s*=\s*|\b(?:cva|cn|clsx)\s*(?=\()/g,
 	)) {
+		if (style && /(?:const|let|var)\s+$/.test(source.slice(0, match.index)))
+			continue;
 		const start = (match.index ?? 0) + match[0].length;
 		contexts.push(source.slice(start, expressionEnd(source, start)));
 	}
@@ -97,8 +101,7 @@ function classContexts(source: string): string {
 }
 export function violations(source: string, path: string): string[] {
 	const errors: string[] = [];
-	const ui =
-		path.startsWith("components/ui/") || path.endsWith("quickstart/ui.mjs");
+	const ui = path.startsWith("components/ui/");
 	const renderer = path.includes("quickstart/");
 	const slot = /\[\s*data-slot\s*(?:[~|^$*]?=|\])/;
 	if (path.endsWith(".css")) {
@@ -117,11 +120,7 @@ export function violations(source: string, path: string): string[] {
 		}
 	}
 	const classes = classContexts(source);
-	const styles = [
-		...source.matchAll(/\bstyle\s*=\s*(?:\{\{[\s\S]*?\}\}|"[^"]*"|'[^']*')/g),
-	]
-		.map((m) => m[0])
-		.join(" ");
+	const styles = classContexts(source, true);
 	// Quickstart owns its CSS primitives, but shares the utility and token policy.
 	const css = renderer
 		? [
@@ -299,17 +298,15 @@ test("acceptance fixtures close policy gaps in every renderer", () => {
 				`${path}: ${cls}`,
 			).toBeGreaterThan(0);
 		}
-		if (!path.endsWith("/ui.mjs")) {
-			for (const source of [
-				'<div style={{ background: "#ff0000" }} />',
-				'<div style={{ color: "red" }} />',
-				"<div style={{ border: border }} />",
-				"<div style={{ boxShadow: shadow }} />",
-				// biome-ignore lint/suspicious/noTemplateCurlyInString: regression source fixture
-				"<div className={`rounded-${x}`} />",
-			])
-				expect(violations(source, path).length, source).toBeGreaterThan(0);
-		}
+		for (const source of [
+			'<div style={{ background: "#ff0000" }} />',
+			'<div style={{ color: "red" }} />',
+			"<div style={{ border: border }} />",
+			"<div style={{ boxShadow: shadow }} />",
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: regression source fixture
+			"<div className={`rounded-${x}`} />",
+		])
+			expect(violations(source, path).length, source).toBeGreaterThan(0);
 		expect(
 			violations(
 				'<p>Build: #123</p><p>shadow copy</p><a href="#abc">Link</a>',
@@ -369,4 +366,13 @@ test.each([
 			violations(source, "feature.tsx"),
 		),
 	).toContain(expected);
+});
+
+test("inline presentation cannot be hidden behind a local binding", () => {
+	expect(
+		violations(
+			'const appearance = { color: "red" }; <div style={appearance} />',
+			"feature.tsx",
+		),
+	).toContain("inline presentation style");
 });
