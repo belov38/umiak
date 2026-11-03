@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
@@ -114,9 +114,36 @@ test("local dashboard/admin, tokenless CLI create/exec/delete and blocked CIDR",
 	await expect(page.getByRole("dialog")).toBeVisible();
 	await noTeamUi();
 	await page.keyboard.press("Escape");
+	await page.goto("/app/templates");
+	await noTeamUi();
+	await expect(
+		page.getByRole("heading", { name: "Templates", exact: true }),
+	).toBeVisible();
+	await expect(page.getByTestId("template-card").first()).toContainText(
+		"ready",
+	);
+	await expect(page.getByTestId("template-card").first()).toContainText(
+		"Slot / VMID",
+	);
+	const visualDir =
+		process.env.UMIAK_VISUAL_DIR || test.info().outputPath("round4");
+	mkdirSync(visualDir, { recursive: true });
+	for (const theme of ["Light", "Dark"]) {
+		await page.getByRole("button", { name: theme, exact: true }).click();
+		await page.screenshot({
+			path: join(visualDir, `templates-${theme.toLowerCase()}.png`),
+			fullPage: true,
+		});
+	}
 	await page.goto(internal.replace(/\/keys$/, "/sandboxes/new"));
 	await expect(page.getByRole("dialog")).toBeVisible();
 	await noTeamUi();
+	await expect(
+		page.getByRole("combobox", { name: "TTL", exact: true }),
+	).toContainText("Platform default (no TTL)");
+	await expect(
+		page.getByRole("combobox", { name: "Idle stop after", exact: true }),
+	).toContainText("Platform default (15 min)");
 
 	expect(
 		(

@@ -111,7 +111,12 @@ export function SnapshotList({ teamId }: { teamId: string }) {
 				)}
 				{snapshots.data && snapshots.data.length === 0 && (
 					<DashboardEmpty kind="snapshots">
-						No saved snapshots yet.
+						No saved snapshots yet. Templates are base OS images; snapshots save
+						a sandbox disk.{" "}
+						<Link href="/app/templates" className="underline">
+							Browse Templates
+						</Link>
+						.
 					</DashboardEmpty>
 				)}
 				{snapshots.data && snapshots.data.length > 0 && (

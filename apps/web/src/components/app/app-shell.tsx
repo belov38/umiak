@@ -176,6 +176,21 @@ export function AppShell({
 
 				<Button
 					asChild
+					variant={pathname === "/app/templates" ? "secondary" : "ghost"}
+					size="sm"
+				>
+					<Link
+						href="/app/templates"
+						onClick={() => setMobileOpen(false)}
+						aria-current={pathname === "/app/templates" ? "page" : undefined}
+					>
+						<LayersIcon />
+						Templates
+					</Link>
+				</Button>
+
+				<Button
+					asChild
 					variant={pathname === "/app/getting-started" ? "secondary" : "ghost"}
 					size="sm"
 				>

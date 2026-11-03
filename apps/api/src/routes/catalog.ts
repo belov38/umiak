@@ -17,6 +17,8 @@ export interface CatalogTemplate {
 	template: TemplateConfig;
 	/** Version of the newest active build; null without one. */
 	version: string | null;
+	buildCreatedAt: string | null;
+	pveVmid: number | null;
 }
 
 /** Configured templates in configuration order with their build versions. */
@@ -27,21 +29,36 @@ export async function catalogTemplates(
 	const templates = (await deps.config.templates()).filter(
 		(t) => t.enabled || opts.includeDisabled,
 	);
-	const versions = new Map<string, string>();
+	const builds = new Map<
+		string,
+		{ version: string; created_at: Date | string; pve_vmid: number }
+	>();
 	if (deps.pool !== null && templates.length > 0) {
-		const r = await deps.pool.query<{ template_slug: string; version: string }>(
-			`SELECT DISTINCT ON (template_slug) template_slug, version
+		const r = await deps.pool.query<{
+			template_slug: string;
+			version: string;
+			created_at: Date | string;
+			pve_vmid: number;
+		}>(
+			`SELECT DISTINCT ON (template_slug) template_slug, version, created_at, pve_vmid
 			 FROM runtime.template_builds
 			 WHERE status = 'active' AND template_slug = ANY($1::text[])
 			 ORDER BY template_slug, promoted_at DESC NULLS LAST, created_at DESC`,
 			[templates.map((t) => t.slug)],
 		);
-		for (const row of r.rows) versions.set(row.template_slug, row.version);
+		for (const row of r.rows) builds.set(row.template_slug, row);
 	}
-	return templates.map((template) => ({
-		template,
-		version: versions.get(template.slug) ?? null,
-	}));
+	return templates.map((template) => {
+		const build = builds.get(template.slug);
+		return {
+			template,
+			version: build?.version ?? null,
+			buildCreatedAt: build?.created_at
+				? new Date(build.created_at).toISOString()
+				: null,
+			pveVmid: build?.pve_vmid ?? null,
+		};
+	});
 }
 
 /** Every configured size, smallest first. */
@@ -66,6 +83,8 @@ function templateResource(t: CatalogTemplate): typeof TemplateSchema._output {
 		loginUser: c.loginUser,
 		capabilities: c.capabilities,
 		version: t.version,
+		buildCreatedAt: t.buildCreatedAt,
+		pveVmid: t.pveVmid,
 	};
 }
 
