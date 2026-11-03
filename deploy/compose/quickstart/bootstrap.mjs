@@ -4,7 +4,7 @@
 import { createHash } from "node:crypto";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { validateConnection } from "./setup.mjs";
+import { requireRootCA, validateConnection } from "./setup.mjs";
 import {
 	checkNode,
 	pinnedPve,
@@ -67,7 +67,7 @@ export async function bootstrapFromInstall({
 		.update("\0")
 		.update(rawReport)
 		.digest("hex");
-	const run = async () => {
+	const attempt = async () => {
 		const state = await store.read();
 		if (state.bootstrap?.digest === digest) return "unchanged";
 		const install = JSON.parse(rawInstall);
@@ -79,15 +79,22 @@ export async function bootstrapFromInstall({
 		const connection = validateConnection(install.connection ?? {});
 		checkReport(report, network.gatewayAddress);
 		connection.deniedAddresses = await deniedAddresses(connection, lookup);
+		requireRootCA(await readOptional(secretsDir, "pve-root-ca.pem"));
+		if (
+			(await readOptional(secretsDir, "pve-token-id")).trim() !==
+			connection.tokenId
+		)
+			fail("pve-token-id does not match install.json connection.tokenId");
 		const token = (await readOptional(secretsDir, "pve-token")).trim();
-		await makePve(connection, token).get("/version");
+		const api = makePve(connection, token);
+		await api.get("/version");
+		await api.get("/pools/umiak");
 		const node = await nodeCheck(connection, secretsDir);
 		if (
 			!node?.version ||
-			(node.config &&
-				(node.config.vmidMin !== 500 ||
-					node.config.vmidMax !== 589 ||
-					node.config.vnet !== "umiak0"))
+			node.config?.vmidMin !== 500 ||
+			node.config?.vmidMax !== 589 ||
+			node.config?.vnet !== "umiak0"
 		)
 			fail("Restricted node-agent configuration mismatch");
 		// Work on a copy so any failure leaves persisted state untouched.
@@ -105,11 +112,20 @@ export async function bootstrapFromInstall({
 			reportAt: stamp,
 		});
 		const previous = state.steps ?? {};
+		// The limits step upserts the installer node's SQL rows before the state
+		// write. That is safe: the upsert is idempotent, touches only the installer
+		// node, and a failure leaves the digest unsaved so the next start retries.
 		next.steps.limits = ready(await steps.limits(install.limits ?? {}, next));
 		next.steps.network = ready(await steps.network(network, next));
-		const changed = ["connection", "limits", "network"].some(
-			(name) => !same(previous[name]?.data, next.steps[name].data),
-		);
+		// Compare installer facts only: step outputs include live PVE inventory
+		// (occupied template VMIDs) that changes after every template build.
+		const { deniedAddresses: _denied, ...connectionFacts } = connection;
+		const facts = {
+			connection: connectionFacts,
+			limits: install.limits ?? {},
+			network: { ...network, sshHost },
+		};
+		const changed = !same(state.bootstrap?.facts, facts);
 		if (changed)
 			for (const name of LATER)
 				if (next.steps[name]) next.steps[name].status = "stale";
@@ -118,15 +134,31 @@ export async function bootstrapFromInstall({
 			: ["connection", "host", "limits", "network", ...LATER].every(
 					(name) => next.steps[name]?.status === "ready",
 				);
+		delete next.bootstrapError;
 		next.bootstrap = {
 			digest,
 			importedAt: stamp,
 			release: install.release,
+			facts,
 			sshHost,
 			publicUrl: install.publicUrl,
 		};
 		await store.write(next);
 		return "imported";
+	};
+	const run = async () => {
+		try {
+			return await attempt();
+		} catch (error) {
+			const state = await store.read();
+			state.bootstrapError = {
+				message: String(error.message),
+				at: now().toISOString(),
+				digest,
+			};
+			await store.write(state);
+			throw error;
+		}
 	};
 	return store.exclusive ? store.exclusive(run) : run();
 }

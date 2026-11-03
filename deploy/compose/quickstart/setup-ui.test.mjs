@@ -159,3 +159,14 @@ test("progress counts only visible steps and warns until the installer has boots
 		/The installer has not finished setting up this deployment\. Re-run the installer on your Proxmox node\./,
 	);
 });
+
+test("setup page shows a recorded installer import failure", () => {
+	const html = renderSetup({
+		steps: {},
+		bootstrapError: { message: "fingerprint <mismatch>" },
+	});
+	assert.match(
+		html,
+		/Installer data could not be imported: fingerprint &lt;mismatch&gt;/,
+	);
+});

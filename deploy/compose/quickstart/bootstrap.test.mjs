@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { bootstrapFromInstall, safeBootstrap } from "./bootstrap.mjs";
 import { createSetupHandler } from "./setup.mjs";
+import { testTls } from "./test-helpers/tls.mjs";
 
 const install = {
 	version: 1,
@@ -56,6 +57,7 @@ const report = {
 
 async function setup(overrides = {}) {
 	const dir = await mkdtemp(join(tmpdir(), "umiak-bootstrap-"));
+	await testTls(join(dir, "tls"));
 	const files = { install: structuredClone(install), report, ...overrides };
 	const secretsDir = join(dir, "secrets");
 	const write = async () => {
@@ -70,6 +72,11 @@ async function setup(overrides = {}) {
 			JSON.stringify(files.report),
 		);
 		await writeFile(join(secretsDir, "pve-token"), "secret\n");
+		await writeFile(join(secretsDir, "pve-token-id"), "umiak@pve!umiak");
+		await writeFile(
+			join(secretsDir, "pve-root-ca.pem"),
+			await readFile(join(dir, "tls", "ca.pem"), "utf8"),
+		);
 	};
 	let state = { steps: {}, complete: false };
 	let writes = 0;
@@ -95,13 +102,15 @@ async function setup(overrides = {}) {
 		},
 	};
 	let versionError;
+	let resources = [];
 	const makePve = () => ({
 		get: async (path) => {
 			if (path === "/version") {
 				if (versionError) throw versionError;
 				return { version: "9.0" };
 			}
-			if (path === "/cluster/resources") return [];
+			if (path === "/pools/umiak") return {};
+			if (path === "/cluster/resources") return resources;
 			if (path.endsWith("/status")) return { type: "lvmthin" };
 			if (path.endsWith("/qemu")) return [];
 			throw new Error(`unexpected ${path}`);
@@ -120,7 +129,10 @@ async function setup(overrides = {}) {
 		secretsDir,
 		steps: handler.wizard.steps,
 		makePve,
-		nodeCheck: async () => ({ version: "1.0" }),
+		nodeCheck: async () => ({
+			version: "1.0",
+			config: { vmidMin: 500, vmidMax: 589, vnet: "umiak0" },
+		}),
 		lookup: async () => [],
 		now: () => new Date("2026-11-04T00:00:00Z"),
 	});
@@ -137,6 +149,9 @@ async function setup(overrides = {}) {
 			state = value;
 		},
 		writes: () => writes,
+		setResources: (value) => {
+			resources = value;
+		},
 		failVersion: (error) => {
 			versionError = error;
 		},
@@ -181,10 +196,12 @@ test("release-only update keeps completion and smoke; other nodes are never touc
 	const t = await setup();
 	await bootstrapFromInstall(t.options());
 	const s = t.state();
-	s.steps.templates = { status: "ready", data: { builds: [] } };
+	s.steps.templates = { status: "ready", data: { builds: [{ pveVmid: 600 }] } };
 	s.steps.smoke = { status: "ready", data: { ok: true } };
 	s.complete = true;
 	t.setState(s);
+	// A built template now occupies VMID 600 in live inventory.
+	t.setResources([{ vmid: 600 }]);
 	t.files.install.release = "0.3.0";
 	await t.write();
 	assert.equal(await bootstrapFromInstall(t.options()), "imported");
@@ -219,12 +236,13 @@ test("fingerprint mismatch and failing isolation throw without touching state", 
 		bootstrapFromInstall(t.options()),
 		/fingerprint mismatch/,
 	);
-	assert.equal(t.writes(), 0);
+	assert.deepEqual(t.state().steps, {});
 	t.failVersion(undefined);
 	t.files.report = { ...report, rules: [], ipset: [] };
 	await t.write();
 	await assert.rejects(bootstrapFromInstall(t.options()));
-	assert.equal(t.writes(), 0);
+	assert.deepEqual(t.state().steps, {});
+	assert.equal(t.state().bootstrap, undefined);
 	assert.equal(t.nodeUpserts.length, 0);
 });
 
@@ -235,5 +253,29 @@ test("safeBootstrap logs failures and never throws", async () => {
 	const result = await safeBootstrap(t.options(), (m) => logs.push(m));
 	assert.equal(result, "error");
 	assert.match(logs.join("\n"), /fingerprint mismatch/);
-	assert.equal(t.writes(), 0);
+	assert.deepEqual(t.state().steps, {});
+});
+
+test("failures are recorded as bootstrapError and cleared by a later import", async () => {
+	const t = await setup();
+	t.failVersion(new Error("Proxmox TLS fingerprint mismatch; verify"));
+	await assert.rejects(bootstrapFromInstall(t.options()));
+	assert.match(t.state().bootstrapError.message, /fingerprint mismatch/);
+	assert.match(t.state().bootstrapError.digest, /^[0-9a-f]{64}$/);
+	assert.deepEqual(t.state().steps, {});
+	t.failVersion(undefined);
+	assert.equal(await bootstrapFromInstall(t.options()), "imported");
+	assert.equal(t.state().bootstrapError, undefined);
+});
+
+test("token id file must match, and node-agent config is strict", async () => {
+	const t = await setup();
+	await writeFile(join(t.options().secretsDir, "pve-token-id"), "other@pve!x");
+	await assert.rejects(bootstrapFromInstall(t.options()), /pve-token-id/);
+	await t.write();
+	const options = {
+		...t.options(),
+		nodeCheck: async () => ({ version: "1.0" }),
+	};
+	await assert.rejects(bootstrapFromInstall(options), /node-agent/);
 });
