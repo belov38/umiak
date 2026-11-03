@@ -229,13 +229,15 @@ class _Journal:
 
     def _forward(self, argv):
         # The undo is journaled before the forward command so a crash right
-        # after it succeeds is still rolled back. If the command itself fails,
-        # PVE did not create the object: drop the undo again so a replay does
+        # after it succeeds is still rolled back. If the command itself exits
+        # non-zero, PVE did not create the object: drop the undo again so a replay does
         # not try to delete something that never existed. (Undoing a missing
         # object is also tolerated by rollback, as a second line of defence.)
         try:
             return self.runner.run(argv)
-        except BaseException:
+        except CommandError:
+            # Only a reported command failure proves nothing was created; on an
+            # interrupt the command may have succeeded, so keep its undo.
             self.actions.pop()
             rollback.write_journal(self.state, self.actions)
             raise

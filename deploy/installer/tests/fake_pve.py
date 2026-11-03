@@ -95,6 +95,29 @@ class FakeRunner(Runner):
     def hostname(self):
         return self._hostname
 
+    def _listing(self, path):
+        # Index listings computed from the model, like the real API.
+        def children(prefix, field):
+            return [{field: key[len(prefix):]} for key in self.objects
+                    if key.startswith(prefix) and "/" not in key[len(prefix):]]
+
+        if path == "/access/roles":
+            return [{"roleid": x["roleid"]} for x in self.roles]
+        if path == "/access/users":
+            return [{"userid": x["userid"]} for x in self.users]
+        if path == "/pools":
+            return children("/pools/", "poolid")
+        if path == "/cluster/firewall/ipset":
+            return children("/cluster/firewall/ipset/", "name")
+        if path == "/cluster/firewall/groups":
+            return children("/cluster/firewall/groups/", "group")
+        if path.startswith("/access/users/") and path.endswith("/token"):
+            user = path.split("/")[3]
+            if not any(x["userid"] == user for x in self.users):
+                raise CommandError(["pvesh", "get", path], 2, "", "no such user")
+            return [{"tokenid": x["tokenid"]} for x in self.tokens]
+        return None
+
     def _missing(self, argv):
         if argv[:3] == ["pveum", "role", "delete"]:
             return not any(x["roleid"] == argv[3] for x in self.roles)
@@ -120,7 +143,9 @@ class FakeRunner(Runner):
             raise CommandError(argv, 1, "", "injected failure")
         out = ""
         head = argv[:2]
-        if head == ["pvesh", "get"]:
+        if head == ["pvesh", "get"] and self._listing(argv[2]) is not None:
+            out = json.dumps(self._listing(argv[2]))
+        elif head == ["pvesh", "get"]:
             path = argv[2]
             if path not in self.objects:
                 raise CommandError(argv, 2, "", "no such object")

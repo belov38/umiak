@@ -442,3 +442,47 @@ def test_undo_of_already_missing_object_counts_as_done(host):
     ])
     prepare_host.rollback.main(str(state_dir), runner.run)
     assert not (state_dir / "active").exists()
+
+
+def test_unreadable_cluster_keeps_undo_actions(host):
+    runner, _ = host
+    state_dir = runner.path("/var/lib/umiak-installer")
+    state_dir.mkdir(parents=True)
+    (state_dir / "active").write_text("active")
+    runner.roles.append({"roleid": "UmiakPoC"})
+    runner.objects["/cluster/firewall/groups/umiak-egress"] = []
+    journal = [
+        ["command", ["pveum", "role", "delete", "UmiakPoC"]],
+        ["collection", "/cluster/firewall/groups/umiak-egress"],
+        ["command", ["pvesh", "delete", "/cluster/sdn/vnets/umiak0/subnets/umiak-10.88.0.0-24"]],
+    ]
+    prepare_host.rollback.write_journal(state_dir, journal)
+    # pve-cluster down: every delete and every existence read fails.
+    runner.fail_on = lambda argv: argv[0] in ("pvesh", "pveum")
+    with pytest.raises(RuntimeError, match="Rollback incomplete"):
+        prepare_host.rollback.main(str(state_dir), runner.run)
+    assert (state_dir / "active").exists()
+    assert json.loads((state_dir / "undo.json").read_text()) == journal
+    # Once the cluster is back, the retry removes the objects for real.
+    runner.fail_on = None
+    prepare_host.rollback.main(str(state_dir), runner.run)
+    assert not (state_dir / "active").exists()
+    assert runner.roles == [] and "/cluster/firewall/groups/umiak-egress" not in runner.objects
+
+
+def test_interrupt_after_forward_keeps_its_undo(host):
+    runner, out = host
+    real_run = runner.run
+
+    def run(argv, input=None):
+        result = real_run(argv, input)
+        if argv[:3] == ["pveum", "pool", "add"]:
+            raise KeyboardInterrupt  # the pool was created, then Ctrl-C
+        return result
+
+    runner.run = run
+    with pytest.raises(KeyboardInterrupt):
+        prepare_host.prepare(runner, config(), out)
+    assert "/pools/umiak" not in runner.objects
+    assert runner.roles == []
+    assert not runner.path("/var/lib/umiak-installer/active").exists()

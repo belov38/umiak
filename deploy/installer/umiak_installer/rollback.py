@@ -8,7 +8,8 @@
 #   ["collection", pvesh_path]             delete all rows, then the collection
 # Each undone action is removed from the journal (atomic rewrite), so a retry
 # resumes where a failed run stopped. An undo whose target is already gone
-# counts as done: real pvesh/pveum fail on deleting missing objects.
+# counts as done (real pvesh/pveum fail on deleting missing objects), but only
+# when a successful read shows it is gone; read errors keep the action.
 import base64
 import fcntl
 import json
@@ -42,29 +43,71 @@ def write_journal(state: Path, actions: list) -> None:
     os.replace(tmp, path)
 
 
-def _pvesh_absent(run, path) -> bool:
+def _read(run, path):
+    return json.loads(run(["pvesh", "get", path, "--output-format", "json"]) or "[]")
+
+
+def _id_field(parent: str) -> str | None:
+    """Which row field names an object inside the listing `parent`."""
+    fixed = {
+        "/cluster/sdn/zones": "zone",
+        "/cluster/sdn/vnets": "vnet",
+        "/cluster/firewall/ipset": "name",
+        "/cluster/firewall/groups": "group",
+        "/access/roles": "roleid",
+        "/pools": "poolid",
+        "/access/users": "userid",
+    }
+    if parent in fixed:
+        return fixed[parent]
+    if parent.startswith("/cluster/sdn/vnets/") and parent.endswith("/subnets"):
+        return "subnet"
+    if parent.startswith("/access/users/") and parent.endswith("/token"):
+        return "tokenid"
+    if parent.startswith("/cluster/firewall/ipset/"):
+        return "cidr"
+    if parent.startswith("/cluster/firewall/groups/"):
+        return "pos"
+    return None
+
+
+def _path_absent(run, path: str) -> bool:
+    """True only when a read succeeds and shows the object is gone.
+
+    A failed read proves nothing (pmxcfs may be down around a reboot), so it
+    raises and the action stays in the journal for the next retry.
+    """
+    parent, key = path.rsplit("/", 1)
+    field = _id_field(parent)
+    if field is None:
+        raise RuntimeError("Cannot check existence of " + path)
     try:
-        run(["pvesh", "get", path, "--output-format", "json"])
-        return False
-    except Exception:  # noqa: BLE001 - any read failure: object not there
-        return True
+        rows = _read(run, parent)
+    except Exception:
+        # Listing a child collection fails when its owner object is gone
+        # (VNet for subnets, user for tokens, IPSet/group for their rows).
+        owner = parent.removesuffix("/subnets").removesuffix("/token")
+        if _id_field(owner.rsplit("/", 1)[0]) is not None and _path_absent(run, owner):
+            return True
+        raise
+    return not any(str(row.get(field)) == key for row in rows)
 
 
 def _absent(run, argv) -> bool:
     """After a failed undo command: is its target already gone?"""
     if argv[:2] == ["pvesh", "delete"]:
-        return _pvesh_absent(run, argv[2])
+        return _path_absent(run, argv[2])
     if argv[:3] == ["pveum", "role", "delete"]:
-        return _pvesh_absent(run, "/access/roles/" + argv[3])
+        return _path_absent(run, "/access/roles/" + argv[3])
     if argv[:3] == ["pveum", "pool", "delete"]:
-        return _pvesh_absent(run, "/pools/" + argv[3])
+        return _path_absent(run, "/pools/" + argv[3])
     if argv[:3] == ["pveum", "user", "delete"]:
-        return _pvesh_absent(run, "/access/users/" + argv[3])
+        return _path_absent(run, "/access/users/" + argv[3])
     if argv[:4] == ["pveum", "user", "token", "remove"]:
-        return _pvesh_absent(run, f"/access/users/{argv[4]}/token/{argv[5]}")
+        return _path_absent(run, f"/access/users/{argv[4]}/token/{argv[5]}")
     if argv[:3] == ["pveum", "acl", "delete"]:
         path, principal, role = argv[3], argv[5], argv[7]
-        acls = json.loads(run(["pvesh", "get", "/access/acl", "--output-format", "json"]) or "[]")
+        acls = _read(run, "/access/acl")
         return not any(x.get("path") == path and x.get("ugid") == principal and x.get("roleid") == role for x in acls)
     return False
 
@@ -85,10 +128,9 @@ def _undo(action, run) -> None:
             path.chmod(action[3])
     elif action[0] == "collection":
         path = action[1]
-        if _pvesh_absent(run, path):
+        if _path_absent(run, path):  # raises when the cluster cannot be read
             return
-        rows = json.loads(run(["pvesh", "get", path, "--output-format", "json"]) or "[]")
-        for row in sorted(rows, key=lambda row: int(row.get("pos", 0)), reverse=True):
+        for row in sorted(_read(run, path), key=lambda row: int(row.get("pos", 0)), reverse=True):
             run(["pvesh", "delete", path + "/" + str(row.get("cidr", row.get("pos")))])
         run(["pvesh", "delete", path])
 
@@ -112,8 +154,12 @@ def replay(state: Path, run=_subprocess_run) -> None:
         del actions[index]
         write_journal(state, actions)
     # Re-apply SDN so removed Umiak objects leave the running configuration.
-    run(["pvesh", "set", "/cluster/sdn"])
-    restore_bridge(state, run)
+    for step in (lambda: run(["pvesh", "set", "/cluster/sdn"]), lambda: restore_bridge(state, run)):
+        try:
+            step()
+        except Exception:  # noqa: BLE001 - keep ACTIVE so the retry applies again
+            failed = True
+            print("Rollback SDN apply or bridge restore failed", file=sys.stderr)
     if failed:
         raise RuntimeError("Rollback incomplete; inspect failures and retry with: " + retry_hint(state))
     (state / ACTIVE).unlink(missing_ok=True)
