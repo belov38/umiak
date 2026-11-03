@@ -10,6 +10,9 @@ const empty = () => ({ claimed: false, claim: null, sessions: {}, pairs: {} });
 export class MemoryOwnerRepository {
 	state = empty();
 	pending = Promise.resolve();
+	async read(fn) {
+		return fn(this.state);
+	}
 	async transaction(fn) {
 		const next = this.pending.then(() => fn(this.state));
 		this.pending = next.catch(() => {});
@@ -32,6 +35,13 @@ export class PgOwnerRepository {
 			[empty()],
 		);
 	}
+	async read(fn) {
+		const { rows } = await this.pool.query(
+			"SELECT state FROM quickstart.owner WHERE id=1",
+		);
+		return fn(rows[0].state);
+	}
+
 	async transaction(fn) {
 		const client = await this.pool.connect();
 		try {
@@ -83,20 +93,29 @@ export class OwnerStore {
 		});
 	}
 	async claimed() {
-		return this.repo.transaction((state) => state.claimed);
+		return this.repo.read((state) => state.claimed);
 	}
 	prune(state) {
-		for (const [key, expires] of Object.entries(state.sessions))
-			if (expires <= this.now()) delete state.sessions[key];
+		for (const [key, session] of Object.entries(state.sessions))
+			if (typeof session === "number" || session.expires <= this.now())
+				delete state.sessions[key];
 		for (const [key, pair] of Object.entries(state.pairs))
 			if (pair.expires <= this.now()) delete state.pairs[key];
 	}
-	issue(state) {
+	issue(state, kind = "browser") {
 		this.prune(state);
 		if (Object.keys(state.sessions).length >= 100)
 			throw new Error("session_limit");
 		const token = `umiak_owner_${random()}`;
-		state.sessions[digest(token)] = this.now() + this.sessionMs;
+		state.sessions[digest(token)] = {
+			kind,
+			created: this.now(),
+			expires:
+				this.now() +
+				(kind === "cli"
+					? Math.min(this.sessionMs, 30 * 86400000)
+					: this.sessionMs),
+		};
 		return token;
 	}
 	async claim(code) {
@@ -112,32 +131,71 @@ export class OwnerStore {
 			return this.issue(state);
 		});
 	}
+	async session(token) {
+		if (typeof token !== "string" || token.length > 256) return null;
+		return this.repo.read((state) => {
+			const raw = state.sessions[digest(token)];
+			const value = typeof raw === "number" ? null : raw;
+			return state.claimed && value?.expires > this.now() ? value : null;
+		});
+	}
 	async authenticate(token) {
-		if (typeof token !== "string" || token.length > 256) return false;
-		return this.repo.transaction(
-			(state) =>
-				state.claimed && (state.sessions[digest(token)] ?? 0) > this.now(),
+		return !!(await this.session(token));
+	}
+	async canApprove(token) {
+		return (await this.session(token))?.kind === "browser";
+	}
+	async sessions() {
+		return this.repo.read((state) =>
+			Object.entries(state.sessions)
+				.map(([id, raw]) => ({
+					id,
+					...(typeof raw === "number"
+						? { expires: raw, kind: "browser" }
+						: raw),
+				}))
+				.filter((x) => x.expires > this.now()),
 		);
+	}
+	async revokeSession(id) {
+		if (typeof id !== "string" || !/^[a-f0-9]{64}$/.test(id))
+			throw new Error("invalid_session");
+		return this.repo.transaction((state) => {
+			delete state.sessions[id];
+		});
 	}
 	async revoke(token) {
 		return this.repo.transaction((state) => {
 			delete state.sessions[digest(token)];
 		});
 	}
-	async pairStart() {
+	async pairStart({ source = "unknown", userAgent = "unknown" } = {}) {
 		return this.repo.transaction((state) => {
 			if (!state.claimed) throw new Error("owner_unclaimed");
 			this.prune(state);
-			if (Object.keys(state.pairs).length >= 50) throw new Error("pair_limit");
+			if (
+				Object.values(state.pairs).filter((pair) => pair.source === source)
+					.length >= 5 ||
+				Object.keys(state.pairs).length >= 1000
+			)
+				throw new Error("pair_limit");
 			const id = random();
 			const secret = random();
 			state.pairs[id] = {
 				secret: digest(secret),
+				code: randomBytes(4)
+					.toString("hex")
+					.toUpperCase()
+					.replace(/(.{4})(.{4})/, "$1-$2"),
+				source,
+				userAgent: String(userAgent).slice(0, 256),
+				created: this.now(),
 				approved: false,
 				expires: this.now() + this.pairMs,
 			};
 			return {
 				id,
+				code: state.pairs[id].code,
 				secret,
 				expiresIn: Math.floor(this.pairMs / 1000),
 				interval: 2,
@@ -145,16 +203,24 @@ export class OwnerStore {
 		});
 	}
 	async pairInfo(id) {
-		return this.repo.transaction((state) => {
+		return this.repo.read((state) => {
 			const pair = validPairId(id) ? state.pairs[id] : undefined;
 			if (!pair || pair.expires <= this.now()) throw new Error("invalid_pair");
-			return { id, approved: pair.approved };
+			return {
+				id,
+				approved: pair.approved,
+				source: pair.source,
+				userAgent: pair.userAgent,
+				created: pair.created,
+			};
 		});
 	}
-	async pairApprove(id) {
+	async pairApprove(id, code) {
 		return this.repo.transaction((state) => {
 			const pair = validPairId(id) ? state.pairs[id] : undefined;
 			if (!pair || pair.expires <= this.now()) throw new Error("invalid_pair");
+			if (typeof code !== "string" || code.toUpperCase() !== pair.code)
+				throw new Error("invalid_pair");
 			pair.approved = true;
 		});
 	}
@@ -170,7 +236,7 @@ export class OwnerStore {
 				throw new Error("invalid_pair");
 			if (!pair.approved) return null;
 			delete state.pairs[id];
-			return this.issue(state);
+			return this.issue(state, "cli");
 		});
 	}
 }

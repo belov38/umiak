@@ -206,9 +206,14 @@ export function AppShell({
 			</nav>
 			<div className="dashboard-sidebar-footer">
 				{quickstart && (
-					<Button asChild variant="ghost" size="sm">
-						<a href="/setup">Setup</a>
-					</Button>
+					<>
+						<Button asChild variant="ghost" size="sm">
+							<a href="/setup">Setup</a>
+						</Button>
+						<Button asChild variant="ghost" size="sm">
+							<a href="/owner/sessions">Owner sessions</a>
+						</Button>
+					</>
 				)}
 				{session.isOperator && (
 					<>

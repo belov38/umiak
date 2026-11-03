@@ -3,6 +3,7 @@ import { apiError, deadline, type Fetch, send } from "../http.ts";
 
 export interface PairCode {
 	id: string;
+	code?: string | undefined;
 	verificationUri: string;
 	expiresIn: number;
 }
@@ -65,6 +66,7 @@ export async function ownerLogin(options: {
 	}
 	options.onCode({
 		id: pair.id,
+		code: typeof pair.code === "string" ? pair.code : undefined,
 		verificationUri: `${origin}/owner/pair?id=${encodeURIComponent(pair.id)}`,
 		expiresIn: pair.expiresIn,
 	});

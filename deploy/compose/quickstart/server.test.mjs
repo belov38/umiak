@@ -82,7 +82,13 @@ test("HTTP routes gate API and WS, claim requires same origin, pair needs owner 
 			401,
 		);
 		assert.equal(
-			(await post("/owner/pair/approve", { id: pair.id }, auth)).status,
+			(
+				await post(
+					"/owner/pair/approve",
+					{ id: pair.id, code: pair.code },
+					auth,
+				)
+			).status,
 			200,
 		);
 		const token = await (
@@ -91,7 +97,13 @@ test("HTTP routes gate API and WS, claim requires same origin, pair needs owner 
 		assert.equal(await store.authenticate(token.token), true);
 		assert.equal((await post("/owner/logout", {}, auth)).status, 200);
 		assert.equal(
-			(await post("/owner/pair/approve", { id: pair.id }, auth)).status,
+			(
+				await post(
+					"/owner/pair/approve",
+					{ id: pair.id, code: pair.code },
+					auth,
+				)
+			).status,
 			401,
 		);
 	} finally {
@@ -137,7 +149,7 @@ test("WebSocket upgrades cannot bypass owner authentication or origin checks", a
 		);
 		assert.equal(
 			await upgrade({
-				cookie: `umiak_owner=${token}`,
+				cookie: `__Host-umiak_owner=${token}`,
 				origin: "https://evil.example",
 			}),
 			401,
@@ -167,7 +179,7 @@ test("network denial precedes public and authenticated routes despite forged for
 	}
 });
 
-test("dedicated CA authenticates IP and newly observed DNS SNI names", async () => {
+test("dedicated CA authenticates only IP and configured DNS SNI names", async () => {
 	const { mkdtempSync, readFileSync, rmSync } = await import("node:fs");
 	const { tmpdir } = await import("node:os");
 	const { join } = await import("node:path");
@@ -178,7 +190,7 @@ test("dedicated CA authenticates IP and newly observed DNS SNI names", async () 
 	await store.init();
 	const server = createQuickstartServer({
 		store,
-		tls: quickstartTls(dir, ["127.0.0.1"]),
+		tls: await quickstartTls(dir, ["127.0.0.1", "home.example.test"]),
 		env: { UMIAK_LOCAL_DENIED_CIDRS: "10.88.0.0/24" },
 	});
 	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -206,6 +218,7 @@ test("dedicated CA authenticates IP and newly observed DNS SNI names", async () 
 	try {
 		assert.equal(await get(), 200);
 		assert.equal(await get("home.example.test"), 200);
+		await assert.rejects(get("www.google.com"));
 	} finally {
 		await new Promise((resolve) => server.close(resolve));
 		rmSync(dir, { recursive: true, force: true });
@@ -276,18 +289,18 @@ test("owner can persist extra IP certificate names without an env file", async (
 	const { quickstartTls } = await import("./server.mjs");
 	const dir = mkdtempSync(join(tmpdir(), "umiak-extra-ip-"));
 	try {
-		const tls = quickstartTls(dir);
-		const next = tls.updateNames(["192.168.2.40"]);
+		const tls = await quickstartTls(dir);
+		const next = await tls.updateNames(["192.168.2.40"], { rotateCA: true });
 		assert.equal(
 			new X509Certificate(next.cert).checkIP("192.168.2.40"),
 			"192.168.2.40",
 		);
-		const restarted = quickstartTls(dir);
+		const restarted = await quickstartTls(dir);
 		assert.equal(
 			new X509Certificate(restarted.cert).checkIP("192.168.2.40"),
 			"192.168.2.40",
 		);
-		assert.throws(() => tls.updateNames(["bad\nsubjectAltName=DNS:evil"]));
+		await assert.rejects(tls.updateNames(["bad\nsubjectAltName=DNS:evil"]));
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

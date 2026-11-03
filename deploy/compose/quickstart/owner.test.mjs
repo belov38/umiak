@@ -29,7 +29,7 @@ test("pair requires owner approval and correct polling secret; delivered only on
 	const pair = await store.pairStart();
 	assert.equal(await store.pairPoll(pair.id, pair.secret), null);
 	await assert.rejects(store.pairPoll(pair.id, "bad"), /invalid_pair/);
-	await store.pairApprove(pair.id);
+	await store.pairApprove(pair.id, pair.code);
 	const token = await store.pairPoll(pair.id, pair.secret);
 	assert.equal(await store.authenticate(token), true);
 	await assert.rejects(store.pairPoll(pair.id, pair.secret), /invalid_pair/);
@@ -62,4 +62,45 @@ test("console recovery invalidates every existing session and pairing", async ()
 	assert.equal(await store.claimed(), false);
 	assert.ok(await store.claim(code));
 	await assert.rejects(() => store.claim(code));
+});
+
+test("pair capacity is isolated by source and approval requires short code", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	await store.claim(await store.init());
+	for (let n = 0; n < 5; n++) await store.pairStart({ source: "one" });
+	await assert.rejects(store.pairStart({ source: "one" }), /pair_limit/);
+	const pair = await store.pairStart({ source: "two", userAgent: "CLI" });
+	assert.match(pair.code, /^[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+	assert.equal((await store.pairInfo(pair.id)).source, "two");
+	await assert.rejects(store.pairApprove(pair.id, "wrong"), /invalid_pair/);
+	await store.pairApprove(pair.id, pair.code);
+	const token = await store.pairPoll(pair.id, pair.secret);
+	assert.equal(await store.canApprove(token), false);
+	assert.equal((await store.sessions()).length, 2);
+	await store.revokeSession(
+		(await store.sessions()).find((x) => x.kind === "cli").id,
+	);
+	assert.equal(await store.authenticate(token), false);
+});
+
+test("authentication and claim status do not acquire mutation transactions", async () => {
+	const repo = new MemoryOwnerRepository();
+	const store = new OwnerStore(repo);
+	const token = await store.claim(await store.init());
+	repo.transaction = () => {
+		throw new Error("write attempted");
+	};
+	assert.equal(await store.authenticate(token), true);
+	assert.equal(await store.claimed(), true);
+});
+
+test("legacy undifferentiated credentials are rejected after upgrade", async () => {
+	const { createHash } = await import("node:crypto");
+	const repo = new MemoryOwnerRepository();
+	const store = new OwnerStore(repo);
+	const token = await store.claim(await store.init());
+	const id = createHash("sha256").update(token).digest("hex");
+	repo.state.sessions[id] = Date.now() + 180 * 86400000;
+	assert.equal(await store.authenticate(token), false);
+	assert.equal(await store.canApprove(token), false);
 });

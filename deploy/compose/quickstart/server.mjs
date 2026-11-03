@@ -1,22 +1,14 @@
-import { execFileSync } from "node:child_process";
-import {
-	createReadStream,
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	writeFileSync,
-} from "node:fs";
+import { createReadStream, existsSync, readFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
-import { networkInterfaces } from "node:os";
 import { join, resolve } from "node:path";
-import { createSecureContext } from "node:tls";
 import { fileURLToPath } from "node:url";
 import { clientGuard } from "../local/ingress.mjs";
 import { OwnerStore, PgOwnerRepository } from "./owner.mjs";
+import { quickstartTls } from "./tls.mjs";
 
-const COOKIE = "umiak_owner";
+const COOKIE = "__Host-umiak_owner";
 const esc = (value) =>
 	String(value).replace(
 		/[&<>"']/g,
@@ -42,7 +34,7 @@ const page = (res, title, body) => {
 		"cache-control": "no-store",
 	});
 	res.end(
-		`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${esc(title)} · Umiak</title><style>body{font:16px system-ui;max-width:800px;margin:3rem auto;padding:1rem;background:#111827;color:#f3f4f6}input,button{font:inherit;padding:.7rem;margin:.4rem}a{color:#93c5fd}code{overflow-wrap:anywhere}pre{white-space:pre-wrap}</style><h1>${esc(title)}</h1>${body}</html>`,
+		`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${esc(title)} · Umiak</title><style>:root{color-scheme:light dark;--bg:#fefefe;--panel:#fefefe;--fg:#060606;--border:#e0e0e0;--accent:#263fa9}@media(prefers-color-scheme:dark){:root{--bg:#060606;--panel:#060606;--fg:#fefefe;--border:#2e2e2e;--accent:#aab9ff}}*{box-sizing:border-box}body{font:15px/1.6 system-ui;max-width:800px;margin:3rem auto;padding:1.5rem;background:var(--bg);color:var(--fg)}h1{font-size:2rem;letter-spacing:-.04em}input,button{font:inherit;padding:.7rem;margin:.4rem 0;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--fg)}input:not([type=checkbox]){display:block;width:100%}button{cursor:pointer;background:var(--accent);color:var(--bg);font-weight:600}section{border:1px solid var(--border);padding:1rem;border-radius:12px;margin:1rem 0}a{color:var(--accent)}code{overflow-wrap:anywhere}pre{white-space:pre-wrap}nav{display:flex;gap:1.5rem;margin-bottom:2rem}</style><nav><strong>Umiak</strong><a href="/app">Sandboxes</a><a href="/app/getting-started">Getting started</a><a href="/owner/sessions">Sessions</a></nav><h1>${esc(title)}</h1>${body}</html>`,
 	);
 };
 async function body(req) {
@@ -82,7 +74,7 @@ export function upstreamHeaders(req, appOrigin) {
 	const out = {};
 	for (const [key, value] of Object.entries(req.headers)) {
 		if (
-			/^(x-auth-|x-forwarded-|x-umiak-|authorization$|cookie$|proxy-|forwarded$|host$)/i.test(
+			/^(tailscale-|x-auth-|x-forwarded-|x-umiak-|authorization$|cookie$|proxy-|forwarded$|host$)/i.test(
 				key,
 			)
 		)
@@ -127,8 +119,8 @@ export function createQuickstartServer({
 	);
 	const appOrigin = env.UMIAK_APP_ORIGIN ?? "http://localhost:4180";
 	const buckets = new Map();
-	function rate(req) {
-		const key = req.socket.remoteAddress;
+	function rate(req, authenticated = false) {
+		const key = `${req.socket.remoteAddress}:${authenticated ? "owner" : "public"}`;
 		const now = Date.now();
 		const old = buckets.get(key);
 		const next =
@@ -161,15 +153,18 @@ export function createQuickstartServer({
 			)
 				return fail(res, 403, "local_network_forbidden");
 			if (preparation && !rate(req)) return fail(res, 429, "rate_limited");
+			const ownerPrivateCA = !(env.UMIAK_QUICKSTART_SERVE_PEERS ?? "")
+				.split(",")
+				.includes(req.socket.remoteAddress?.replace(/^::ffff:/, ""));
 			const safe = ["GET", "HEAD", "OPTIONS"].includes(req.method);
 			const token = bearer(req);
-			const owner = await store.authenticate(token);
+			const owner = token ? await store.authenticate(token) : false;
 			const browser = !!req.headers.cookie;
 			if (req.headers.origin && req.headers.origin !== origin)
 				return fail(res, 403, "origin_forbidden");
 			if (!safe && browser && req.headers.origin !== origin)
 				return fail(res, 403, "origin_required");
-			if (path.startsWith("/owner/") && !rate(req))
+			if (path.startsWith("/owner/") && !rate(req, owner))
 				return fail(res, 429, "rate_limited");
 			if (path === "/v1/meta" && req.method === "GET") {
 				const reply = await fetch(
@@ -189,6 +184,9 @@ export function createQuickstartServer({
 					apiUrl: origin,
 					appUrl: origin,
 					ownerClaimed: await store.claimed(),
+					ownerPrivateCA: !(env.UMIAK_QUICKSTART_SERVE_PEERS ?? "")
+						.split(",")
+						.includes(req.socket.remoteAddress?.replace(/^::ffff:/, "")),
 				});
 			}
 			if (
@@ -245,7 +243,14 @@ export function createQuickstartServer({
 				return json(res, 200, { claimed: true });
 			}
 			if (path === "/owner/pair" && req.method === "POST")
-				return json(res, 200, await store.pairStart());
+				return json(
+					res,
+					200,
+					await store.pairStart({
+						source: req.socket.remoteAddress,
+						userAgent: req.headers["user-agent"],
+					}),
+				);
 			if (path === "/owner/pair/poll" && req.method === "POST") {
 				const input = await body(req);
 				const credential = await store.pairPoll(input.id, input.secret);
@@ -259,7 +264,8 @@ export function createQuickstartServer({
 				(path === "/pve-setup.sh" || path === "/quickstart/setup/callback") &&
 				setupHandler
 			) {
-				if (await setupHandler(req, res, { origin, owner })) return;
+				if (await setupHandler(req, res, { origin, owner, ownerPrivateCA }))
+					return;
 			}
 			if (!owner) {
 				if (
@@ -269,6 +275,12 @@ export function createQuickstartServer({
 						path === "/setup" ||
 						path === "/owner/pair")
 				) {
+					if (await store.claimed())
+						return page(
+							res,
+							"Open your signed-in deployment address",
+							"<p>This deployment is already claimed. Open this pairing link on the hostname where you signed in. Owner cookies stay on that hostname. Console recovery is available if you lost your session.</p>",
+						);
 					return page(
 						res,
 						"Claim this Umiak deployment",
@@ -277,17 +289,48 @@ export function createQuickstartServer({
 				}
 				return fail(res, 401, "owner_required");
 			}
+			if (
+				!(await store.canApprove(token)) &&
+				(path.startsWith("/quickstart/") ||
+					path === "/setup" ||
+					path === "/owner/tls")
+			)
+				return fail(res, 403, "browser_session_required");
 			if (path === "/owner/tls" && req.method === "GET")
 				return page(
 					res,
 					"HTTPS addresses",
-					`<p>Open initially using localhost or a DNS name. Add LAN/tailnet IPs here for clients that connect by IP. The same CA remains valid.</p><form id="tls"><input id="names" placeholder="192.168.1.10,100.100.1.10"><button>Save certificate names</button></form><pre id="result"></pre><p><a href="/setup">Setup</a></p><script>document.querySelector('#tls').onsubmit=async e=>{e.preventDefault();const r=await fetch('/owner/tls',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({names:document.querySelector('#names').value.split(',').map(x=>x.trim()).filter(Boolean)})});document.querySelector('#result').textContent=r.ok?'Saved. IP clients can now connect with the verified CA.':'Invalid names';};</script>`,
+					`<p>Open initially using localhost or a configured DNS name. Add LAN/tailnet IPs here for clients that connect by IP. Adding names rotates the constrained owner CA. Download and verify the new CA before using these addresses.</p><form id="tls"><input id="names" placeholder="192.168.1.10,100.100.1.10"><label><input id="rotate" type="checkbox" required> I understand that adding names rotates the CA and requires trusting the new fingerprint.</label><button>Save certificate names</button></form><pre id="result"></pre><p><a href="/setup">Setup</a></p><script>document.querySelector('#tls').onsubmit=async e=>{e.preventDefault();const r=await fetch('/owner/tls',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rotateCA:document.querySelector("#rotate").checked,names:document.querySelector('#names').value.split(',').map(x=>x.trim()).filter(Boolean)})});document.querySelector('#result').textContent=r.ok?'Saved. Retrieve the CA through Docker and verify its new fingerprint before connecting.':'Invalid names';};</script>`,
 				);
 			if (path === "/owner/tls" && req.method === "POST") {
 				const input = await body(req);
 				if (!tls.updateNames) return fail(res, 400, "tls_not_configurable");
-				server.setSecureContext(tls.updateNames(input.names));
+				server.setSecureContext(
+					await tls.updateNames(input.names, {
+						rotateCA: input.rotateCA === true,
+					}),
+				);
 				return json(res, 200, { saved: true });
+			}
+			if (path === "/app/help" || path === "/help") {
+				res.writeHead(302, { location: "/app/getting-started" });
+				return res.end();
+			}
+			if (path === "/owner/sessions" && req.method === "GET") {
+				if (!(await store.canApprove(token)))
+					return fail(res, 403, "browser_session_required");
+				const sessions = await store.sessions();
+				return page(
+					res,
+					"Owner sessions",
+					`<p>CLI sessions expire after 30 days. Revoke a lost device here.</p>${sessions.map((x) => `<section><strong>${esc(x.kind)}</strong> · expires ${esc(new Date(x.expires).toISOString())} <button data-session="${esc(x.id)}">Revoke</button></section>`).join("")}<p id="result" role="status"></p><script>document.querySelectorAll('[data-session]').forEach(b=>b.onclick=async()=>{const r=await fetch('/owner/sessions/revoke',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.session})});if(r.ok)location.reload();else document.querySelector('#result').textContent='Could not revoke session';});</script>`,
+				);
+			}
+			if (path === "/owner/sessions/revoke" && req.method === "POST") {
+				if (!(await store.canApprove(token)))
+					return fail(res, 403, "browser_session_required");
+				await store.revokeSession((await body(req)).id);
+				return json(res, 200, { revoked: true });
 			}
 			if (path === "/owner/logout" && req.method === "POST") {
 				await store.revoke(token);
@@ -299,19 +342,24 @@ export function createQuickstartServer({
 			}
 			if (path === "/owner/pair/approve" && req.method === "POST") {
 				const input = await body(req);
-				await store.pairApprove(input.id);
+				if (!(await store.canApprove(token)))
+					return fail(res, 403, "browser_session_required");
+				await store.pairApprove(input.id, input.code);
 				return json(res, 200, { approved: true });
 			}
 			if (path === "/owner/pair" && req.method === "GET") {
 				const id = url.searchParams.get("id");
-				await store.pairInfo(id);
+				const info = await store.pairInfo(id);
 				return page(
 					res,
 					"Approve CLI pairing",
-					`<p>Only approve a request you started in your terminal. Confirm the request identifier matches:</p><code>${esc(id)}</code><p><button id="approve">Approve this CLI</button></p><pre id="message"></pre><script>document.getElementById('approve').onclick=async()=>{const r=await fetch('/owner/pair/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:${JSON.stringify(id)}})});document.getElementById('message').textContent=r.ok?'Approved. Return to your terminal.':'Approval failed or expired.';};</script>`,
+					`<p>Approve only a login you started. Enter the short code printed in your terminal.</p><p>Source: ${esc(info.source)} · ${esc(new Date(info.created).toISOString())}</p><p>Client: ${esc(info.userAgent)}</p><form id="approval"><label>Pairing code <input id="pair-code" autocomplete="off" placeholder="ABCD-1234" required></label><button>Approve CLI</button></form><pre id="message" role="status"></pre><script>document.getElementById('approval').onsubmit=async e=>{e.preventDefault();const r=await fetch('/owner/pair/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:${JSON.stringify(id)},code:document.getElementById('pair-code').value})});document.getElementById('message').textContent=r.ok?'Approved. Return to your terminal.':'Approval failed. Check the code and expiry.';};</script>`,
 				);
 			}
-			if (setupHandler && (await setupHandler(req, res, { origin, owner })))
+			if (
+				setupHandler &&
+				(await setupHandler(req, res, { origin, owner, ownerPrivateCA }))
+			)
 				return;
 			if (path === "/") {
 				res.writeHead(302, { location: "/app" });
@@ -394,134 +442,7 @@ export function createQuickstartServer({
 	return server;
 }
 
-/** A dedicated owner CA, separate from the guest gateway CA and SSH identities. */
-export function quickstartTls(dir, names = []) {
-	mkdirSync(dir, { recursive: true, mode: 0o700 });
-	const run = (args) => execFileSync("openssl", args, { stdio: "ignore" });
-	const ca = join(dir, "ca.pem"),
-		caKey = join(dir, "ca.key");
-	if (!existsSync(ca) || !existsSync(caKey))
-		run([
-			"req",
-			"-sha256",
-			"-x509",
-			"-newkey",
-			"ec",
-			"-pkeyopt",
-			"ec_paramgen_curve:P-256",
-			"-pkeyopt",
-			"ec_param_enc:named_curve",
-			"-nodes",
-			"-days",
-			"3650",
-			"-subj",
-			"/CN=Umiak quickstart owner CA",
-			"-keyout",
-			caKey,
-			"-out",
-			ca,
-			"-addext",
-			"basicConstraints=critical,CA:TRUE",
-			"-addext",
-			"keyUsage=critical,keyCertSign,cRLSign",
-		]);
-	const valid = (name) =>
-		typeof name === "string" &&
-		name.length <= 253 &&
-		(net.isIP(name) ||
-			/^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$/.test(name) ||
-			name === "localhost");
-	const namesFile = join(dir, "tls-names.json");
-	const savedNames = existsSync(namesFile)
-		? JSON.parse(readFileSync(namesFile, "utf8"))
-		: [];
-	const local = [
-		...savedNames,
-		"localhost",
-		"127.0.0.1",
-		"::1",
-		...names,
-		...Object.values(networkInterfaces())
-			.flat()
-			.map((x) => x?.address),
-	].filter(valid);
-	const cache = new Map();
-	function issue(list, key = "default") {
-		const stem = join(dir, key);
-		const conf = `basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=${[...new Set(list)].map((name) => `${net.isIP(name) ? "IP" : "DNS"}:${name}`).join(",")}\n`;
-		writeFileSync(`${stem}.ext`, conf, { mode: 0o600 });
-		run([
-			"req",
-			"-sha256",
-			"-new",
-			"-newkey",
-			"ec",
-			"-pkeyopt",
-			"ec_paramgen_curve:P-256",
-			"-pkeyopt",
-			"ec_param_enc:named_curve",
-			"-nodes",
-			"-subj",
-			"/CN=Umiak owner ingress",
-			"-keyout",
-			`${stem}.key`,
-			"-out",
-			`${stem}.csr`,
-		]);
-		run([
-			"x509",
-			"-sha256",
-			"-req",
-			"-in",
-			`${stem}.csr`,
-			"-CA",
-			ca,
-			"-CAkey",
-			caKey,
-			"-set_serial",
-			`0x${Date.now().toString(16)}${Math.floor(Math.random() * 0xffffff).toString(16)}`,
-			"-days",
-			"90",
-			"-extfile",
-			`${stem}.ext`,
-			"-out",
-			`${stem}.pem`,
-		]);
-		return {
-			key: readFileSync(`${stem}.key`),
-			cert: readFileSync(`${stem}.pem`),
-		};
-	}
-	const fallback = issue(local);
-	return {
-		...fallback,
-		updateNames(extra) {
-			if (
-				!Array.isArray(extra) ||
-				extra.length > 16 ||
-				extra.some((name) => !valid(name))
-			)
-				throw new Error("invalid_tls_names");
-			writeFileSync(namesFile, JSON.stringify(extra), { mode: 0o600 });
-			return issue([...local, ...extra]);
-		},
-		SNICallback(name, cb) {
-			try {
-				if (!valid(name)) throw new Error("invalid_sni");
-				if (!cache.has(name)) {
-					if (cache.size >= 64) throw new Error("sni_limit");
-					cache.set(
-						name,
-						createSecureContext(issue([name], `sni-${cache.size}`)),
-					);
-				}
-				cb(null, cache.get(name));
-			} catch (error) {
-				cb(error);
-			}
-		},
-	};
-}
+export { quickstartTls } from "./tls.mjs";
 
 async function main() {
 	const { default: pg } = await import("pg");
@@ -531,7 +452,7 @@ async function main() {
 	if (code) console.log(`Umiak one-time setup code: ${code}`);
 	const dir =
 		process.env.UMIAK_QUICKSTART_TLS_DIR ?? "/var/lib/umiak/owner/tls";
-	const tls = quickstartTls(
+	const tls = await quickstartTls(
 		dir,
 		(process.env.UMIAK_QUICKSTART_TLS_NAMES ?? "").split(",").filter(Boolean),
 	);

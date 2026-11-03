@@ -168,7 +168,7 @@ async function login(
 				onCode(code) {
 					ctx.out.event("pairing_code", code);
 					ctx.out.info(
-						`Open ${code.verificationUri} in the claimed owner browser. Confirm request ${code.id}.`,
+						`Open ${code.verificationUri} in the claimed owner browser. Enter pairing code ${code.code ?? code.id}.`,
 					);
 					if (opts.browser !== false && process.stderr.isTTY === true)
 						openBrowser(code.verificationUri);

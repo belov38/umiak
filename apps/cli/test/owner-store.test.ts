@@ -31,7 +31,7 @@ it("serializes concurrent claims and pair delivery in Postgres and preserves own
 		expect(JSON.stringify(state.rows)).not.toContain(code);
 		await expect(restarted.claim(code)).rejects.toThrow("invalid_claim");
 		const pair = await restarted.pairStart();
-		await restarted.pairApprove(pair.id);
+		await restarted.pairApprove(pair.id, pair.code);
 		const polls = await Promise.allSettled([
 			store.pairPoll(pair.id, pair.secret),
 			restarted.pairPoll(pair.id, pair.secret),
