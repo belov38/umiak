@@ -10,6 +10,7 @@ export * from "./ids.ts";
 export * from "./jobs.ts";
 export * from "./label.ts";
 export * from "./locks.ts";
+export * from "./node-maintenance.ts";
 export * from "./notifier.ts";
 export * from "./placement.ts";
 export * from "./principal.ts";

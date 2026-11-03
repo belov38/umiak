@@ -3,6 +3,8 @@ import type { Tx } from "@umiak/db";
 import { invalidState, notFound, quotaExceeded } from "./errors.ts";
 import type { JobSender } from "./jobs.ts";
 import { lockNode, lockTeam } from "./locks.ts";
+import { nodeAcceptsStarts } from "./node-maintenance.ts";
+import { nodeUnplaceable } from "./placement.ts";
 import { DELETE_RETRY_LIMIT } from "./queues.ts";
 import {
 	type MachineState,
@@ -85,6 +87,9 @@ export function nodeRam(tx: Tx, nodeId: string): Promise<NodeRam> {
 }
 
 export interface AdmitInput {
+	/** New disks require eligible topology, checked after taking the node lock. */
+	storageId?: string;
+	templateBuildId?: string;
 	nodeId: string;
 	needMb: number;
 	/** `<template_slug>/<size_slug>` of the request; its warm machines are never evicted. */
@@ -131,6 +136,19 @@ export async function admit(tx: Tx, input: AdmitInput): Promise<AdmitResult> {
 async function admitLocked(tx: Tx, input: AdmitInput): Promise<AdmitResult> {
 	const { nodeId, needMb, pairKey, evict, jobs } = input;
 	await lockNode(tx, nodeId);
+	if (!(await nodeAcceptsStarts(tx, nodeId))) return { ok: false };
+	if (
+		input.storageId !== undefined &&
+		(await nodeUnplaceable(tx, nodeId, input.storageId)) !== null
+	)
+		return { ok: false };
+	if (input.templateBuildId !== undefined) {
+		const build = await tx.client.query(
+			"SELECT 1 FROM runtime.template_builds WHERE id=$1 AND node_id=$2 AND storage_id=$3 AND status='active'",
+			[input.templateBuildId, nodeId, input.storageId],
+		);
+		if (!build.rowCount) return { ok: false };
+	}
 	const ram = await nodeRam(tx, nodeId);
 	const deficit = ram.reservedMb + needMb - ram.capMb;
 	if (deficit <= 0) return { ok: true, evicted: [] };
@@ -214,6 +232,7 @@ export async function tryPoweredStart(
 	const nodeId = node.rows[0]?.node_id;
 	if (nodeId === undefined) throw notFound("machine");
 	await lockNode(tx, nodeId);
+	if (!(await nodeAcceptsStarts(tx, nodeId))) return false;
 
 	const cur = await tx.client.query<{ state: MachineState; memory_mb: number }>(
 		"SELECT state, memory_mb FROM runtime.machines WHERE id = $1",

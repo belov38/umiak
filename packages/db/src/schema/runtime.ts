@@ -157,6 +157,7 @@ export const nodes = runtime.table("nodes", {
 	ramCapMb: integer("ram_cap_mb").notNull(),
 	cloneConcurrency: integer("clone_concurrency").notNull().default(4),
 	nodeAgentRef: text("node_agent_ref").notNull(),
+	retiredAt: tstz("retired_at"),
 	lastSeenAt: tstz("last_seen_at"),
 	createdAt: createdAt(),
 	updatedAt: updatedAt(),
@@ -622,4 +623,18 @@ export const desktopTickets = runtime.table("desktop_tickets", {
 	expiresAt: tstz("expires_at").notNull(),
 	usedAt: tstz("used_at"),
 	createdAt: tstz("created_at").notNull().defaultNow(),
+});
+
+// S19 durable node-local build reservations; interruption keeps admission fenced.
+export const nodeBuildJobs = runtime.table("node_build_jobs", {
+	id: text("id").primaryKey(),
+	nodeId: uuid("node_id").notNull(),
+	templateSlug: text("template_slug").notNull(),
+	status: text("status", {
+		enum: ["running", "interrupted", "succeeded", "failed"],
+	})
+		.notNull()
+		.default("running"),
+	createdAt: createdAt(),
+	finishedAt: tstz("finished_at"),
 });

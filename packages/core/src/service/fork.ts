@@ -270,6 +270,7 @@ export async function forkSandbox(
 			src.node_id,
 			size.memoryMb,
 			`${src.template_slug}/${size.slug}`,
+			srcMachine.storageId,
 		);
 
 		const labels: Record<string, string> = input.labels ?? src.labels ?? {};

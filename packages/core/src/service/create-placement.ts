@@ -121,6 +121,8 @@ export async function admitCold(
 	for (const c of candidates) {
 		const res = await admit(tx, {
 			nodeId: c.nodeId,
+			storageId: c.storageId,
+			templateBuildId: c.templateBuildId,
 			needMb,
 			pairKey,
 			evict: true,
@@ -154,6 +156,7 @@ export async function admitOnSnapshotNode(
 		throw outOfCapacity(OUT_OF_CAPACITY_RETRY_SECONDS, undefined, unplaceable);
 	const res = await admit(tx, {
 		nodeId: snap.nodeId,
+		storageId: snap.storageId,
 		needMb,
 		pairKey,
 		evict: true,
@@ -181,9 +184,11 @@ export async function admitOnNode(
 	nodeId: string,
 	needMb: number,
 	pairKey: string,
+	storageId?: string,
 ): Promise<void> {
 	const res = await admit(tx, {
 		nodeId,
+		...(storageId !== undefined ? { storageId } : {}),
 		needMb,
 		pairKey,
 		evict: true,
