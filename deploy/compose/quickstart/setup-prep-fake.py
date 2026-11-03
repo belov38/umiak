@@ -21,8 +21,11 @@ roles, users, tokens, acls = [], [], [], []
 original_path = Path
 sandbox = original_path(tempfile.mkdtemp(prefix="umiak-prep-fake-"))
 commands = []
-objects = {"/cluster/firewall/options": {"enable": 0 if scenario == "disabled-firewall" else 1}, "/nodes/pve/firewall/options": {"enable": 1}, "/cluster/sdn/zones": [], "/cluster/sdn/vnets": [], "/access/acl": acls, "/storage/fast": {"type":"lvmthin","vgname":"custom-vg","thinpool":"custom-pool"}}
+objects = {"/cluster/firewall/options": {"enable": 0 if scenario == "disabled-firewall" else 1}, "/nodes/pve/firewall/options": {"enable": 1}, "/cluster/sdn/zones": [], "/cluster/sdn/vnets": [], "/access/acl": acls, "/storage": [{"storage":"media","type":"dir","content":"iso,import","path":"/srv/media"}], "/storage/fast": {"type":"lvmthin","vgname":"custom-vg","thinpool":"custom-pool"}}
 if scenario == "pending-sdn": objects["/cluster/sdn/zones"] = [{"zone":"foreign","pending":1}]
+if scenario == "pending-subnet":
+    objects["/cluster/sdn/vnets"] = [{"vnet":"foreign"}]
+    objects["/cluster/sdn/vnets/foreign/subnets"] = [{"subnet":"foreign-10.9.0.0-24","state":"changed"}]
 agent = b"fake-node-agent"
 report = {}
 config = {"origin": "https://stack.example:8443", "token": "a" * 64, "node": "pve", "gateway": "192.168.68.90", "publicKey": "ssh-ed25519 AAAA test", "tokenId": "developer@pve!quickstart", "nodeSha256": hashlib.sha256(agent).hexdigest(), "storage": "fast"}
@@ -77,6 +80,10 @@ def run(args, **kwargs):
     args = list(args)
     commands.append(args)
     out = ""
+    if scenario == "collected-timer" and args[:2] == ["systemctl", "stop"]:
+        assert not kwargs.get("check")
+        assert kwargs.get("stderr") == subprocess.DEVNULL
+        return subprocess.CompletedProcess(args, 5, stdout="", stderr="timer already collected")
     if args[:3] == ["pvesh", "get", "/cluster/sdn/zones/umiak"] and "/cluster/sdn/zones/umiak" not in objects:
         raise subprocess.CalledProcessError(2, args)
     if args[:2] == ["pvesh", "get"]:
@@ -142,7 +149,6 @@ def run(args, **kwargs):
     return subprocess.CompletedProcess(args, 0, stdout=out, stderr="")
 
 
-atexit.register = lambda fn: None
 pathlib.Path = mapped
 subprocess.run = run
 os.geteuid = lambda: 0
@@ -155,13 +161,15 @@ def execute():
     try:
         exec(compile(source, "setup-prep.py", "exec"), namespace)
     except BaseException:
-        if "rollback_on_exit" in namespace: namespace["rollback_on_exit"]()
+        if "rollback_on_exit" in namespace:
+            atexit.unregister(namespace["rollback_on_exit"])
+            namespace["rollback_on_exit"]()
         raise
     finally:
-        if "lock" in namespace and not namespace["lock"].closed: namespace["lock"].close()
+        pass
     return namespace
 
-if scenario in ["disabled-firewall", "pending-sdn"]:
+if scenario in ["disabled-firewall", "pending-sdn", "pending-subnet"]:
     try: execute()
     except SystemExit as error: assert "firewall" in str(error) or "Pending SDN" in str(error)
     else: raise AssertionError("Disabled firewall accepted")
@@ -181,17 +189,23 @@ if fail_callback:
     assert mapped("/etc/pve/priv/authorized_keys").read_text() == "existing-management-key\n"
     fail_callback = False
 namespace = execute()
+# Run the real registered atexit callback before retrying in this test process.
+atexit._run_exitfuncs()
 # A successful rerun tolerates every pre-existing object, CIDR, ACL and token.
 namespace = execute()
+atexit._run_exitfuncs()
 assert 'vg = "custom-vg"' in mapped("/etc/umiak-node.toml").read_text()
 assert 'storage = "fast"' in mapped("/etc/umiak-node.toml").read_text()
 if scenario != "success": print("SCENARIO PASS: " + scenario)
 assert mapped("/sys/class/net/vmbr0/bridge/mcast_hash_max").read_text() == "1024"
 assert mapped("/etc/pve/priv/authorized_keys").read_text().startswith("existing-management-key\n")
 assert any(command[:2] == ["systemd-run", "--quiet"] for command in commands)
-assert any(command == ["systemctl", "stop", "umiak-quickstart-rollback.timer"] for command in commands)
+assert sum(command == ["systemctl", "stop", "umiak-quickstart-rollback.timer"] for command in commands) == (3 if scenario in ["partial-failure-rerun", "nonempty-delete"] else 2)
 assert report["tokenSecret"] == "fake-secret"
-assert any("UmiakTemplateMedia" in command and "--roles" in command for command in commands)
+assert any("UmiakTemplateMedia" in command and "/storage/media" in command for command in commands)
+assert not any("/storage/local" in command for command in commands)
+assert report["mediaStorage"] == "media"
+assert 'isoDir = "/srv/media/template/iso"' in mapped("/etc/umiak-node.toml").read_text()
 assert any("VM.GuestAgent.Unrestricted" in " ".join(command) for command in commands)
 assert not any("VM.Monitor" in " ".join(command) for command in commands)
 assert report["sshPublicKey"] == "ssh-ed25519 AAAA"

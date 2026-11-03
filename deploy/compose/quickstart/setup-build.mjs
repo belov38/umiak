@@ -48,6 +48,7 @@ export function buildInvocation(
 		UMIAK_TEMPLATE_VMID: "599",
 		UMIAK_CLUSTER_ID: "1",
 		UMIAK_PVE_STORAGE: limits.storage,
+		UMIAK_PVE_MEDIA_STORAGE: state.mediaStorage || "local",
 		UMIAK_PVE_VNET: "umiak0",
 		UMIAK_PVE_POOL: "umiak",
 		UMIAK_STATE_DB: join(directory, "state.db"),

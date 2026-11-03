@@ -854,6 +854,12 @@ export function createSetupHandler({
 								validateSshPublicKey(input.sshPublicKey),
 							"Host callback credentials are incomplete",
 						);
+						requireValue(
+							typeof input.mediaStorage === "string" &&
+								NAME.test(input.mediaStorage),
+							"Invalid template media storage",
+						);
+						state.mediaStorage = input.mediaStorage;
 						const api = makePve(connection, input.tokenSecret);
 						await api.get("/pools/umiak");
 						await atomicSecret(secretsDir, "pve-token", input.tokenSecret);
@@ -970,6 +976,12 @@ export function createSetupHandler({
 					state.steps.connection?.status === "ready",
 					"Connect Proxmox first",
 				);
+				const storage =
+					input.storage ?? state.steps.limits?.data?.storage ?? "local-lvm";
+				requireValue(
+					typeof storage === "string" && NAME.test(storage),
+					"Invalid storage name",
+				);
 				const mode = input.mode === "fresh" ? "fresh" : "adopt";
 				const token = randomBytes(32).toString("hex");
 				if (
@@ -1004,8 +1016,7 @@ export function createSetupHandler({
 							? "/etc/ssl/certs/ca-certificates.crt"
 							: "/root/.config/umiak/quickstart-ca.pem",
 					mode,
-					storage:
-						input.storage || state.steps.limits?.data?.storage || "local-lvm",
+					storage,
 					guestDns:
 						input.guestDns || state.steps.network?.data?.guestDns || "1.1.1.1",
 					connectionHash: digest(JSON.stringify(state.steps.connection.data)),

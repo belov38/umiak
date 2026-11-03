@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { buildInvocation, TemplateBuildJobs } from "./setup-build.mjs";
 
 const state = {
+	mediaStorage: "images",
 	steps: {
 		connection: {
 			data: {
@@ -27,6 +28,7 @@ test("build invocation binds exact recipe slot, existing credentials and isolate
 	);
 	assert.equal(invocation.env.UMIAK_TEMPLATE_VMID_RANGE, "597-597");
 	assert.equal(invocation.env.UMIAK_VMID_RANGE, "500-589");
+	assert.equal(invocation.env.UMIAK_PVE_MEDIA_STORAGE, "images");
 	assert.equal(
 		invocation.env.UMIAK_PVE_TOKEN_SECRET_FILE,
 		"/secrets/pve-token",

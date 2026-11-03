@@ -19,7 +19,7 @@ export interface Check {
 	detail?: string;
 }
 
-const MEDIA_STORAGE = "local";
+const MEDIA_STORAGE = process.env.UMIAK_PVE_MEDIA_STORAGE || "local";
 const MB = 1024 * 1024;
 
 async function check(

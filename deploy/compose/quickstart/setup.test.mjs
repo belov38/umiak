@@ -296,6 +296,11 @@ test("adoption callback token expires, is single use, and setup denies the confi
 		});
 		return { status, data: JSON.parse(data) };
 	}
+	for (const storage of ["../local", "bad/name", "bad;name", 123]) {
+		const rejected = await request("/quickstart/setup/prepare", { storage });
+		assert.equal(rejected.status, 400);
+		assert.equal(state.preparation, undefined);
+	}
 	const publicPrepared = await request(
 		"/quickstart/setup/prepare",
 		{},

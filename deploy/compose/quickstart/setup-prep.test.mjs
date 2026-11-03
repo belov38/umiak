@@ -49,11 +49,14 @@ test("fresh host real program completes against fake PVE and preserves existing 
 	);
 	assert.equal(result.status, 0, result.stderr);
 	assert.match(result.stdout, /FAKE FRESH HOST PASS/);
+	assert.equal(result.stderr, "");
 	assert.doesNotMatch(result.stdout, /fake-secret/);
 });
 for (const scenario of [
 	"disabled-firewall",
 	"pending-sdn",
+	"pending-subnet",
+	"collected-timer",
 	"partial-failure-rerun",
 	"nonempty-delete",
 ]) {
@@ -69,5 +72,6 @@ for (const scenario of [
 		);
 		assert.equal(result.status, 0, result.stderr);
 		assert.match(result.stdout, new RegExp(`SCENARIO PASS: ${scenario}`));
+		assert.equal(result.stderr, "");
 	});
 }

@@ -8,6 +8,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shlex
 import socket
@@ -71,7 +72,8 @@ if int(get("/cluster/firewall/options").get("enable", 0)) != 1:
 # Read host-rule options without changing them: they do not gate VM isolation.
 node_firewall = get(f"/nodes/{config['node']}/firewall/options")
 # Applying SDN commits all pending changes, so refuse any unrelated transaction.
-for path in ["/cluster/sdn/zones", "/cluster/sdn/vnets"]:
+vnets = get("/cluster/sdn/vnets")
+for path in ["/cluster/sdn/zones", "/cluster/sdn/vnets", *["/cluster/sdn/vnets/" + row["vnet"] + "/subnets" for row in vnets]]:
     if any(row.get("pending") or row.get("state") in ["new", "changed", "deleted"] for row in get(path)):
         raise SystemExit("Pending SDN changes must be applied or reverted by the administrator first")
 for path, expected in [
@@ -95,6 +97,22 @@ if exists("/cluster/firewall/groups/umiak-egress"):
             raise SystemExit("Existing Umiak firewall group differs; use read-only adoption")
         cursor += 1
 storage_name = config.get("storage", "local-lvm")
+if not isinstance(storage_name, str) or not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_-]*", storage_name):
+    raise SystemExit("Invalid storage name")
+# Match the media ACL, node-agent paths and template-builder storage to the same
+# existing directory storage. Do not assume its administrator chose 'local'.
+media_candidates = [row for row in get("/storage") if row.get("type") == "dir"
+                    and {"import", "iso"}.issubset(set(row.get("content", "").split(",")))
+                    and not row.get("disable")
+                    and (not row.get("nodes") or config["node"] in row["nodes"].split(","))]
+media_candidates.sort(key=lambda row: (row["storage"] != "local", row["storage"]))
+if not media_candidates:
+    raise SystemExit("An enabled directory storage with import and iso content is required")
+media = media_candidates[0]
+media_name = media["storage"]
+media_path = media.get("path", "")
+if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_-]*", media_name) or not media_path.startswith("/"):
+    raise SystemExit("Invalid template media storage configuration")
 storage = get("/storage/" + storage_name)
 if storage.get("type") != "lvmthin" or not storage.get("vgname") or not storage.get("thinpool"):
     raise SystemExit("Selected storage must be an existing LVM-thin storage with VG and thinpool")
@@ -210,7 +228,9 @@ def rollback_on_exit():
         finally:
             sys.argv = previous
     lock.close()
-    command("systemctl", "stop", "umiak-quickstart-rollback.timer")
+    # The timer may already have fired or been collected. Exit cleanup is quiet.
+    subprocess.run(["systemctl", "stop", "umiak-quickstart-rollback.timer"],
+                   check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 atexit.register(rollback_on_exit)
 command("systemd-run", "--quiet", "--collect", "--unit=umiak-quickstart-rollback", "--on-active=5min", str(rollback), str(state))
 privs = "VM.Allocate VM.Audit VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.PowerMgmt VM.GuestAgent.Audit VM.GuestAgent.FileRead VM.GuestAgent.FileWrite VM.GuestAgent.FileSystemMgmt VM.GuestAgent.Unrestricted Pool.Audit"
@@ -229,7 +249,7 @@ for role, privileges in [("UmiakTemplateMedia", "Datastore.AllocateTemplate Data
     if not any(x["roleid"] == role for x in roles):
         mutate(["pveum", "role", "add", role, "--privs", privileges], ["pveum", "role", "delete", role])
 for principal_flag, principal in [("--users", user_id), ("--tokens", user_id + "!" + token_name)]:
-    for path, role in [("/pool/umiak", "UmiakPoC"), ("/storage/" + storage_name, "PVEDatastoreUser"), ("/sdn/zones/umiak", "PVESDNUser"), ("/storage/local", "UmiakTemplateMedia"), ("/pool/umiak", "UmiakConsole")]:
+    for path, role in [("/pool/umiak", "UmiakPoC"), ("/storage/" + storage_name, "PVEDatastoreUser"), ("/sdn/zones/umiak", "PVESDNUser"), ("/storage/" + media_name, "UmiakTemplateMedia"), ("/pool/umiak", "UmiakConsole")]:
         if not any(x.get("path") == path and x.get("ugid") == principal and x.get("roleid") == role for x in acls):
             mutate(["pveum", "acl", "modify", path, principal_flag, principal, "--roles", role], ["pveum", "acl", "delete", path, principal_flag, principal, "--roles", role])
 
@@ -259,6 +279,8 @@ node_config = f'''node = "{config['node']}"
 vg = "{storage['vgname']}"
 thinPool = "{storage['thinpool']}"
 storage = "{storage_name}"
+isoDir = {json.dumps(media_path.rstrip("/") + "/template/iso")}
+importDir = {json.dumps(media_path.rstrip("/") + "/import")}
 vmidMin = 500
 vmidMax = 589
 templateVmidMin = 595
@@ -280,11 +302,10 @@ probe = subprocess.run([str(node_binary), "--stdio"], input=json.dumps({"op": "v
 if not json.loads(probe.stdout).get("ok"):
     raise SystemExit("Node-agent verification failed; rollback timer remains armed")
 host_key = Path("/etc/ssh/ssh_host_ed25519_key.pub").read_text().split()
-report = {"token": config["token"], "tokenSecret": token_path.read_text().strip(), "caPem": Path("/etc/pve/pve-root-ca.pem").read_text(), "sshPublicKey": " ".join(host_key[:2])}
+report = {"token": config["token"], "mediaStorage": media_name, "tokenSecret": token_path.read_text().strip(), "caPem": Path("/etc/pve/pve-root-ca.pem").read_text(), "sshPublicKey": " ".join(host_key[:2])}
 request = urllib.request.Request(config["origin"] + "/quickstart/setup/callback", data=json.dumps(report).encode(), headers={"Content-Type": "application/json"}, method="POST")
 with urllib.request.urlopen(request, context=context, timeout=30) as response:
     if response.status != 200:
         raise SystemExit("Callback failed; rollback timer remains armed")
 active_file.unlink(missing_ok=True)
-command("systemctl", "stop", "umiak-quickstart-rollback.timer")
 print("Host prepared and credentials reported. Re-run Adopt in the owner dashboard.")
