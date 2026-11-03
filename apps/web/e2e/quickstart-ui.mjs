@@ -56,6 +56,18 @@ test("quickstart appearance, focus and revoke confirmation", async () => {
 					await page.reload();
 				}
 				await page.evaluate(() => document.fonts.ready);
+				await page.setViewportSize({ width: 390, height: 844 });
+				await page.screenshot({
+					path: `${dir}/${name}-${theme}-390.png`,
+					fullPage: true,
+				});
+				assert.equal(
+					await page.evaluate(
+						() => document.documentElement.scrollWidth <= innerWidth,
+					),
+					true,
+				);
+				await page.setViewportSize({ width: 1440, height: 1000 });
 				await page.screenshot({
 					path: `${dir}/${name}-${theme}.png`,
 					fullPage: true,
@@ -127,6 +139,13 @@ test("quickstart appearance, focus and revoke confirmation", async () => {
 		await capture("setup", "/setup");
 		if (!baseline) {
 			await page.setViewportSize({ width: 390, height: 844 });
+			await page
+				.getByRole("button", { name: "Open navigation", exact: true })
+				.click();
+			await page.getByRole("button", { name: "Dark", exact: true }).click();
+			await page
+				.getByRole("button", { name: "Close navigation", exact: true })
+				.click();
 			assert.equal(
 				await page.evaluate(
 					() => document.documentElement.scrollWidth <= innerWidth,

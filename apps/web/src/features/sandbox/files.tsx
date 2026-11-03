@@ -261,10 +261,9 @@ export function FilesTab({
 						<span key={c.path} className="flex items-center">
 							{i > 1 && <span className="text-muted-foreground">/</span>}
 							<Button
-								variant="ghost"
-								size="sm"
+								variant="link"
+								size="inline"
 								type="button"
-								className="px-0.5 hover:underline"
 								onClick={() => setDir(c.path)}
 							>
 								{c.name}

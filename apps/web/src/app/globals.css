@@ -71,6 +71,7 @@
 }
 
 @theme inline {
+	--color-overlay: var(--overlay);
 	--color-link: var(--link);
 	--color-disabled-foreground: var(--disabled-foreground);
 	--color-warning: var(--warning);
@@ -134,6 +135,7 @@
 }
 
 :root {
+	--overlay: #00000099;
 	--background: #fefefe;
 	--foreground: #060606;
 	--card: #fefefe;

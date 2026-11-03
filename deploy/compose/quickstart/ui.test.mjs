@@ -56,3 +56,21 @@ test("setup auxiliary controls are secondary and side effects ask for confirmati
 	assert.match(html, /confirm\('Run the smoke test/);
 	assert.match(html, /result.warning/);
 });
+
+test("owner navigation and progress follow dashboard composition", () => {
+	const html = renderPage("Owner sessions", "");
+	assert.match(
+		html,
+		/h1\{font-size:2rem;font-weight:400;letter-spacing:-.02em/,
+	);
+	assert.match(html, /href="\/owner\/sessions" aria-current="page"/);
+	assert.match(
+		html,
+		/class="sidebar-footer"><nav aria-label="Owner navigation"><a href="\/setup"/,
+	);
+	assert.match(html, /data-theme="light"[^>]*><svg/);
+	const setup = renderSetup({ steps: {} }, "http://localhost");
+	assert.match(setup, /href="\/setup" aria-current="page"/);
+	assert.match(setup, /role="progressbar"/);
+	assert.doesNotMatch(setup, /<progress/);
+});

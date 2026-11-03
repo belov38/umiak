@@ -13,6 +13,8 @@ const buttonVariants = cva(
 				outline: "border-input bg-background text-foreground hover:bg-muted",
 				secondary:
 					"bg-secondary text-secondary-foreground hover:bg-secondary/80",
+				terminal:
+					"border-border font-mono text-xs text-muted-foreground aria-selected:bg-muted aria-selected:font-medium aria-selected:text-foreground",
 				ghost: "bg-transparent hover:bg-muted active:bg-border",
 				destructive:
 					"bg-transparent text-destructive hover:bg-[var(--destructive-tint)]",
@@ -20,6 +22,9 @@ const buttonVariants = cva(
 			},
 			size: {
 				default: "h-[var(--control-height)] gap-2 px-4",
+				inline: "h-auto gap-1 p-0 text-xs",
+				theme: "h-12 min-w-0 gap-2 px-2",
+				"theme-end": "h-12 min-w-0 gap-2 px-2 border-l border-border",
 				xs: "h-7 gap-1 px-2 text-xs",
 				sm: "h-10 gap-2 px-3",
 				lg: "h-12 gap-2 px-4",

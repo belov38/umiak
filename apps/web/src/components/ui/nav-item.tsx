@@ -17,6 +17,8 @@ export function NavItem({
 				variant === "ghost"
 					? "text-muted-foreground"
 					: "text-secondary-foreground",
+				size === "theme-end" && "border-l border-border",
+				(size === "theme" || size === "theme-end") && "px-2",
 				className,
 			)}
 			{...props}

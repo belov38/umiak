@@ -92,8 +92,7 @@ export function OperatorActions({
 			</Button>
 			<Button
 				size="xs"
-				variant="outline"
-				className="text-destructive"
+				variant="destructive"
 				disabled={busy || !canDelete(sandbox)}
 				onClick={() => setDialog("delete")}
 			>

@@ -136,18 +136,12 @@ export function TerminalTab({
 			<div className="flex flex-wrap items-center gap-1" role="tablist">
 				{tabs.map((t) => (
 					<Button
-						variant="ghost"
-						size="sm"
+						variant="terminal"
+						size="xs"
 						key={t.id}
 						type="button"
 						role="tab"
 						aria-selected={t.id === active}
-						className={cn(
-							"border px-2 py-1 font-mono text-xs",
-							t.id === active
-								? "bg-muted font-medium"
-								: "text-muted-foreground",
-						)}
 						onClick={() => setActive(t.id)}
 					>
 						{ptyTitle(t)}

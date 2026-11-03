@@ -86,10 +86,10 @@ export function OverviewTab({
 					<div className="flex items-center">
 						<h2 className="font-medium">Last commands</h2>
 						<Button
-							variant="ghost"
-							size="sm"
+							variant="link"
+							size="inline"
 							type="button"
-							className="ml-auto text-xs underline"
+							className="ml-auto "
 							onClick={() => onOpenTab("commands")}
 						>
 							All commands
@@ -128,10 +128,10 @@ export function OverviewTab({
 					<div className="flex items-center">
 						<h2 className="font-medium">Published ports</h2>
 						<Button
-							variant="ghost"
-							size="sm"
+							variant="link"
+							size="inline"
 							type="button"
-							className="ml-auto text-xs underline"
+							className="ml-auto "
 							onClick={() => onOpenTab("ports")}
 						>
 							Manage

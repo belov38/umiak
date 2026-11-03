@@ -258,8 +258,8 @@ function KeyTable({
 								{k.createdBy?.email ?? "—"}
 								{note && (
 									<Badge
-										variant="outline"
-										className="ml-2 border-warning/35 text-warning"
+										variant="warning"
+										className="ml-2"
 										data-testid="creator-note"
 									>
 										{note}

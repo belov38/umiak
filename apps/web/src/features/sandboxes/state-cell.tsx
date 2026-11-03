@@ -109,7 +109,7 @@ export function HealthCell({ sandbox }: { sandbox: SandboxData }) {
 		<Tooltip>
 			<TooltipTrigger asChild>
 				<span>
-					<Badge className="bg-warning-tint text-warning">degraded</Badge>
+					<Badge variant="warning">degraded</Badge>
 				</span>
 			</TooltipTrigger>
 			<TooltipContent className="max-w-72">

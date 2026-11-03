@@ -54,19 +54,9 @@ export const JsonField: JSONFieldClientComponent = ({
 				readOnly={disabled}
 				spellCheck={false}
 				rows={Math.min(Math.max(text.split("\n").length, 3), 20)}
-				style={{
-					width: "100%",
-					fontFamily: "var(--font-mono, monospace)",
-					fontSize: "13px",
-					padding: "8px 12px",
-					border: `1px solid ${invalid ? "var(--theme-error-500)" : "var(--theme-elevation-150)"}`,
-					borderRadius: "var(--style-radius-s, 3px)",
-					background: disabled
-						? "var(--theme-elevation-100)"
-						: "var(--theme-input-bg, var(--theme-elevation-0))",
-					color: "var(--theme-elevation-800)",
-					resize: "vertical",
-				}}
+				className="umiak-admin-json"
+				aria-invalid={invalid}
+				data-disabled={disabled}
 				onChange={(e) => {
 					const t = e.target.value;
 					setText(t);
@@ -81,7 +71,7 @@ export const JsonField: JSONFieldClientComponent = ({
 				}}
 			/>
 			{invalid && (
-				<div style={{ color: "var(--theme-error-500)", fontSize: "12px" }}>
+				<div className="umiak-admin-json-error">
 					Invalid JSON: the last valid value is kept.
 				</div>
 			)}

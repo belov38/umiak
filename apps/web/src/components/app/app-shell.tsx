@@ -75,7 +75,7 @@ export function AppShell({
 	const singleOwner = useSingleOwner();
 	const pathname = usePathname();
 	const [mobileOpen, setMobileOpen] = useState(false);
-	const [dark, setDark] = useState(false);
+	const [dark, setDark] = useState<boolean | null>(null);
 	useEffect(() => {
 		setDark(document.documentElement.classList.contains("dark"));
 	}, []);
@@ -392,14 +392,18 @@ function ThemeSwitch({
 	dark,
 	onChange,
 }: {
-	dark: boolean;
+	dark: boolean | null;
 	onChange: (next: boolean) => void;
 }) {
 	return (
-		<fieldset className="dashboard-theme" aria-label="Appearance">
+		<fieldset
+			className="dashboard-theme"
+			aria-label="Appearance"
+			style={{ visibility: dark === null ? "hidden" : "visible" }}
+		>
 			<NavItem
 				variant={!dark ? "secondary" : "ghost"}
-				className="min-w-0 px-2 h-12"
+				size="theme"
 				aria-pressed={!dark}
 				onClick={() => onChange(false)}
 			>
@@ -408,8 +412,8 @@ function ThemeSwitch({
 			</NavItem>
 			<NavItem
 				variant={dark ? "secondary" : "ghost"}
-				className="min-w-0 px-2 h-12 border-l border-border"
-				aria-pressed={dark}
+				size="theme-end"
+				aria-pressed={dark === true}
 				onClick={() => onChange(true)}
 			>
 				<MoonIcon />

@@ -266,7 +266,7 @@ test("local main pages in light and dark", async ({ page }, info) => {
 	);
 	const dir = process.env.UMIAK_VISUAL_DIR ?? info.outputPath("local-ui");
 	mkdirSync(dir, { recursive: true });
-	await page.setViewportSize({ width: 1900, height: 1000 });
+	await page.setViewportSize({ width: 1440, height: 1000 });
 	await page.goto("/app");
 	const keys = await page
 		.getByRole("link", { name: "API keys", exact: true })
@@ -311,6 +311,18 @@ test("local main pages in light and dark", async ({ page }, info) => {
 				if (!button) throw new Error("Appearance control missing");
 				button.click();
 			}, theme);
+			await page.setViewportSize({ width: 390, height: 844 });
+			await page.screenshot({
+				path: join(dir, `${name}-${theme}-390.png`),
+				fullPage: true,
+				animations: "disabled",
+			});
+			expect(
+				await page.evaluate(
+					() => document.documentElement.scrollWidth <= innerWidth,
+				),
+			).toBe(true);
+			await page.setViewportSize({ width: 1440, height: 1000 });
 			await page.screenshot({
 				path: join(dir, `${name}-${theme}.png`),
 				fullPage: true,

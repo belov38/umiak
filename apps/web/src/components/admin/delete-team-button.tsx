@@ -57,11 +57,7 @@ export function DeleteTeamButton({
 				<span
 					role="alert"
 					data-testid="delete-team-refusal"
-					style={{
-						color: "var(--theme-error-500)",
-						fontSize: "13px",
-						maxWidth: "28rem",
-					}}
+					className="umiak-admin-refusal"
 				>
 					{refusal}
 				</span>

@@ -280,10 +280,10 @@ function EnvironmentForm({
 										<span className="font-mono">{k}</span> •••
 									</Badge>
 									<Button
-										variant="ghost"
-										size="sm"
+										variant="link"
+										size="inline"
 										type="button"
-										className="ml-1 text-xs underline"
+										className="ml-1 "
 										onClick={() =>
 											set({ removedSecrets: toggle(form.removedSecrets, k) })
 										}
@@ -327,10 +327,9 @@ function EnvironmentForm({
 										{f.linkPath ? ` · → ${f.linkPath}` : ""}
 									</span>
 									<Button
-										variant="ghost"
-										size="sm"
+										variant="link"
+										size="inline"
 										type="button"
-										className="text-xs underline"
 										onClick={() =>
 											set({
 												removedSecretFiles: toggle(
