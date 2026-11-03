@@ -42,13 +42,15 @@ report = {
     "firewall": get("/cluster/firewall/options"),
 }
 report["nodeFirewall"] = get("/nodes/" + config["node"] + "/firewall/options")
+# Host-rule enable is informational; sandbox VM and NIC enable control isolation.
+# Sealed templates have their build firewall removed; Machines.create installs it.
 report["vmFirewallsValid"] = True
 for vm in get("/nodes/" + config["node"] + "/qemu"):
     vmid = int(vm["vmid"])
-    if not (500 <= vmid <= 589 or 595 <= vmid <= 598):
+    if not (500 <= vmid <= 589) or int(vm.get("template", 0)) == 1:
         continue
     vm_config = get(f"/nodes/{config['node']}/qemu/{vmid}/config")
-    if not any(tag.startswith("umiak") for tag in vm_config.get("tags", "").split(";")):
+    if not vm.get("name", "").startswith("umiak-") and not any(tag.startswith("umiak") for tag in vm_config.get("tags", "").split(";")):
         continue
     options = get(f"/nodes/{config['node']}/qemu/{vmid}/firewall/options")
     if int(options.get("enable", 0)) != 1:

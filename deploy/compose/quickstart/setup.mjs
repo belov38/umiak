@@ -361,7 +361,6 @@ export function createSetupHandler({
 					report.zone?.type === "simple" &&
 					report.vnet?.zone === "umiak" &&
 					Number(report.firewall?.enable) === 1 &&
-					Number(report.nodeFirewall?.enable ?? 1) === 1 &&
 					report.vmFirewallsValid === true,
 				"Existing host report does not match the required isolated Umiak setup",
 			);
@@ -384,7 +383,8 @@ export function createSetupHandler({
 					"SDN VNet",
 					"gateway IPSet",
 					"egress firewall rules",
-					"enabled cluster, node and VM firewalls",
+					"enabled cluster and sandbox VM firewalls",
+					"node host firewall options read (independent of VM isolation)",
 					"restricted node-agent",
 				].map((name) => ({ name, ok: true })),
 				nodeVersion: node.version,

@@ -333,14 +333,15 @@ export async function verifyFirewall(api, connection) {
 	const nodeFirewall = await api.get(
 		`/nodes/${connection.node}/firewall/options`,
 	);
-	if (Number(nodeFirewall.enable ?? 1) !== 1)
-		throw new Error("Node firewall must be enabled");
+	// This switch controls host rules, independently of per-VM isolation.
+	// Sealed templates deliberately have no per-VM firewall; creation installs it.
 	const vms = await api.get(`/nodes/${connection.node}/qemu`);
 	for (const vm of Array.isArray(vms) ? vms : []) {
 		const id = Number(vm.vmid);
-		if (!((id >= 500 && id <= 589) || (id >= 595 && id <= 598))) continue;
+		if (id < 500 || id > 589 || Number(vm.template) === 1) continue;
 		const config = await api.get(`/nodes/${connection.node}/qemu/${id}/config`);
 		if (
+			!String(vm.name || "").startsWith("umiak-") &&
 			!String(config.tags || "")
 				.split(";")
 				.some((tag) => tag === "umiak-tpl" || tag.startsWith("umiak"))
@@ -367,7 +368,11 @@ export async function verifyAdoption(api, connection, nodeCheck) {
 	const token = connection.tokenId.split("!")[1];
 	const checks = [];
 	await verifyFirewall(api, connection);
-	checks.push({ name: "enabled cluster, node and VM firewalls", ok: true });
+	checks.push({ name: "enabled cluster and sandbox VM firewalls", ok: true });
+	checks.push({
+		name: "node host firewall options read (independent of VM isolation)",
+		ok: true,
+	});
 	const check = async (name, path, valid = () => true) => {
 		const result = await api.get(path);
 		if (!valid(result))

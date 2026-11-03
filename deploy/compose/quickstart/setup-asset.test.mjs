@@ -156,7 +156,7 @@ test("fresh node download uses only the expiring setup capability and expires af
 		zone: { type: "simple" },
 		vnet: { zone: "umiak" },
 		firewall: { enable: 1 },
-		nodeFirewall: { enable: 1 },
+		nodeFirewall: { enable: 0 },
 		vmFirewallsValid: true,
 		rules,
 		ipset: [{ cidr: "192.168.68.90" }],

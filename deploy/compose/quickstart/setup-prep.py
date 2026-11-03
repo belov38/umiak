@@ -68,8 +68,8 @@ if command("sysctl", "-n", "net.ipv4.ip_forward") != "1":
     raise SystemExit("Enable IPv4 forwarding for Proxmox SDN before preparation")
 if int(get("/cluster/firewall/options").get("enable", 0)) != 1:
     raise SystemExit("Cluster firewall must already be enabled and verified")
-if int(get(f"/nodes/{config['node']}/firewall/options").get("enable", 1)) != 1:
-    raise SystemExit("Node firewall must already be enabled and verified")
+# Read host-rule options without changing them: they do not gate VM isolation.
+node_firewall = get(f"/nodes/{config['node']}/firewall/options")
 # Applying SDN commits all pending changes, so refuse any unrelated transaction.
 for path in ["/cluster/sdn/zones", "/cluster/sdn/vnets"]:
     if any(row.get("pending") or row.get("state") in ["new", "changed", "deleted"] for row in get(path)):

@@ -447,28 +447,46 @@ test("SSH callback rejects multiline and malformed host keys", async () => {
 		assert.throws(() => validateSshPublicKey(value), /Invalid SSH/);
 });
 
-test("isolation verifies node and VM firewall switches and NIC flags", async () => {
+test("isolation permits disabled host rules and sealed templates but checks sandbox firewalls", async () => {
 	const { verifyFirewall } = await import("./setup-host.mjs");
-	const node = "pve";
 	const data = {
 		"/cluster/firewall/options": { enable: 1 },
-		"/nodes/pve/firewall/options": { enable: 1 },
-		"/nodes/pve/qemu": [{ vmid: 597 }],
+		"/nodes/pve/firewall/options": { enable: 0 },
+		"/nodes/pve/qemu": [
+			{ vmid: 597, template: 1 },
+			{ vmid: 500, name: "umiak-500" },
+		],
 		"/nodes/pve/qemu/597/config": {
 			tags: "umiak-tpl",
+			net0: "virtio=00:11:22:33:44:55,bridge=umiak0",
+		},
+		"/nodes/pve/qemu/597/firewall/options": { enable: 0 },
+		"/nodes/pve/qemu/500/config": {
+			tags: "umiak",
 			net0: "virtio=00:11:22:33:44:55,bridge=umiak0,firewall=1",
 		},
-		"/nodes/pve/qemu/597/firewall/options": { enable: 1 },
+		"/nodes/pve/qemu/500/firewall/options": { enable: 1 },
 	};
-	const api = { get: async (path) => data[path] };
-	await verifyFirewall(api, { node });
-	data["/nodes/pve/firewall/options"].enable = 0;
-	await assert.rejects(() => verifyFirewall(api, { node }), /Node firewall/);
-	data["/nodes/pve/firewall/options"].enable = 1;
-	data["/nodes/pve/qemu/597/firewall/options"].enable = 0;
-	await assert.rejects(() => verifyFirewall(api, { node }), /VM 597 firewall/);
-	data["/nodes/pve/qemu/597/firewall/options"].enable = 1;
-	data["/nodes/pve/qemu/597/config"].net0 =
+	const reads = [];
+	const api = {
+		get: async (path) => {
+			reads.push(path);
+			return data[path];
+		},
+	};
+	const result = await verifyFirewall(api, { node: "pve" });
+	assert.equal(result.nodeFirewall.enable, 0);
+	assert.ok(!reads.some((path) => path.includes("/597/")));
+	data["/nodes/pve/qemu/500/firewall/options"].enable = 0;
+	await assert.rejects(
+		() => verifyFirewall(api, { node: "pve" }),
+		/VM 500 firewall/,
+	);
+	data["/nodes/pve/qemu/500/firewall/options"].enable = 1;
+	data["/nodes/pve/qemu/500/config"].net0 =
 		"virtio=00:11:22:33:44:55,bridge=umiak0";
-	await assert.rejects(() => verifyFirewall(api, { node }), /net0 firewall/);
+	await assert.rejects(
+		() => verifyFirewall(api, { node: "pve" }),
+		/net0 firewall/,
+	);
 });
