@@ -183,10 +183,14 @@ test("keyboard focus remains visible on every control primitive in both themes",
 	const { page } = session;
 	await page.setViewportSize({ width: 1400, height: 1000 });
 	for (const theme of ["Light", "Dark"]) {
+		await page.goto("/app/account");
+		await page.getByRole("button", { name: theme, exact: true }).click();
 		const seen = new Set<string>();
 		for (const path of [`/app/t/${team}/sandboxes/new`, "/app/account"]) {
 			await page.goto(path);
-			await page.getByRole("button", { name: theme, exact: true }).click();
+			await expect(page.locator("html")).toHaveClass(
+				theme === "Dark" ? "dark" : "",
+			);
 			// Return to the start and exercise actual sequential keyboard navigation.
 			await page.evaluate(() => {
 				(document.activeElement as HTMLElement)?.blur();
