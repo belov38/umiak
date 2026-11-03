@@ -132,37 +132,7 @@ export async function resolveCredentials(
 			team,
 		);
 	}
-	try {
-		return await fromAuthCommand(opts, env, url, team);
-	} catch (err) {
-		if (err instanceof Error && /the umiak profile is for/.test(err.message))
-			throw err;
-		if (url !== undefined) {
-			try {
-				const response = await (opts.fetch ?? fetch)(
-					new Request(`${trimSlash(url)}/v1/meta`, {
-						signal: AbortSignal.timeout(2000),
-					}),
-				);
-				if (
-					response.ok &&
-					((await response.json()) as { authMode?: string }).authMode === "none"
-				) {
-					return withTeam(
-						{
-							baseUrl: trimSlash(url),
-							session: true,
-							getToken: async () => "",
-						},
-						team,
-					);
-				}
-			} catch {
-				// Metadata discovery is optional; retain the existing credential chain.
-			}
-		}
-		throw err;
-	}
+	return fromAuthCommand(opts, env, url, team);
 }
 
 /** Explicit options first, then UMIAK_API_KEY, then UMIAK_ACCESS_TOKEN. */
@@ -259,7 +229,6 @@ async function fromAuthCommand(
 	return withTeam(
 		{
 			baseUrl,
-			...(current.kind === "none" ? { session: true as const } : {}),
 			async getToken(force = false, signal) {
 				if (!force && fresh(current)) return current.token;
 				inflight ??= refresh().finally(() => {
@@ -287,7 +256,7 @@ export function parseAuthToken(stdout: string): AuthToken {
 	const ok =
 		typeof o.kind === "string" &&
 		typeof o.token === "string" &&
-		(o.token !== "" || o.kind === "none") &&
+		o.token !== "" &&
 		typeof o.apiUrl === "string" &&
 		(o.expiresAt === null || typeof o.expiresAt === "string") &&
 		(o.team === undefined || o.team === null || typeof o.team === "string");

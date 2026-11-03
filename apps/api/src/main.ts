@@ -4,7 +4,6 @@
 // (src/shutdown.ts): at most 10 s, then exit 0.
 // `@umiak/agent-client` and `@umiak/proto` are loaded from their `dist`: run
 // `pnpm build` once before `node src/main.ts` (the image does it).
-import { warnLocalPolicy } from "@umiak/auth";
 import { createApiLogger } from "./http/logger.ts";
 import { startApi } from "./server.ts";
 import { loadSettings, type Settings } from "./settings.ts";
@@ -21,11 +20,6 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 	const log = createApiLogger({ level: settings.logLevel });
-	if (settings.authMode === "none")
-		process.stderr.write(
-			"WARNING: UMIAK_AUTH_MODE=none: ANY ALLOWED NETWORK CLIENT HAS FULL VM AND PLATFORM CONTROL. No login is required. Restrict UMIAK_LOCAL_ALLOWED_CIDRS.\n",
-		);
-	if (settings.authMode === "none") warnLocalPolicy(process.env);
 	process.on("unhandledRejection", (reason) => {
 		log.error(
 			{ err: reason instanceof Error ? reason.message : String(reason) },

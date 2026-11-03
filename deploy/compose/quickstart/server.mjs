@@ -4,7 +4,7 @@ import net from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalFetch } from "../canonical-fetch.mjs";
-import { clientGuard } from "../local/ingress.mjs";
+import { clientGuard } from "./client-guard.mjs";
 import { requestContext } from "./origin.mjs";
 import { OwnerStore, PgOwnerRepository } from "./owner.mjs";
 import { signinContent, signinIssueContent } from "./signin-ui.mjs";

@@ -15,8 +15,8 @@ it("rejects unallowed socket peers despite a spoofed forwarded address", async (
 		publicUrl: "http://localhost/mcp",
 		issuer: null,
 		log: createLogger({ level: "silent" }),
-		localEnv: {
-			UMIAK_AUTH_MODE: "none",
+		ownerEnv: {
+			UMIAK_AUTH_MODE: "owner",
 			UMIAK_LOCAL_ALLOWED_CIDRS: "127.0.0.0/8",
 		},
 	});
@@ -35,9 +35,9 @@ it("accepts a local request without an OAuth challenge", async () => {
 	const api = createPublicApp(
 		makeTestDeps({
 			settings: testSettings({
-				UMIAK_AUTH_MODE: "none",
+				UMIAK_AUTH_MODE: "owner",
+				UMIAK_LOCAL_ALLOWED_CIDRS: "127.0.0.0/8",
 				UMIAK_API_URL: "http://localhost:4180",
-				UMIAK_LOCAL_ALLOWED_HOSTS: "",
 			}),
 		}),
 	);
@@ -46,8 +46,9 @@ it("accepts a local request without an OAuth challenge", async () => {
 		publicUrl: "http://localhost/mcp",
 		issuer: null,
 		log: createLogger({ level: "silent" }),
-		localEnv: {
-			UMIAK_AUTH_MODE: "none",
+		ownerEnv: {
+			UMIAK_AUTH_MODE: "owner",
+			UMIAK_LOCAL_ALLOWED_CIDRS: "127.0.0.0/8",
 			UMIAK_API_URL: "http://localhost:4180",
 		},
 		fetch: (async (req: Request) => {
@@ -95,16 +96,19 @@ it("accepts a local request without an OAuth challenge", async () => {
 	expect(forwarded).toEqual(["127.0.0.1"]);
 });
 
-it.each(["none", "oidc"] as const)(
+it.each(["owner", "oidc"] as const)(
 	"%s mode keeps a rejected team key unauthorized and advertises OAuth only in oidc",
 	async (mode) => {
 		app = createHttpApp({
 			apiUrl: "http://api",
 			publicUrl: "http://localhost/mcp",
 			issuer:
-				mode === "none" ? null : "https://keycloak.example.com/realms/umiak",
+				mode === "owner" ? null : "https://keycloak.example.com/realms/umiak",
 			log: createLogger({ level: "silent" }),
-			localEnv: { UMIAK_AUTH_MODE: mode },
+			ownerEnv: {
+				UMIAK_AUTH_MODE: mode,
+				UMIAK_LOCAL_ALLOWED_CIDRS: "127.0.0.0/8",
+			},
 			fetch: (async () =>
 				Response.json(
 					{
@@ -146,7 +150,10 @@ it.each(["", "Basic abc", "Bearer", "Bearer umiak_first, Bearer umiak_second"])(
 			publicUrl: "http://localhost/mcp",
 			issuer: null,
 			log: createLogger({ level: "silent" }),
-			localEnv: { UMIAK_AUTH_MODE: "none" },
+			ownerEnv: {
+				UMIAK_AUTH_MODE: "owner",
+				UMIAK_LOCAL_ALLOWED_CIDRS: "127.0.0.0/8",
+			},
 			fetch: (async () => {
 				apiCalls++;
 				throw new Error("must not reach API");
@@ -176,7 +183,7 @@ it("default local MCP transport preserves canonical Host through a real HTTP soc
 	const api = createServer((req, res) => {
 		if (req.headers.host !== "localhost:4180") {
 			res.writeHead(403);
-			res.end("local_host_forbidden");
+			res.end("host_forbidden");
 			return;
 		}
 		res.setHeader("content-type", "application/json");
@@ -196,8 +203,9 @@ it("default local MCP transport preserves canonical Host through a real HTTP soc
 			publicUrl: "http://localhost/mcp",
 			issuer: null,
 			log: createLogger({ level: "silent" }),
-			localEnv: {
-				UMIAK_AUTH_MODE: "none",
+			ownerEnv: {
+				UMIAK_AUTH_MODE: "owner",
+				UMIAK_LOCAL_ALLOWED_CIDRS: "127.0.0.0/8",
 				UMIAK_API_URL: "http://localhost:4180",
 			},
 		});

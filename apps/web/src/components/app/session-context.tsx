@@ -51,7 +51,7 @@ export function useTeamPermission(teamId: string): {
 	};
 }
 
-export const LocalModeContext = createContext(false);
-export function useLocalMode() {
-	return useContext(LocalModeContext);
+export const OwnerModeContext = createContext(false);
+export function useOwnerMode() {
+	return useContext(OwnerModeContext);
 }

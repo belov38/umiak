@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import net from "node:net";
 import { hostname } from "node:os";
-import { clientGuard } from "../local/ingress.mjs";
+import { clientGuard } from "./client-guard.mjs";
 
 function authority(value, protocol) {
 	if (typeof value !== "string" || !value || /[\s/@\\#?]/.test(value))

@@ -657,13 +657,13 @@ func TestProcessDrainTimeout(t *testing.T) {
 	}
 }
 
-func TestAuthMode(t *testing.T) {
-	for _, mode := range []string{"", "oidc", "none", "invalid"} {
+func TestAuthModeOwner(t *testing.T) {
+	for _, mode := range []string{"", "oidc", "owner", "none", "invalid"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newFixture(t)
 			f.env["UMIAK_AUTH_MODE"] = mode
 			cfg, err := FromEnv(f.getenv)
-			if mode == "invalid" {
+			if mode == "invalid" || mode == "none" {
 				if err == nil {
 					t.Fatal("invalid auth mode accepted")
 				}

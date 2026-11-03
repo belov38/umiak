@@ -140,7 +140,6 @@ async def resolve_credentials(
     chain: Chain,
     env: Mapping[str, str],
     auth_command: Sequence[str],
-    metadata_transport: httpx.AsyncBaseTransport | None = None,
 ) -> AsyncCredentials:
     if chain.token is not None:
         if chain.url is None:
@@ -150,23 +149,7 @@ async def resolve_credentials(
         if chain.url is None:
             raise no_api_url()
         return _ProviderToken(chain.url, chain.team, chain.provider)
-    try:
-        current = parse_auth_token(await run_auth_command(auth_command, env))
-    except UmiakError:
-        if chain.url is not None and metadata_transport is not None:
-            request = httpx.Request(
-                "GET",
-                f"{trim_slash(chain.url)}/v1/meta",
-                extensions={"timeout": {"connect": 2.0, "read": 2.0, "write": 2.0, "pool": 2.0}},
-            )
-            try:
-                response = await metadata_transport.handle_async_request(request)
-                await response.aread()
-                if response.is_success and response.json().get("authMode") == "none":
-                    return _FixedToken(chain.url, chain.team, "")
-            except (httpx.HTTPError, ValueError, AttributeError):
-                pass
-        raise
+    current = parse_auth_token(await run_auth_command(auth_command, env))
     if chain.url is not None and not same_api(chain.url, current.api_url):
         raise no_credentials(f"the umiak profile is for {current.api_url}, not {chain.url}")
     return _ProfileToken(
@@ -355,9 +338,7 @@ class AsyncClientCore:
             return self._creds
         async with self._creds_lock:
             if self._creds is None:
-                self._creds = await resolve_credentials(
-                    self._chain, self._env, self._auth_command, self._inner
-                )
+                self._creds = await resolve_credentials(self._chain, self._env, self._auth_command)
             return self._creds
 
     @staticmethod

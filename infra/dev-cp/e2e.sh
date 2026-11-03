@@ -55,7 +55,7 @@ die() {
 	exit 1
 }
 
-[[ "$AUTH_MODE" = none || -s "$E2E_PW" ]] || die "$E2E_PW is missing: run infra/dev-cp/dev-users.sh"
+[[ -s "$E2E_PW" ]] || die "$E2E_PW is missing: run infra/dev-cp/dev-users.sh"
 [[ -s "$CA" ]] || die "$CA is missing: run infra/dev-cp/deploy.sh"
 if [[ ! -x "$UMIAK" ]]; then
 	log "building the CLI"
@@ -159,11 +159,6 @@ BASE_VMS=$(vms_in_range) || die "ssh $PVE_SSH failed"
 [[ -z "$BASE_VMS" ]] || log "note: VMs already in 500-589: $BASE_VMS"
 "$UMIAK" version >/dev/null && pass "umiak $("$UMIAK" version 2>/dev/null | head -1); pve VMs before: ${BASE_VMS:-none}"
 
-if [[ "$AUTH_MODE" = none ]]; then
- step "login (local)"
- "$UMIAK" login --api-url "$API_URL" --credential-store file >"$W/login.out" 2>"$W/login.err" || fail "local login"
- "$UMIAK" whoami --json >"$W/whoami.json" && pass "tokenless owner"
-else
 step "login (device grant)"
 "$UMIAK" login --no-browser --credential-store file --api-url "$API_URL" >"$W/login.out" 2>"$W/login.err" &
 lp=$!
@@ -179,8 +174,6 @@ else
 	kill "$lp" 2>/dev/null
 	KEEP_GOING=0
 	fail "$(cat "$W/login.err" | xargs)"
-fi
-
 fi
 
 step "create --wait"
@@ -274,20 +267,6 @@ done
 r="$(cc "$url/") $(cc "$url/?_token=umiakp_bad") $(cc -H "Umiak-Port-Token: $tok" "$url/") $(cc -H 'Accept: text/html' -c "$W/jar" "$url/?_token=$tok") $(cc -b "$W/jar" "$url/")"
 [[ "$r" == "401 401 200 302 200" ]] && pass "$url: none 401, bad 401, header 200, browser 302+cookie, cookie 200" || fail "codes $r"
 
-if [[ "$AUTH_MODE" = none ]]; then
- step "preview public"
- "$UMIAK" port "$S" 3000 --public >/dev/null
- [[ "$(cc "$url/")" == 200 ]] && pass "public 200" || fail "public preview"
- step "guest control plane isolation"
- "$UMIAK" exec "$S" -- python3 -c 'import socket
-for port in (4180,8080,8090):
- s=socket.socket(); s.settimeout(3)
- try:
-  s.connect(("192.168.68.90",port)); s.sendall(b"GET /v1/meta HTTP/1.1\r\nHost: 192.168.68.90:%d\r\nConnection: close\r\n\r\n" % port); data=s.recv(1024); assert b"403" in data.split(b"\r\n")[0],data
- except (TimeoutError,ConnectionRefusedError,OSError): pass
- finally: s.close()
-print("app/API/MCP blocked or denied")' && pass "all three ports" || fail "guest can reach control plane"
-else
 step "preview sso"
 "$UMIAK" port "$S" 3000 --sso >/dev/null
 r1=$(cc "$url/")
@@ -296,8 +275,6 @@ if [[ "$r1" == 401 ]] && grep -q 'status 200' <<<"$r" && grep -q '__Host-umiak_a
 	pass "non-browser 401; browser: Keycloak login -> /umiak-auth -> callback -> 200 with __Host-umiak_auth"
 else
 	fail "non-browser $r1; $(head -3 <<<"$r" | xargs)"
-fi
-
 fi
 
 step "umiak ssh"

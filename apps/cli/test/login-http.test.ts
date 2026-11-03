@@ -27,17 +27,30 @@ for (const [origin, warning] of [
 	it(`HTTP transport warning=${warning} at login to ${origin}, never for later commands`, async () => {
 		const home = cliHome();
 		let stderr = "";
-		vi.stubGlobal("fetch", async (req: Request) =>
-			Response.json(
-				req.url.endsWith("/meta")
-					? { authMode: "none", tenancy: "single", oidc: null }
-					: {
-							user: { id: "local", email: "local@localhost" },
-							team: { id: "team_local" },
-							auth: { kind: "local", scopes: [] },
-						},
-			),
-		);
+		vi.stubGlobal("fetch", async (req: Request) => {
+			const path = new URL(req.url).pathname;
+			if (path === "/v1/meta")
+				return Response.json({
+					authMode: "owner",
+					tenancy: "single",
+					oidc: null,
+				});
+			if (path === "/owner/pair")
+				return Response.json({
+					id: "pair_1",
+					secret: "s3cret",
+					code: "123456",
+					expiresIn: 600,
+					interval: 0,
+				});
+			if (path === "/owner/pair/poll")
+				return Response.json({ token: "umiak_pairedowner" });
+			return Response.json({
+				user: { id: "local", email: "local@localhost" },
+				team: { id: "team_local" },
+				auth: { kind: "team_key", scopes: [] },
+			});
+		});
 		const run = (argv: string[]) =>
 			runCli({
 				argv: [...argv, "--json"],

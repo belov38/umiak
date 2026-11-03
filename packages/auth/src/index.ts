@@ -4,7 +4,7 @@ export * from "./client-ip.ts";
 export * from "./environments.ts";
 export * from "./identity.ts";
 export * from "./ids.ts";
-export * from "./local-mode.ts";
+export * from "./owner-mode.ts";
 export * from "./pg-store.ts";
 export * from "./scopes.ts";
 export * from "./secret-sets.ts";

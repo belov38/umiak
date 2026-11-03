@@ -4,7 +4,7 @@ import type { Sandbox, SandboxData } from "@umiak/sdk";
 import { useEffect, useRef, useState } from "react";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { QueryError } from "@/components/app/query-error";
-import { useLocalMode } from "@/components/app/session-context";
+import { useOwnerMode } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { desktopBrowserGuidance } from "@/lib/browser-guidance";
@@ -22,7 +22,7 @@ export function DesktopTab({
 	track: (id: string) => void;
 }) {
 	const attempt = useAttempt();
-	const localMode = useLocalMode();
+	const ownerMode = useOwnerMode();
 	const [url, setUrl] = useState<string | null>(null);
 	const [error, setError] = useState<unknown>(null);
 	const [revision, setRevision] = useState(0);
@@ -136,7 +136,7 @@ export function DesktopTab({
 						}}
 					>
 						<option value="token">Secret link</option>
-						{!localMode && <option value="sso">Team members</option>}
+						{!ownerMode && <option value="sso">Team members</option>}
 						<option value="public">Public</option>
 					</NativeSelect>
 				</label>

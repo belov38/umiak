@@ -452,9 +452,3 @@ mise exec -- node apps/api/src/main.ts   # переменные окружени
 ```
 
 Тесты (`vitest`) и `typecheck` от этого не зависят: vitest берёт исходники по условию `source`, а `typecheck` сам собирает `dist`.
-
-## Single-user LAN mode (S15)
-
-Use `docker compose -f deploy/compose/compose.yaml -f deploy/compose/local.yaml up -d --build`
-for a separate `umiak-local` project without Keycloak/oauth2-proxy.
-See [Russian home quickstart](README.local.ru.md) for CIDRs, URLs and the retained WSS/CA requirements.

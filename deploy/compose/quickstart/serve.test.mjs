@@ -7,7 +7,7 @@ import { createQuickstartServer } from "./server.mjs";
 test("trusted HTTPS proxy preserves legacy secure cookie, origin, and CLI bearer; identity headers grant nothing", async (t) => {
 	t.mock.method(globalThis, "fetch", async (_url, options) => {
 		assert.equal(options.headers["x-umiak-client-ip"], "127.0.0.1");
-		return Response.json({ authMode: "none" });
+		return Response.json({ authMode: "owner" });
 	});
 	const store = new OwnerStore(new MemoryOwnerRepository());
 	const token = await store.claim(await store.init());
@@ -123,7 +123,7 @@ test("optional proxy sidecar has no upstream network and uses HTTP ingress", asy
 test("public socket spoofing cannot change origin, cookie selection or client IP", async (t) => {
 	const fetchServer = globalThis.fetch;
 	t.mock.method(globalThis, "fetch", async () =>
-		Response.json({ authMode: "none" }),
+		Response.json({ authMode: "owner" }),
 	);
 	const store = new OwnerStore(new MemoryOwnerRepository());
 	const code = await store.init();

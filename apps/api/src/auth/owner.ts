@@ -1,4 +1,4 @@
-import { isLocalClientAllowed, localSessionHeaders } from "@umiak/auth";
+import { isTrustedIngressClient, ownerSessionHeaders } from "@umiak/auth";
 import type { Context, MiddlewareHandler } from "hono";
 import type { ApiDeps, ApiEnv } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
@@ -9,57 +9,57 @@ import {
 	TEAM_HEADER,
 } from "./principal.ts";
 
-/** Applies even to metadata: the local deployment is private to these networks. */
-export function localNetworkGuard(deps: ApiDeps): MiddlewareHandler<ApiEnv> {
+/**
+ * Applies even to metadata: owner mode is reachable only through the trusted
+ * ingress. The check is on the socket peer, never on forwarded addresses: the
+ * ingress has already admitted (and stamped) the real client.
+ */
+export function ownerNetworkGuard(deps: ApiDeps): MiddlewareHandler<ApiEnv> {
 	let observed = 0;
 	return async (c, next) => {
-		if (deps.settings.authMode === "none" && observed++ < 10)
+		if (deps.settings.authMode !== "owner") return next();
+		const peer = (
+			c.env as
+				| { incoming?: { socket?: { remoteAddress?: string } } }
+				| undefined
+		)?.incoming?.socket?.remoteAddress;
+		if (observed++ < 10)
 			deps.log.info(
-				{
-					clientIp: c.var.clientIp,
-					peer: (
-						c.env as
-							| { incoming?: { socket?: { remoteAddress?: string } } }
-							| undefined
-					)?.incoming?.socket?.remoteAddress,
-				},
-				"local mode observed client address (may be Docker NAT)",
+				{ clientIp: c.var.clientIp, peer },
+				"owner mode observed peer and client address",
 			);
 		if (
-			deps.settings.authMode === "none" &&
-			!isLocalClientAllowed(c.var.clientIp, {
-				UMIAK_LOCAL_ALLOWED_CIDRS: deps.settings.localAllowedCidrs.join(","),
-				UMIAK_LOCAL_DENIED_CIDRS: deps.settings.localDeniedCidrs?.join(","),
+			!isTrustedIngressClient(peer ?? "", {
+				allowed: deps.settings.localAllowedCidrs,
+				denied: deps.settings.localDeniedCidrs ?? [],
 			})
 		)
 			throw new ApiError(
 				403,
-				"local_network_forbidden",
-				"client address is outside UMIAK_LOCAL_ALLOWED_CIDRS",
+				"ingress_required",
+				"owner mode accepts requests from the trusted ingress only",
 			);
-
 		if (
-			deps.settings.authMode === "none" &&
-			!deps.settings.localAllowedHosts.includes(
+			!deps.settings.ownerHosts.includes(
 				c.req.header("host")?.toLowerCase() ?? "",
 			)
 		)
 			throw new ApiError(
 				403,
-				"local_host_forbidden",
-				"Host must match the configured API or app authority (UMIAK_LOCAL_ALLOWED_HOSTS for additional hosts)",
+				"host_forbidden",
+				"Host must match the configured API or app authority",
 			);
 		await next();
 	};
 }
 
-export async function localAuthenticate(
+export async function ownerAuthenticate(
 	deps: ApiDeps,
 	c: Context<ApiEnv>,
 	requested?: string | null,
 ) {
 	// CLI/SDK calls have no Origin. Browsers must use the configured app origin,
-	// and simple cross-site form bodies must never invoke local authority.
+	// and simple cross-site form bodies must never invoke owner authority.
 	const origin = c.req.header("origin");
 	if (origin !== undefined && origin !== deps.settings.appOrigin)
 		throw new ApiError(
@@ -79,10 +79,10 @@ export async function localAuthenticate(
 			throw new ApiError(
 				403,
 				"origin_forbidden",
-				"HTML form content types are not accepted in local mode",
+				"HTML form content types are not accepted in owner mode",
 			);
 	}
-	const s = await deps.sessions.resolve(localSessionHeaders());
+	const s = await deps.sessions.resolve(ownerSessionHeaders());
 	const header = c.req.header(TEAM_HEADER);
 	const team = await selectPersonTeam(
 		deps.identity,

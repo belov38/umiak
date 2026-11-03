@@ -1,12 +1,13 @@
 // Environment of web (S8 §14.1). Parsed once; every problem is reported at
 // once, so a misconfigured deployment is fixed in one round.
-import { authMode, localAllowedCidrs, localDeniedCidrs } from "@umiak/auth";
+import { type AuthMode, ownerCidrSet, parseAuthMode } from "@umiak/auth";
 import { z } from "zod";
 
 export interface WebEnv {
-	authMode: "oidc" | "none";
+	authMode: AuthMode;
+	/** CIDRs of the trusted ingress in `owner` mode. */
 	localAllowedCidrs?: string;
-	/** Effective deny list in `none` mode (explicit list plus node IPs). */
+	/** Effective deny list in `owner` mode (explicit list plus node IPs). */
 	localDeniedCidrs?: string;
 	databaseUrl: string;
 	payloadSecret: string;
@@ -90,16 +91,16 @@ export function parseWebEnv(env: Record<string, string | undefined>): WebEnv {
 		);
 	}
 	const e = r.data;
-	const mode = authMode(env);
-	if (mode === "none") localAllowedCidrs(env);
+	const mode = parseAuthMode(env);
+	const cidrs = mode === "owner" ? ownerCidrSet(env) : undefined;
 	return {
 		authMode: mode,
-		...(mode === "none"
-			? { localDeniedCidrs: localDeniedCidrs(env).join(",") }
-			: {}),
-		...(env.UMIAK_LOCAL_ALLOWED_CIDRS === undefined
+		...(cidrs === undefined
 			? {}
-			: { localAllowedCidrs: env.UMIAK_LOCAL_ALLOWED_CIDRS }),
+			: {
+					localAllowedCidrs: cidrs.allowed.join(","),
+					localDeniedCidrs: cidrs.denied.join(","),
+				}),
 		databaseUrl: e.DATABASE_URL,
 		payloadSecret: e.PAYLOAD_SECRET,
 		appOrigin: e.UMIAK_APP_ORIGIN,
@@ -115,7 +116,7 @@ export function parseWebEnv(env: Record<string, string | undefined>): WebEnv {
 		previewPort:
 			e.UMIAK_PREVIEW_PORT ?? (e.UMIAK_PREVIEW_SCHEME === "http" ? 80 : 443),
 		apiPublicUrl: e.UMIAK_API_PUBLIC_URL.replace(/\/+$/, ""),
-		logoutUrl: mode === "none" ? null : (e.UMIAK_LOGOUT_URL ?? null),
+		logoutUrl: mode === "owner" ? null : (e.UMIAK_LOGOUT_URL ?? null),
 	};
 }
 

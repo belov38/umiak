@@ -26,7 +26,7 @@ describe("server dashboard metadata", () => {
 	});
 	it("defaults old metadata and unavailability to teams", async () => {
 		for (const reply of [
-			new Response(JSON.stringify({ authMode: "none" })),
+			new Response(JSON.stringify({ authMode: "oidc" })),
 			new Response("down", { status: 503 }),
 			new Response("invalid"),
 		]) {

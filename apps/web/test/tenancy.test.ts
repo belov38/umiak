@@ -7,7 +7,6 @@ describe("explicit metadata tenancy", () => {
 		for (const meta of [
 			undefined,
 			{},
-			{ authMode: "none" },
 			{ authMode: "owner" },
 			{ tenancy: "unknown" },
 			{ tenancy: "teams" },
@@ -18,7 +17,7 @@ describe("explicit metadata tenancy", () => {
 		expect(metaTenancy({ tenancy: "single", authMode: "oidc" })).toBe("single");
 	});
 	it("does not teach team concepts in single-owner Getting started", () => {
-		for (const mode of ["owner", "none"] as const) {
+		for (const mode of ["owner"] as const) {
 			const sections = guideSections({
 				mode,
 				tenancy: "single",
@@ -88,7 +87,7 @@ function markup(
 					},
 					member: true,
 					logoutUrl: null,
-					localMode: true,
+					ownerMode: true,
 					quickstart,
 					// biome-ignore lint/correctness/noChildrenProp: Component props require children when using createElement in a .ts test.
 					children: child,

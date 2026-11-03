@@ -2,7 +2,6 @@ from enum import StrEnum
 
 
 class MetaAuthMode(StrEnum):
-    NONE = "none"
     OIDC = "oidc"
     OWNER = "owner"
 

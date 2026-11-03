@@ -5,7 +5,8 @@ import { guard } from "../src/lib/guard.ts";
 const options = {
 	appOrigin: "http://192.168.1.10:4180",
 	operatorGroups: [],
-	authMode: "none" as const,
+	authMode: "owner" as const,
+	localAllowedCidrs: "192.168.1.0/24",
 };
 function request(
 	pathname = "/app",
@@ -15,7 +16,7 @@ function request(
 	return { pathname, method, headers: new Headers(headers) };
 }
 afterEach(() => vi.unstubAllEnvs());
-describe("local web transport boundary", () => {
+describe("owner web transport boundary", () => {
 	it("opens dashboard and admin without oauth headers for an allowed ingress client", () => {
 		for (const path of ["/app", "/admin", "/cms-api/users/me"]) {
 			expect(
@@ -50,7 +51,7 @@ describe("local web transport boundary", () => {
 			)?.status,
 		).toBe(403);
 	});
-	it("keeps CSRF origin checks on plain LAN HTTP", () => {
+	it("keeps CSRF origin checks on plain HTTP", () => {
 		const h = { "x-umiak-client-ip": "192.168.1.20" };
 		expect(guard(request("/app", h, "POST"), options)?.reason).toBe(
 			"origin_forbidden",
@@ -67,7 +68,7 @@ describe("local web transport boundary", () => {
 			guard(
 				request(
 					"/cms-api/users/login",
-					{ "x-umiak-client-ip": "127.0.0.1" },
+					{ "x-umiak-client-ip": "192.168.1.20" },
 					"POST",
 				),
 				options,
@@ -80,7 +81,7 @@ describe("local web transport boundary", () => {
 				?.status,
 		).toBe(401);
 	});
-	it("parses none mode without a sign-out destination", () => {
+	it("parses owner mode without a sign-out destination", () => {
 		const env = parseWebEnv({
 			DATABASE_URL: "postgres://local/db",
 			PAYLOAD_SECRET: "0123456789abcdef",
@@ -88,10 +89,11 @@ describe("local web transport boundary", () => {
 			UMIAK_OPERATOR_GROUPS: "operators",
 			UMIAK_PREVIEW_DOMAIN: "umiak.localhost",
 			UMIAK_API_PUBLIC_URL: "http://192.168.1.10:8080",
-			UMIAK_AUTH_MODE: "none",
+			UMIAK_AUTH_MODE: "owner",
+			UMIAK_LOCAL_ALLOWED_CIDRS: "192.168.1.0/24",
 			UMIAK_LOGOUT_URL: "https://idp/logout",
 		});
-		expect(env.authMode).toBe("none");
+		expect(env.authMode).toBe("owner");
 		expect(env.logoutUrl).toBeNull();
 	});
 });

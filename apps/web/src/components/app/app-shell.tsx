@@ -46,7 +46,7 @@ import {
 import type { AppTeam } from "@/lib/app-session";
 import { signOutHref, switchTeamPath, teamPath } from "@/lib/team-path";
 import { cn } from "@/lib/utils";
-import { LocalModeContext } from "./session-context";
+import { OwnerModeContext } from "./session-context";
 
 const NAV = [
 	{ label: "Sandboxes", section: undefined, icon: BoxIcon },
@@ -59,7 +59,7 @@ export function AppShell({
 	team,
 	member,
 	logoutUrl,
-	localMode = false,
+	ownerMode = false,
 	quickstart = false,
 	children,
 }: {
@@ -67,7 +67,7 @@ export function AppShell({
 	/** False when an operator looks at a team they are not in. */
 	member: boolean;
 	logoutUrl: string | null;
-	localMode?: boolean;
+	ownerMode?: boolean;
 	quickstart?: boolean;
 	children: React.ReactNode;
 }) {
@@ -317,7 +317,7 @@ export function AppShell({
 							<DropdownMenuItem asChild>
 								<Link href="/app/account">Account</Link>
 							</DropdownMenuItem>
-							{!localMode && (
+							{!ownerMode && (
 								<Tooltip>
 									<TooltipTrigger asChild>
 										<DropdownMenuItem asChild>
@@ -379,9 +379,9 @@ export function AppShell({
 			</Dialog>
 			<main id="dashboard-content" className="dashboard-content" tabIndex={-1}>
 				<div className="dashboard-page">
-					<LocalModeContext.Provider value={localMode}>
+					<OwnerModeContext.Provider value={ownerMode}>
 						{children}
-					</LocalModeContext.Provider>
+					</OwnerModeContext.Provider>
 				</div>
 			</main>
 		</div>

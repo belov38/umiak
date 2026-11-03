@@ -165,12 +165,11 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 ## 10. Развёртывание и аутентификация
 
-Режим по умолчанию — `UMIAK_AUTH_MODE=oidc` (описан ниже). S15 добавляет
-опциональный `none` для одного локального owner/operator без Keycloak и
-oauth2-proxy, с обязательным client CIDR guard. Отдельный compose override
-сохраняет WSS/CA гостевых агентов и отдаёт web по HTTP через private ingress.
-Спецификация: `docs/specs/s15-local-mode.md`; домашний запуск:
-`deploy/compose/README.local.ru.md`.
+Режим по умолчанию — `UMIAK_AUTH_MODE=oidc` (описан ниже). Режим `owner`
+(домашний запуск, корневой `compose.yaml`) — один owner/operator за доверенным
+ingress (`deploy/compose/quickstart/server.mjs`): backend принимает только
+сокет-peer ingress из `UMIAK_LOCAL_ALLOWED_CIDRS` и работает под фиксированной
+идентичностью `umiak:local`, без Keycloak и oauth2-proxy.
 
 **Control plane работает в Kubernetes:** `api`, `worker`, `web`, `gateway`, `mcp`, Keycloak (IdP, эксплуатация — S12). Postgres — в кластере (оператор) или внешний. Proxmox-ноды, VM и `umiak-node` остаются вне Kubernetes.
 

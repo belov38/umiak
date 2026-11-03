@@ -21,7 +21,7 @@ export async function DefaultTeamShell({
 			team={team}
 			member
 			logoutUrl={webEnv().logoutUrl}
-			localMode={webEnv().authMode === "none"}
+			ownerMode={webEnv().authMode === "owner"}
 		>
 			{children}
 		</AppShell>

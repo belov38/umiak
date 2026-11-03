@@ -37,8 +37,8 @@ test("metadata bridge uses configured canonical API authority instead of interna
 	t.mock.method(globalThis, "fetch", async (url, options) => {
 		assert.equal(url, "http://api:8080/v1/meta");
 		return new Headers(options.headers).get("host") === "localhost:4180"
-			? Response.json({ authMode: "none" })
-			: new Response("local_host_forbidden", { status: 403 });
+			? Response.json({ authMode: "owner" })
+			: new Response("host_forbidden", { status: 403 });
 	});
 	const server = createMetaProxy(
 		undefined,
@@ -54,5 +54,5 @@ test("metadata bridge uses configured canonical API authority instead of interna
 		{ headers: { host: "evil.example" } },
 	);
 	assert.equal(response.status, 200);
-	assert.deepEqual(await response.json(), { authMode: "none" });
+	assert.deepEqual(await response.json(), { authMode: "owner" });
 });

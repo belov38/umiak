@@ -191,8 +191,8 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	if c.AuthMode == "" {
 		c.AuthMode = "oidc"
 	}
-	if c.AuthMode != "oidc" && c.AuthMode != "none" {
-		return c, fmt.Errorf("UMIAK_AUTH_MODE must be oidc or none")
+	if c.AuthMode != "oidc" && c.AuthMode != "owner" {
+		return c, fmt.Errorf("UMIAK_AUTH_MODE must be oidc or owner")
 	}
 
 	c.InstanceID = l.str("INSTANCE_ID", "")

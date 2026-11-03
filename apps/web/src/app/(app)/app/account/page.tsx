@@ -14,7 +14,7 @@ export default async function AccountPage() {
 		<DefaultTeamShell>
 			<AccountSettings
 				signOutHref={
-					webEnv().authMode === "none" ? null : signOutHref(webEnv().logoutUrl)
+					webEnv().authMode === "owner" ? null : signOutHref(webEnv().logoutUrl)
 				}
 			/>
 		</DefaultTeamShell>

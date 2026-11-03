@@ -22,14 +22,10 @@ describe("Getting started", () => {
 		expect(text).not.toContain("192.168.68.90");
 	});
 	it("uses build-from-source and mode-specific authentication outside quickstart", () => {
-		for (const mode of ["none", "oidc"] as const) {
-			const text = JSON.stringify(guideSections({ ...deployment, mode }));
-			expect(text).toContain("pnpm --filter @umiak/cli build");
-			expect(text).not.toContain("install.sh");
-			expect(text).toContain(
-				mode === "none" ? "No sign-in" : "browser sign-in",
-			);
-		}
+		const text = JSON.stringify(guideSections({ ...deployment, mode: "oidc" }));
+		expect(text).toContain("pnpm --filter @umiak/cli build");
+		expect(text).not.toContain("install.sh");
+		expect(text).toContain("browser sign-in");
 	});
 	it("supports the default LAN HTTP origin and optional HTTPS", () => {
 		const text = JSON.stringify(
@@ -46,7 +42,7 @@ describe("Getting started", () => {
 			new URL("../../../docs/getting-started.md", import.meta.url),
 			"utf8",
 		);
-		for (const mode of ["owner", "none", "oidc"] as const) {
+		for (const mode of ["owner", "oidc"] as const) {
 			for (const section of guideSections({ ...deployment, mode })) {
 				for (const block of section.blocks) {
 					if (block.kind === "code")

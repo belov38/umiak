@@ -240,11 +240,10 @@ This changes only owner access; setup, VM data and guest trust are preserved. Th
 recovery command is deliberately unavailable over HTTP.
 
 Legacy OIDC: `docker compose -f deploy/compose/compose.yaml up -d --build`.
-Legacy S15: add `-f deploy/compose/local.yaml`. Do not run two stacks over the same
-DB simultaneously. Protect and back up named volumes; `down -v` deletes state.
+Do not run two stacks over the same DB simultaneously. Protect and back up named volumes; `down -v` deletes state.
 
 CT590 deployment: `infra/dev-cp/deploy-quickstart.sh`; rollback:
-`UMIAK_DEVCP_AUTH_MODE=none infra/dev-cp/deploy.sh` (or `oidc`). No PVE objects,
+`infra/dev-cp/deploy.sh` (OIDC). No PVE objects,
 gateway CA or guest port are replaced by that quickstart deployment.
 
 ## Local validation
@@ -252,7 +251,7 @@ gateway CA or guest port are replaced by that quickstart deployment.
 Run `pnpm build` before the compiled CLI gate, then:
 
 ```sh
-node --test deploy/compose/canonical-fetch.test.mjs deploy/compose/quickstart/*.test.mjs deploy/compose/local/*.test.mjs deploy/compose/meta-proxy.test.mjs
+node --test deploy/compose/canonical-fetch.test.mjs deploy/compose/quickstart/*.test.mjs deploy/compose/meta-proxy.test.mjs
 ```
 
 Missing host CLI binaries fail the compiled gate. The quickstart fixtures exercise

@@ -1,11 +1,15 @@
 # Zero-config S16 entry point: docker compose up --build
-# The S7/S15/OIDC deployment remains at deploy/compose/compose.yaml.
+# The corporate OIDC deployment remains at deploy/compose/compose.yaml.
 name: umiak-quickstart
 
+# Backends (api, mcp, gateway) accept the socket peer of the trusted owner
+# ingress only; the ingress itself and the web listener admit real clients.
+x-client-cidrs: &client-cidrs 127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,fc00::/7
+
 x-app-env: &app-env
-  UMIAK_AUTH_MODE: none
+  UMIAK_AUTH_MODE: owner
   UMIAK_QUICKSTART: "1"
-  UMIAK_LOCAL_ALLOWED_CIDRS: 127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,fc00::/7
+  UMIAK_LOCAL_ALLOWED_CIDRS: 127.0.0.0/8,::1/128,172.29.116.0/24
   UMIAK_LOCAL_DENIED_CIDRS: ${UMIAK_LOCAL_DENIED_CIDRS:-10.88.0.0/24}
   UMIAK_APP_ORIGIN: http://localhost:4180
   UMIAK_APP_URL: http://localhost:4180
@@ -247,6 +251,8 @@ services:
     command: [node, server.js]
     environment:
       <<: *app-env
+      # Web checks the client address stamped by the ingress, not its peer.
+      UMIAK_LOCAL_ALLOWED_CIDRS: *client-cidrs
       UMIAK_PAYLOAD_SECRET_FILE: /all-secrets/payload-secret
     volumes:
       - network-config:/network-config:ro
@@ -352,6 +358,7 @@ services:
     build: *quickstart-build
     environment:
       <<: *app-env
+      UMIAK_LOCAL_ALLOWED_CIDRS: *client-cidrs
       UMIAK_QUICKSTART_PORT: "4180"
       UMIAK_PUBLIC_URL: ${UMIAK_PUBLIC_URL:-}
       UMIAK_TRUSTED_PROXY_CIDRS: ${UMIAK_TRUSTED_PROXY_CIDRS:-127.0.0.0/8,::1/128}

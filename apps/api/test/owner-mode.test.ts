@@ -1,5 +1,5 @@
 import type { IncomingMessage } from "node:http";
-import { LOCAL_USER_SUB } from "@umiak/auth";
+import { OWNER_USER_SUB } from "@umiak/auth";
 import { describe, expect, it } from "vitest";
 import { createProxiedApp, createPublicApp } from "../src/app.ts";
 import {
@@ -10,22 +10,22 @@ import {
 	testSettings,
 } from "../src/testing/index.ts";
 
+const INGRESS = "172.29.116.10";
+
 function setup(
 	listener: "public" | "proxied" = "public",
-	cidrs?: string,
+	cidrs = "127.0.0.0/8,::1/128,172.29.116.0/24",
 	trusted = "",
-	hosts = "",
 ) {
 	const settings = testSettings({
-		UMIAK_AUTH_MODE: "none",
-		...(cidrs === undefined ? {} : { UMIAK_LOCAL_ALLOWED_CIDRS: cidrs }),
+		UMIAK_AUTH_MODE: "owner",
+		UMIAK_LOCAL_ALLOWED_CIDRS: cidrs,
 		UMIAK_API_TRUSTED_PROXY_CIDRS: trusted,
-		UMIAK_LOCAL_ALLOWED_HOSTS: hosts,
 	});
 	const identity = testIdentityStore({
 		sessions: [
 			{
-				sub: LOCAL_USER_SUB,
+				sub: OWNER_USER_SUB,
 				isOperator: true,
 				teams: [
 					{ teamId: TEST_TEAM_ID, name: "Local", role: "owner" },
@@ -43,7 +43,7 @@ function setup(
 		listener === "public" ? createPublicApp(deps) : createProxiedApp(deps);
 	function request(
 		path = "/v1/me",
-		peer = "192.168.1.2",
+		peer = INGRESS,
 		headers: Record<string, string> = {},
 		method = "GET",
 	) {
@@ -56,11 +56,12 @@ function setup(
 	return { request, settings };
 }
 
-describe("local API", () => {
+describe("owner API", () => {
 	for (const listener of ["public", "proxied"] as const) {
-		it(`${listener}: unauthenticated local owner/operator, forged identity ignored`, async () => {
+		it(`${listener}: the ingress peer authenticates as the owner, forged identity ignored`, async () => {
 			const { request } = setup(listener);
-			const res = await request(undefined, undefined, {
+			const res = await request(undefined, INGRESS, {
+				"x-umiak-client-ip": "100.64.10.20",
 				"x-auth-request-email": "attacker@example.com",
 				"x-auth-request-user": "attacker",
 			});
@@ -69,33 +70,45 @@ describe("local API", () => {
 			expect(JSON.stringify(body)).not.toContain("attacker");
 			expect(JSON.stringify(body)).toContain("owner");
 		});
-		it(`${listener}: denies outside networks even on metadata, ignores spoofed XFF`, async () => {
+		it(`${listener}: rejects peers outside the ingress network even on metadata, ignores spoofed XFF`, async () => {
 			const { request } = setup(listener);
-			expect(
-				(
-					await request("/v1/meta", "8.8.8.8", {
-						"x-forwarded-for": "127.0.0.1",
-					})
-				).status,
-			).toBe(403);
+			const res = await request("/v1/meta", "192.168.1.5", {
+				"x-forwarded-for": "127.0.0.1",
+				"x-umiak-client-ip": "172.29.116.10",
+			});
+			expect(res.status).toBe(403);
+			expect(await res.text()).toContain("ingress_required");
 		});
 	}
-	it("uses trusted proxy chain and replaces defaults", async () => {
-		const { request } = setup("public", "192.168.4.0/24", "10.0.0.0/8");
+	it("checks the socket peer, not the forwarded client address", async () => {
+		const trusted = setup("public", undefined, "172.29.116.0/24");
 		expect(
 			(
-				await request("/v1/meta", "10.0.0.1", {
-					"x-forwarded-for": "192.168.4.10",
+				await trusted.request("/v1/meta", INGRESS, {
+					"x-forwarded-for": "100.64.10.20",
+					"x-umiak-client-ip": "100.64.10.20",
 				})
 			).status,
 		).toBe(200);
+		const outsider = setup("public");
 		expect(
 			(
-				await request("/v1/meta", "10.0.0.1", {
-					"x-forwarded-for": "127.0.0.1,8.8.8.8",
+				await outsider.request("/v1/meta", "192.168.1.5", {
+					"x-forwarded-for": INGRESS,
 				})
 			).status,
 		).toBe(403);
+	});
+	it("requires the ingress allowlist to be configured", () => {
+		expect(() => testSettings({ UMIAK_AUTH_MODE: "owner" })).toThrow(
+			/UMIAK_LOCAL_ALLOWED_CIDRS/,
+		);
+		expect(() =>
+			testSettings({
+				UMIAK_AUTH_MODE: "none",
+				UMIAK_LOCAL_ALLOWED_CIDRS: "127.0.0.0/8",
+			}),
+		).toThrow(/UMIAK_AUTH_MODE must be oidc or owner/);
 	});
 	it("rejects arbitrary Host even on a same-origin GET without Origin", async () => {
 		const { request } = setup();
@@ -106,27 +119,20 @@ describe("local API", () => {
 			403,
 		);
 	});
-	it("accepts configured API, app and explicitly allowed internal authorities", async () => {
-		const { request, settings } = setup("public", undefined, "", "api:8080");
+	it("accepts the configured API and app authorities", async () => {
+		const { request, settings } = setup();
 		for (const host of [
 			new URL(settings.apiUrl).host,
 			new URL(settings.appOrigin).host,
-			"api:8080",
 		])
 			expect((await request("/v1/meta", undefined, { host })).status).toBe(200);
-		expect(
-			(await request("/v1/meta", undefined, { host: "api:8081" })).status,
-		).toBe(403);
-		expect(() =>
-			testSettings({ UMIAK_LOCAL_ALLOWED_HOSTS: "trusted@evil.example" }),
-		).toThrow();
 	});
 
-	it("advertises none and suppresses OIDC", async () => {
+	it("advertises owner, single tenancy and suppresses OIDC", async () => {
 		const { request, settings } = setup();
 		expect(settings.oidc).toBeNull();
 		expect(await (await request("/v1/meta")).json()).toMatchObject({
-			authMode: "none",
+			authMode: "owner",
 			tenancy: "single",
 			oidc: null,
 		});
@@ -148,9 +154,12 @@ describe("local API", () => {
 			).status,
 		).toBe(403);
 	});
-	it("team API keys keep their scoped key identity in none mode", async () => {
+	it("team API keys keep their scoped key identity in owner mode", async () => {
 		const deps = makeTestDeps({
-			settings: testSettings({ UMIAK_AUTH_MODE: "none" }),
+			settings: testSettings({
+				UMIAK_AUTH_MODE: "owner",
+				UMIAK_LOCAL_ALLOWED_CIDRS: "127.0.0.0/8",
+			}),
 		});
 		const r = await createPublicApp(deps).request(
 			"/v1/me",
@@ -168,7 +177,7 @@ describe("local API", () => {
 		expect(await r.json()).toMatchObject({ auth: { kind: "team_key" } });
 	});
 
-	it("does not turn invalid bearer credentials into local authority", async () => {
+	it("does not turn invalid bearer credentials into owner authority", async () => {
 		expect(
 			(
 				await setup().request(undefined, undefined, {
@@ -179,7 +188,7 @@ describe("local API", () => {
 	});
 });
 
-it("local public GET honors team query and rejects conflicting header", async () => {
+it("owner public GET honors team query and rejects conflicting header", async () => {
 	const { request } = setup();
 	const { encodeUuid } = await import("@umiak/auth");
 	const team = encodeUuid("team", "00000000-0000-7000-8000-000000000002");

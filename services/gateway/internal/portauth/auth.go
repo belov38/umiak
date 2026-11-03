@@ -128,8 +128,8 @@ func (a *Auth) Check(w http.ResponseWriter, r *http.Request, l routes.Label, rt 
 	case AccessToken:
 		res = a.checkToken(w, r, l, rt, ip, requestID)
 	case AccessSSO:
-		if a.cfg.AuthMode == "none" || a.cfg.PreviewScheme == "http" {
-			http.Error(w, "sso_unavailable_in_local_mode: use token or public preview access", http.StatusForbidden)
+		if a.cfg.AuthMode == "owner" || a.cfg.PreviewScheme == "http" {
+			http.Error(w, "sso_unavailable_in_owner_mode: use token or public preview access", http.StatusForbidden)
 			res = Result{AuthResult: ResultInvalid}
 			break
 		}

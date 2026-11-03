@@ -8,9 +8,10 @@ import {
 import { testOptions } from "./helpers.ts";
 
 afterEach(() => vi.unstubAllEnvs());
-describe("local Payload identity boundary", () => {
+describe("owner Payload identity boundary", () => {
 	it("rejects unstamped and disallowed clients before touching the database or cache", async () => {
-		vi.stubEnv("UMIAK_AUTH_MODE", "none");
+		vi.stubEnv("UMIAK_AUTH_MODE", "owner");
+		vi.stubEnv("UMIAK_LOCAL_ALLOWED_CIDRS", "127.0.0.0/8,172.29.116.0/24");
 		const payload = {} as Payload;
 		for (const headers of [
 			new Headers(),
@@ -32,20 +33,18 @@ describe("local Payload identity boundary", () => {
 			});
 		}
 	});
-	it("uses a non-Host cookie name and disables admin sign-out only for local HTTP", async () => {
-		vi.stubEnv("UMIAK_AUTH_MODE", "none");
+	it("uses a non-Host cookie name and for an HTTP owner origin", async () => {
+		vi.stubEnv("UMIAK_AUTH_MODE", "owner");
 		const c = await buildUmiakConfig({
 			...testOptions("postgres://local/db"),
 			appOrigin: "http://192.168.1.10:4180",
 		});
 		expect(c.cookiePrefix).toBe("payload");
 		expect(c.csrf).toEqual(["http://192.168.1.10:4180"]);
-		expect(c.admin.components?.logout?.Button).toBe(
-			"/src/components/admin/local-logout#LocalLogout",
-		);
+		expect(c.admin.components?.logout).toBeUndefined();
 	});
-	it("retains the Host cookie for HTTPS local deployments", async () => {
-		vi.stubEnv("UMIAK_AUTH_MODE", "none");
+	it("retains the Host cookie for HTTPS owner deployments", async () => {
+		vi.stubEnv("UMIAK_AUTH_MODE", "owner");
 		const c = await buildUmiakConfig(testOptions("postgres://local/db"));
 		expect(c.cookiePrefix).toBe("__Host-payload");
 	});

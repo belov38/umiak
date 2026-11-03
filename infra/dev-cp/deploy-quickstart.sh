@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # S16 on the existing CT590. Does not touch PVE objects or firewall.
-# Roll back: UMIAK_DEVCP_AUTH_MODE=none|oidc infra/dev-cp/deploy.sh
+# Roll back: infra/dev-cp/deploy.sh (OIDC)
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)

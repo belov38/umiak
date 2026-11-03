@@ -11,7 +11,7 @@ export default async function GettingStartedPage() {
 			<GettingStarted
 				deployment={{
 					tenancy,
-					mode: process.env.UMIAK_QUICKSTART === "1" ? "owner" : env.authMode,
+					mode: env.authMode,
 					apiUrl: env.apiPublicUrl,
 					appUrl: env.appOrigin,
 					previewDomain: env.umiakDomain,

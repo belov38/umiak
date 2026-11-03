@@ -1,7 +1,7 @@
 /** Commands are checked against docs/getting-started.md by the drift test. */
 export interface GuideDeployment {
 	tenancy?: "single" | "teams";
-	mode: "owner" | "none" | "oidc";
+	mode: "owner" | "oidc";
 	apiUrl: string;
 	appUrl: string;
 	previewDomain: string;
@@ -86,9 +86,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 								`umiak login --api-url ${quote(api)}\numiak whoami`,
 							),
 							text(
-								d.mode === "none"
-									? "No sign-in is required in local mode. Access is restricted by the deployment's network policy; never expose the local listener to an untrusted network."
-									: `Login opens browser sign-in through this deployment's identity provider. For unattended clients, use a scoped ${singleOwner ? "" : "team "}API key from API keys.`,
+								`Login opens browser sign-in through this deployment's identity provider. For unattended clients, use a scoped ${singleOwner ? "" : "team "}API key from API keys.`,
 							),
 						],
 		},
@@ -177,7 +175,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 					'[mcp_servers.umiak]\ncommand = "umiak"\nargs = ["mcp"]',
 				),
 				text(
-					`Remote MCP is available at ${mcp}. Local mode needs no credential. OIDC supports browser sign-in; quickstart remote MCP uses an owner credential. Prefer stdio for quickstart so credentials stay in the CLI profile. For HTTPS through your own proxy, remote clients must trust its certificate.`,
+					`Remote MCP is available at ${mcp}. OIDC supports browser sign-in; quickstart remote MCP uses an owner credential. Prefer stdio for quickstart so credentials stay in the CLI profile. For HTTPS through your own proxy, remote clients must trust its certificate.`,
 				),
 				...(d.mode === "oidc"
 					? [

@@ -2436,7 +2436,6 @@
 					"authMode": {
 						"enum": [
 							"oidc",
-							"none",
 							"owner"
 						],
 						"type": "string"

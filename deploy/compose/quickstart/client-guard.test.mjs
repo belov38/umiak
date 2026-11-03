@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { clientGuard } from "./ingress.mjs";
+import { clientGuard } from "./client-guard.mjs";
 
-test("local ingress defaults and mapped addresses", () => {
+test("client guard defaults and mapped addresses", () => {
 	const allow = clientGuard();
 	for (const ip of [
 		"127.0.0.1",

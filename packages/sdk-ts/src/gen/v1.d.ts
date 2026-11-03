@@ -2150,7 +2150,7 @@ export interface components {
              */
             appUrl: string;
             /** @enum {string} */
-            authMode?: "oidc" | "none" | "owner";
+            authMode?: "oidc" | "owner";
             /**
              * @description Build of the api
              * @example 1.4.0+3f2c1a9
