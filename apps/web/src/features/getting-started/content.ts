@@ -58,7 +58,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 				d.mode === "owner"
 					? [
 							text(
-								"Quickstart uses HTTP on your trusted LAN by default. For HTTPS, use Tailscale Serve or your own reverse proxy. Download the installer from this deployment.",
+								"Download the installer from this deployment's tailnet HTTPS address.",
 							),
 							code(
 								"Install CLI",
@@ -138,7 +138,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 			title: "Desktops",
 			blocks: [
 				text(
-					"Windows 11 (`windows`) includes the desktop; Linux offers `linux` and `linux-desktop`. Use `linux-desktop` or `windows` for a graphical session. The old `windows-desktop` slug is accepted as an alias of `windows`. Desktop templates need more RAM than a headless Linux sandbox. The dashboard's Desktop tab has the same viewer. The embedded viewer needs a secure browser context for WebCodecs: use Tailscale Serve (recommended), localhost or your own HTTPS proxy. For localhost, run ssh -L 4180:localhost:4180 <docker-host> and open http://localhost:4180. From LAN HTTP, open the HTTPS viewer in a new tab. For a quick Chrome test only, add this origin at chrome://flags/#unsafely-treat-insecure-origin-as-secure; this weakens browser protection.",
+					"Windows 11 (`windows`) includes the desktop; Linux offers `linux` and `linux-desktop`. Use `linux-desktop` or `windows` for a graphical session. The old `windows-desktop` slug is accepted as an alias of `windows`. Desktop templates need more RAM than a headless Linux sandbox. The dashboard's Desktop tab has the same viewer. The embedded viewer needs a secure browser context for WebCodecs, which the tailnet HTTPS address provides.",
 				),
 				code(
 					"Create a desktop",
@@ -271,7 +271,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 			title: "Troubleshooting",
 			blocks: [
 				text(
-					"Connection timeout: check the URL, LAN or tailnet reachability and deployment network policy. The owner ingress admits only the networks it is configured for. On macOS, check the browser's Local Network permission if curl works but the browser cannot connect.",
+					"Connection timeout: check the URL and that Tailscale is connected on this device, then check deployment network policy.",
 				),
 				text(
 					"Certificate error: check the certificate configured on your HTTPS proxy or guest gateway. Obtain any required CA through a trusted operator channel and compare its fingerprint. Do not bypass certificate verification for an installer.",
@@ -279,7 +279,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 				...(d.mode === "owner"
 					? [
 							text(
-								"New browser or device? Owner sessions live per browser and hostname. Get a ten-minute one-time code from Owner sessions → Sign in another browser in an existing session, or run docker compose exec quickstart node deploy/compose/quickstart/run.mjs node deploy/compose/quickstart/signin-code.mjs on the Docker host. Enter it on the Sign in page. Existing browsers and CLIs stay signed in. CLI credentials cannot issue browser access. Recovery revokes all sessions; use it only as a last resort. An expired CLI pairing request needs a fresh login.",
+								"New browser or device? Owner sessions live per browser and hostname. Get a ten-minute one-time code from Owner sessions → Sign in another browser in an existing session, or run docker compose exec quickstart node deploy/compose/quickstart/run.mjs node deploy/compose/quickstart/signin-code.mjs in the control plane container. Enter it on the Sign in page. Existing browsers and CLIs stay signed in. CLI credentials cannot issue browser access. Recovery revokes all sessions; use it only as a last resort. An expired CLI pairing request needs a fresh login.",
 							),
 						]
 					: []),
@@ -290,7 +290,9 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 				),
 				code("Inspect CLI commands", "umiak --help\numiak mcp --help"),
 				code(
-					"Inspect stack logs (Docker host)",
+					d.mode === "owner"
+						? "Inspect stack logs (control plane container)"
+						: "Inspect stack logs (Docker host)",
 					d.mode === "owner"
 						? "docker compose logs --tail=100 quickstart api worker gateway"
 						: "docker compose logs --tail=100 api worker gateway",
@@ -298,22 +300,5 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 			],
 		},
 	];
-	if (d.mode === "owner")
-		sections.push({
-			id: "hosting",
-			title: "Optional Tailscale Serve",
-			blocks: [
-				text(
-					"Quickstart defaults to LAN HTTP. Operators can use Tailscale Serve or their own HTTPS reverse proxy for a trusted dashboard certificate. Tailscale Serve keeps access within the tailnet; if you use Funnel, this is public. Supply a Tailscale auth key through the environment; never commit it. This is an optional Docker Compose override.",
-				),
-				code(
-					"Start with Tailscale Serve",
-					"TS_AUTHKEY=... TS_HOSTNAME=umiak docker compose -f compose.yaml -f deploy/compose/quickstart/compose.tailscale.yaml up -d --build",
-				),
-				text(
-					"Upgrade note: if host-run Serve still targets localhost:4180, run tailscale serve --bg --https=8443 http://localhost:4181 to preserve HTTPS origin and Secure __Host- owner cookies. Docker Engine 28 or newer is required for loopback publish isolation; Docker Desktop can NAT other containers to the host gateway, so trust containers on that Docker host. Serve covers this dashboard hostname. It cannot serve wildcard preview hostnames: quickstart previews still use the guest gateway HTTP listener on port 8085 by default, with their own DNS configuration.",
-				),
-			],
-		});
 	return sections;
 }

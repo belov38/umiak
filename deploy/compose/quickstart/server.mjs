@@ -53,15 +53,39 @@ async function body(req) {
 	}
 	return JSON.parse(Buffer.concat(chunks).toString() || "{}");
 }
-function bearer(req, origin) {
+// Browsers reach the deployment over Tailscale Serve HTTPS (or http://localhost via
+// ssh -L), and both accept Secure cookies, so only the __Host- cookie exists.
+const ownerCookie = (value, maxAge) =>
+	`${COOKIE}=${value}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${maxAge}`;
+// Port 4180 serves only loopback Host names; everything else belongs on the tailnet HTTPS listener.
+const LOOPBACK_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i;
+const useTailnet = (req, res) => {
+	const message =
+		"Open the tailnet HTTPS address of this deployment instead of this port. Port 4180 is for ssh -L access via localhost only.";
+	if (req.headers.accept?.includes("text/html")) {
+		res.writeHead(403, {
+			"content-type": "text/html; charset=utf-8",
+			"cache-control": "no-store",
+		});
+		return res.end(
+			renderPage(
+				"Use the tailnet address",
+				`<h1>Use the tailnet address</h1><p>${esc(message)}</p><p><code>use_tailnet_https</code></p>`,
+				{ authenticated: false },
+			),
+		);
+	}
+	json(res, 403, {
+		error: { code: "use_tailnet_https", message, retryable: false },
+	});
+};
+function bearer(req) {
 	const a = req.headers.authorization;
 	if (a?.startsWith("Bearer ")) return a.slice(7);
 	return req.headers.cookie
 		?.split(";")
 		.map((x) => x.trim())
-		.find((x) =>
-			x.startsWith(`${origin?.startsWith("https:") ? COOKIE : "umiak_owner"}=`),
-		)
+		.find((x) => x.startsWith(`${COOKIE}=`))
 		?.split("=")
 		.slice(1)
 		.join("=");
@@ -112,19 +136,12 @@ export function createQuickstartServer({
 	proxyListener = false,
 	metadataFetch = canonicalFetch,
 }) {
-	const allowed = clientGuard(
-		env.UMIAK_LOCAL_ALLOWED_CIDRS ??
-			"127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,fc00::/7",
-		env.UMIAK_LOCAL_DENIED_CIDRS ?? "10.88.0.0/24",
-		env,
-	);
 	const clientNotDenied = clientGuard(
 		"0.0.0.0/1,128.0.0.0/1,::/1,8000::/1",
 		env.UMIAK_LOCAL_DENIED_CIDRS ?? "10.88.0.0/24",
 		env,
 	);
 	const appOrigin = env.UMIAK_APP_ORIGIN ?? "http://localhost:4180";
-	let warnedServe = false;
 	const buckets = new Map();
 	function rate(req, authenticated = false) {
 		const key = `${req.umiakClientAddress ?? req.socket.remoteAddress}:${authenticated ? "owner" : "public"}`;
@@ -144,16 +161,10 @@ export function createQuickstartServer({
 		res.setHeader("referrer-policy", "no-referrer");
 		res.setHeader("x-frame-options", "DENY");
 		try {
+			if (!proxyListener && !LOOPBACK_HOST.test(req.headers.host ?? ""))
+				return useTailnet(req, res);
 			const { origin, clientAddress } = requestContext(req, env, proxyListener);
 			req.umiakClientAddress = clientAddress;
-			if (
-				!proxyListener &&
-				!warnedServe &&
-				/\.ts\.net(?::\d+)?$/i.test(req.headers.host ?? "")
-			) {
-				warnedServe = true;
-				console.warn("Tailscale Host arriving on :4180: point Serve at :4181");
-			}
 			const url = new URL(req.url, origin);
 			const path = url.pathname;
 			if (req.method === "GET" && uiAsset(path, res, assetsDir)) return;
@@ -161,21 +172,13 @@ export function createQuickstartServer({
 				? new URL(env.UMIAK_PUBLIC_URL).origin
 				: origin;
 			if (url.origin !== origin) return fail(res, 400, "invalid_path");
-			// Host preparation uses an expiring capability, never network ownership.
-			const preparation =
-				!!setupHandler &&
-				((path === "/pve-setup.sh" && req.method === "GET") ||
-					(path === "/quickstart/setup/callback" && req.method === "POST"));
 			if (
-				!preparation &&
-				(!allowed(req.socket.remoteAddress) ||
-					!clientNotDenied(req.umiakClientAddress) ||
-					(await setupHandler?.deniedPeer?.(req.umiakClientAddress)))
+				!clientNotDenied(req.umiakClientAddress) ||
+				(await setupHandler?.deniedPeer?.(req.umiakClientAddress))
 			)
 				return fail(res, 403, "local_network_forbidden");
-			if (preparation && !rate(req)) return fail(res, 429, "rate_limited");
 			const safe = ["GET", "HEAD", "OPTIONS"].includes(req.method);
-			const token = bearer(req, origin);
+			const token = bearer(req);
 			const owner = token ? await store.authenticate(token) : false;
 			const browser = !!req.headers.cookie;
 			if (req.headers.origin && req.headers.origin !== origin)
@@ -261,10 +264,7 @@ export function createQuickstartServer({
 								req.umiakClientAddress,
 								url.hostname,
 							);
-				res.setHeader(
-					"set-cookie",
-					`${origin.startsWith("https:") ? COOKIE : "umiak_owner"}=${credential}; Path=/; HttpOnly; ${origin.startsWith("https:") ? "Secure; " : ""}SameSite=Strict; Max-Age=15552000`,
-				);
+				res.setHeader("set-cookie", ownerCookie(credential, 15552000));
 				return json(res, 200, { claimed: true });
 			}
 			if (path === "/owner/pair" && req.method === "POST")
@@ -286,12 +286,6 @@ export function createQuickstartServer({
 					credential ? { token: credential } : { pending: true },
 				);
 			}
-			if (
-				(path === "/pve-setup.sh" || path === "/quickstart/setup/callback") &&
-				setupHandler
-			) {
-				if (await setupHandler(req, res, { origin, owner })) return;
-			}
 			if (!owner) {
 				if (req.headers.accept?.includes("application/json"))
 					return fail(res, 401, "owner_required");
@@ -310,7 +304,7 @@ export function createQuickstartServer({
 					return page(
 						res,
 						"Claim this Umiak deployment",
-						`<p>Enter the one-time setup code from <code>docker compose logs quickstart</code>. Network access alone grants no control.</p><form id="claim"><label>Setup code<input id="code" type="password" autocomplete="off" required placeholder="Setup code"></label><button>Claim deployment</button></form><pre id="message" role="status"></pre><script>document.getElementById('claim').onsubmit=async e=>{e.preventDefault();const r=await fetch('/owner/claim',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:document.getElementById('code').value})});if(r.ok)location.reload();else document.getElementById('message').textContent='Claim failed. Check the setup code; it can only be used once.';};</script>`,
+						`<p>Enter the one-time setup code printed by the installer. Network access alone grants no control.</p><form id="claim"><label>Setup code<input id="code" type="password" autocomplete="off" required placeholder="Setup code"></label><button>Claim deployment</button></form><pre id="message" role="status"></pre><script>document.getElementById('claim').onsubmit=async e=>{e.preventDefault();const r=await fetch('/owner/claim',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:document.getElementById('code').value})});if(r.ok)location.reload();else document.getElementById('message').textContent='Claim failed. Check the setup code; it can only be used once.';};</script>`,
 						false,
 					);
 				}
@@ -360,19 +354,12 @@ export function createQuickstartServer({
 					(x) => x.id === id,
 				)?.current;
 				await store.revokeSession(id);
-				if (current)
-					res.setHeader(
-						"set-cookie",
-						`${origin.startsWith("https:") ? COOKIE : "umiak_owner"}=; Path=/; HttpOnly; ${origin.startsWith("https:") ? "Secure; " : ""}SameSite=Strict; Max-Age=0`,
-					);
+				if (current) res.setHeader("set-cookie", ownerCookie("", 0));
 				return json(res, 200, { revoked: true });
 			}
 			if (path === "/owner/logout" && req.method === "POST") {
 				await store.revoke(token);
-				res.setHeader(
-					"set-cookie",
-					`${origin.startsWith("https:") ? COOKIE : "umiak_owner"}=; Path=/; HttpOnly; ${origin.startsWith("https:") ? "Secure; " : ""}SameSite=Strict; Max-Age=0`,
-				);
+				res.setHeader("set-cookie", ownerCookie("", 0));
 				return json(res, 200, { loggedOut: true });
 			}
 			if (path === "/owner/pair/approve" && req.method === "POST") {
@@ -457,13 +444,14 @@ export function createQuickstartServer({
 	server.headersTimeout = 15000;
 	server.on("upgrade", async (req, socket, head) => {
 		try {
+			if (!proxyListener && !LOOPBACK_HOST.test(req.headers.host ?? ""))
+				throw new Error("denied");
 			const { origin, clientAddress } = requestContext(req, env, proxyListener);
 			req.umiakClientAddress = clientAddress;
 			if (
-				!allowed(req.socket.remoteAddress) ||
 				!clientNotDenied(req.umiakClientAddress) ||
 				(await setupHandler?.deniedPeer?.(req.umiakClientAddress)) ||
-				!(await store.authenticate(bearer(req, origin))) ||
+				!(await store.authenticate(bearer(req))) ||
 				(req.headers.origin && req.headers.origin !== origin)
 			)
 				throw new Error("denied");

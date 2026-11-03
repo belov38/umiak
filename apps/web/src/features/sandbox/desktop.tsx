@@ -34,10 +34,9 @@ export function DesktopTab({
 				secureContext: window.isSecureContext,
 				webCodecs: "VideoDecoder" in window,
 				webRTC: "RTCPeerConnection" in window,
-				...(url ? { viewerUrl: url } : {}),
 			}),
 		);
-	}, [url]);
+	}, []);
 	const frame = useRef<HTMLIFrameElement>(null);
 	const ready = sandbox.state === "ready" && !sandbox.blocked;
 	const status = useQuery({

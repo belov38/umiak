@@ -7,7 +7,11 @@ Quickstart owner and local deployments show a single-owner dashboard without tea
 
 The examples below use `https://api.example.com`, `https://app.example.com` and `preview.example.com`. Replace them with the URLs shown in your dashboard. Commands are checked against the in-app guide by `apps/web/test/getting-started.test.ts`.
 
-Quickstart: run `docker compose up -d --build` from the repository root, then follow [the operator quickstart](../deploy/compose/quickstart/README.md).
+Install: on your Proxmox node run the installer, which creates the control plane container and joins your tailnet, then follow [the operator notes](../deploy/compose/quickstart/README.md).
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/belov38/umiak/main/install.sh | sh
+```
 
 ## The model in one minute (owner)
 
@@ -19,7 +23,7 @@ Inactive sandboxes stop automatically according to deployment policy. Their disk
 
 ## Install the CLI (owner)
 
-Quickstart uses HTTP on your trusted LAN by default (`http://HOST:4180`). For remote access and browser secure contexts, use Tailscale Serve (recommended) or your own HTTPS reverse proxy. Replace the example HTTPS origin below with your deployment's origin. No owner CA is generated.
+Your deployment is reachable only at its tailnet HTTPS address (`https://umiak.<tailnet>.ts.net`). Replace the example HTTPS origin below with it. No owner CA is generated.
 
 **Install CLI**
 
@@ -257,7 +261,7 @@ If quota_exceeded or out_of_capacity appears, stop or delete an unused sandbox, 
 
 ## Troubleshooting (owner)
 
-Connection timeout: check the URL, LAN or tailnet reachability and deployment network policy. The owner ingress admits only the networks it is configured for. On macOS, check the browser's Local Network permission if curl works but the browser cannot connect.
+Connection timeout: check the URL and that Tailscale is connected on this device, then check deployment network policy.
 
 Certificate error: check the certificate configured on your own HTTPS proxy or guest gateway. Obtain any required CA through a trusted operator channel and compare its fingerprint. Do not bypass certificate verification for an installer.
 
@@ -272,23 +276,11 @@ umiak --help
 umiak mcp --help
 ```
 
-**Inspect stack logs (Docker host)**
+**Inspect stack logs (control plane container)**
 
 ```text
 docker compose logs --tail=100 quickstart api worker gateway
 ```
-
-## Optional Tailscale Serve
-
-Quickstart defaults to LAN HTTP on port 4180. Tailscale Serve is recommended for private remote access and browser secure contexts. Operators may use their own HTTPS reverse proxy instead. If you use Funnel, this is public; an Internet-facing proxy also exposes the deployment publicly. Owner authentication remains required. Supply a Tailscale auth key through the environment; never commit it. This is an optional Docker Compose override.
-
-**Start with Tailscale Serve**
-
-```text
-TS_AUTHKEY=... TS_HOSTNAME=umiak docker compose -f compose.yaml -f deploy/compose/quickstart/compose.tailscale.yaml up -d --build
-```
-
-Serve covers this dashboard hostname. It cannot serve wildcard preview hostnames: quickstart previews still use the guest gateway HTTP listener on port 8085 and IP-derived sslip.io DNS by default. Setup and Settings show the Funnel public-exposure warning on a `.ts.net` origin. See the operator quickstart for trusted proxy headers and host configuration.
 
 ## The model in one minute (oidc)
 
@@ -449,13 +441,7 @@ umiak mcp --help
 docker compose logs --tail=100 api worker gateway
 ```
 
-## LAN install and private proxy CAs
-
-For a default LAN deployment:
-
-```sh
-curl --fail http://HOST:4180/install.sh -o umiak-install.sh && sh ./umiak-install.sh
-```
+## Private proxy CAs
 
 Generic `--cacert` support is available when your own HTTPS proxy uses a private
 CA. Verify that CA through a trusted operator channel, then use:
@@ -466,36 +452,17 @@ UMIAK_CA_CERT="$PWD/proxy-ca.pem" sh ./umiak-install.sh
 umiak login --api-url https://your-proxy --cacert ./proxy-ca.pem
 ```
 
-Quickstart does not generate an owner CA. Publicly trusted Serve/proxy certificates
-and LAN HTTP need no private CA file.
+Quickstart does not generate an owner CA. The publicly trusted Tailscale Serve
+certificate needs no private CA file.
 
 ## Secure browser features
 
-The desktop viewer follows the preview scheme and port (HTTP8085 in quickstart).
-Its WebSocket video decoder needs WebCodecs `VideoDecoder`, unavailable on LAN
-HTTP. Serve secures the dashboard, not separate wildcard HTTP viewers. An HTTPS
-parent cannot embed an HTTP viewer; use **Open in new tab** for HTTP experiments,
-and set any Chrome test override for that exact viewer origin too. A viewer HTTPS
-proxy resolves that transport restriction; an HTTPS viewer under an HTTP parent
-must be opened in a new tab to avoid the insecure ancestor.
-
-In Chromium, `RTCPeerConnection` exists on LAN HTTP, while `VideoDecoder`,
-`VideoEncoder`, Clipboard API, `navigator.mediaDevices` and `crypto.subtle` do not.
-WebRTC constructor availability is not a full desktop streaming test. Desktop does
-not capture the browser camera/microphone; no dashboard getUserMedia or
-crypto.subtle usage was found. Clipboard falls back to execCommand, then manual
-selection. Dashboard and same-origin WebSocket terminal otherwise work over HTTP.
-
-For features requiring a secure browser context:
-
-1. Use Tailscale Serve (recommended).
-2. Use localhost: for a remote Docker host, run
-   `ssh -L 4180:localhost:4180 <docker-host>` and open `http://localhost:4180`.
-3. Use your own HTTPS reverse proxy with a trusted certificate.
-4. For a quick Chrome test only, add the exact deployment origin at
-   `chrome://flags/#unsafely-treat-insecure-origin-as-secure` and relaunch Chrome.
-   This weakens browser protection; remove the exception after the test. It does
-   not establish certificate trust.
+The tailnet HTTPS address is a secure context, so the desktop viewer's WebSocket
+video decoder (WebCodecs `VideoDecoder`) and the Clipboard API work. For emergency
+access, `ssh -L 4180:<control-plane-ip>:4180 root@<pve-host>` and
+`http://localhost:4180` is also a secure context. Desktop does not capture the
+browser camera/microphone. Clipboard falls back to execCommand, then manual
+selection.
 
 ## Guest certificate lifecycle
 
@@ -513,7 +480,7 @@ Plan rotation before expiry; the CA is never silently replaced or extended.
 
 Owner cookies are per browser and hostname. The Sign in page has no dashboard
 navigation until authenticated. Get a ten-minute, one-use code from an existing
-browser's **Owner sessions → Sign in another browser**, or on the Docker host:
+browser's **Owner sessions → Sign in another browser**, or in the control plane container:
 
 ```sh
 docker compose exec quickstart node deploy/compose/quickstart/run.mjs node deploy/compose/quickstart/signin-code.mjs

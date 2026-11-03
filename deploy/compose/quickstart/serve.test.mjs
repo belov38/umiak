@@ -4,7 +4,7 @@ import test from "node:test";
 import { MemoryOwnerRepository, OwnerStore } from "./owner.mjs";
 import { createQuickstartServer } from "./server.mjs";
 
-test("trusted HTTPS proxy preserves legacy secure cookie, origin, and CLI bearer; identity headers grant nothing", async (t) => {
+test("trusted HTTPS proxy uses the __Host secure cookie, origin, and CLI bearer; identity headers grant nothing", async (t) => {
 	t.mock.method(globalThis, "fetch", async (_url, options) => {
 		assert.equal(options.headers["x-umiak-client-ip"], "127.0.0.1");
 		return Response.json({ authMode: "owner" });
@@ -69,57 +69,6 @@ test("trusted HTTPS proxy preserves legacy secure cookie, origin, and CLI bearer
 		await new Promise((resolve) => server.close(resolve));
 	}
 });
-test("optional proxy sidecar has no upstream network and uses HTTP ingress", async () => {
-	const { execFile } = await import("node:child_process");
-	const { promisify } = await import("node:util");
-	const { readFile } = await import("node:fs/promises");
-	const { stdout } = await promisify(execFile)(
-		"docker",
-		[
-			"compose",
-			"-f",
-			"compose.yaml",
-			"-f",
-			"deploy/compose/quickstart/compose.tailscale.yaml",
-			"config",
-			"--format",
-			"json",
-		],
-		{
-			env: {
-				...process.env,
-				TS_AUTHKEY: "config-only",
-				UMIAK_QUICKSTART_ALLOWED_HOSTS: "lab.example",
-			},
-		},
-	);
-	const config = JSON.parse(stdout);
-	const ingress = config.services.quickstart;
-	assert.ok(
-		ingress.ports.some(
-			(port) => port.target === 4181 && port.host_ip === "127.0.0.1",
-		),
-	);
-	assert.doesNotMatch(
-		ingress.environment.UMIAK_TRUSTED_PROXY_CIDRS,
-		/172\.29\.116\.(?:1|128)\//,
-	);
-
-	assert.equal(
-		config.services.mcp.environment.UMIAK_MCP_ALLOWED_HOSTS,
-		"localhost:4180",
-	);
-	assert.deepEqual(Object.keys(config.services.tailscale.networks), [
-		"serve-internal",
-	]);
-	for (const name of ["api", "mcp", "web", "postgres"])
-		assert.equal(config.services[name].networks["serve-internal"], undefined);
-	const serve = JSON.parse(
-		await readFile(new URL("./tailscale/serve.json", import.meta.url), "utf8"),
-	);
-	assert.ok(JSON.stringify(serve).includes("http://172.30.116.10:4181"));
-});
-
 test("public socket spoofing cannot change origin, cookie selection or client IP", async (t) => {
 	const fetchServer = globalThis.fetch;
 	t.mock.method(globalThis, "fetch", async () =>
@@ -155,8 +104,10 @@ test("public socket spoofing cannot change origin, cookie selection or client IP
 		body: JSON.stringify({ code }),
 	});
 	assert.equal(response.status, 200);
-	assert.match(response.headers.get("set-cookie"), /^umiak_owner=/);
-	assert.doesNotMatch(response.headers.get("set-cookie"), /Secure/);
+	assert.match(
+		response.headers.get("set-cookie"),
+		/^__Host-umiak_owner=.*; Secure;/,
+	);
 	await fetchServer(`${origin}/setup`, {
 		headers: {
 			...headers,

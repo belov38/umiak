@@ -27,14 +27,18 @@ describe("Getting started", () => {
 		expect(text).not.toContain("install.sh");
 		expect(text).toContain("browser sign-in");
 	});
-	it("supports the default LAN HTTP origin and optional HTTPS", () => {
-		const text = JSON.stringify(
-			guideSections({ ...deployment, apiUrl: "http://192.168.1.20:8080" }),
-		);
-		expect(text).toContain("http://192.168.1.20:8080/install.sh");
-		expect(text).not.toContain("--cacert");
-		expect(text).not.toContain("UMIAK_CA_CERT");
-		expect(text).toContain("compose.tailscale.yaml");
+	it("describes tailnet HTTPS access without LAN HTTP or the Compose sidecar", () => {
+		const text = JSON.stringify(guideSections(deployment));
+		expect(text).toContain("tailnet HTTPS address");
+		for (const legacy of [
+			"LAN HTTP",
+			"trusted LAN by default",
+			"compose.tailscale.yaml",
+			"TS_AUTHKEY",
+			"chrome://flags",
+			"Funnel",
+		])
+			expect(text).not.toContain(legacy);
 	});
 
 	it("keeps every guide command in the checked-in documentation", () => {

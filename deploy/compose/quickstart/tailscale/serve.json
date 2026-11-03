@@ -1,9 +1,0 @@
-{
-	"TCP": { "443": { "HTTPS": true } },
-	"Web": {
-		"${TS_CERT_DOMAIN}:443": {
-			"Handlers": { "/": { "Proxy": "http://172.30.116.10:4181" } }
-		}
-	},
-	"AllowFunnel": { "${TS_CERT_DOMAIN}:443": false }
-}

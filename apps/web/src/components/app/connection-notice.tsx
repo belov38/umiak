@@ -1,15 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
-import {
-	certificateExpiryLines,
-	tailnetExposureWarning,
-} from "@/lib/browser-guidance";
+import { certificateExpiryLines } from "@/lib/browser-guidance";
 
 export function ConnectionNotice() {
-	const [warning, setWarning] = useState<string | null>(null);
 	const [certificates, setCertificates] = useState<string[]>([]);
 	useEffect(() => {
-		setWarning(tailnetExposureWarning(window.location.hostname));
 		const controller = new AbortController();
 		fetch("/quickstart/setup/certificates", { signal: controller.signal })
 			.then(async (response) => {
@@ -21,7 +16,6 @@ export function ConnectionNotice() {
 	}, []);
 	return (
 		<>
-			{warning && <p role="status">{warning}</p>}
 			{certificates.map((line) => (
 				<p key={line} role="status">
 					{line}

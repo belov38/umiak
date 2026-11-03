@@ -5,8 +5,8 @@ umask 077
 origin='__UMIAK_ORIGIN__'
 case "$origin" in
  https://*) ;;
- http://*) printf '%s\n' 'Warning: HTTP installation integrity relies on the local network; SHA256SUMS is downloaded over the same channel.' >&2;;
- *) printf '%s\n' 'Installer requires an HTTP or HTTPS origin.' >&2; exit 1;;
+ http://localhost|http://localhost:*|http://127.0.0.1|http://127.0.0.1:*|http://\[::1\]|http://\[::1\]:*) ;;
+ *) printf '%s\n' 'Installer requires the HTTPS tailnet address of this deployment (http only on localhost).' >&2; exit 1;;
 esac
 case "$(uname -s)" in
  Darwin) os=darwin;;

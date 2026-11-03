@@ -3,31 +3,16 @@ import { windowsDesktop } from "./setup-desktop.mjs";
 import { prepareWindowsMedia, validateWindowsMedia } from "./setup-iso.mjs";
 // Owner-only setup orchestration. PVE adoption never writes to the host API.
 
-import { execFile } from "node:child_process";
-import { createHash, randomBytes, X509Certificate } from "node:crypto";
-import { lookup } from "node:dns/promises";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomBytes, X509Certificate } from "node:crypto";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { dirname, join } from "node:path";
-import { promisify } from "node:util";
 import {
 	buildInvocation,
 	runTemplateBuild,
 	TemplateBuildJobs,
 } from "./setup-build.mjs";
-import { renderAdoption, renderPreparation } from "./setup-prep.mjs";
-
 import {
-	allocateTemplateVmid,
-	templateRange,
-	validateTemplateInventory,
-	validateTemplateRange,
-} from "./setup-vmids.mjs";
-
-const execFileAsync = promisify(execFile);
-
-import {
-	atomicSecret,
 	checkNode,
 	normalizedFingerprint,
 	pinnedPve,
@@ -36,24 +21,32 @@ import {
 	verifyIsolation,
 } from "./setup-host.mjs";
 import { renderHelp, renderSetup } from "./setup-ui.mjs";
+import {
+	allocateTemplateVmid,
+	templateRange,
+	validateTemplateInventory,
+	validateTemplateRange,
+} from "./setup-vmids.mjs";
 
 export { renderHelp, renderSetup, verifyAdoption };
 
 const NAME = /^[a-zA-Z][a-zA-Z0-9_-]{0,62}$/;
 const domain = /^(?=.{1,253}$)[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?$/;
-function requireRootCA(pem) {
+export function requireRootCA(pem) {
 	try {
 		const certificate = new X509Certificate(pem);
 		if (!certificate.ca) throw new Error("not a CA");
 	} catch {
 		throw new Error(
-			"A valid PVE root CA certificate is required; supply it in Connect or generate a read-only host report",
+			"A valid PVE root CA certificate is required; re-run the installer on the PVE node to refresh the connection",
 		);
 	}
 	return pem;
 }
-const STEPS = ["connection", "host", "limits", "network", "templates", "smoke"];
-const digest = (value) => createHash("sha256").update(value).digest("hex");
+// Browser-driven steps, in order. `connection` and `host` are internal records
+// written only by the installer import; they gate every step below.
+const STEPS = ["limits", "network", "templates", "smoke"];
+const BOOTSTRAP = ["connection", "host"];
 function requireValue(ok, message) {
 	if (!ok) throw new Error(message);
 }
@@ -223,10 +216,15 @@ export class SetupWizard {
 			if (!Object.hasOwn(this.steps, name))
 				throw new Error("Unknown setup step");
 			if (STEPS.includes(name)) {
-				for (const prior of STEPS.slice(0, STEPS.indexOf(name)))
+				for (const prior of [
+					...BOOTSTRAP,
+					...STEPS.slice(0, STEPS.indexOf(name)),
+				])
 					requireValue(
 						state.steps[prior]?.status === "ready",
-						`Complete ${prior} first`,
+						BOOTSTRAP.includes(prior)
+							? `The installer has not recorded ${prior} yet; re-run it on the PVE node`
+							: `Complete ${prior} first`,
 					);
 			}
 			try {
@@ -236,16 +234,11 @@ export class SetupWizard {
 					data,
 					updatedAt: new Date().toISOString(),
 				};
-				if (name === "connection") {
-					delete state.hostReport;
-					delete state.hostReportAt;
-					delete state.preparation;
-				}
 				for (const next of preserveCompletion
 					? []
 					: STEPS.slice(STEPS.indexOf(name) + 1))
 					if (state.steps[next]) state.steps[next].status = "stale";
-				state.complete = STEPS.every(
+				state.complete = [...BOOTSTRAP, ...STEPS].every(
 					(step) => state.steps[step]?.status === "ready",
 				);
 				await this.store.write(state);
@@ -314,115 +307,6 @@ export function createSetupHandler({
 		);
 	const query = (sql, args) => pool.query(sql, args);
 	const steps = {
-		async connection(input) {
-			const connection = validateConnection(input);
-			const addresses = [];
-			for (const host of [
-				new URL(connection.apiUrl).hostname,
-				connection.sshHost,
-			]) {
-				if (isIP(host)) addresses.push(host);
-				else
-					try {
-						for (const item of await lookup(host, { all: true }))
-							addresses.push(item.address);
-					} catch {}
-			}
-			connection.deniedAddresses = [...new Set(addresses)].sort();
-			const token = (
-				input.tokenSecret || (await readOptional(secretsDir, "pve-token"))
-			).trim();
-			const api = makePve(connection, token);
-			await api.get("/version");
-			if (token) await atomicSecret(secretsDir, "pve-token", token);
-			await atomicSecret(secretsDir, "pve-token-id", connection.tokenId);
-			if (input.caPem)
-				await atomicSecret(
-					secretsDir,
-					"pve-root-ca.pem",
-					requireRootCA(input.caPem),
-				);
-			if (input.sshPrivateKey)
-				await atomicSecret(
-					secretsDir,
-					"umiak-node_ed25519",
-					input.sshPrivateKey,
-				);
-			if (input.knownHosts)
-				await atomicSecret(secretsDir, "known_hosts", input.knownHosts);
-			return connection;
-		},
-		async host(input, state) {
-			requireValue(
-				input.mode === "adopt",
-				"Run the generated preparation script first, then choose adopt to verify",
-			);
-			const connection = connectionOf(state);
-			const api = await pveOf(state);
-			requireValue(
-				requireRootCA(await readOptional(secretsDir, "pve-root-ca.pem")),
-				"PVE root CA is required before host adoption; supply it in Connect or generate a read-only host report",
-			);
-			try {
-				return await verifyAdoption(api, connection, () =>
-					nodeCheck(connection, secretsDir),
-				);
-			} catch (error) {
-				if (
-					error.status !== 403 ||
-					!state.hostReport ||
-					state.hostReportUsed ||
-					!Number.isFinite(Date.parse(state.hostReportAt)) ||
-					Date.now() - Date.parse(state.hostReportAt) > 5 * 60 * 1000
-				)
-					throw new Error(
-						error.message +
-							"; generate a new read-only adoption report, then retry Adopt",
-					);
-			}
-			// Privilege-separated tokens cannot inspect global firewall policy. Accept
-			// only a fresh one-time report obtained with the scoped console capability.
-			state.hostReportUsed = true;
-			const report = state.hostReport;
-			verifyIsolation(report.rules, report.ipset, undefined, report.denySets);
-			requireValue(
-				Number(report.user?.enable ?? 1) === 1 &&
-					report.zone?.type === "simple" &&
-					report.vnet?.zone === "umiak" &&
-					Number(report.firewall?.enable) === 1 &&
-					report.vmFirewallsValid === true,
-				"Existing host report does not match the required isolated Umiak setup",
-			);
-			await api.get("/pools/umiak");
-			const node = await nodeCheck(connection, secretsDir);
-			requireValue(
-				node.version &&
-					node.config?.vmidMin === 500 &&
-					node.config?.vmidMax === 589 &&
-					node.config?.vnet === "umiak0",
-				"Restricted node-agent configuration mismatch",
-			);
-			return {
-				checks: [
-					"user",
-					"token",
-					"role",
-					"pool",
-					"SDN zone",
-					"SDN VNet",
-					"gateway IPSet",
-					"egress firewall rules",
-					"enabled cluster and sandbox VM firewalls",
-					"node host firewall options read (independent of VM isolation)",
-					"restricted node-agent",
-				].map((name) => ({ name, ok: true })),
-				nodeVersion: node.version,
-				reportAt: state.hostReportAt,
-				ipset: report.ipset,
-				rules: report.rules,
-				denySets: report.denySets,
-			};
-		},
 		async limits(input, state) {
 			const limits = validateLimits({ ...templateRange(state), ...input });
 			Object.assign(
@@ -739,7 +623,7 @@ export function createSetupHandler({
 	const jobs = new TemplateBuildJobs({
 		store,
 		validate: async (slug, state, input) => {
-			for (const step of ["connection", "host", "limits", "network"])
+			for (const step of [...BOOTSTRAP, "limits", "network"])
 				requireValue(
 					state.steps[step]?.status === "ready",
 					`Complete ${step} before building`,
@@ -858,39 +742,6 @@ export function createSetupHandler({
 			);
 		},
 	});
-	const preparationScript = async (prep, connection, token) => {
-		const publicKey = (
-			await readOptional(secretsDir, "umiak-node_ed25519.pub")
-		).trim();
-		let nodeSha256;
-		try {
-			nodeSha256 = digest(
-				await readFile(join(assetsDir, "umiak-node-linux-amd64")),
-			);
-		} catch {}
-		if (prep.mode === "fresh")
-			requireValue(
-				nodeSha256,
-				"Node-agent build asset is missing; rebuild the quickstart image before preparing a host",
-			);
-		const config = {
-			origin: prep.origin,
-			token,
-			publicKey,
-			gateway: prep.gateway,
-			node: connection.node,
-			tokenId: connection.tokenId,
-			nodeSha256,
-			storage: prep.storage,
-			templateVmidMin: prep.templateVmidMin,
-			templateVmidMax: prep.templateVmidMax,
-			guestDns: prep.guestDns,
-			caPath: prep.caPath,
-		};
-		return prep.mode === "fresh"
-			? renderPreparation(config)
-			: renderAdoption(config);
-	};
 	const handler = async (req, res, context) => {
 		const path = new URL(req.url, context.origin).pathname;
 		if (
@@ -900,130 +751,6 @@ export function createSetupHandler({
 			!path.startsWith("/quickstart/setup/")
 		)
 			return false;
-		if (path === "/pve-setup.sh" || path === "/quickstart/setup/callback") {
-			try {
-				const input =
-					path === "/pve-setup.sh"
-						? {
-								token: new URL(req.url, context.origin).searchParams.get(
-									"token",
-								),
-								asset: new URL(req.url, context.origin).searchParams.get(
-									"asset",
-								),
-							}
-						: await body(req);
-				const action = async () => {
-					const state = await store.read();
-					const prep = state.preparation;
-					requireValue(
-						prep &&
-							prep.expiresAt > Date.now() &&
-							typeof input.token === "string" &&
-							digest(input.token) === prep.hash,
-						"Setup token is invalid, expired or already consumed",
-					);
-					const connection = connectionOf(state);
-					requireValue(
-						prep.connectionHash === digest(JSON.stringify(connection)),
-						"Connection changed; generate a new setup command",
-					);
-					if (path === "/pve-setup.sh") {
-						requireValue(
-							req.method === "GET",
-							"Use GET for the preparation script",
-						);
-						if (input.asset !== null) {
-							requireValue(
-								input.asset === "node-agent" && prep.mode === "fresh",
-								"Unknown or unavailable preparation asset",
-							);
-							const binary = await readFile(
-								join(assetsDir, "umiak-node-linux-amd64"),
-							);
-							res.writeHead(200, {
-								"Content-Type": "application/octet-stream",
-								"Content-Length": binary.length,
-								"Cache-Control": "no-store",
-								"Referrer-Policy": "no-referrer",
-							});
-							res.end(binary);
-							return;
-						}
-						const script = await preparationScript(
-							prep,
-							connection,
-							input.token,
-						);
-						res.writeHead(200, {
-							"Content-Type": "text/x-shellscript",
-							"Cache-Control": "no-store",
-							"Referrer-Policy": "no-referrer",
-						});
-						res.end(script);
-						return;
-					}
-					requireValue(
-						req.method === "POST",
-						"Use POST for the preparation callback",
-					);
-					if (prep.mode === "adopt") {
-						requireValue(
-							input.report?.zone?.type === "simple" &&
-								input.report?.vnet?.zone === "umiak",
-							"Host verification report is incomplete",
-						);
-						state.hostReport = input.report;
-						state.hostReportAt = new Date().toISOString();
-						delete state.hostReportUsed;
-						if (
-							input.caPem &&
-							!(await readOptional(secretsDir, "pve-root-ca.pem"))
-						)
-							await atomicSecret(
-								secretsDir,
-								"pve-root-ca.pem",
-								requireRootCA(input.caPem),
-							);
-					} else {
-						requireValue(
-							typeof input.tokenSecret === "string" &&
-								input.tokenSecret.length > 0 &&
-								typeof input.caPem === "string" &&
-								validateSshPublicKey(input.sshPublicKey),
-							"Host callback credentials are incomplete",
-						);
-						requireValue(
-							typeof input.mediaStorage === "string" &&
-								NAME.test(input.mediaStorage),
-							"Invalid template media storage",
-						);
-						state.mediaStorage = input.mediaStorage;
-						const api = makePve(connection, input.tokenSecret);
-						await api.get("/pools/umiak");
-						await atomicSecret(secretsDir, "pve-token", input.tokenSecret);
-						await atomicSecret(
-							secretsDir,
-							"pve-root-ca.pem",
-							requireRootCA(input.caPem),
-						);
-						await atomicSecret(
-							secretsDir,
-							"known_hosts",
-							`${connection.sshHost} ${input.sshPublicKey}\n`,
-						);
-					}
-					delete state.preparation;
-					await store.write(state);
-					json(res, 200, { ok: true });
-				};
-				if (store.exclusive) await store.exclusive(action);
-				else await action();
-			} catch (error) {
-				json(res, 400, { error: error.message });
-			}
-			return true;
-		}
 		if (!context.owner) {
 			json(res, 401, { error: "owner_required" });
 			return true;
@@ -1128,7 +855,7 @@ export function createSetupHandler({
 					state.templateDetectionError = error.message;
 				}
 			}
-			html(res, renderSetup(state, context.origin));
+			html(res, renderSetup(state));
 			return true;
 		}
 		if (req.method === "GET" && path === "/quickstart/setup/media/storages") {
@@ -1197,108 +924,25 @@ export function createSetupHandler({
 			}
 			return true;
 		}
-		if (req.method === "POST" && path === "/quickstart/setup/prepare") {
-			try {
-				const input = await body(req);
-				const state = await store.read();
-				requireValue(
-					state.steps.connection?.status === "ready",
-					"Connect Proxmox first",
-				);
-				const storage =
-					input.storage ?? state.steps.limits?.data?.storage ?? "local-lvm";
-				requireValue(
-					typeof storage === "string" && NAME.test(storage),
-					"Invalid storage name",
-				);
-				const mode = input.mode === "fresh" ? "fresh" : "adopt";
-				const token = randomBytes(32).toString("hex");
-				if (
-					mode === "fresh" &&
-					!(await readOptional(secretsDir, "umiak-node_ed25519"))
-				) {
-					await atomicSecret(secretsDir, "key-init", "");
-					await execFileAsync("ssh-keygen", [
-						"-q",
-						"-t",
-						"ed25519",
-						"-N",
-						"",
-						"-C",
-						"umiak-quickstart",
-						"-f",
-						join(secretsDir, "umiak-node_ed25519"),
-					]);
-				}
-				const gateway =
-					input.gatewayAddress ||
-					state.steps.network?.data?.gatewayAddress ||
-					"";
-				if (mode === "fresh")
-					requireValue(
-						/^\d{1,3}(?:\.\d{1,3}){3}$/.test(gateway),
-						"Fresh preparation requires the gateway LAN IPv4 address",
-					);
-				const preparationRange = validateTemplateRange({
-					vmidMin: 500,
-					vmidMax: 589,
-					...templateRange(state),
-					...(input.templateVmidMin !== undefined
-						? { templateVmidMin: Number(input.templateVmidMin) }
-						: {}),
-					...(input.templateVmidMax !== undefined
-						? { templateVmidMax: Number(input.templateVmidMax) }
-						: {}),
-				});
-				state.preparation = {
-					...preparationRange,
-					caPath: "/etc/ssl/certs/ca-certificates.crt",
-					mode,
-					storage,
-					guestDns:
-						input.guestDns || state.steps.network?.data?.guestDns || "1.1.1.1",
-					connectionHash: digest(JSON.stringify(state.steps.connection.data)),
-					hash: digest(token),
-					expiresAt: Date.now() + 15 * 60 * 1000,
-					origin: context.origin,
-					gateway,
-				};
-				const url = `${context.origin}/pve-setup.sh?token=${token}`;
-				const script = await preparationScript(
-					state.preparation,
-					connectionOf(state),
-					token,
-				);
-				const sha256 = digest(script);
-				await store.write(state);
-				const host = new URL(context.origin).hostname;
-				const insecure =
-					context.origin.startsWith("http:") &&
-					!["localhost", "127.0.0.1", "[::1]"].includes(host);
-				const warning = insecure
-					? "WARNING: HTTP delivers a script executed as root and sends the PVE API token secret, CA and host key back without encryption. Use Tailscale Serve or HTTPS for preparation. The SHA256 below only pins the displayed script; HTTP cannot authenticate this page or protect the callback."
-					: undefined;
-				json(res, 200, {
-					warning,
-					sha256,
-					command: `# SHA256: ${sha256}\ncurl -fsSL '${url}' -o pve-setup.sh\nprintf '%s  %s\\n' '${sha256}' 'pve-setup.sh' | sha256sum -c - && bash pve-setup.sh --dry-run\n# Inspect pve-setup.sh, then execute:\nprintf '%s  %s\\n' '${sha256}' 'pve-setup.sh' | sha256sum -c - && bash pve-setup.sh`,
-					expiresIn: 900,
-				});
-			} catch (error) {
-				json(res, 400, { error: error.message });
-			}
-			return true;
-		}
 		if (req.method === "POST" && path.startsWith("/quickstart/setup/")) {
+			const step = path.slice("/quickstart/setup/".length);
+			// Connection and host facts come from the installer, never from the browser.
+			if (!Object.hasOwn(steps, step)) {
+				json(res, 404, { error: "not_found" });
+				return true;
+			}
 			try {
-				const step = path.slice("/quickstart/setup/".length);
 				json(res, 200, await wizard.run(step, await body(req), context));
 			} catch (error) {
 				json(res, 400, { error: error.message });
 			}
 			return true;
 		}
-		json(res, 405, { error: "method_not_allowed" });
+		json(res, path.startsWith("/quickstart/setup/") ? 405 : 404, {
+			error: path.startsWith("/quickstart/setup/")
+				? "method_not_allowed"
+				: "not_found",
+		});
 		return true;
 	};
 	handler.init = async () => {

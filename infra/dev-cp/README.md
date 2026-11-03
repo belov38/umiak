@@ -311,6 +311,9 @@ redeploy. Existing Serve `__Host-umiak_owner` and CLI bearer sessions remain val
 plain HTTP uses a separate non-Secure cookie and therefore requires its own login.
 Anonymous access gets the owner gate, never an upstream identity bypass.
 
+> S18: `deploy-quickstart.sh`, `quickstart-preflight.sh` and `compose.quickstart.yaml` were removed with the
+> legacy S16 install paths. The commands below are historical.
+
 Private operator procedure (no credentials in transcripts):
 
 ```sh
