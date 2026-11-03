@@ -2,7 +2,7 @@
 	"TCP": { "443": { "HTTPS": true } },
 	"Web": {
 		"${TS_CERT_DOMAIN}:443": {
-			"Handlers": { "/": { "Proxy": "https+insecure://quickstart:8444" } }
+			"Handlers": { "/": { "Proxy": "https+insecure://172.30.116.10:8444" } }
 		}
 	},
 	"AllowFunnel": { "${TS_CERT_DOMAIN}:443": false }

@@ -164,3 +164,52 @@ test("Serve internal quickstart SNI accepts the external Host without trusting i
 		await rm(dir, { recursive: true, force: true });
 	}
 });
+
+test("sidecar shares only an owner-ingress network and requires no new owner-CA name", async () => {
+	const { execFile } = await import("node:child_process");
+	const { promisify } = await import("node:util");
+	const { readFile } = await import("node:fs/promises");
+	const { stdout } = await promisify(execFile)(
+		"docker",
+		[
+			"compose",
+			"-f",
+			"compose.yaml",
+			"-f",
+			"deploy/compose/quickstart/compose.tailscale.yaml",
+			"config",
+			"--format",
+			"json",
+		],
+		{
+			env: {
+				...process.env,
+				TS_AUTHKEY: "test-config-only",
+				UMIAK_QUICKSTART_TLS_NAMES: "headless.example.test",
+			},
+		},
+	);
+	const config = JSON.parse(stdout);
+	assert.deepEqual(Object.keys(config.services.tailscale.networks), [
+		"serve-internal",
+	]);
+	for (const name of ["api", "mcp", "web", "postgres"])
+		assert.equal(
+			config.services[name].networks["serve-internal"],
+			undefined,
+			name,
+		);
+	assert.ok(config.services.quickstart.networks["serve-internal"]);
+	assert.equal(
+		config.services.quickstart.environment.UMIAK_QUICKSTART_TLS_NAMES,
+		"headless.example.test",
+	);
+	const serve = JSON.parse(
+		await readFile(new URL("./tailscale/serve.json", import.meta.url), "utf8"),
+	);
+	assert.equal(
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: Tailscale expands this literal key.
+		serve.Web["${TS_CERT_DOMAIN}:443"].Handlers["/"].Proxy,
+		"https+insecure://172.30.116.10:8444",
+	);
+});

@@ -18,15 +18,20 @@ const validName = (name) =>
 		));
 const normalize = (names) =>
 	[...new Set(names.map((name) => name.toLowerCase()))].sort();
-const constraint = (name) =>
-	net.isIP(name) === 4
-		? `IP:${name}/255.255.255.255`
-		: net.isIP(name) === 6
-			? `IP:${name}/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff`
-			: `DNS:${name}`;
+// Bun's shipped TLS verifier rejects IP name constraints. DNS remains constrained;
+// IP issuance is restricted by this allowlist and the volume-private signing key.
+const dnsConstraints = (names) =>
+	names
+		.filter((name) => !net.isIP(name))
+		.map((name) => `permitted;DNS:${name}`)
+		.join(",");
 
 /** Preissue one leaf for the allowlist. TLS handshakes never perform disk I/O or sign. */
-export async function quickstartTls(dir, names = []) {
+export async function quickstartTls(
+	dir,
+	names = [],
+	{ leafDays = 90, now = Date.now } = {},
+) {
 	if (!Array.isArray(names) || names.some((name) => !validName(name)))
 		throw new Error("invalid_tls_names");
 	await mkdir(dir, { recursive: true, mode: 0o700 });
@@ -37,6 +42,9 @@ export async function quickstartTls(dir, names = []) {
 	let credentials;
 	let context;
 	let caFingerprint;
+	let pendingNames = [];
+	let compatibilityRotation = false;
+	let updating = Promise.resolve();
 	const ownNames = normalize([
 		"localhost",
 		"127.0.0.1",
@@ -77,7 +85,7 @@ export async function quickstartTls(dir, names = []) {
 				"-addext",
 				"keyUsage=critical,keyCertSign,cRLSign",
 				"-addext",
-				`nameConstraints=critical,${next.map((name) => `permitted;${constraint(name)}`).join(",")}`,
+				`nameConstraints=critical,${dnsConstraints(next)}`,
 			]);
 			const leaf = join(staging, "owner");
 			await openssl("openssl", [
@@ -116,7 +124,7 @@ export async function quickstartTls(dir, names = []) {
 				"-set_serial",
 				`0x${randomBytes(16).toString("hex")}`,
 				"-days",
-				"90",
+				String(leafDays),
 				"-extfile",
 				`${leaf}.ext`,
 				"-out",
@@ -131,7 +139,7 @@ export async function quickstartTls(dir, names = []) {
 				.fingerprint256;
 			await writeFile(
 				join(staging, "tls-policy.json"),
-				JSON.stringify({ version: 1, names: next, caFingerprint: fingerprint }),
+				JSON.stringify({ version: 2, names: next, caFingerprint: fingerprint }),
 				{ mode: 0o600 },
 			);
 			for (const file of [
@@ -150,28 +158,12 @@ export async function quickstartTls(dir, names = []) {
 			await rm(staging, { recursive: true, force: true });
 		}
 	}
-	if (existsSync(policyFile)) {
-		const policy = JSON.parse(await readFile(policyFile, "utf8"));
-		if (
-			policy.version !== 1 ||
-			!Array.isArray(policy.names) ||
-			policy.names.some((name) => !validName(name))
-		)
-			throw new Error("invalid_tls_policy");
-		allowed = new Set(policy.names);
-		caFingerprint = new X509Certificate(await readFile(caFile)).fingerprint256;
-		if (policy.caFingerprint !== caFingerprint)
-			throw new Error("invalid_tls_policy");
-		if (names.some((name) => !allowed.has(name.toLowerCase())))
-			throw new Error("tls_ca_rotation_required");
-		credentials = {
-			key: await readFile(join(dir, "owner.key")),
-			cert: await readFile(join(dir, "owner.pem")),
-		};
+	async function renewLeaf() {
 		const leaf = new X509Certificate(credentials.cert);
-		if (!leaf.verify(new X509Certificate(await readFile(caFile)).publicKey))
-			throw new Error("invalid_tls_policy");
-		if (new Date(leaf.validTo).getTime() - Date.now() < 7 * 86400000) {
+		if (
+			new Date(leaf.validTo).getTime() - now() <
+			Math.min(7, leafDays / 3) * 86400000
+		) {
 			// Reissue only a leaf under the existing constrained CA, without changing trust.
 			const stem = join(dir, "renew");
 			await openssl("openssl", [
@@ -202,7 +194,7 @@ export async function quickstartTls(dir, names = []) {
 				"-set_serial",
 				`0x${randomBytes(16).toString("hex")}`,
 				"-days",
-				"90",
+				String(leafDays),
 				"-extfile",
 				`${stem}.ext`,
 				"-out",
@@ -210,7 +202,41 @@ export async function quickstartTls(dir, names = []) {
 			]);
 			await rename(`${stem}.pem`, join(dir, "owner.pem"));
 			credentials.cert = await readFile(join(dir, "owner.pem"));
+			context = createSecureContext(credentials);
+			return { ...credentials, caFingerprint };
 		}
+		return null;
+	}
+	if (existsSync(policyFile)) {
+		const policy = JSON.parse(await readFile(policyFile, "utf8"));
+		if (
+			![1, 2].includes(policy.version) ||
+			!Array.isArray(policy.names) ||
+			policy.names.some((name) => !validName(name))
+		)
+			throw new Error("invalid_tls_policy");
+		allowed = new Set(policy.names);
+		compatibilityRotation = policy.version === 1;
+		caFingerprint = new X509Certificate(await readFile(caFile)).fingerprint256;
+		if (policy.caFingerprint !== caFingerprint)
+			throw new Error("invalid_tls_policy");
+		pendingNames = normalize(names).filter((name) => !allowed.has(name));
+		if (compatibilityRotation)
+			console.warn(
+				"Umiak TLS: existing CA uses IP name constraints unsupported by the shipped CLI. Explicitly rotate at /owner/tls or rotate-ca.mjs, then replace client trust.",
+			);
+		if (pendingNames.length)
+			console.warn(
+				`Umiak TLS: CA rotation required for ${pendingNames.join(", ")}; continuing with existing CA and names. Open /owner/tls or use rotate-ca.mjs.`,
+			);
+		credentials = {
+			key: await readFile(join(dir, "owner.key")),
+			cert: await readFile(join(dir, "owner.pem")),
+		};
+		const leaf = new X509Certificate(credentials.cert);
+		if (!leaf.verify(new X509Certificate(await readFile(caFile)).publicKey))
+			throw new Error("invalid_tls_policy");
+
 		context = createSecureContext(credentials);
 	} else {
 		// An unrestricted legacy CA must never silently remain trusted.
@@ -218,10 +244,28 @@ export async function quickstartTls(dir, names = []) {
 			throw new Error("legacy_tls_ca_requires_rotation");
 		await install(ownNames);
 	}
-	let updating = Promise.resolve();
+	await renewLeaf();
 	return {
 		...credentials,
 		caFingerprint,
+		status() {
+			const warning = pendingNames.length
+				? `CA rotation required for ${pendingNames.join(", ")}. Existing addresses continue to work. Rotate at /owner/tls, then replace old client trust.`
+				: compatibilityRotation
+					? "Existing CA has IP name constraints unsupported by the shipped CLI. Explicitly rotate the owner CA and replace old client trust."
+					: null;
+			return {
+				names: [...allowed],
+				pendingNames: [...pendingNames],
+				caFingerprint,
+				warning,
+			};
+		},
+		renew() {
+			const update = updating.then(renewLeaf);
+			updating = update.catch(() => {});
+			return update;
+		},
 		updateNames(extra, { rotateCA = false } = {}) {
 			const update = updating.then(async () => {
 				if (
@@ -230,10 +274,12 @@ export async function quickstartTls(dir, names = []) {
 					extra.some((name) => !validName(name))
 				)
 					throw new Error("invalid_tls_names");
-				const next = normalize([...allowed, ...extra]);
-				if (next.length !== allowed.size) {
+				const next = normalize([...allowed, ...pendingNames, ...extra]);
+				if (rotateCA || next.length !== allowed.size) {
 					if (!rotateCA) throw new Error("tls_ca_rotation_required");
 					await install(next);
+					pendingNames = [];
+					compatibilityRotation = false;
 				}
 				return { ...credentials, caFingerprint };
 			});

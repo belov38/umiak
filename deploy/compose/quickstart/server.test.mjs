@@ -305,3 +305,29 @@ test("owner can persist extra IP certificate names without an env file", async (
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+test("anonymous browser guide navigations show claim while API clients retain JSON", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	await store.init();
+	const server = createQuickstartServer({
+		store,
+		transport: http,
+		env: { UMIAK_LOCAL_DENIED_CIDRS: "10.88.0.0/24" },
+	});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const base = `http://127.0.0.1:${server.address().port}`;
+	try {
+		const browser = await fetch(`${base}/app/getting-started`, {
+			headers: { accept: "text/html" },
+		});
+		assert.equal(browser.status, 200);
+		assert.match(await browser.text(), /Claim this Umiak deployment/);
+		const api = await fetch(`${base}/app/getting-started`, {
+			headers: { accept: "application/json" },
+		});
+		assert.equal(api.status, 401);
+		assert.equal((await api.json()).error.code, "owner_required");
+	} finally {
+		await new Promise((resolve) => server.close(resolve));
+	}
+});

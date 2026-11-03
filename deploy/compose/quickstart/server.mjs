@@ -110,6 +110,7 @@ export function createQuickstartServer({
 	env = process.env,
 	tls = {},
 	transport = https,
+	renewIntervalMs = 86400000,
 }) {
 	const allowed = clientGuard(
 		env.UMIAK_LOCAL_ALLOWED_CIDRS ??
@@ -216,7 +217,7 @@ export function createQuickstartServer({
 						: path.slice("/downloads/".length);
 				if (
 					!assetsDir ||
-					!/^(install\.sh|SHA256SUMS|umiak-node-linux-amd64|umiak-(linux|darwin)-(arm64|x64)|umiak-windows-x64\.exe)$/.test(
+					!/^(install\.sh|SHA256SUMS|DOWNLOADS|umiak-node-linux-amd64|umiak-(linux|darwin)-(arm64|x64)(\.gz)?|umiak-windows-x64\.exe(\.gz)?)$/.test(
 						file,
 					)
 				)
@@ -276,6 +277,8 @@ export function createQuickstartServer({
 					req.method === "GET" &&
 					(path === "/" ||
 						path === "/app" ||
+						(path.startsWith("/app/") &&
+							req.headers.accept?.includes("text/html")) ||
 						path === "/setup" ||
 						path === "/owner/pair")
 				) {
@@ -297,14 +300,16 @@ export function createQuickstartServer({
 				!(await store.canApprove(token)) &&
 				(path.startsWith("/quickstart/") ||
 					path === "/setup" ||
-					path === "/owner/tls")
+					path.startsWith("/owner/tls"))
 			)
 				return fail(res, 403, "browser_session_required");
+			if (path === "/owner/tls/status" && req.method === "GET")
+				return json(res, 200, tls.status?.() ?? { warning: null });
 			if (path === "/owner/tls" && req.method === "GET")
 				return page(
 					res,
 					"HTTPS addresses",
-					`<p>Open initially using localhost or a configured DNS name. Add LAN/tailnet IPs here for clients that connect by IP. Adding names rotates the constrained owner CA. Download and verify the new CA before using these addresses.</p><form id="tls"><input id="names" placeholder="192.168.1.10,100.100.1.10"><label><input id="rotate" type="checkbox" required> I understand that adding names rotates the CA and requires trusting the new fingerprint.</label><button>Save certificate names</button></form><pre id="result"></pre><p><a href="/setup">Setup</a></p><script>document.querySelector('#tls').onsubmit=async e=>{e.preventDefault();const r=await fetch('/owner/tls',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rotateCA:document.querySelector("#rotate").checked,names:document.querySelector('#names').value.split(',').map(x=>x.trim()).filter(Boolean)})});document.querySelector('#result').textContent=r.ok?'Saved. Retrieve the CA through Docker and verify its new fingerprint before connecting.':'Invalid names';};</script>`,
+					`<p role="status">${esc(tls.status?.().warning ?? "")}</p><p>Current CA SHA256: <code>${esc(tls.status?.().caFingerprint ?? "")}</code></p><p>Open initially using localhost or a configured DNS name. Add LAN/tailnet IPs here for clients that connect by IP. Adding names rotates the constrained owner CA. Download and verify the new CA before using these addresses.</p><form id="tls"><input id="names" value="${esc(tls.status?.().pendingNames.join(",") ?? "")}" placeholder="192.168.1.10,100.100.1.10"><label><input id="rotate" type="checkbox" required> I understand that adding names rotates the CA and requires trusting the new fingerprint.</label><button>Save certificate names</button></form><pre id="result"></pre><p><a href="/setup">Setup</a></p><script>document.querySelector('#tls').onsubmit=async e=>{e.preventDefault();const r=await fetch('/owner/tls',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rotateCA:document.querySelector("#rotate").checked,names:document.querySelector('#names').value.split(',').map(x=>x.trim()).filter(Boolean)})});document.querySelector('#result').textContent=r.ok?'Saved. New CA SHA256: '+(await r.json()).caFingerprint+'. Replace old client trust with the new CA obtained through Docker.':'Invalid names';};</script>`,
 				);
 			if (path === "/owner/tls" && req.method === "POST") {
 				const input = await body(req);
@@ -314,7 +319,7 @@ export function createQuickstartServer({
 						rotateCA: input.rotateCA === true,
 					}),
 				);
-				return json(res, 200, { saved: true });
+				return json(res, 200, { saved: true, ...tls.status?.() });
 			}
 			if (path === "/app/help" || path === "/help") {
 				res.writeHead(302, { location: "/app/getting-started" });
@@ -357,7 +362,7 @@ export function createQuickstartServer({
 				return page(
 					res,
 					"Approve CLI pairing",
-					`<p>Approve only a login you started. Enter the short code printed in your terminal.</p><p>Source: ${esc(info.source)} · ${esc(new Date(info.created).toISOString())}</p><p>Client: ${esc(info.userAgent)}</p><form id="approval"><label>Pairing code <input id="pair-code" autocomplete="off" placeholder="ABCD-1234" required></label><button>Approve CLI</button></form><pre id="message" role="status"></pre><script>document.getElementById('approval').onsubmit=async e=>{e.preventDefault();const r=await fetch('/owner/pair/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:${JSON.stringify(id)},code:document.getElementById('pair-code').value})});document.getElementById('message').textContent=r.ok?'Approved. Return to your terminal.':'Approval failed. Check the code and expiry.';};</script>`,
+					`<p>Approve only a login you started. Enter the short code printed in your terminal.</p><p>Source (possibly a Docker NAT address): ${esc(info.source)} · ${esc(new Date(info.created).toISOString())}</p><p>Client: ${esc(info.userAgent)}</p><form id="approval"><label>Pairing code <input id="pair-code" autocomplete="off" placeholder="ABCD-1234" required></label><button>Approve CLI</button></form><pre id="message" role="status"></pre><script>document.getElementById('approval').onsubmit=async e=>{e.preventDefault();const r=await fetch('/owner/pair/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:${JSON.stringify(id)},code:document.getElementById('pair-code').value})});document.getElementById('message').textContent=r.ok?'Approved. Return to your terminal.':'Approval failed. Check the code and expiry.';};</script>`,
 				);
 			}
 			if (
@@ -411,6 +416,28 @@ export function createQuickstartServer({
 			else res.end();
 		}
 	});
+	if (tls.renew) {
+		let renewing = false;
+		const renewal = setInterval(async () => {
+			if (renewing) return;
+			renewing = true;
+			try {
+				const credentials = await tls.renew();
+				if (credentials) {
+					server.setSecureContext(credentials);
+					console.log(
+						"Umiak owner TLS leaf renewed without restart; CA trust unchanged",
+					);
+				}
+			} catch (error) {
+				console.warn("Umiak TLS leaf renewal failed:", error.message);
+			} finally {
+				renewing = false;
+			}
+		}, renewIntervalMs);
+		renewal.unref();
+		server.once("close", () => clearInterval(renewal));
+	}
 	server.requestTimeout = 30000;
 	server.headersTimeout = 15000;
 	server.on("upgrade", async (req, socket, head) => {

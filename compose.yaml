@@ -329,6 +329,7 @@ services:
     environment:
       <<: *app-env
       UMIAK_QUICKSTART_PORT: "8444"
+      UMIAK_QUICKSTART_TLS_NAMES: ${UMIAK_QUICKSTART_TLS_NAMES:-}
       UMIAK_QUICKSTART_ASSETS: /app/quickstart-assets
       UMIAK_QUICKSTART_TLS_DIR: /var/lib/umiak/owner/tls
     volumes:

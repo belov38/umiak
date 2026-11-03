@@ -44,6 +44,7 @@ test("unknown SNI is refused without consuming capacity for configured names", a
 		]);
 		assert.match(stdout, /X509v3 Name Constraints: critical/);
 		assert.match(stdout, /DNS:home.example.test/);
+		assert.doesNotMatch(stdout, /IP Address:/);
 		// Even possession of an accidentally signed outside leaf does not bypass CA constraints.
 		await openssl("req", [
 			"-new",
@@ -130,6 +131,100 @@ test("adding owner-approved names requires explicit CA rotation and survives res
 			/invalid_tls_names/,
 		);
 	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test("configured name expansion keeps the old CA serving until explicit rotation", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "umiak-tls-"));
+	try {
+		const initial = await quickstartTls(dir, ["first.example.test"]);
+		const restarted = await quickstartTls(dir, [
+			"first.example.test",
+			"new.example.test",
+		]);
+		assert.equal(restarted.caFingerprint, initial.caFingerprint);
+		assert.deepEqual(restarted.status().pendingNames, ["new.example.test"]);
+		const rotated = await restarted.updateNames([], { rotateCA: true });
+		assert.notEqual(rotated.caFingerprint, initial.caFingerprint);
+		assert.equal(
+			new X509Certificate(rotated.cert).checkHost("new.example.test"),
+			"new.example.test",
+		);
+		assert.deepEqual(restarted.status().pendingNames, []);
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test("a short-lived leaf renews at runtime under the same CA", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "umiak-tls-"));
+	try {
+		let now = Date.now();
+		const tls = await quickstartTls(dir, [], { leafDays: 1, now: () => now });
+		const previous = new X509Certificate(tls.cert);
+		now += 23 * 3600000;
+		const renewed = await tls.renew();
+		assert.ok(renewed);
+		assert.notEqual(
+			new X509Certificate(renewed.cert).serialNumber,
+			previous.serialNumber,
+		);
+		assert.equal(renewed.caFingerprint, tls.caFingerprint);
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test("ingress daily renewal check replaces its TLS context without a restart", async () => {
+	const { createQuickstartServer } = await import("./server.mjs");
+	const { MemoryOwnerRepository, OwnerStore } = await import("./owner.mjs");
+	const dir = await mkdtemp(join(tmpdir(), "umiak-tls-"));
+	let server;
+	try {
+		let now = Date.now();
+		const tls = await quickstartTls(dir, [], { leafDays: 1, now: () => now });
+		const previous = new X509Certificate(tls.cert).serialNumber;
+		const store = new OwnerStore(new MemoryOwnerRepository());
+		await store.init();
+		server = createQuickstartServer({
+			store,
+			tls,
+			env: { UMIAK_LOCAL_DENIED_CIDRS: "10.88.0.0/24" },
+			renewIntervalMs: 20,
+		});
+		await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+		now += 23 * 3600000;
+		const ca = await readFile(join(dir, "ca.pem"));
+		const serial = () =>
+			new Promise((resolve, reject) => {
+				https
+					.get(
+						{
+							host: "127.0.0.1",
+							port: server.address().port,
+							path: "/v1/me",
+							ca,
+							agent: false,
+						},
+						(res) => {
+							const value = res.socket.getPeerCertificate().serialNumber;
+							res.resume();
+							resolve(value);
+						},
+					)
+					.on("error", reject);
+			});
+		let current = previous;
+		for (let i = 0; i < 50 && current === previous; i++) {
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			current = await serial();
+		}
+		now = Date.now();
+		assert.notEqual(current, previous);
+		await tls.renew();
+	} finally {
+		if (server) await new Promise((resolve) => server.close(resolve));
 		await rm(dir, { recursive: true, force: true });
 	}
 });

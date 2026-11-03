@@ -13,12 +13,19 @@ services:
       - tailscale-state:/var/lib/tailscale
       - ./deploy/compose/quickstart/tailscale:/config:ro
     networks:
-      control: { ipv4_address: 172.29.116.12 }
+      serve-internal: { ipv4_address: 172.30.116.12 }
     depends_on:
       quickstart: { condition: service_started }
   quickstart:
     environment:
-      UMIAK_QUICKSTART_SERVE_PEERS: 172.29.116.12
-      UMIAK_QUICKSTART_TLS_NAMES: "quickstart,${UMIAK_QUICKSTART_TLS_NAMES:-}"
+      UMIAK_QUICKSTART_SERVE_PEERS: 172.30.116.12
+    networks:
+      serve-internal: { ipv4_address: 172.30.116.10 }
 volumes:
   tailscale-state: {}
+
+networks:
+  serve-internal:
+    ipam:
+      config:
+        - subnet: 172.30.116.0/24

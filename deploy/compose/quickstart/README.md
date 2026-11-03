@@ -12,7 +12,13 @@ openssl x509 -in umiak-ca.pem -noout -fingerprint -sha256
 Use the local Docker console as the trust channel. Install this verified CA in your
 browser trust store, then open `https://localhost:8444` on the Docker host, or
 `https://<configured-DNS-name>:8444` remotely. Set `UMIAK_QUICKSTART_TLS_NAMES` before boot for remote DNS names. DNS can be LAN DNS, mDNS, MagicDNS or
-ordinary DNS; Tailscale is optional. No external relay is used.
+ordinary DNS; Tailscale is optional. For example:
+
+```sh
+UMIAK_QUICKSTART_TLS_NAMES=server.home.example docker compose up -d --build
+```
+
+The variable is passed into the ingress on first boot. No external relay is used.
 
 Enter the one-time setup code from the logs to claim ownership. Other LAN/tailnet
 peers cannot operate the deployment. Owner cookies expire after 180 days; CLI sessions after at most 30 days. CLI pairing
@@ -21,7 +27,30 @@ requests expire after five minutes. Credentials and claim state survive containe
 For raw LAN/tailnet IP URLs, first open by localhost or a DNS name and visit
 `/owner/tls` to add the IPs to the certificate. This takes effect immediately and is
 persisted without an `.env` file. Only configured names are accepted. Adding names requires explicit CA rotation and renewed trust; unknown SNI is rejected. The CA expires after one year; rotate it before expiry.
+The CA has critical DNS-only permitted subtrees, with configured IPs as leaf SANs.
+Bun 1.4.4 (latest stable checked on 2026-11-03) rejects any IP name constraints;
+TLS verification stays enabled. This CA is **unconstrained for IP names**. Ingress
+issuance stays limited to its configured names, unknown DNS SNI is rejected, and
+the signing key never leaves the owner volume. Trust this CA only on owner clients.
 The guest gateway on port 443 uses its own independent CA.
+
+Adding configured names after first boot keeps existing addresses serving with
+the old CA and logs a warning, also shown in Setup and `/owner/tls`. An owner can
+explicitly rotate at `/owner/tls` (also for an old IP-constrained CA), or use the
+trusted Docker console:
+
+```sh
+docker compose exec quickstart node deploy/compose/quickstart/rotate-ca.mjs server.home.example 192.168.1.10
+docker compose restart quickstart
+docker compose cp quickstart:/var/lib/umiak/owner/tls/ca.pem ./umiak-ca.pem
+openssl x509 -in umiak-ca.pem -noout -fingerprint -sha256
+```
+
+The command prints the new fingerprint. Replace the old CA in browser trust and
+CLI CA files; existing sessions, database and guest gateway trust survive. Do not
+run console rotation concurrently with an owner UI rotation. Leaves renew daily
+when less than seven days remain, without restarting the ingress or changing CA
+trust. The one-year CA itself requires an explicit owner rotation before expiry.
 
 ## Wizard
 
@@ -115,8 +144,10 @@ Claim with the Docker log code, then `curl -fsSL https://umiak.YOUR-TAILNET.ts.n
 and enter the CLI short code in the owner browser. No CA download or `--cacert` is needed.
 The state volume retains node identity; protect the auth key and do not commit it.
 Serve uses userspace networking and connects only to the private owner ingress;
-its internal HTTPS target skips certificate verification within the isolated compose
-network. It never bypasses the owner gate. Tailscale identity headers are stripped,
+its internal HTTPS target skips certificate verification within a dedicated network
+shared only with quickstart. It connects by a fixed internal IP without SNI, so
+enabling Serve requires no new owner-CA name. The sidecar has no network in common
+with api, mcp, web or postgres. It never bypasses the owner gate. Tailscale identity headers are stripped,
 not used as authentication. Funnel is disabled. The fixed sidecar address is used
 only to report public certificate handling in metadata, never to grant access.
 
@@ -135,3 +166,37 @@ service to that port (default443). The trusted sidecar peer plus MagicDNS origin
 port select the installer instructions only. This avoids confusing direct private
 HTTPS with Serve when Docker NAT gives both the same socket source; neither source
 nor origin port confers owner authorization.
+
+
+## Compiled CLI TLS gate
+
+Run `pnpm build` first, then
+`node --test deploy/compose/quickstart/*.test.mjs deploy/compose/local/*.test.mjs deploy/compose/meta-proxy/*.test.mjs`.
+The quickstart wildcard includes `compiled-cli.test.mjs`; missing host binaries
+fail rather than skip. It executes `apps/cli/dist/umiak-<os>-<arch>` against a real
+HTTPS quickstart ingress and its generated constrained CA, with an isolated owner
+store and metadata upstream fixture. Both DNS localhost and raw IP login must
+reach `/v1/meta` and create pairing requests. This catches Bun verifier failures
+that source tests under Node cannot detect. TLS tests also exercise first-boot DNS,
+pending-name restart, explicit rotation and a one-day leaf renewed at runtime.
+Compose assertions ensure the optional sidecar cannot share any upstream network.
+
+### Installer download and pairing
+
+The installer downloads gzip archives (the default `gzip` utility is present on
+macOS and common Linux distributions), announces the release/platform/compressed
+size, and uses curl's progress bar on terminal stderr. Piped stderr stays quiet
+apart from status and errors. SHA256SUMS covers both the downloaded archive and the
+extracted executable; either mismatch preserves the previous installation. The
+verified executable is installed by an atomic rename in the destination directory.
+
+The installer prints the PATH hint before starting owner pairing. Set
+`UMIAK_INSTALL_SKIP_LOGIN=1` to install without starting a pairing request; it prints
+the manual `umiak login` command, including the selected CA when needed. For example:
+
+```sh
+curl -fsSL https://your-deployment/install.sh | UMIAK_INSTALL_SKIP_LOGIN=1 sh
+```
+
+A native Darwin arm64 build measured 90,976,226 bytes before gzip and 40,887,362
+bytes downloaded (55.1% smaller); exact release sizes are in `/downloads/DOWNLOADS`.
