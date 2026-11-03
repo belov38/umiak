@@ -33,7 +33,13 @@ rather than the moving stable alias. PVE download auditing reads `http_proxy`
 from `/cluster/options` and exempts only wget resolution/connection records for
 that configured transport endpoint. All redirect URLs and all other resolved or
 connected targets remain subject to the original HTTPS/private-address checks.
-Failure to read cluster options fails closed before starting a download.
+Failure to read cluster options fails closed before starting a download. PVE
+silently hides `http_proxy` without `Sys.Audit` on `/`, so URL download preflight
+requires that effective privilege explicitly. Fresh preparation grants a dedicated
+`UmiakDatacenterAudit` role with only `Sys.Audit`, on `/` with propagation disabled,
+to both the user and privsep token. Existing/adopted hosts are unchanged; missing
+read access gives an actionable error before a download starts. Uploaded media
+does not require this extra privilege.
 
 ## Verification
 
@@ -42,3 +48,14 @@ client address, proxy origin/secure cookies, denied forwarded clients, unchanged
 owner/CLI bearer sessions, isolated sidecar configuration, preparation warning,
 command integrity hash and proxy-log exemptions with malicious redirects/targets.
 Final aggregate gates and live evidence are recorded in the S16 implementation plan.
+
+## Canonical upstream Host
+
+Removing the stale API Host allowance exposed internal metadata and MCP requests
+that used Docker DNS `api:8080` as their Host. Ruling: keep the API Host guard and
+public API URL unchanged. The metadata bridge and local MCP transport connect to
+the fixed internal API URL but set Host to the configured canonical
+`UMIAK_API_URL` authority, independently of incoming headers. The root Compose
+metadata bridge explicitly receives that URL. OIDC behavior remains unchanged.
+Regression tests cover metadata bridging with a malicious inbound Host and MCP
+initialization against the real local API Host guard, with no extra Host allowance.

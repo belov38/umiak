@@ -144,6 +144,7 @@ export function downloadPermission(permissions, node, storage) {
 	const at = (path, priv) =>
 		Boolean(permissions[path]?.[priv] || permissions["/"]?.[priv]);
 	return (
+		Boolean(permissions["/"]?.["Sys.Audit"]) &&
 		at(`/storage/${storage}`, "Datastore.AllocateTemplate") &&
 		(at(`/nodes/${node}`, "Sys.AccessNetwork") ||
 			(at("/", "Sys.Modify") && at("/", "Sys.Audit")))
@@ -195,7 +196,7 @@ export async function prepareWindowsMedia(
 		!downloadPermission(permissions, node, storage)
 	)
 		throw Error(
-			`ISO downloads require Datastore.AllocateTemplate on /storage/${storage} and Sys.AccessNetwork on /nodes/${node}; ask the host administrator to grant this scoped permission`,
+			`ISO downloads require Datastore.AllocateTemplate on /storage/${storage} and Sys.AccessNetwork on /nodes/${node}, plus read-only Sys.Audit on / to read cluster options and reliably identify the datacenter proxy; ask the host administrator to grant these scoped permissions`,
 		);
 	const clusterOptions =
 		input.isoUrl || input.virtioUrl ? await api.get("/cluster/options") : {};

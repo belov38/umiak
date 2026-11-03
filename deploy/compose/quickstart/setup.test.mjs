@@ -99,6 +99,7 @@ test("adoption reads only existing PVE objects and fails closed on missing zone"
 										? { enable: 1 }
 										: path === "/access/permissions"
 											? {
+													"/": { "Sys.Audit": 1 },
 													"/pool/umiak": { "VM.Audit": 1 },
 													"/nodes/pve": { "Sys.AccessNetwork": 1 },
 													"/storage/local": { "Datastore.AllocateTemplate": 1 },
@@ -112,6 +113,27 @@ test("adoption reads only existing PVE objects and fails closed on missing zone"
 	}));
 	assert.ok(r.checks.every((x) => x.ok));
 	assert.ok(paths.every((x) => x.startsWith("/")));
+	const withoutAudit = await verifyAdoption(
+		{
+			...api,
+			get: async (path) => {
+				const value = await api.get(path);
+				if (path === "/access/permissions") delete value["/"];
+				return value;
+			},
+		},
+		connection,
+		async () => ({
+			version: "test",
+			config: { vmidMin: 500, vmidMax: 589, vnet: "umiak0" },
+		}),
+	);
+	const download = withoutAudit.checks.find((check) =>
+		check.name.includes("native ISO download"),
+	);
+	assert.equal(download.ok, false);
+	assert.equal(download.optional, true);
+
 	await assert.rejects(
 		() =>
 			verifyAdoption(

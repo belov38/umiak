@@ -226,4 +226,8 @@ assert any("VM.GuestAgent.Unrestricted" in " ".join(command) for command in comm
 assert not any("VM.Monitor" in " ".join(command) for command in commands)
 assert report["sshPublicKey"] == "ssh-ed25519 AAAA"
 assert any(command[:6] == ["pveum", "user", "token", "add", "developer@pve", "quickstart"] for command in commands)
+# Both the user and its separated token need root-only read access to proxy options.
+assert ["pveum", "role", "add", "UmiakDatacenterAudit", "--privs", "Sys.Audit"] in commands
+for flag, principal in [("--users", "developer@pve"), ("--tokens", "developer@pve!quickstart")]:
+    assert ["pveum", "acl", "modify", "/", flag, principal, "--roles", "UmiakDatacenterAudit", "--propagate", "0"] in commands
 print("FAKE FRESH HOST PASS: role/token/pool/SDN/IPSet/rules/node-agent/callback, rollback and bridge preservation")

@@ -307,8 +307,11 @@ trusted workstation and compute `sha256sum virtio-win.iso` (Linux),
 SHA256` (PowerShell); confirm it against your trusted distribution source.
 
 Native downloads need `Datastore.AllocateTemplate` on `/storage/<iso-storage>`
-and `Sys.AccessNetwork` on `/nodes/<node>`. Fresh preparation generates the
-scoped `UmiakMediaDownload` role; adoption reports whether this optional capability
+and `Sys.AccessNetwork` on `/nodes/<node>`, plus read-only `Sys.Audit` on `/`
+to obtain datacenter proxy options (PVE otherwise silently omits `http_proxy`).
+Fresh preparation generates `UmiakMediaDownload` and a separate
+`UmiakDatacenterAudit` role, the latter bound only to `/` without propagation
+for both user and separated token; adoption reports whether this optional capability
 is present. Existing hosts are not modified by adoption. A missing capability
 blocks downloads with an actionable error, without blocking ordinary adoption.
 Do not grant cluster-wide `Sys.Modify` just for ISO downloads. These checks match

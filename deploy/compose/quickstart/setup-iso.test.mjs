@@ -40,6 +40,7 @@ function fake({
 	exitstatus = "OK",
 	permission = true,
 	proxy,
+	clusterAudit = true,
 	log = [{ t: "download progress 100%" }],
 } = {}) {
 	const posts = [];
@@ -52,6 +53,7 @@ function fake({
 			if (path === "/access/permissions")
 				return permission
 					? {
+							"/": clusterAudit ? { "Sys.Audit": 1 } : {},
 							"/nodes/pve": { "Sys.AccessNetwork": 1 },
 							"/storage/local": { "Datastore.AllocateTemplate": 1 },
 						}
@@ -305,4 +307,13 @@ test("native download reads datacenter proxy before auditing wget task", async (
 		head,
 	});
 	assert.equal(result.isoSha256, sha);
+});
+
+test("download refuses a partial cluster-options view without root Sys.Audit", async () => {
+	const api = fake({ clusterAudit: false, proxy: "http://10.2.3.4:3128" });
+	await assert.rejects(
+		prepareWindowsMedia(api, "pve", input, { resolve, head }),
+		/Sys.Audit.*cluster options/,
+	);
+	assert.equal(api.posts.length, 0);
 });
