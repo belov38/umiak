@@ -35,7 +35,7 @@ if scenario.startswith("pending-state-"):
         objects["/cluster/sdn/vnets/foreign/subnets"] = [{"subnet":"foreign-10.9.0.0-24", "state":state}]
 agent = b"fake-node-agent"
 report = {}
-config = {"origin": "https://stack.example:8443", "token": "a" * 64, "node": "pve", "gateway": "192.168.68.90", "publicKey": "ssh-ed25519 AAAA test", "tokenId": "developer@pve!quickstart", "nodeSha256": hashlib.sha256(agent).hexdigest(), "storage": "fast"}
+config = {"origin": "https://stack.example:8443", "token": "a" * 64, "node": "pve", "gateway": "192.168.68.90", "publicKey": "ssh-ed25519 AAAA test", "tokenId": "developer@pve!quickstart", "nodeSha256": hashlib.sha256(agent).hexdigest(), "storage": "fast", "templateVmidMin": 700, "templateVmidMax": 704}
 
 
 def mapped(value="."):
@@ -208,6 +208,9 @@ atexit._run_exitfuncs()
 namespace = execute()
 atexit._run_exitfuncs()
 assert 'vg = "custom-vg"' in mapped("/etc/umiak-node.toml").read_text()
+assert 'templateVmidMin = 700' in mapped('/etc/umiak-node.toml').read_text()
+assert 'templateVmidMax = 704' in mapped('/etc/umiak-node.toml').read_text()
+assert 'templateVmid = 0' in mapped('/etc/umiak-node.toml').read_text()
 assert 'storage = "fast"' in mapped("/etc/umiak-node.toml").read_text()
 if scenario != "success": print("SCENARIO PASS: " + scenario)
 assert mapped("/sys/class/net/vmbr0/bridge/mcast_hash_max").read_text() == "1024"

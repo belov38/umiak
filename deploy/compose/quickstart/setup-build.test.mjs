@@ -142,3 +142,64 @@ test("dry run validates rebuild confirmation and never launches or changes durab
 	assert.equal(launches, 0);
 	assert.deepEqual(data, state);
 });
+
+test("completed ISO source provenance remains visible after another template job", async () => {
+	const { createSetupHandler } = await import("./setup.mjs");
+	const builds = [
+		{
+			templateSlug: "windows",
+			pveVmid: 701,
+			mediaVerification: "unverified",
+			isoSha256: "a".repeat(64),
+		},
+	];
+	const handler = createSetupHandler({
+		pool: {},
+		store: {
+			read: async () => ({
+				steps: { templates: { data: { builds } } },
+				buildJob: { slug: "linux", status: "ready" },
+			}),
+		},
+	});
+	let result;
+	const response = {
+		writeHead: () => {},
+		end: (value) => {
+			result = JSON.parse(value);
+		},
+	};
+	await handler(
+		{ method: "GET", url: "/quickstart/setup/build", headers: {} },
+		response,
+		{ owner: true, origin: "https://umiak.example.test" },
+	);
+	assert.equal(result.buildJob.slug, "linux");
+	assert.deepEqual(result.builds, builds);
+});
+
+test("ISO verification is retained in a build record after a later build", async () => {
+	let data = structuredClone(state);
+	const jobs = new TemplateBuildJobs({
+		store: {
+			read: async () => structuredClone(data),
+			write: async (next) => {
+				data = structuredClone(next);
+			},
+		},
+		run: async (slug) => ({
+			templateSlug: slug,
+			mediaVerification: slug === "windows" ? "unverified" : undefined,
+			isoSha256: slug === "windows" ? "a".repeat(64) : undefined,
+		}),
+	});
+	const first = await jobs.start("windows");
+	await jobs.settled();
+	await jobs.start("linux");
+	await jobs.settled();
+	assert.equal(
+		data.buildRecords[first.id].manifest.mediaVerification,
+		"unverified",
+	);
+	assert.equal(data.buildRecords[first.id].manifest.isoSha256, "a".repeat(64));
+});

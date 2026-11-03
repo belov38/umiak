@@ -317,6 +317,16 @@ export class TemplateBuildJobs {
 						finishedAt: new Date().toISOString(),
 						manifest,
 					};
+					current.buildRecords = {
+						...current.buildRecords,
+						[job.id]: {
+							id: job.id,
+							slug,
+							startedAt: job.startedAt,
+							finishedAt: current.buildJob.finishedAt,
+							manifest,
+						},
+					};
 				});
 			} catch (error) {
 				await this.update((current) => {

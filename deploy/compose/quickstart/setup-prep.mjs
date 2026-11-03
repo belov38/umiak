@@ -1,6 +1,16 @@
 // Generates a deployment-bound fresh-host script; tokens never enter git or logs.
 import { readFileSync } from "node:fs";
+import { validateTemplateRange } from "./setup-vmids.mjs";
 export function renderPreparation(config) {
+	config = {
+		...config,
+		...validateTemplateRange({
+			vmidMin: 500,
+			vmidMax: 589,
+			templateVmidMin: config.templateVmidMin ?? 600,
+			templateVmidMax: config.templateVmidMax ?? 699,
+		}),
+	};
 	if (
 		config.tokenId &&
 		!/^[a-zA-Z0-9._-]+@pve![a-zA-Z0-9._-]+$/.test(config.tokenId)

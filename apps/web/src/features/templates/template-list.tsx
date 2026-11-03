@@ -12,6 +12,12 @@ import { Input } from "@/components/ui/input";
 import { useUmiak } from "@/lib/api";
 import { teamPath } from "@/lib/team-path";
 
+type MediaRecord = {
+	templateSlug: string;
+	mediaVerification?: string;
+	isoSha256?: string;
+	virtioSha256?: string;
+};
 type BuildJob = {
 	id: string;
 	slug: string;
@@ -20,12 +26,13 @@ type BuildJob = {
 	log?: string;
 	mediaVerification?: string;
 	mediaSha256?: string;
+	manifest?: MediaRecord;
 	error?: string;
 };
 async function buildRequest(
 	method = "GET",
 	body?: object,
-): Promise<{ buildJob?: BuildJob | null }> {
+): Promise<{ buildJob?: BuildJob | null; builds?: MediaRecord[] }> {
 	const r = await fetch("/quickstart/setup/build", {
 		method,
 		headers: { "Content-Type": "application/json" },
@@ -56,6 +63,15 @@ export function TemplateList({
 		queryFn: () => buildRequest(),
 		enabled: quickstart && session.isOperator,
 		refetchInterval: 2000,
+	});
+	const storages = useQuery({
+		queryKey: ["template-media-storages"],
+		queryFn: async () => {
+			const response = await fetch("/quickstart/setup/media/storages");
+			if (!response.ok) throw new Error("Cannot load ISO storage");
+			return (await response.json()) as { storages: { storage: string }[] };
+		},
+		enabled: quickstart && session.isOperator,
 	});
 	const [selected, setSelected] = useState<{
 		slug: string;
@@ -98,6 +114,9 @@ export function TemplateList({
 						pveVmid?: number | null;
 					};
 					const current = job?.slug === t.slug ? job : undefined;
+					const media = jobs.data?.builds?.find(
+						(b) => b.templateSlug === t.slug,
+					);
 					const status =
 						current?.status === "running"
 							? "building"
@@ -142,6 +161,21 @@ export function TemplateList({
 								<dt className="text-muted-foreground">Slot / VMID</dt>
 								<dd>{metadata.pveVmid ?? "—"}</dd>
 							</dl>
+							{media?.mediaVerification && (
+								<p className="text-sm">
+									ISO source: {media.mediaVerification}
+									{media.isoSha256 && (
+										<span className="block break-all text-xs">
+											Windows SHA256: {media.isoSha256}
+										</span>
+									)}
+									{media.virtioSha256 && (
+										<span className="block break-all text-xs">
+											VirtIO SHA256: {media.virtioSha256}
+										</span>
+									)}
+								</p>
+							)}
 							{session.isOperator && (
 								<div className="flex flex-wrap gap-2">
 									<Button
@@ -212,13 +246,16 @@ export function TemplateList({
 						Started {new Date(job.startedAt).toLocaleString()}. Builds run
 						serially. You can reload this page safely.
 					</p>
-					{job.mediaVerification === "unverified" && (
+					{(job.mediaVerification || job.manifest?.mediaVerification) ===
+						"unverified" && (
 						<p role="status" className="text-sm">
 							Not verified: the ISO will be used as downloaded
 						</p>
 					)}
-					{job.mediaSha256 && (
-						<p className="break-all text-xs">ISO SHA256: {job.mediaSha256}</p>
+					{(job.mediaSha256 || job.manifest?.isoSha256) && (
+						<p className="break-all text-xs">
+							ISO SHA256: {job.mediaSha256 || job.manifest?.isoSha256}
+						</p>
 					)}
 					{job.error && (
 						<p role="alert" className="text-destructive">
@@ -245,6 +282,7 @@ export function TemplateList({
 					</DialogTitle>
 					{selected && (
 						<form
+							id="template-build-form"
 							className="space-y-4"
 							onSubmit={async (event) => {
 								event.preventDefault();
@@ -284,6 +322,21 @@ export function TemplateList({
 										licensed ISO URL or an already uploaded ISO. Without SHA256:
 										Not verified: the ISO will be used as downloaded.
 									</p>
+									<label className="block text-sm">
+										ISO storage
+										<select
+											name="mediaStorage"
+											className="mt-1 block w-full border bg-background p-2"
+											aria-label="ISO storage"
+										>
+											<option value="">First eligible ISO storage</option>
+											{storages.data?.storages.map((s) => (
+												<option key={s.storage} value={s.storage}>
+													{s.storage}
+												</option>
+											))}
+										</select>
+									</label>
 									<label htmlFor="tpl-isoUrl" className="block text-sm">
 										Windows ISO HTTPS URL
 										<Input
@@ -330,6 +383,53 @@ export function TemplateList({
 										Explicitly allow private/internal ISO URL targets
 									</label>
 								</>
+							)}
+							{selected.windows && (
+								<Button
+									type="button"
+									variant="outline"
+									disabled={busy}
+									onClick={async () => {
+										setBusy(true);
+										setError("");
+										try {
+											const form = document.querySelector<HTMLFormElement>(
+												"#template-build-form",
+											);
+											if (!form) return;
+											const data = Object.fromEntries(new FormData(form));
+											const response = await fetch(
+												"/quickstart/setup/media/validate",
+												{
+													method: "POST",
+													headers: { "Content-Type": "application/json" },
+													body: JSON.stringify({
+														...data,
+														allowInternalIsoUrls:
+															data.allowInternalIsoUrls === "on",
+													}),
+												},
+											);
+											const result = await response.json();
+											setError(
+												response.ok
+													? `${result.message}. No download or build was started.`
+													: result.error,
+											);
+										} catch (e) {
+											setError(String(e));
+										} finally {
+											setBusy(false);
+										}
+									}}
+								>
+									Validate ISO inputs only
+								</Button>
+							)}
+							{error && (
+								<p role="status" className="text-sm">
+									{error}
+								</p>
 							)}
 							<label className="flex gap-2 text-sm">
 								<input type="checkbox" required />I confirm starting this{" "}

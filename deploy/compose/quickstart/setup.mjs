@@ -730,6 +730,14 @@ export function createSetupHandler({
 				...state.steps.limits.data,
 				...templateRange(state),
 			});
+			if (!input.dryRun) {
+				const node = await nodeCheck(connectionOf(state), secretsDir);
+				requireValue(
+					input.templateVmid >= node.config?.templateVmidMin &&
+						input.templateVmid <= node.config?.templateVmidMax,
+					"The node-agent template VMID range does not include the selected slot. Update templateVmidMin/templateVmidMax in /etc/umiak-node.toml to match Setup before building; adoption never rewrites host configuration.",
+				);
+			}
 			const invocation = buildInvocation(
 				slug,
 				state,
@@ -893,6 +901,8 @@ export function createSetupHandler({
 							tokenId: connection.tokenId,
 							nodeSha256,
 							storage: prep.storage,
+							templateVmidMin: prep.templateVmidMin,
+							templateVmidMax: prep.templateVmidMax,
 							guestDns: prep.guestDns,
 							caPath: prep.caPath,
 						};
@@ -1066,7 +1076,11 @@ export function createSetupHandler({
 			return true;
 		}
 		if (req.method === "GET" && path === "/quickstart/setup/build") {
-			json(res, 200, { buildJob: (await store.read()).buildJob || null });
+			const state = await store.read();
+			json(res, 200, {
+				buildJob: state.buildJob || null,
+				builds: state.steps.templates?.data?.builds || [],
+			});
 			return true;
 		}
 		if (
@@ -1146,7 +1160,19 @@ export function createSetupHandler({
 						/^\d{1,3}(?:\.\d{1,3}){3}$/.test(gateway),
 						"Fresh preparation requires the gateway LAN IPv4 address",
 					);
+				const preparationRange = validateTemplateRange({
+					vmidMin: 500,
+					vmidMax: 589,
+					...templateRange(state),
+					...(input.templateVmidMin !== undefined
+						? { templateVmidMin: Number(input.templateVmidMin) }
+						: {}),
+					...(input.templateVmidMax !== undefined
+						? { templateVmidMax: Number(input.templateVmidMax) }
+						: {}),
+				});
 				state.preparation = {
+					...preparationRange,
 					caPath:
 						context.ownerPrivateCA === false
 							? "/etc/ssl/certs/ca-certificates.crt"
