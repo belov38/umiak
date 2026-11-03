@@ -26,9 +26,16 @@ if scenario == "pending-sdn": objects["/cluster/sdn/zones"] = [{"zone":"foreign"
 if scenario == "pending-subnet":
     objects["/cluster/sdn/vnets"] = [{"vnet":"foreign"}]
     objects["/cluster/sdn/vnets/foreign/subnets"] = [{"subnet":"foreign-10.9.0.0-24","state":"changed"}]
+if scenario.startswith("pending-state-"):
+    _, _, kind, state = scenario.split("-", 3)
+    if kind == "zone": objects["/cluster/sdn/zones"] = [{"zone":"foreign", "state":state}]
+    elif kind == "vnet": objects["/cluster/sdn/vnets"] = [{"vnet":"foreign", "state":state}]
+    else:
+        objects["/cluster/sdn/vnets"] = [{"vnet":"foreign"}]
+        objects["/cluster/sdn/vnets/foreign/subnets"] = [{"subnet":"foreign-10.9.0.0-24", "state":state}]
 agent = b"fake-node-agent"
 report = {}
-config = {"origin": "https://stack.example:8443", "token": "a" * 64, "node": "pve", "gateway": "192.168.68.90", "publicKey": "ssh-ed25519 AAAA test", "tokenId": "developer@pve!quickstart", "nodeSha256": hashlib.sha256(agent).hexdigest(), "storage": "fast"}
+config = {"origin": "http://stack.example:4180", "token": "a" * 64, "node": "pve", "gateway": "192.168.68.90", "publicKey": "ssh-ed25519 AAAA test", "tokenId": "developer@pve!quickstart", "nodeSha256": hashlib.sha256(agent).hexdigest(), "storage": "fast", "templateVmidMin": 700, "templateVmidMax": 704}
 
 
 def mapped(value="."):
@@ -39,7 +46,7 @@ def mapped(value="."):
 for name, value in {
     "/usr/sbin/dnsmasq": "fake",
     "/sys/class/net/vmbr0/bridge/mcast_hash_max": "1024",
-    "/root/.config/umiak/quickstart-ca.pem": "fake-ca",
+    "/etc/ssl/certs/ca-certificates.crt": "fake-ca",
     "/etc/pve/pve-root-ca.pem": "fake-pve-ca",
     "/etc/pve/priv/authorized_keys": "existing-management-key\n",
     "/etc/ssh/ssh_host_ed25519_key.pub": "ssh-ed25519 AAAA host\n",
@@ -90,7 +97,13 @@ def run(args, **kwargs):
         path = args[2]
         if path not in objects:
             raise subprocess.CalledProcessError(2, args)
-        out = json.dumps(objects[path])
+        value = objects[path]
+        if "--pending" not in args:
+            if isinstance(value, list): value = [{key: item for key,item in row.items() if key not in ["pending", "state"]} for row in value]
+            elif isinstance(value, dict): value = {key:item for key,item in value.items() if key not in ["pending", "state"]}
+        else:
+            assert args[args.index("--pending") + 1] == "1"
+        out = json.dumps(value)
     elif args[:2] == ["pvesh", "create"]:
         path = args[2]
         values = dict(zip(args[3::2], args[4::2], strict=True))
@@ -169,7 +182,7 @@ def execute():
         pass
     return namespace
 
-if scenario in ["disabled-firewall", "pending-sdn", "pending-subnet"]:
+if scenario == "disabled-firewall" or scenario.startswith("pending-"):
     try: execute()
     except SystemExit as error: assert "firewall" in str(error) or "Pending SDN" in str(error)
     else: raise AssertionError("Disabled firewall accepted")
@@ -195,6 +208,9 @@ atexit._run_exitfuncs()
 namespace = execute()
 atexit._run_exitfuncs()
 assert 'vg = "custom-vg"' in mapped("/etc/umiak-node.toml").read_text()
+assert 'templateVmidMin = 700' in mapped('/etc/umiak-node.toml').read_text()
+assert 'templateVmidMax = 704' in mapped('/etc/umiak-node.toml').read_text()
+assert 'templateVmid = 0' in mapped('/etc/umiak-node.toml').read_text()
 assert 'storage = "fast"' in mapped("/etc/umiak-node.toml").read_text()
 if scenario != "success": print("SCENARIO PASS: " + scenario)
 assert mapped("/sys/class/net/vmbr0/bridge/mcast_hash_max").read_text() == "1024"

@@ -71,6 +71,8 @@ test("adoption reads only existing PVE objects and fails closed on missing zone"
 	const api = {
 		get: async (path) => {
 			paths.push(path);
+			if (path.endsWith("/storage"))
+				return [{ storage: "local", content: "iso" }];
 			return path === "/cluster/firewall/options"
 				? { enable: 1 }
 				: path.includes("/zones/")
@@ -96,7 +98,11 @@ test("adoption reads only existing PVE objects and fails closed on missing zone"
 									: path.includes("/users/")
 										? { enable: 1 }
 										: path === "/access/permissions"
-											? { "/pool/umiak": { "VM.Audit": 1 } }
+											? {
+													"/pool/umiak": { "VM.Audit": 1 },
+													"/nodes/pve": { "Sys.AccessNetwork": 1 },
+													"/storage/local": { "Datastore.AllocateTemplate": 1 },
+												}
 											: {};
 		},
 	};
@@ -274,7 +280,7 @@ test("adoption callback token expires, is single use, and setup denies the confi
 		},
 	};
 	const handler = createSetupHandler({ pool: {}, store });
-	async function request(path, input, owner = true, ownerPrivateCA = true) {
+	async function request(path, input, owner = true) {
 		const req = Readable.from(
 			input === undefined ? [] : [JSON.stringify(input)],
 		);
@@ -291,7 +297,6 @@ test("adoption callback token expires, is single use, and setup denies the confi
 		};
 		await handler(req, res, {
 			owner,
-			ownerPrivateCA,
 			origin: "https://stack.example",
 		});
 		return { status, data: JSON.parse(data) };
@@ -316,11 +321,8 @@ test("adoption callback token expires, is single use, and setup denies the confi
 
 	const prepared = await request("/quickstart/setup/prepare", {});
 	assert.equal(prepared.status, 200);
-	assert.match(prepared.data.command, /--cacert/);
-	assert.equal(
-		state.preparation.caPath,
-		"/root/.config/umiak/quickstart-ca.pem",
-	);
+	assert.doesNotMatch(prepared.data.command, /--cacert/);
+	assert.equal(state.preparation.caPath, "/etc/ssl/certs/ca-certificates.crt");
 	const token = prepared.data.command.match(/token=([a-f0-9]{64})/)[1];
 	const report = { zone: { type: "simple" }, vnet: { zone: "umiak" } };
 	const accepted = await request(
@@ -370,11 +372,11 @@ test("host adoption cannot become ready without a valid mounted PVE root CA", as
 	assert.equal(state.steps.host.status, "error");
 	assert.equal(state.complete, false);
 });
-test("help copy examples contain actual newlines and link certificate settings", () => {
+test("help copy examples contain actual newlines without owner certificate settings", () => {
 	const html = renderHelp("https://stack.example");
 	assert.match(html, /umiak login[^<]*\numiak create/);
 	assert.doesNotMatch(html, /\\numiak create/);
-	assert.match(html, /href="\/owner\/tls"/);
+	assert.doesNotMatch(html, /href="\/owner\/tls"/);
 	assert.doesNotMatch(
 		renderSetup({ steps: {} }, "https://stack.example"),
 		/otherwise pin the leaf/,
@@ -515,4 +517,50 @@ test("isolation permits disabled host rules and sealed templates but checks sand
 		() => verifyFirewall(api, { node: "pve" }),
 		/net0 firewall/,
 	);
+});
+
+test("API adoption reads pending SDN metadata and refuses staged zone changes", async () => {
+	const paths = [];
+	const api = {
+		get: async (path) => {
+			paths.push(path);
+			if (path === "/cluster/firewall/options") return { enable: 1 };
+			if (path === "/access/permissions")
+				return { "/pool/umiak": { "VM.Audit": 1 } };
+			if (path.includes("/nodes/pve/storage")) return [];
+			if (path === "/cluster/sdn/zones/umiak?pending=1")
+				return { type: "simple", state: "changed" };
+			return {};
+		},
+	};
+	await assert.rejects(
+		verifyAdoption(api, connection, async () => ({})),
+		/SDN zone/,
+	);
+	assert.ok(paths.includes("/cluster/sdn/zones/umiak?pending=1"));
+});
+
+test("dashboard template registration preserves completion and smoke; wizard registration invalidates smoke", async () => {
+	for (const dashboardBuild of [true, false]) {
+		let state = {
+			complete: true,
+			steps: Object.fromEntries(
+				["connection", "host", "limits", "network", "templates", "smoke"].map(
+					(name) => [name, { status: "ready", data: {} }],
+				),
+			),
+		};
+		const wizard = new SetupWizard({
+			store: {
+				read: async () => structuredClone(state),
+				write: async (next) => {
+					state = next;
+				},
+			},
+			steps: { templates: async () => ({ builds: [] }) },
+		});
+		await wizard.run("templates", {}, { dashboardBuild });
+		assert.equal(state.complete, dashboardBuild);
+		assert.equal(state.steps.smoke.status, dashboardBuild ? "ready" : "stale");
+	}
 });

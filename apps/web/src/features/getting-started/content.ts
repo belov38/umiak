@@ -2,10 +2,11 @@
 export interface GuideDeployment {
 	tenancy?: "single" | "teams";
 	mode: "owner" | "none" | "oidc";
-	ownerPrivateCA?: boolean;
 	apiUrl: string;
 	appUrl: string;
 	previewDomain: string;
+	previewScheme?: "http" | "https";
+	previewPort?: number;
 }
 type Block =
 	| { kind: "text"; text: string }
@@ -25,6 +26,13 @@ const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 export function guideSections(d: GuideDeployment): GuideSection[] {
 	const singleOwner = d.tenancy === "single";
+	const previewScheme =
+		d.previewScheme ?? (d.mode === "owner" ? "http" : "https");
+	const previewPort = d.previewPort ?? (d.mode === "owner" ? 8085 : 443);
+	const previewSuffix =
+		previewPort === (previewScheme === "http" ? 80 : 443)
+			? ""
+			: `:${previewPort}`;
 	const api = d.apiUrl.replace(/\/+$/, "");
 	const mcp = `${d.appUrl.replace(/\/+$/, "")}/mcp`;
 	const sections: GuideSection[] = [
@@ -36,7 +44,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 					`A sandbox is a throwaway virtual machine, identified by a three-word slug. A template is the image it is cloned from; a size sets RAM and vCPU. ${singleOwner ? "You own your sandboxes, snapshots and API keys." : "Your team owns its sandboxes, snapshots and API keys."}`,
 				),
 				text(
-					"Snapshots save a disk so you can create another sandbox with --from. Fork copies a sandbox directly. Port previews expose a guest port over HTTPS. Desktop templates stream a screen that people and agents can control.",
+					"Snapshots save a disk so you can create another sandbox with --from. Fork copies a sandbox directly. Port previews expose a guest port over HTTP or HTTPS. Desktop templates stream a screen that people and agents can control.",
 				),
 				text(
 					"Inactive sandboxes stop automatically according to deployment policy. Their disks remain available for resume. Use limits to check the actual quotas before creating a sandbox.",
@@ -50,31 +58,12 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 				d.mode === "owner"
 					? [
 							text(
-								d.ownerPrivateCA === false
-									? "This deployment serves the CLI installer over publicly trusted HTTPS; no private owner CA is needed."
-									: "This deployment serves the CLI installer. First obtain umiak-ca.pem through the operator's Docker console and compare its SHA-256 fingerprint through that trusted channel. Trust the owner CA in your browser too. Never download and trust a CA only through an unverified connection.",
+								"Quickstart uses HTTP on your trusted LAN by default. For HTTPS, use Tailscale Serve or your own reverse proxy. Download the installer from this deployment.",
 							),
-							...(d.ownerPrivateCA === false
-								? [
-										code(
-											"Install CLI",
-											`curl --fail ${quote(`${api}/install.sh`)} -o umiak-install.sh && sh ./umiak-install.sh`,
-										),
-									]
-								: [
-										code(
-											"Retrieve owner CA (on the Docker host)",
-											"docker compose cp quickstart:/var/lib/umiak/owner/tls/ca.pem ./umiak-ca.pem",
-										),
-										code(
-											"Check owner CA fingerprint",
-											"openssl x509 -in umiak-ca.pem -noout -fingerprint -sha256",
-										),
-										code(
-											"Install with verified CA",
-											`curl --fail --cacert ./umiak-ca.pem ${quote(`${api}/install.sh`)} -o umiak-install.sh && UMIAK_CA_CERT="$PWD/umiak-ca.pem" sh ./umiak-install.sh`,
-										),
-									]),
+							code(
+								"Install CLI",
+								`curl --fail ${quote(`${api}/install.sh`)} -o umiak-install.sh && sh ./umiak-install.sh`,
+							),
 							text(
 								"The installer runs login. Open the pairing link on the hostname where you claimed this deployment, and compare the short code shown in your terminal before approving. The CLI saves the deployment connection settings in its profile.",
 							),
@@ -131,7 +120,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 			title: "Port previews",
 			blocks: [
 				text(
-					`A preview URL has the form https://<slug>-<port>.${d.previewDomain}. Start a server inside the VM, then publish its port. Token access is the default; public access lets anyone with the URL connect.`,
+					`A preview URL has the form ${previewScheme}://<slug>-<port>.${d.previewDomain}${previewSuffix}. Start a server inside the VM, then publish its port. Token access is the default; public access lets anyone with the URL connect.`,
 				),
 				code(
 					"Start a preview server",
@@ -140,7 +129,9 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 				code("Publish a protected port", "umiak port 3000"),
 				code("Publish a public port", "umiak port 3000 --public"),
 				text(
-					"Preview TLS uses the guest gateway certificate, which may have a different CA from the owner dashboard. Ask the operator for its verified CA if your browser does not trust it.",
+					previewScheme === "http"
+						? "Quickstart previews use plain HTTP on your trusted LAN (port 8085 by default), with IP-derived sslip.io DNS. Token access remains the default; --public removes that token requirement. Serve cannot cover wildcard preview hostnames."
+						: "Preview TLS uses the guest gateway certificate. Ask the operator for its verified CA if your browser does not trust it.",
 				),
 			],
 		},
@@ -149,7 +140,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 			title: "Desktops",
 			blocks: [
 				text(
-					"Use an available desktop template for a graphical session. Desktop templates need more RAM than a headless Linux sandbox. The dashboard's Desktop tab has the same viewer.",
+					"Use an available desktop template for a graphical session. Desktop templates need more RAM than a headless Linux sandbox. The dashboard's Desktop tab has the same viewer. The embedded viewer needs a secure browser context for WebCodecs: use Tailscale Serve (recommended), localhost or your own HTTPS proxy. For localhost, run ssh -L 4180:localhost:4180 <docker-host> and open http://localhost:4180. From LAN HTTP, open the HTTPS viewer in a new tab. For a quick Chrome test only, add this origin at chrome://flags/#unsafely-treat-insecure-origin-as-secure; this weakens browser protection.",
 				),
 				code(
 					"Create a desktop",
@@ -171,7 +162,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 			title: "Connect an agent with MCP",
 			blocks: [
 				text(
-					"The recommended stdio transport uses your CLI profile, including pairing and CA settings. Put umiak on PATH, then register it in Claude Code or add the Codex configuration below.",
+					"The recommended stdio transport uses your paired CLI profile. Put umiak on PATH, then register it in Claude Code or add the Codex configuration below.",
 				),
 				code(
 					"Claude Code · stdio",
@@ -182,7 +173,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 					'[mcp_servers.umiak]\ncommand = "umiak"\nargs = ["mcp"]',
 				),
 				text(
-					`Remote MCP is available at ${mcp}. Local mode needs no credential. OIDC supports browser sign-in; quickstart remote MCP uses an owner credential. Prefer stdio for quickstart so credentials stay in the CLI profile. Remote clients must also trust the deployment CA.`,
+					`Remote MCP is available at ${mcp}. Local mode needs no credential. OIDC supports browser sign-in; quickstart remote MCP uses an owner credential. Prefer stdio for quickstart so credentials stay in the CLI profile. For HTTPS through your own proxy, remote clients must trust its certificate.`,
 				),
 				...(d.mode === "oidc"
 					? [
@@ -281,7 +272,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 					"Connection timeout: check the URL, LAN or tailnet reachability and deployment network policy. Local mode is only reachable from allowed networks. On macOS, check the browser's Local Network permission if curl works but the browser cannot connect.",
 				),
 				text(
-					"Certificate error: obtain the CA through a trusted operator channel and compare the fingerprint. Owner and preview CAs are separate. Do not bypass certificate verification for an installer.",
+					"Certificate error: check the certificate configured on your HTTPS proxy or guest gateway. Obtain any required CA through a trusted operator channel and compare its fingerprint. Do not bypass certificate verification for an installer.",
 				),
 				...(d.mode === "owner"
 					? [
@@ -311,14 +302,14 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 			title: "Optional Tailscale Serve",
 			blocks: [
 				text(
-					"Operators can use Tailscale Serve for a publicly trusted dashboard certificate. Supply a Tailscale auth key through the environment; never commit it. This is an optional Docker Compose override.",
+					"Quickstart defaults to LAN HTTP. Operators can use Tailscale Serve or their own HTTPS reverse proxy for a trusted dashboard certificate. Tailscale Serve keeps access within the tailnet; if you use Funnel, this is public. Supply a Tailscale auth key through the environment; never commit it. This is an optional Docker Compose override.",
 				),
 				code(
 					"Start with Tailscale Serve",
 					"TS_AUTHKEY=... TS_HOSTNAME=umiak docker compose -f compose.yaml -f deploy/compose/quickstart/compose.tailscale.yaml up -d --build",
 				),
 				text(
-					"Serve covers this dashboard hostname. It cannot serve wildcard preview hostnames: previews still use the guest gateway and its wildcard certificate and DNS configuration.",
+					"Serve covers this dashboard hostname. It cannot serve wildcard preview hostnames: quickstart previews still use the guest gateway HTTP listener on port 8085 by default, with their own DNS configuration.",
 				),
 			],
 		});

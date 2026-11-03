@@ -54,7 +54,8 @@ type DispatchConfig struct {
 	UmiakDomain string
 	// TunnelHost is the tunnel endpoint host (tunnel.<domain>).
 	TunnelHost string
-	// Umiak and Tunnel are the certificates of both destinations.
+	// Umiak and Tunnel are the certificates of both destinations. A nil
+	// Umiak disables preview TLS while preserving the tunnel endpoint.
 	Umiak, Tunnel *CertSource
 	// HandshakeTimeout bounds each TLS handshake; 0 means 10 s.
 	HandshakeTimeout time.Duration
@@ -199,7 +200,7 @@ func (d *Dispatcher) kind(sni string) string {
 		return kindUnknown
 	case sni == d.cfg.TunnelHost:
 		return kindTunnel
-	case d.cfg.UmiakDomain != "" && strings.HasSuffix(sni, "."+d.cfg.UmiakDomain) && len(sni) > len(d.cfg.UmiakDomain)+1:
+	case d.cfg.Umiak != nil && d.cfg.UmiakDomain != "" && strings.HasSuffix(sni, "."+d.cfg.UmiakDomain) && len(sni) > len(d.cfg.UmiakDomain)+1:
 		// One or more labels; the proxy answers 404 for nested ones.
 		return kindUmiak
 	default:

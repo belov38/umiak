@@ -31,12 +31,15 @@ test("upstream headers remove forged identity, credentials and forwarding header
 
 test("origin accepts DNS and IP but refuses malformed authority", () => {
 	assert.equal(
-		requestOrigin({ headers: { host: "pve:8444" } }),
-		"https://pve:8444",
+		requestOrigin(
+			{ headers: { host: "pve:8444" } },
+			{ UMIAK_QUICKSTART_ALLOWED_HOSTS: "pve" },
+		),
+		"http://pve:8444",
 	);
 	assert.equal(
 		requestOrigin({ headers: { host: "192.168.1.2:8444" } }),
-		"https://192.168.1.2:8444",
+		"http://192.168.1.2:8444",
 	);
 	assert.throws(() => requestOrigin({ headers: { host: "evil/path" } }));
 	assert.throws(() => requestOrigin({ headers: { host: "bad'host" } }));
@@ -52,7 +55,7 @@ test("HTTP routes gate API and WS, claim requires same origin, pair needs owner 
 	});
 	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const base = `http://127.0.0.1:${server.address().port}`;
-	const origin = base.replace("http:", "https:");
+	const origin = base;
 	const post = (path, body, headers = {}) =>
 		fetch(base + path, {
 			method: "POST",
@@ -69,7 +72,7 @@ test("HTTP routes gate API and WS, claim requires same origin, pair needs owner 
 		assert.equal(claim.status, 200);
 		const cookie = claim.headers.get("set-cookie");
 		assert.match(cookie, /HttpOnly/);
-		assert.match(cookie, /Secure/);
+		assert.doesNotMatch(cookie, /Secure/);
 		assert.match(cookie, /SameSite=Strict/);
 		const auth = { cookie: cookie.split(";")[0], origin };
 		assert.equal(
@@ -149,7 +152,7 @@ test("WebSocket upgrades cannot bypass owner authentication or origin checks", a
 		);
 		assert.equal(
 			await upgrade({
-				cookie: `__Host-umiak_owner=${token}`,
+				cookie: `umiak_owner=${token}`,
 				origin: "https://evil.example",
 			}),
 			401,
@@ -176,52 +179,6 @@ test("network denial precedes public and authenticated routes despite forged for
 		assert.equal(res.status, 403);
 	} finally {
 		await new Promise((resolve) => server.close(resolve));
-	}
-});
-
-test("dedicated CA authenticates only IP and configured DNS SNI names", async () => {
-	const { mkdtempSync, readFileSync, rmSync } = await import("node:fs");
-	const { tmpdir } = await import("node:os");
-	const { join } = await import("node:path");
-	const https = await import("node:https");
-	const { quickstartTls } = await import("./server.mjs");
-	const dir = mkdtempSync(join(tmpdir(), "umiak-owner-tls-"));
-	const store = new OwnerStore(new MemoryOwnerRepository());
-	await store.init();
-	const server = createQuickstartServer({
-		store,
-		tls: await quickstartTls(dir, ["127.0.0.1", "home.example.test"]),
-		env: { UMIAK_LOCAL_DENIED_CIDRS: "10.88.0.0/24" },
-	});
-	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-	const ca = readFileSync(join(dir, "ca.pem"));
-	const get = (servername) =>
-		new Promise((resolve, reject) => {
-			https
-				.get(
-					{
-						host: "127.0.0.1",
-						port: server.address().port,
-						path: "/setup",
-						ca,
-						...(servername
-							? { servername, headers: { host: servername } }
-							: {}),
-					},
-					(res) => {
-						res.resume();
-						resolve(res.statusCode);
-					},
-				)
-				.on("error", reject);
-		});
-	try {
-		assert.equal(await get(), 200);
-		assert.equal(await get("home.example.test"), 200);
-		await assert.rejects(get("www.google.com"));
-	} finally {
-		await new Promise((resolve) => server.close(resolve));
-		rmSync(dir, { recursive: true, force: true });
 	}
 });
 
@@ -281,31 +238,6 @@ test("wizard resolved PVE addresses are denied dynamically", async () => {
 	}
 });
 
-test("owner can persist extra IP certificate names without an env file", async () => {
-	const { mkdtempSync, rmSync } = await import("node:fs");
-	const { tmpdir } = await import("node:os");
-	const { join } = await import("node:path");
-	const { X509Certificate } = await import("node:crypto");
-	const { quickstartTls } = await import("./server.mjs");
-	const dir = mkdtempSync(join(tmpdir(), "umiak-extra-ip-"));
-	try {
-		const tls = await quickstartTls(dir);
-		const next = await tls.updateNames(["192.168.2.40"], { rotateCA: true });
-		assert.equal(
-			new X509Certificate(next.cert).checkIP("192.168.2.40"),
-			"192.168.2.40",
-		);
-		const restarted = await quickstartTls(dir);
-		assert.equal(
-			new X509Certificate(restarted.cert).checkIP("192.168.2.40"),
-			"192.168.2.40",
-		);
-		await assert.rejects(tls.updateNames(["bad\nsubjectAltName=DNS:evil"]));
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
-});
-
 test("anonymous browser guide navigations show claim while API clients retain JSON", async () => {
 	const store = new OwnerStore(new MemoryOwnerRepository());
 	await store.init();
@@ -354,4 +286,104 @@ test("download length enables determinate installer progress through Serve", asy
 	);
 	assert.equal(response.headers.get("content-length"), "16");
 	assert.equal(await response.text(), "compressed bytes");
+});
+
+test("public installer and downloads HEAD match GET headers without a body or owner session", async (t) => {
+	const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const dir = await mkdtemp(join(tmpdir(), "umiak-head-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	await writeFile(join(dir, "install.sh"), "origin=__UMIAK_ORIGIN__");
+	await writeFile(join(dir, "umiak-darwin-arm64.gz"), "compressed");
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	await store.init();
+	const server = createQuickstartServer({
+		store,
+		transport: http,
+		assetsDir: dir,
+		env: {},
+	});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	t.after(() => new Promise((resolve) => server.close(resolve)));
+	const base = `http://127.0.0.1:${server.address().port}`;
+	for (const path of ["/install.sh", "/downloads/umiak-darwin-arm64.gz"]) {
+		const get = await fetch(base + path);
+		const bytes = await get.arrayBuffer();
+		const head = await fetch(base + path, { method: "HEAD" });
+		assert.equal(head.status, 200);
+		assert.equal(
+			head.headers.get("content-type"),
+			get.headers.get("content-type"),
+		);
+		assert.equal(Number(head.headers.get("content-length")), bytes.byteLength);
+		assert.equal(await head.text(), "");
+	}
+	assert.equal(
+		(await fetch(`${base}/downloads/missing`, { method: "HEAD" })).status,
+		404,
+	);
+});
+
+test("HTTPS proxy claim retains __Host cookie and direct HTTP ignores forwarded headers from untrusted peers", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	const code = await store.init();
+	const server = createQuickstartServer({
+		store,
+		env: {
+			UMIAK_TRUSTED_PROXY_CIDRS: "127.0.0.0/8",
+			UMIAK_PUBLIC_URL: "https://lab.example",
+		},
+	});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	try {
+		const response = await fetch(
+			`http://127.0.0.1:${server.address().port}/owner/claim`,
+			{
+				method: "POST",
+				headers: {
+					"x-forwarded-proto": "https",
+					"x-forwarded-host": "lab.example",
+					origin: "https://lab.example",
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ code }),
+			},
+		);
+		assert.equal(response.status, 200);
+		assert.match(
+			response.headers.get("set-cookie"),
+			/^__Host-umiak_owner=.*; Secure;/,
+		);
+	} finally {
+		await new Promise((resolve) => server.close(resolve));
+	}
+});
+
+test("trusted proxies cannot bypass denied client CIDRs", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	await store.init();
+	const server = createQuickstartServer({
+		store,
+		env: { UMIAK_LOCAL_DENIED_CIDRS: "10.88.0.0/24" },
+	});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	try {
+		const response = await fetch(
+			`http://127.0.0.1:${server.address().port}/owner/pair`,
+			{
+				method: "POST",
+				headers: {
+					"x-forwarded-proto": "https",
+					"x-forwarded-host": "lab.example",
+					"x-forwarded-for": "10.88.0.3",
+					"content-type": "application/json",
+				},
+				body: "{}",
+			},
+		);
+		assert.equal(response.status, 403);
+	} finally {
+		await new Promise((resolve) => server.close(resolve));
+	}
 });

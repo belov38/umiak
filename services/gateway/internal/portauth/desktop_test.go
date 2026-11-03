@@ -102,3 +102,32 @@ func TestDesktopWebRTCMediaAndWebSocketRequireCurrentOriginAndEpoch(t *testing.T
 		}
 	}
 }
+
+func TestHTTPDesktopCookieAndExactOrigin(t *testing.T) {
+	h := newHarness(t, func(c *Config) { c.PreviewScheme = "http"; c.PreviewPort = 8085; c.CrossSite = true })
+	l := routes.Label{Raw: "quiet-otter-desktop", Slug: "quiet-otter", Kind: routes.KindDesktop}
+	rt := cpapi.Route{Access: "token", AuthEpoch: 7}
+	root := "http://quiet-otter-desktop." + testDomain + ":8085"
+	r := httptest.NewRequestWithContext(t.Context(), "GET", root+"/?_ticket=umiakd_secret", nil)
+	grant := h.auth.CheckDesktop(httptest.NewRecorder(), r, l, rt, clientIP, "rid", &desktopAPI{epoch: 7})
+	if !grant.Proceed || grant.SetCookie == nil {
+		t.Fatalf("ticket grant: %+v", grant)
+	}
+	if grant.SetCookie.Secure || grant.SetCookie.Partitioned || grant.SetCookie.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("HTTP desktop cookie cannot require secure transport: %+v", grant.SetCookie)
+	}
+	for _, origin := range []string{root, "http://quiet-otter-desktop." + testDomain, "http://quiet-otter-desktop." + testDomain + ":8086", "https://quiet-otter-desktop." + testDomain + ":8085", "http://other-desktop." + testDomain + ":8085"} {
+		for _, method := range []string{"POST", "GET"} {
+			req := httptest.NewRequestWithContext(t.Context(), method, root+"/api/stream", nil)
+			req.Header.Set("Origin", origin)
+			if method == "GET" {
+				req.Header.Set("Upgrade", "websocket")
+			}
+			req.AddCookie(grant.SetCookie)
+			result := h.auth.CheckDesktop(httptest.NewRecorder(), req, l, rt, clientIP, "rid", nil)
+			if result.Proceed != (origin == root) {
+				t.Fatalf("%s Origin %s proceed=%v", method, origin, result.Proceed)
+			}
+		}
+	}
+}

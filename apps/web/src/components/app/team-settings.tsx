@@ -15,6 +15,7 @@ import {
 } from "@/actions/members";
 import { renameTeam } from "@/actions/teams";
 import { ConfirmButton } from "@/components/app/confirm-button";
+import { ConnectionNotice } from "@/components/app/connection-notice";
 import { QueryError } from "@/components/app/query-error";
 import { useAppSession } from "@/components/app/session-context";
 import { TeamNotices } from "@/components/app/team-notices";
@@ -66,6 +67,7 @@ export function TeamSettings({ data }: { data: TeamSettingsData }) {
 	return (
 		<div className="space-y-6">
 			<h1>Team settings</h1>
+			<ConnectionNotice />
 			<TeamNotices
 				teamId={data.team.id}
 				notices={data.notices}

@@ -68,15 +68,19 @@ type Config struct {
 	MetricsListen string
 
 	// Names.
-	UmiakDomain string
-	TunnelHost  string
-	SSHHost     string
+	UmiakDomain   string
+	PreviewScheme string // http for quickstart; https by default
+	PreviewPort   int
+	TunnelHost    string
+	SSHHost       string
 
-	// TLS files (required when TLSListen is set).
+	// Tunnel TLS files are required when TLSListen is set. Preview TLS
+	// files are optional for HTTP previews; HTTPS previews require them.
 	UmiakCertFile  string
 	UmiakKeyFile   string
 	TunnelCertFile string
 	TunnelKeyFile  string
+	TLSCAFile      string // optional public CA certificate for expiry metrics
 
 	// Client IP.
 	ProxyProtocol      bool
@@ -205,12 +209,30 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	c.MetricsListen = l.str("METRICS_LISTEN", ":9090")
 
 	c.UmiakDomain = l.str("PREVIEW_DOMAIN", "")
+	c.TLSCAFile = l.str("TLS_CA_FILE", "")
+	c.PreviewScheme = l.str("PREVIEW_SCHEME", "https")
+	if c.PreviewScheme != "http" && c.PreviewScheme != "https" {
+		l.fail("PREVIEW_SCHEME", errors.New("must be http or https"))
+	}
+	previewPort := 443
+	if c.PreviewScheme == "http" {
+		previewPort = 80
+	}
+	c.PreviewPort = l.integer("PREVIEW_PORT", previewPort)
+	if c.PreviewPort > 65535 {
+		l.fail("PREVIEW_PORT", errors.New("must be within 1..65535"))
+	}
 	c.TunnelHost = l.str("TUNNEL_HOST", "")
 	c.SSHHost = l.str("SSH_HOST", "")
 
 	if c.TLSListen != "" {
-		c.UmiakCertFile = l.required("TLS_PREVIEW_CERT_FILE")
-		c.UmiakKeyFile = l.required("TLS_PREVIEW_KEY_FILE")
+		if c.PreviewScheme == "https" {
+			c.UmiakCertFile = l.required("TLS_PREVIEW_CERT_FILE")
+			c.UmiakKeyFile = l.required("TLS_PREVIEW_KEY_FILE")
+		} else {
+			c.UmiakCertFile = l.str("TLS_PREVIEW_CERT_FILE", "")
+			c.UmiakKeyFile = l.str("TLS_PREVIEW_KEY_FILE", "")
+		}
 		c.TunnelCertFile = l.required("TLS_TUNNEL_CERT_FILE")
 		c.TunnelKeyFile = l.required("TLS_TUNNEL_KEY_FILE")
 	} else {
@@ -319,6 +341,9 @@ func (c Config) ValidateServe() error {
 	}
 	need("PREVIEW_DOMAIN", c.UmiakDomain)
 	need("TUNNEL_HOST", c.TunnelHost)
+	if c.PreviewScheme == "http" && c.HTTPListen == "" {
+		errs = append(errs, fmt.Errorf("%sHTTP_LISTEN: is required with HTTP previews", envPrefix))
+	}
 	if c.DatabaseURL == "" {
 		errs = append(errs, fmt.Errorf("%sDATABASE_URL (or DATABASE_URL): is required", envPrefix))
 	}

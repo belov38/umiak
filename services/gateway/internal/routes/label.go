@@ -3,6 +3,7 @@
 package routes
 
 import (
+	"net"
 	"strings"
 )
 
@@ -53,12 +54,18 @@ func DefaultGrammar() Grammar {
 	}
 }
 
-// ParseHost parses "<label>.<umiakDomain>[:443]". It reports false for every
+// ParseHost parses "<label>.<umiakDomain>[:port]". It reports false for every
 // host outside the grammar: another domain, the apex, nested labels, a
-// trailing dot, a port other than 443, or an invalid label.
+// trailing dot, an invalid authority port, or an invalid label.
 func ParseHost(host, umiakDomain string, g Grammar) (Label, bool) {
 	host = strings.ToLower(host)
-	host = strings.TrimSuffix(host, ":443")
+	if strings.Contains(host, ":") {
+		name, port, err := net.SplitHostPort(host)
+		if _, ok := parsePort(port); err != nil || !ok {
+			return Label{}, false
+		}
+		host = name
+	}
 	if host == "" || strings.ContainsAny(host, ":[]") || strings.HasSuffix(host, ".") {
 		return Label{}, false
 	}

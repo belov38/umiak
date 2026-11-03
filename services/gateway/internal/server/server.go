@@ -266,20 +266,24 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 
 	i.limits = ratelimit.New(cfg.RateLimit, i.metrics)
 	i.auth = portauth.New(portauth.Config{
-		AuthMode:    cfg.AuthMode,
-		Codec:       portauth.NewCodec(cfg.CookieKeys, deps.Now),
-		API:         deps.API,
-		AuthURL:     cfg.AuthURL,
-		UmiakDomain: cfg.UmiakDomain,
-		CrossSite:   cfg.CookieCrossSite,
-		Limits:      i.limits,
-		Metrics:     i.metrics,
+		AuthMode:      cfg.AuthMode,
+		PreviewScheme: cfg.PreviewScheme,
+		PreviewPort:   cfg.PreviewPort,
+		Codec:         portauth.NewCodec(cfg.CookieKeys, deps.Now),
+		API:           deps.API,
+		AuthURL:       cfg.AuthURL,
+		UmiakDomain:   cfg.UmiakDomain,
+		CrossSite:     cfg.CookieCrossSite,
+		Limits:        i.limits,
+		Metrics:       i.metrics,
 	})
 	i.streams = httpproxy.NewStreamTracker()
 	accessLog := obs.NewAccessLog(deps.AccessLog)
 	i.proxy = httpproxy.New(httpproxy.Config{
 		DesktopAPI:          cpapi.Desktop(deps.API),
 		UmiakDomain:         cfg.UmiakDomain,
+		PreviewScheme:       cfg.PreviewScheme,
+		PreviewPort:         cfg.PreviewPort,
 		Grammar:             grammar(cfg),
 		Routes:              i.routes,
 		Auth:                i.auth,
@@ -331,7 +335,13 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 	}
 	tunnelHandler := edge.TunnelHandler(g.Admitter(), rate.NewLimiter(rate.Limit(rateLimit), burst), i.metrics)
 	errLog := slog.NewLogLogger(deps.Logger.Handler(), slog.LevelDebug)
-	i.plain = edge.NewPlainServer(edge.PlainHandler(i.proxy, tunnelHandler, cfg.TunnelHost), cfg.Timeouts)
+	plainHandler := edge.PlainHandler(i.proxy, tunnelHandler, cfg.TunnelHost)
+	if cfg.PreviewScheme == "http" {
+		// Quickstart exposes only application previews over plain HTTP.
+		// Guest tunnels continue to use their dedicated TLS endpoint.
+		plainHandler = i.proxy
+	}
+	i.plain = edge.NewPlainServer(plainHandler, cfg.Timeouts)
 	i.umiakSrv = edge.NewUmiakServer(i.proxy, cfg.Timeouts)
 	i.tunnelSrv = edge.NewTunnelServer(tunnelHandler, cfg.Timeouts)
 	for _, s := range i.edgeServers() {
@@ -504,18 +514,26 @@ func (i *Instance) edgeServers() []*http.Server {
 // startEdge loads the certificates and builds the TLS dispatcher of ln
 // (PROXY protocol v2 first when configured).
 func (i *Instance) startEdge(ln net.Listener) (*edge.Dispatcher, []*edge.CertSource, error) {
-	umiak, err := edge.NewCertSource("umiak", i.cfg.UmiakCertFile, i.cfg.UmiakKeyFile, i.metrics)
-	if err != nil {
-		return nil, nil, fmt.Errorf("server: %w", err)
+	var umiak *edge.CertSource
+	var err error
+	if i.cfg.UmiakCertFile != "" || i.cfg.UmiakKeyFile != "" {
+		umiak, err = edge.NewCertSource("umiak", i.cfg.UmiakCertFile, i.cfg.UmiakKeyFile, i.metrics)
+		if err != nil {
+			return nil, nil, fmt.Errorf("server: %w", err)
+		}
 	}
 	tun, err := edge.NewCertSource("tunnel", i.cfg.TunnelCertFile, i.cfg.TunnelKeyFile, i.metrics)
 	if err != nil {
 		return nil, nil, fmt.Errorf("server: %w", err)
 	}
-	for _, c := range []*edge.CertSource{umiak, tun} {
+	certs := []*edge.CertSource{tun}
+	if umiak != nil {
+		certs = append(certs, umiak)
+	}
+	for _, c := range certs {
 		c.SetLogger(i.log)
 	}
-	i.AddReadyCheck(func() bool { return umiak.Loaded() && tun.Loaded() })
+	i.AddReadyCheck(func() bool { return (umiak == nil || umiak.Loaded()) && tun.Loaded() })
 	if i.cfg.ProxyProtocol {
 		ln = edge.WrapProxyProtocol(ln, i.cfg.ProxyProtocolCIDRs, i.cfg.ProxyHeaderTimeout)
 	}
@@ -534,7 +552,7 @@ func (i *Instance) startEdge(ln net.Listener) (*edge.Dispatcher, []*edge.CertSou
 		Metrics:            i.metrics,
 		Logger:             i.log,
 	})
-	return d, []*edge.CertSource{umiak, tun}, nil
+	return d, certs, nil
 }
 
 // Run serves the non-nil listeners and runs the tunnel gateway until ctx is
@@ -546,6 +564,19 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 		return errors.New("server: Run called twice")
 	}
 	defer close(i.runEnded)
+	var caExpiry *edge.CAExpirySource
+	if i.cfg.TLSCAFile != "" {
+		var err error
+		caExpiry, err = edge.NewCAExpirySource(i.cfg.TLSCAFile, i.metrics)
+		if err != nil {
+			for _, ln := range []net.Listener{ls.Internal, ls.Metrics, ls.TLS, ls.Plain, ls.SSH} {
+				if ln != nil {
+					_ = ln.Close()
+				}
+			}
+			return fmt.Errorf("server: %w", err)
+		}
+	}
 	var disp *edge.Dispatcher
 	var certs []*edge.CertSource
 	if ls.TLS != nil {
@@ -620,6 +651,9 @@ func (i *Instance) Run(ctx context.Context, ls Listeners) error {
 	}
 	wg.Go(func() { i.pingLoop(runCtx) })
 	wg.Go(func() { i.limits.Run(runCtx) })
+	if caExpiry != nil {
+		wg.Go(func() { caExpiry.Run(runCtx) })
+	}
 	close(i.runStarted)
 
 	var err error

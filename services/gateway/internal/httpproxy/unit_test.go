@@ -102,11 +102,11 @@ func TestForwardedHeader(t *testing.T) {
 		{"203.0.113.5", "app-3000.umiak.test:443", `for=203.0.113.5;proto=https;host="app-3000.umiak.test:443"`},
 	}
 	for _, c := range cases {
-		if got := forwardedHeader(netip.MustParseAddr(c.ip), c.host); got != c.want {
+		if got := forwardedHeader(netip.MustParseAddr(c.ip), c.host, "https"); got != c.want {
 			t.Errorf("forwardedHeader(%s, %s) = %q, want %q", c.ip, c.host, got, c.want)
 		}
 	}
-	if got := forwardedHeader(netip.Addr{}, "h.umiak.test"); got != "for=unknown;proto=https;host=h.umiak.test" {
+	if got := forwardedHeader(netip.Addr{}, "h.umiak.test", "https"); got != "for=unknown;proto=https;host=h.umiak.test" {
 		t.Errorf("forwardedHeader(invalid) = %q", got)
 	}
 }

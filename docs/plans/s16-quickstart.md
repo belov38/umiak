@@ -336,3 +336,222 @@ Remaining scope limits: owner-only live pairing/lifecycle intentionally omitted 
 claimed stand; covered by local compiled-ingress tests and existing lifecycle gates.
 Fresh-host prep and template builds remain faked/dry-run (forbidden on this stand).
 Independent acceptance/master merge remains outstanding.
+
+## Round 4 — s16-fix3
+
+Technical decisions are delegated by Ilia; see round-4 spec rulings.
+
+- [x] Dashboard Templates catalog, guarded enable/build/rebuild, durable progress,
+  template/snapshot explanation and fake build/rebuild tests.
+- [x] Separate template VMID range, inventory-based allocation and preserved adoption;
+  occupied-ID, overlap and adoption regression tests.
+- [x] API lifecycle defaults, regenerated OpenAPI and SDKs, create labels and Playwright.
+- [x] PVE HTTPS ISO download, SHA256/security/storage/reuse/progress/permission tests,
+  Windows legal notice and checksum guidance; no live download.
+- [x] Full gate, light/dark captures, safe CT590 redeploy and read-only checks.
+- [x] Commit logical steps and push s16-fix3; independent acceptance/master merge pending.
+
+### Round-4 verification evidence (2026-11-03)
+
+- Dashboard catalog exposes OS/capabilities/default and allowed sizes/enabled/version/
+  date/VMID, guarded enable toggle, owner build/rebuild confirmation, serial durable
+  progress/logs and per-build media records. OIDC members get a read-only catalog;
+  operators can enable/disable and use S5 build instructions (OIDC has no owner
+  build service). Snapshots explains and links back to Templates.
+- Configurable template range defaults600–699 for fresh hosts; legacy state derives
+  595–598. Inventory includes cluster-wide occupied QEMU/LXC IDs, nextid, overlap and
+  exhausted-range checks. Fake adoption preserves existing IDs; rebuild dry-run
+  makes no writes. Review caught missing node-agent propagation: fresh preparation
+  now emits the selected range, fake verifies700–704; a real build checks the node
+  range before downloading/creating. On adopted hosts an administrator must update
+  the node-agent range before expansion; no automatic host writes.
+- Windows and VirtIO URLs accept optional SHA256. With a checksum PVE verifies it;
+  without one UI warns, node-agent computes actual SHA256, and source stays marked
+  unverified in active template metadata and durable build records. Fake tests cover
+  private/credential/non-HTTPS URLs and redirect targets, mismatch, reuse by checksum
+  or filename+size, and missing scoped download permissions. No media shipped.
+- Full `pnpm build`, `pnpm lint`, `pnpm typecheck`, e2e TypeScript checks PASS.
+  Lint retains the pre-existing informational String.raw notice in an MCP test.
+  Sequential workspace tests:4545 TS passed,8 skipped; Python83 passed (ruff passed).
+  Go build/vet/test-p1/golangci-lint passed for all five modules; changed node-agent
+  repeated after selected-storage SHA support. Scoped shellcheck passes with sourced
+  files resolved; broad historical desktop probe scripts retain pre-existing warnings.
+- Node quickstart/local/meta-proxy final gate127/127 PASS, including compiled native CLI TLS,
+  optional checksum media tests, pending SDN fake, signals/HEAD, short-lived CA cap/
+  expiry warning, atomic generation recovery and external rotation reload.
+- Playwright OIDC23/23 PASS (prior22 plus Templates), local1/1 PASS. New checks assert
+  real lifecycle defaults, template size and environment defaults. Targeted visual
+  scenario1/1 PASS after scrolling the dialog to show TTL/idle. Isolated stacks and
+  volumes removed. Initial runs collided with the other acceptance's standard
+  Compose name and then with local trace output; final runs used a separate
+  project, ports and artifact directories. No production failures were hidden.
+- Live CT590: RAM inventory0 sandbox bytes; no VMs created. Built API/web/quickstart
+  while old services kept running, verified zero pending/running operations before
+  short replacement. Owner state MD5 remained bb3490bc78b21dcafbb04378d0e03729;
+  ownerClaimed=true, tenancy=single; sessions preserved. Guest CA/tunnel/preview
+  checksums unchanged; gateway/worker not restarted. API/web healthy.
+- Live read-only API checks return Linux20261101.1/597, Windows20261101.2/598,
+  Linux desktop20261101.3/596 and Windows desktop20261101.7/595 with build dates.
+  Templates SSR200 contains explanation; limits defaults null/900; Setup range
+  derives595–598. Validation function on deployed code rejects HTTP/loopback and
+  accepts public HTTPS without a checksum, with no download or build invocation.
+  No owner browser login, recovery, pairing, ISO download, rebuild, host prep,
+  firewall/network change or sandbox mutation. Full claimed-owner browser check is
+  left to Ilia; screenshots use the isolated fake-backend stack.
+- Round-3 acceptance S1/S2 and lows1–5 incorporated: ten-year new CA with capped
+  leaves and30-day warning, atomic credential generations, running reload after
+  console rotation, real pending=1 SDN reads/fake fidelity, signal exits, public HEAD,
+  accurate Serve published-port wording. Existing live CA was not rotated.
+
+Screenshots (isolated backend, light/dark):
+- /Users/ib/.t3/userdata/s16-fix3/templates-light.png
+- /Users/ib/.t3/userdata/s16-fix3/templates-dark.png
+- /Users/ib/.t3/userdata/s16-fix3/create-light.png
+- /Users/ib/.t3/userdata/s16-fix3/create-dark.png
+
+Remaining: master independent acceptance and merge; no live fresh-host preparation,
+Windows build, ISO download or rebuild on this stand. Native PVE GET performs its
+own DNS resolution after validated HEAD preflight; source/DNS changes between those
+requests cannot be controlled without proxying the download. See quickstart README.
+
+## Round 5 scope replacement — HTTP owner ingress (2026-11-03)
+
+Ilia explicitly removed private owner TLS, including optional support. This
+supersedes the round-5 CA export/retention work and earlier owner-TLS rulings.
+Implementation choices are delegated; no additional design approval is required.
+
+- [x] Preserve build/media acceptance fixes and remove obsolete owner CA code/tests.
+- [x] HTTP ingress, Host/Origin checks, generic trusted proxy origin and cookies.
+- [x] HTTP installer/compiled CLI with generic custom-proxy CA regression.
+- [x] HTTP token/public previews, guest gateway TLS unchanged.
+- [x] Secure-context guidance, Funnel visibility, three-path docs and runbook.
+- [x] Full final gate and state-preserving CT590 migration to HTTP backend of Serve.
+- [x] Logical commits and push s16-fix4; no main merge.
+
+Rulings: direct DNS names require the Host allowlist (or configured public URL),
+while literal private/tailnet addresses and localhost work by default. Trusted
+proxies are a configured origin boundary: forwarded headers are accepted only
+from their CIDRs; configuring UMIAK_PUBLIC_URL pins the external origin. Compose
+explicitly trusts its host NAT peer for host-run proxies and the optional sidecar
+peer; authorization remains the owner gate. HTTP and HTTPS cookies use separate
+names, with the existing __Host-umiak_owner retained for HTTPS proxy sessions.
+
+### Round-5 final rulings and verification (HTTP scope)
+
+All six implementation items above are complete; the seventh is closed by the
+logical commits and push recorded in this branch. The old B1/L5 work was replaced,
+not shipped: private owner TLS implementation/rotation files removed428 source
+lines, plus319 lines of owner TLS tests. The owner TLS routes/metadata/SNI/installer
+plumbing and volume mounts are gone. The retired CT590 owner-CA volume was checked
+to contain only TLS data and emptied; owner/session state remains in Postgres.
+
+Implementation rulings:
+
+- HTTP4180 binds all Docker-host interfaces by default behind S15 peer allow/deny.
+  Direct DNS Hosts require the configured allowlist; literal addresses/localhost
+  work without an env file. Generic proxy CIDRs admit forwarding only from known
+  peers. Root Compose trusts loopback plus exact Docker host gateway/NAT peers
+  (.1/.128); isolated sidecar adds its exact peer. PUBLIC_URL pins external origin.
+  Proxies without PUBLIC_URL must restrict their own allowed Hosts. No Tailscale
+  identity header grants access. Effective external addresses drive rate/deny
+  checks; admitted socket peer is passed to private S15 upstreams, so public proxy
+  clients do not fail the inner LAN guard. Review found and fixed both boundaries.
+- Preserve existing HTTPS __Host-umiak_owner and all CLI credentials. HTTP uses
+  a separate plain-name cookie. No login, recovery, claim or new pairing was done
+  on CT590. Existing local CLI session successfully called whoami using the old,
+  newly compiled and freshly downloaded binaries.
+- HTTP preview and desktop URLs use explicit configured scheme/port. Exact desktop
+  Origin and cookies and web CSP follow that configuration. HTTPS wildcard preview
+  support remains, and guest tunnel443 stays TLS. No new gateway/PVE firewall rule.
+- Renewal keeps the guest CA, private keys, SSH trust and service tokens. Check at
+  start and daily; renew leaves within30 days by atomic certificate rename. Both
+  quickstart and legacy dev-cp have a networkless renewal sidecar. Setup/settings
+  show ISO expiry strings; CA warning begins one year before expiry. Metrics
+  cert=ca/tunnel/umiak publish expiry timestamps. Rotation of CA still requires
+  rebuilding agent packages/templates, unlike ordinary leaf renewal.
+- HEAD405/network failures are advisory; valid GET results are accepted only after
+  paginated wget redirect/resolved/connecting-address audit. Private redirects,
+  HTTPS downgrade and rebinding-address logs reject and delete the volume.
+
+Final gate evidence:
+
+- pnpm build/lint/typecheck and e2e typecheck PASS. Lint retains the pre-existing
+  informational String.raw notice in an MCP Windows test. Local Playwright's
+  unignored .last-run.json was removed after its run, then lint was repeated.
+- Sequential workspace gate PASS:4583 TS tests passed,8 skipped; Python83 passed,
+  including generated-client freshness and ruff. Initial Python freshness failure
+  after metadata schema additions was corrected by regenerating the Python SDK.
+- Node quickstart/local/meta-proxy140/140 PASS, including compiled CLI HTTP pairing
+  start and HTTPS external proxy with explicit test --cacert. Private owner CA
+  compiled tests are removed. Real PEM copies tested earlier are obsolete.
+- Five Go modules build/vet/test-p1 PASS; lint PASS (one new test Body.Close
+  errcheck fixed, gateway lint repeated clean). Renewal/edge tests also PASS with
+  -race. Compiled guest subprocess fixture uses real agent.Run and TLS/WebSocket,
+  tests admission and Control/Info before renewal, on the surviving tunnel after
+  hot reload, and on reconnect with the unchanged CA file. The systemd-dependent
+  shipped daemon wrapper cannot run on this macOS; only OS supervisor/identity
+  dependencies in that fixture are replaced. No VM/template rebuild required.
+- Shellcheck PASS for quickstart/secret-init/turn and touched dev-cp scripts.
+- OIDC Playwright23/23 and local1/1 PASS. Isolated projects/ports used. Local also
+  used explicit separate subnets to avoid both other projects and Docker automatic
+  address allocation; all our test stacks/networks/DB volumes were removed.
+  Initial OIDC environment-port mismatch and local subnet collision were corrected
+  in launch configuration. Other projects were never stopped or removed.
+
+Secure-context experiment (Playwright Chromium, intercepted static documents at
+real URL origins, standard browser security settings): LAN HTTP192.168.68.90:4180
+isSecureContext=false; VideoDecoder/VideoEncoder, navigator.clipboard,
+mediaDevices and crypto.subtle absent; RTCPeerConnection present. localhost HTTP
+and HTTPS expose all those APIs. No dashboard getUserMedia/crypto.subtle use was
+found; terminal uses ws/wss. Clipboard has execCommand then manual-copy fallback.
+This proves browser capability exposure, not a live VM stream. An HTTPS parent
+cannot embed an HTTP viewer; Serve secures only the dashboard, not a separate
+wildcard viewer. Guidance detects the viewer origin too, and lists Serve,
+localhost/SSH, HTTPS proxy and a temporary exact-origin Chrome flag with warning.
+WebRTC constructor availability alone is not claimed as a full stream test.
+
+CT590 final live evidence:
+
+- Serve https://umiak-dev-cp.tail0000.ts.net:8443/app -> http://localhost:4180;
+  LAN http://192.168.68.90:4180/app; direct tailnet http://100.64.10.7:4180/app.
+- Builds ran while old services remained up. Immediately before each short
+  replacement:0 unfinished operations. Final state:ownerClaimed=true,
+  complete=true, owner state MD5 bb3490bc78b21dcafbb04378d0e03729 unchanged.
+  CA/tunnel/preview PEM checksums unchanged; gateway-renewal running. No owner
+  browser login/recovery, new pairing, ISO download, build on pve, VM creation,
+  sandbox mutation, firewall or network change occurred. Final qm inventory has
+  no500–589 VM and preserves templates595–598 and unrelated102/108/9000/9001.
+- Public meta returns the Serve HTTPS origin, HTTP preview scheme/8085 and no
+  ownerPrivateCA. Anonymous HTTP API401 and browser claim/claimed-owner gate.
+  Actual /app setup handler against live DB returns pass-through (no /setup
+  redirect). Validation-only local:iso/windows.iso returns200 without downloads.
+  Live Setup rendering contains the pinned VirtIO digest and Funnel warning.
+- Fresh bundled installer downloaded/verifies41MB archive over Serve, installed
+  to a temporary directory with SKIP_LOGIN, and that binary authenticated using the
+  existing CLI session. Temporary install removed; no credential store replaced.
+- Tailnet HTTP8085 preview request with a valid but nonexistent sandbox host
+  reaches gateway and returns404. Token/public access behavior is covered by
+  gateway HTTP end-to-end tests. No real preview sandbox was created for live
+  verification. CA2036-10-29, both leaves2027-12-03; all three expiry metrics read.
+
+Remaining boundaries: no live sandbox/desktop stream/template build/download or
+fresh-host preparation (forbidden on active pve). The agent browser lacks Ilia's
+owner cookie, so no full signed-in live dialog interaction was attempted; live
+handler/render/validation checks and local browser tests cover those paths.
+Independent acceptance and master merge remain outstanding; no main merge.
+
+Additional browser evidence: a separate fake-backend owner-mode render confirms
+Windows dialog VirtIO checksum is prefilled and a rejected build input appears
+only once, inside the dialog. POST was intercepted with a fake400; no builder or
+PVE call was possible. Initial probe reused another branch's mutable :dev image;
+final probe and repeated OIDC/local gates use unique image tags as well as project
+names/ports/subnets. Security image inspection now derives the running web image
+reference from the selected Compose project, avoiding unrelated image tags.
+
+Final integration check: MCP's private accepted Host is independent of the public
+DNS allowlist; ingress normalizes upstream Host. The dev stand advertises its
+Serve MCP URL. Remote MCP initialize returned200 using the existing CLI bearer;
+the test-created protocol session was closed. No pairing was started. Final
+repeated isolated-image OIDC23/23 and local1/1 passed. The Docker image audit uses
+the running container's Config.Image reference (Docker's platform config digest
+was not runnable by name on this Docker Desktop image store).

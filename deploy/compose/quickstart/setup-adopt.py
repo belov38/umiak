@@ -17,8 +17,8 @@ if os.geteuid() != 0 or socket.gethostname().split(".")[0] != config["node"]:
     raise SystemExit("Run as root on the PVE node named in Setup")
 
 
-def get(path):
-    return json.loads(subprocess.run(["pvesh", "get", path, "--output-format", "json"], text=True, capture_output=True, check=True).stdout)
+def get(path, *options):
+    return json.loads(subprocess.run(["pvesh", "get", path, *options, "--output-format", "json"], text=True, capture_output=True, check=True).stdout)
 
 
 def optional_set(name):
@@ -28,14 +28,21 @@ def optional_set(name):
         return []
 
 
+# Read staged changes explicitly: default PVE SDN reads omit pending metadata.
+vnets = get("/cluster/sdn/vnets", "--pending", "1")
+for path in ["/cluster/sdn/zones", "/cluster/sdn/vnets", *["/cluster/sdn/vnets/" + row["vnet"] + "/subnets" for row in vnets]]:
+    if any(row.get("pending") or row.get("state") in ["new", "changed", "deleted"] for row in get(path, "--pending", "1")):
+        raise SystemExit("Pending SDN changes must be applied or reverted by the administrator before adoption")
+
 uid, token = config["tokenId"].split("!")
 report = {
     "user": get("/access/users/" + uid),
     "token": get("/access/users/" + uid + "/token/" + token),
     "role": get("/access/roles/UmiakPoC"),
+    "downloadPrivileges": {"requiredNodePrivilege": "Sys.AccessNetwork", "requiredStoragePrivilege": "Datastore.AllocateTemplate", "acl": get("/access/acl")},
     "pool": get("/pools/umiak"),
-    "zone": get("/cluster/sdn/zones/umiak"),
-    "vnet": get("/cluster/sdn/vnets/umiak0"),
+    "zone": get("/cluster/sdn/zones/umiak", "--pending", "1"),
+    "vnet": get("/cluster/sdn/vnets/umiak0", "--pending", "1"),
     "ipset": get("/cluster/firewall/ipset/umiak-gateway"),
     "rules": get("/cluster/firewall/groups/umiak-egress"),
     "denySets": {name: optional_set(name) for name in ["umiak-deny", "umiak-deny6", "umiak-deny-public"]},
@@ -65,10 +72,12 @@ for vm in get("/nodes/" + config["node"] + "/qemu"):
             report["vmFirewallsValid"] = False
 node = subprocess.run(["/usr/local/bin/umiak-node", "--stdio"], input=json.dumps({"op": "version", "args": {}}), text=True, capture_output=True, check=True)
 report["nodeAgent"] = json.loads(node.stdout)
-ca = Path(config.get("caPath", "/root/.config/umiak/quickstart-ca.pem"))
-if not ca.exists():
-    raise SystemExit("Copy the verified quickstart CA to " + str(ca))
-context = ssl.create_default_context(cafile=str(ca))
+ca = Path(config.get("caPath", "/etc/ssl/certs/ca-certificates.crt"))
+context = None
+if config["origin"].startswith("https://"):
+    if not ca.exists():
+        raise SystemExit("HTTPS proxy trust store is missing: " + str(ca))
+    context = ssl.create_default_context(cafile=str(ca))
 request = urllib.request.Request(config["origin"] + "/quickstart/setup/callback", data=json.dumps({"token": config["token"], "report": report, "caPem": Path("/etc/pve/pve-root-ca.pem").read_text()}).encode(), headers={"Content-Type": "application/json"}, method="POST")
 with urllib.request.urlopen(request, context=context, timeout=30) as response:
     if response.status != 200:

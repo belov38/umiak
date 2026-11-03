@@ -94,11 +94,11 @@ def sync_detailed(
 ) -> Response[Error | HostedPortWrite]:
     """Publish a port or change its access
 
-     Publishes the guest port at `https://<slug>-<port>.<umiakDomain>` with the given settings (PUT:
-    omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1). 201 for
-    a new port, 200 for a change or the same settings. A new token port or a switch to token returns
-    `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links and
-    cookies. Allowed in any state but deleting and deleted.
+     Publishes the guest port at the configured preview scheme, domain and port with the given settings
+    (PUT: omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1).
+    201 for a new port, 200 for a change or the same settings. A new token port or a switch to token
+    returns `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links
+    and cookies. Allowed in any state but deleting and deleted.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -137,11 +137,11 @@ def sync(
 ) -> Error | HostedPortWrite | None:
     """Publish a port or change its access
 
-     Publishes the guest port at `https://<slug>-<port>.<umiakDomain>` with the given settings (PUT:
-    omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1). 201 for
-    a new port, 200 for a change or the same settings. A new token port or a switch to token returns
-    `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links and
-    cookies. Allowed in any state but deleting and deleted.
+     Publishes the guest port at the configured preview scheme, domain and port with the given settings
+    (PUT: omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1).
+    201 for a new port, 200 for a change or the same settings. A new token port or a switch to token
+    returns `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links
+    and cookies. Allowed in any state but deleting and deleted.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -175,11 +175,11 @@ async def asyncio_detailed(
 ) -> Response[Error | HostedPortWrite]:
     """Publish a port or change its access
 
-     Publishes the guest port at `https://<slug>-<port>.<umiakDomain>` with the given settings (PUT:
-    omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1). 201 for
-    a new port, 200 for a change or the same settings. A new token port or a switch to token returns
-    `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links and
-    cookies. Allowed in any state but deleting and deleted.
+     Publishes the guest port at the configured preview scheme, domain and port with the given settings
+    (PUT: omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1).
+    201 for a new port, 200 for a change or the same settings. A new token port or a switch to token
+    returns `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links
+    and cookies. Allowed in any state but deleting and deleted.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -216,11 +216,11 @@ async def asyncio(
 ) -> Error | HostedPortWrite | None:
     """Publish a port or change its access
 
-     Publishes the guest port at `https://<slug>-<port>.<umiakDomain>` with the given settings (PUT:
-    omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1). 201 for
-    a new port, 200 for a change or the same settings. A new token port or a switch to token returns
-    `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links and
-    cookies. Allowed in any state but deleting and deleted.
+     Publishes the guest port at the configured preview scheme, domain and port with the given settings
+    (PUT: omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1).
+    201 for a new port, 200 for a change or the same settings. A new token port or a switch to token
+    returns `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links
+    and cookies. Allowed in any state but deleting and deleted.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.

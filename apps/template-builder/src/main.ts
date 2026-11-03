@@ -44,7 +44,7 @@ const USAGE = `usage:
   umiak-tpl preflight [<slug>] [--node <node>]
   umiak-tpl versions <slug> [--update]
   umiak-tpl build <slug> --agent-package <tar> [--node <node>] [--umiak-cli <file>] [--api-url <url>]
-                [--tunnel-url <wss-url>] [--ssh-user-ca <file>] [--refresh] [--keep-on-failure]
+                [--template-vmid <id>] [--tunnel-url <wss-url>] [--ssh-user-ca <file>] [--refresh] [--keep-on-failure]
                 [--no-verify] [--fail-step <step>] [--connect-url <wss-url> --dev-cp-ssh <user@host>]
                 windows: [--iso <file>] [--iso-sha256 <hex> | --accept-iso-sha256] [--edition <name>]
                 [--product-key-file <file>]
@@ -299,6 +299,9 @@ async function cmdBuild(
 			pool: cfg.pool,
 			vnet: cfg.vnet,
 			agentPackage,
+			...(str("template-vmid") !== undefined
+				? { templateVmid: Number(str("template-vmid")) }
+				: {}),
 			keepOnFailure: v["keep-on-failure"] === true,
 			noVerify,
 			templatesDir: TEMPLATES_DIR,
@@ -312,6 +315,8 @@ async function cmdBuild(
 			...opt("fail-step", "failStep"),
 			...opt("iso", "iso"),
 			...opt("iso-sha256", "isoSha256"),
+			...opt("virtio-iso", "virtioIso"),
+			...opt("virtio-sha256", "virtioSha256"),
 			...opt("edition", "edition"),
 			...opt("product-key-file", "productKeyFile"),
 			...(v["accept-iso-sha256"] === true ? { acceptIsoSha256: true } : {}),
@@ -381,6 +386,7 @@ async function main(argv: string[]): Promise<number> {
 			update: { type: "boolean", default: false },
 			node: { type: "string" },
 			"agent-package": { type: "string" },
+			"template-vmid": { type: "string" },
 			"umiak-cli": { type: "string" },
 			"api-url": { type: "string" },
 			"tunnel-url": { type: "string" },
@@ -391,6 +397,8 @@ async function main(argv: string[]): Promise<number> {
 			"fail-step": { type: "string" },
 			iso: { type: "string" },
 			"iso-sha256": { type: "string" },
+			"virtio-iso": { type: "string" },
+			"virtio-sha256": { type: "string" },
 			"accept-iso-sha256": { type: "boolean", default: false },
 			edition: { type: "string" },
 			"product-key-file": { type: "string" },

@@ -1,13 +1,23 @@
 // Generates a deployment-bound fresh-host script; tokens never enter git or logs.
 import { readFileSync } from "node:fs";
+import { validateTemplateRange } from "./setup-vmids.mjs";
 export function renderPreparation(config) {
+	config = {
+		...config,
+		...validateTemplateRange({
+			vmidMin: 500,
+			vmidMax: 589,
+			templateVmidMin: config.templateVmidMin ?? 600,
+			templateVmidMax: config.templateVmidMax ?? 699,
+		}),
+	};
 	if (
 		config.tokenId &&
 		!/^[a-zA-Z0-9._-]+@pve![a-zA-Z0-9._-]+$/.test(config.tokenId)
 	)
 		throw new Error("Invalid preparation token ID");
 	if (
-		!/^https:\/\/[a-zA-Z0-9.:[\]-]+$/.test(config.origin) ||
+		!/^https?:\/\/[a-zA-Z0-9.:[\]-]+$/.test(config.origin) ||
 		!/^[a-f0-9]{64}$/.test(config.token) ||
 		!/^ssh-ed25519 [a-zA-Z0-9+/=]+(?: [a-zA-Z0-9_-]+)?$/.test(
 			config.publicKey,
@@ -25,7 +35,7 @@ export function renderPreparation(config) {
 }
 export function renderAdoption(config) {
 	if (
-		!/^https:\/\/[a-zA-Z0-9.:[\]-]+$/.test(config.origin) ||
+		!/^https?:\/\/[a-zA-Z0-9.:[\]-]+$/.test(config.origin) ||
 		!/^[a-f0-9]{64}$/.test(config.token) ||
 		!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(config.node)
 	)

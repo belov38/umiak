@@ -52,7 +52,7 @@ const (
 const usage = `usage:
   umiak-gateway [serve]
   umiak-gateway check-config
-  umiak-gateway dev-secrets -dir <dir> [-domain umiak.localhost] [-tunnel-host tunnel.localhost] [-ssh-host ssh.localhost] [-owner uid:gid] [-worker-owner uid:gid]
+  umiak-gateway dev-secrets -dir <dir> [-domain umiak.localhost] [-tunnel-host tunnel.localhost] [-ssh-host ssh.localhost] [-owner uid:gid] [-worker-owner uid:gid] [-renew-before 720h] [-renew-interval 24h]
   umiak-gateway healthcheck [-url http://127.0.0.1:9090/readyz]
   umiak-gateway version`
 
@@ -329,10 +329,18 @@ func devSecrets(args []string) int {
 	sshHost := fs.String("ssh-host", devsecrets.DefaultSSHHost, "SSH host name (host key comments)")
 	owner := fs.String("owner", "", "uid:gid that owns the created files (the gateway's user)")
 	workerOwner := fs.String("worker-owner", "", "uid:gid that owns worker-gateway-token (the worker's user)")
+	renewBefore := fs.Duration("renew-before", 0, "renew TLS leaves expiring within this duration; preserve the CA and private keys (e.g. 720h)")
+	renewInterval := fs.Duration("renew-interval", 0, "keep running and renew at this interval (e.g. 24h); requires -renew-before")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *dir == "" || fs.NArg() != 0 {
+	intervalSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "renew-interval" {
+			intervalSet = true
+		}
+	})
+	if *dir == "" || *renewBefore < 0 || (intervalSet && (*renewInterval <= 0 || *renewBefore == 0)) || fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, usage)
 		return 2
 	}
@@ -346,20 +354,43 @@ func devSecrets(args []string) int {
 		fmt.Fprintln(os.Stderr, "umiak-gateway dev-secrets:", err)
 		return 2
 	}
-	written, err := devsecrets.Generate(devsecrets.Options{
+	opts := devsecrets.Options{
 		Dir: *dir, Domain: *domain, TunnelHost: *tunnelHost, SSHHost: *sshHost,
-		Owner: o, WorkerOwner: wo,
-	})
-	for _, name := range written {
-		fmt.Println("wrote", name)
+		Owner: o, WorkerOwner: wo, RenewBefore: *renewBefore,
 	}
-	if err != nil {
+	generate := func() error {
+		written, err := devsecrets.Generate(opts)
+		for _, name := range written {
+			fmt.Println("wrote", name)
+		}
+		if err == nil && len(written) == 0 {
+			fmt.Println("all files exist in", *dir)
+		}
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer stop()
+	if err := generate(); err != nil {
 		fmt.Fprintln(os.Stderr, "umiak-gateway dev-secrets:", err)
-		return 1
+		if *renewInterval == 0 {
+			return 1
+		}
 	}
-	if len(written) == 0 {
-		fmt.Println("all files exist in", *dir)
+	if *renewInterval > 0 {
+		ticker := time.NewTicker(*renewInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return 0
+			case <-ticker.C:
+				if err := generate(); err != nil {
+					fmt.Fprintln(os.Stderr, "umiak-gateway dev-secrets:", err)
+				}
+			}
+		}
 	}
+
 	return 0
 }
 

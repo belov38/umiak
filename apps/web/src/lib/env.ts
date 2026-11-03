@@ -13,8 +13,10 @@ export interface WebEnv {
 	/** Origin of the dashboard, the only Origin of unsafe requests (S8 §5.6). */
 	appOrigin: string;
 	operatorGroups: string[];
-	/** Domain of sandbox hosts, for CSP frame-src (`https://*.<umiakDomain>`). */
+	/** Sandbox preview origin configuration, including the CSP frame-src. */
 	umiakDomain: string;
+	previewScheme: "http" | "https";
+	previewPort: number;
 	/** Public API URL shown in the UI (CLI and SDK hints). */
 	apiPublicUrl: string;
 	/** Sign-out target after oauth2-proxy (Keycloak logout); optional. */
@@ -56,6 +58,8 @@ const schema = z.object({
 		.toLowerCase()
 		.regex(HOSTNAME, "must be a domain name, e.g. umiak.example.com"),
 	UMIAK_API_PUBLIC_URL: httpUrl,
+	UMIAK_PREVIEW_SCHEME: z.enum(["http", "https"]).default("https"),
+	UMIAK_PREVIEW_PORT: z.coerce.number().int().min(1).max(65535).optional(),
 	UMIAK_LOGOUT_URL: httpUrl.optional(),
 });
 
@@ -107,6 +111,9 @@ export function parseWebEnv(env: Record<string, string | undefined>): WebEnv {
 			),
 		],
 		umiakDomain: e.UMIAK_PREVIEW_DOMAIN,
+		previewScheme: e.UMIAK_PREVIEW_SCHEME,
+		previewPort:
+			e.UMIAK_PREVIEW_PORT ?? (e.UMIAK_PREVIEW_SCHEME === "http" ? 80 : 443),
 		apiPublicUrl: e.UMIAK_API_PUBLIC_URL.replace(/\/+$/, ""),
 		logoutUrl: mode === "none" ? null : (e.UMIAK_LOGOUT_URL ?? null),
 	};
@@ -127,6 +134,8 @@ const BUILD_ENV: WebEnv = {
 	appOrigin: "https://app.build.invalid",
 	operatorGroups: [],
 	umiakDomain: "umiak.build.invalid",
+	previewScheme: "https",
+	previewPort: 443,
 	apiPublicUrl: "https://api.build.invalid",
 	logoutUrl: null,
 };

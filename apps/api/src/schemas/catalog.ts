@@ -18,6 +18,16 @@ export const TemplateSchema = z
 		capabilities: z.array(z.string()).openapi({
 			description: "What the template supports: exec, files, ssh, desktop",
 		}),
+		buildCreatedAt: z.iso
+			.datetime()
+			.nullable()
+			.optional()
+			.openapi({ description: "Creation date of the active build" }),
+		pveVmid: z
+			.int()
+			.nullable()
+			.optional()
+			.openapi({ description: "VMID of the active sealed template" }),
 		version: z.string().nullable().openapi({
 			description: "Version of the active build; null while none is active",
 		}),

@@ -958,7 +958,7 @@ export interface paths {
         get?: never;
         /**
          * Publish a port or change its access
-         * @description Publishes the guest port at `https://<slug>-<port>.<umiakDomain>` with the given settings (PUT: omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1). 201 for a new port, 200 for a change or the same settings. A new token port or a switch to token returns `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links and cookies. Allowed in any state but deleting and deleted.
+         * @description Publishes the guest port at the configured preview scheme, domain and port with the given settings (PUT: omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1). 201 for a new port, 200 for a change or the same settings. A new token port or a switch to token returns `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links and cookies. Allowed in any state but deleting and deleted.
          */
         put: operations["ports.put"];
         post?: never;
@@ -2027,6 +2027,11 @@ export interface components {
         Limits: {
             /** @description A sandbox of at least one allowed size fits the quota now */
             canCreate: boolean;
+            /** @description Effective platform lifecycle defaults; null disables the policy. Omitted by older servers. */
+            defaults?: {
+                idleTimeoutSeconds: number | null;
+                ttlSeconds: number | null;
+            };
             quota: {
                 maxActiveSandboxes: number;
                 maxRamMb: number;
@@ -2167,6 +2172,13 @@ export interface components {
                 /** Format: uri */
                 issuer: string;
             } | null;
+            /** @description Public preview listener port; omit from URLs when it is the scheme default */
+            previewPort?: number;
+            /**
+             * @description Scheme of published port URLs; absent on older servers means https
+             * @enum {string}
+             */
+            previewScheme?: "http" | "https";
             ssh: {
                 /** @example ssh.example.com */
                 host: string;
@@ -2180,7 +2192,7 @@ export interface components {
              */
             tenancy?: "single" | "teams";
             /**
-             * @description Domain of published ports: https://<slug>-<port>.<umiakDomain>
+             * @description Domain of published ports: <previewScheme>://<slug>-<port>.<umiakDomain>[:previewPort]
              * @example umiak.example.com
              */
             umiakDomain: string;
@@ -2703,6 +2715,11 @@ export interface components {
         };
         Template: {
             allowedSizes: string[];
+            /**
+             * Format: date-time
+             * @description Creation date of the active build
+             */
+            buildCreatedAt?: string | null;
             /** @description What the template supports: exec, files, ssh, desktop */
             capabilities: string[];
             /** @example 2gb */
@@ -2717,6 +2734,8 @@ export interface components {
             name: string;
             /** @enum {string} */
             os: "linux" | "windows" | (string & {});
+            /** @description VMID of the active sealed template */
+            pveVmid?: number | null;
             /** @example linux */
             slug: string;
             /** @description Version of the active build; null while none is active */

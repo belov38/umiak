@@ -49,7 +49,7 @@ func forwardedFor(r *http.Request, trusted []netip.Prefix) string {
 }
 
 // forwardedHeader returns the RFC 7239 Forwarded value of one hop.
-func forwardedHeader(ip netip.Addr, host string) string {
+func forwardedHeader(ip netip.Addr, host string, scheme string) string {
 	var node string
 	switch {
 	case !ip.IsValid():
@@ -59,7 +59,7 @@ func forwardedHeader(ip netip.Addr, host string) string {
 	default:
 		node = ip.String()
 	}
-	return "for=" + node + ";proto=https;host=" + forwardedValue(host)
+	return "for=" + node + ";proto=" + scheme + ";host=" + forwardedValue(host)
 }
 
 // forwardedValue returns s as an RFC 7239 value: a token as is, anything

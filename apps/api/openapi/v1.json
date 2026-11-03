@@ -2026,6 +2026,28 @@
 						"description": "A sandbox of at least one allowed size fits the quota now",
 						"type": "boolean"
 					},
+					"defaults": {
+						"description": "Effective platform lifecycle defaults; null disables the policy. Omitted by older servers.",
+						"properties": {
+							"idleTimeoutSeconds": {
+								"type": [
+									"integer",
+									"null"
+								]
+							},
+							"ttlSeconds": {
+								"type": [
+									"integer",
+									"null"
+								]
+							}
+						},
+						"required": [
+							"ttlSeconds",
+							"idleTimeoutSeconds"
+						],
+						"type": "object"
+					},
 					"quota": {
 						"properties": {
 							"maxActiveSandboxes": {
@@ -2465,6 +2487,20 @@
 							"null"
 						]
 					},
+					"previewPort": {
+						"description": "Public preview listener port; omit from URLs when it is the scheme default",
+						"maximum": 65535,
+						"minimum": 1,
+						"type": "integer"
+					},
+					"previewScheme": {
+						"description": "Scheme of published port URLs; absent on older servers means https",
+						"enum": [
+							"http",
+							"https"
+						],
+						"type": "string"
+					},
 					"ssh": {
 						"properties": {
 							"host": {
@@ -2500,7 +2536,7 @@
 						"type": "string"
 					},
 					"umiakDomain": {
-						"description": "Domain of published ports: https://<slug>-<port>.<umiakDomain>",
+						"description": "Domain of published ports: <previewScheme>://<slug>-<port>.<umiakDomain>[:previewPort]",
 						"example": "umiak.example.com",
 						"type": "string"
 					}
@@ -3956,6 +3992,14 @@
 						},
 						"type": "array"
 					},
+					"buildCreatedAt": {
+						"description": "Creation date of the active build",
+						"format": "date-time",
+						"type": [
+							"string",
+							"null"
+						]
+					},
 					"capabilities": {
 						"description": "What the template supports: exec, files, ssh, desktop",
 						"items": {
@@ -3986,6 +4030,13 @@
 						],
 						"type": "string",
 						"x-extensible-enum": true
+					},
+					"pveVmid": {
+						"description": "VMID of the active sealed template",
+						"type": [
+							"integer",
+							"null"
+						]
 					},
 					"slug": {
 						"example": "linux",
@@ -9987,7 +10038,7 @@
 				]
 			},
 			"put": {
-				"description": "Publishes the guest port at `https://<slug>-<port>.<umiakDomain>` with the given settings (PUT: omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1). 201 for a new port, 200 for a change or the same settings. A new token port or a switch to token returns `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links and cookies. Allowed in any state but deleting and deleted.",
+				"description": "Publishes the guest port at the configured preview scheme, domain and port with the given settings (PUT: omitted fields take their defaults: access token, hostRewrite preserve, appProtocol http1). 201 for a new port, 200 for a change or the same settings. A new token port or a switch to token returns `token` and `urlWithToken` once; keep them. Any access change invalidates the port's links and cookies. Allowed in any state but deleting and deleted.",
 				"operationId": "ports.put",
 				"parameters": [
 					{

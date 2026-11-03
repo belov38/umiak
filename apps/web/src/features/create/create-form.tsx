@@ -43,6 +43,7 @@ import {
 	type EnvironmentChoice,
 	emptyCreateForm,
 	type FormErrors,
+	platformDefaultLabel,
 	slugProblem,
 	toCreateRequest,
 } from "@/lib/create-form";
@@ -397,7 +398,13 @@ export function CreateSandboxForm({
 									disabled={sizeChoices.length === 0}
 								>
 									<SelectTrigger aria-label="Size" className="w-80">
-										<SelectValue placeholder="default size" />
+										<SelectValue
+											placeholder={
+												template
+													? `Template default (${template.defaultSize})`
+													: "Loading sizes…"
+											}
+										/>
 									</SelectTrigger>
 									<SelectContent>
 										{sizeChoices.map((slug) => {
@@ -410,6 +417,9 @@ export function CreateSandboxForm({
 											return (
 												<SelectItem key={slug} value={slug}>
 													{slug}
+													{slug === template?.defaultSize
+														? " (template default)"
+														: ""}
 													{s ? ` · ${s.vcpu} vCPU · ${s.memoryMb} MB` : ""}
 													{why ? ` (${why})` : ""}
 												</SelectItem>
@@ -476,9 +486,7 @@ export function CreateSandboxForm({
 												? `${singleOwner ? "default" : "team default"}: ${defaultEnv.name}`
 												: singleOwner
 													? "default (none set)"
-													: singleOwner
-														? "default (none set)"
-														: "team default (none set)"}
+													: "team default (none set)"}
 										</SelectItem>
 										{envs.map((x) => (
 											<SelectItem key={x.id} value={`env:${x.name}`}>
@@ -548,14 +556,34 @@ export function CreateSandboxForm({
 									<span>TTL</span>
 									<DurationSelect
 										label="TTL"
-										choices={TTL_CHOICES}
+										choices={TTL_CHOICES.map((c) =>
+											c.value === "default"
+												? {
+														...c,
+														label: platformDefaultLabel(
+															limits.data?.defaults?.ttlSeconds,
+															"no TTL",
+														),
+													}
+												: c,
+										)}
 										value={form.ttl}
 										onChange={(ttl) => patch({ ttl })}
 									/>
 									<span>Idle stop after</span>
 									<DurationSelect
 										label="Idle stop after"
-										choices={IDLE_CHOICES}
+										choices={IDLE_CHOICES.map((c) =>
+											c.value === "default"
+												? {
+														...c,
+														label: platformDefaultLabel(
+															limits.data?.defaults?.idleTimeoutSeconds,
+															"never",
+														),
+													}
+												: c,
+										)}
 										value={form.idle}
 										onChange={(idle) => patch({ idle })}
 									/>

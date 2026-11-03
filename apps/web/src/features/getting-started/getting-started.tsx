@@ -31,11 +31,17 @@ export function GettingStarted({
 					...previous,
 					...(validUrl(value.apiUrl) ? { apiUrl: value.apiUrl } : {}),
 					...(validUrl(value.appUrl) ? { appUrl: value.appUrl } : {}),
+					...(value.previewScheme === "http" || value.previewScheme === "https"
+						? { previewScheme: value.previewScheme }
+						: {}),
+					...(typeof value.previewPort === "number" &&
+					Number.isInteger(value.previewPort) &&
+					value.previewPort > 0 &&
+					value.previewPort <= 65535
+						? { previewPort: value.previewPort }
+						: {}),
 					...(typeof value.umiakDomain === "string"
 						? { previewDomain: value.umiakDomain }
-						: {}),
-					...(typeof value.ownerPrivateCA === "boolean"
-						? { ownerPrivateCA: value.ownerPrivateCA }
 						: {}),
 				}));
 			})

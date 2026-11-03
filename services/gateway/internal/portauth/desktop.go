@@ -22,7 +22,7 @@ func (a *Auth) CheckDesktop(w http.ResponseWriter, r *http.Request, l routes.Lab
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead || strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		origins := r.Header.Values("Origin")
-		if len(origins) != 1 || origins[0] != "https://"+l.Raw+"."+a.cfg.UmiakDomain {
+		if len(origins) != 1 || origins[0] != a.previewOrigin(l) {
 			return reject(http.StatusForbidden, "origin_forbidden")
 		}
 	}
@@ -53,8 +53,10 @@ func (a *Auth) CheckDesktop(w http.ResponseWriter, r *http.Request, l routes.Lab
 			return reject(http.StatusUnauthorized, "token_invalid")
 		}
 		cookie := a.sessionCookie(Session{Label: l.Raw, Mode: ModeDesktop, Epoch: grant.AuthEpoch, UserID: grant.UserID}, a.cfg.SSOTTL)
-		cookie.SameSite = http.SameSiteNoneMode
-		cookie.Partitioned = true
+		if cookie.Secure {
+			cookie.SameSite = http.SameSiteNoneMode
+			cookie.Partitioned = true
+		}
 		return Result{Proceed: true, AuthResult: ResultOK, UserID: grant.UserID, SetCookie: cookie}
 	}
 	switch rt.Access {

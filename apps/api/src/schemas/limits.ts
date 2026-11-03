@@ -11,6 +11,16 @@ const counters = z.object({
 
 export const LimitsSchema = z
 	.object({
+		defaults: z
+			.object({
+				ttlSeconds: z.int().nullable(),
+				idleTimeoutSeconds: z.int().nullable(),
+			})
+			.optional()
+			.openapi({
+				description:
+					"Effective platform lifecycle defaults; null disables the policy. Omitted by older servers.",
+			}),
 		quota: z.object({
 			maxActiveSandboxes: z.int(),
 			maxRamMb: z.int(),

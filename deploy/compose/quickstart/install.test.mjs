@@ -13,12 +13,13 @@ async function runInstaller({
 	arch = "arm64",
 	os = "Darwin",
 	badChecksum = false,
-	ca = false,
+	originHost = "127.0.0.1",
 	corruptArchive = false,
 	invalidGzip = false,
 	badArchiveChecksum = false,
 	tty = false,
 	skipLogin = false,
+	interrupt = false,
 } = {}) {
 	const dir = await mkdtemp(join(tmpdir(), "umiak-install-test-"));
 	const bin = join(dir, "bin");
@@ -32,8 +33,6 @@ async function runInstaller({
 	const archiveSum = createHash("sha256").update(compressed).digest("hex");
 	const downloads = [];
 	const file = `umiak-${os === "Darwin" ? "darwin" : "linux"}-${arch === "aarch64" || arch === "arm64" ? "arm64" : "x64"}`;
-	const caPath = join(dir, "test-ca.pem");
-	if (ca) await writeFile(caPath, "test-ca");
 	const server = createServer((req, res) => {
 		downloads.push(req.url);
 		if (req.url === "/downloads/SHA256SUMS")
@@ -51,7 +50,7 @@ async function runInstaller({
 		}
 	});
 	await new Promise((r) => server.listen(0, "127.0.0.1", r));
-	const origin = `http://127.0.0.1:${server.address().port}`;
+	const origin = `http://${originHost}:${server.address().port}`;
 	await writeFile(
 		join(bin, "uname"),
 		`#!/bin/sh\ncase "$1" in -s) echo '${os}';; -m) echo '${arch}';; esac\n`,
@@ -68,7 +67,7 @@ async function runInstaller({
 	const realCurl = execFileSync("which", ["curl"], { encoding: "utf8" }).trim();
 	await writeFile(
 		join(bin, "curl"),
-		`#!/bin/sh\nprintf '%s\\n' "$@" >> '${curlLog}'\nexec '${realCurl}' "$@"\n`,
+		`#!/bin/sh\nprintf '%s\\n' "$@" >> '${curlLog}'\n${interrupt ? 'kill -INT "$PPID"; exit 0' : `exec '${realCurl}' --noproxy '*' --connect-to '${originHost}:${server.address().port}:127.0.0.1:${server.address().port}' "$@"`}\n`,
 	);
 	await chmod(join(bin, "curl"), 0o755);
 	const installer = join(dir, "installer.sh");
@@ -94,7 +93,6 @@ sys.exit(os.waitstatus_to_exitcode(status))
 			HOME: dir,
 			UMIAK_INSTALL_DIR: target,
 			...(skipLogin ? { UMIAK_INSTALL_SKIP_LOGIN: "1" } : {}),
-			...(ca ? { UMIAK_CA_CERT: caPath } : {}),
 		},
 		stdio: ["pipe", "pipe", "pipe"],
 	});
@@ -111,7 +109,6 @@ sys.exit(os.waitstatus_to_exitcode(status))
 		installed: await readFile(join(target, "umiak"), "utf8"),
 		login: await readFile(loginLog, "utf8").catch(() => null),
 		origin,
-		caPath,
 		curlArgs: await readFile(curlLog, "utf8").catch(() => ""),
 	};
 }
@@ -140,14 +137,17 @@ test("unsupported OS fails before any download", async () => {
 	assert.match(r.output, /Unsupported operating system/);
 });
 
-test("passes chosen private CA to CLI login", async () => {
-	const r = await runInstaller({ ca: true });
-	assert.equal(r.status, 0, r.output);
-	assert.equal(
-		r.login,
-		`login\n--api-url\n${r.origin}\n--cacert\n${r.caPath}\n`,
-	);
-});
+for (const originHost of ["192.168.1.10", "100.64.0.2", "umiak.example.com"])
+	test(`installs over HTTP at ${originHost} and explains same-channel checksums`, async () => {
+		const r = await runInstaller({ originHost });
+		assert.equal(r.status, 0, r.output);
+		assert.equal(r.login, `login\n--api-url\n${r.origin}\n`);
+		assert.equal(
+			(r.output.match(/integrity relies on the local network/g) ?? []).length,
+			1,
+		);
+		assert.match(r.output, /SHA256SUMS.*same.*channel/);
+	});
 for (const [os, arch, release] of [
 	["Darwin", "x86_64", "darwin-x64"],
 	["Linux", "x86_64", "linux-x64"],
@@ -183,14 +183,20 @@ for (const tty of [false, true])
 	});
 
 test("skip login installs verified bytes and prints manual pairing without starting it", async () => {
-	const r = await runInstaller({ skipLogin: true, ca: true });
+	const r = await runInstaller({ skipLogin: true });
 	assert.equal(r.status, 0, r.output);
 	assert.match(r.installed, /#!\/bin\/sh/);
 	assert.equal(r.login, null);
-	assert.ok(
-		r.output.includes(
-			`umiak login --api-url '${r.origin}' --cacert '${r.caPath}'`,
-		),
-		r.output,
-	);
+	assert.ok(r.output.includes(`umiak login --api-url '${r.origin}'`), r.output);
+});
+
+test("interrupt exits 130, cleans temporary downloads and preserves existing installation", async () => {
+	const r = await runInstaller({ interrupt: true });
+	assert.equal(r.status, 130, r.output);
+	assert.equal(r.installed, "old-binary");
+	assert.equal(r.login, null);
+	assert.deepEqual(r.downloads, []);
+	const scratchFile = r.curlArgs.trim().split("\n").at(-1);
+	const { access } = await import("node:fs/promises");
+	await assert.rejects(access(join(scratchFile, "..")), { code: "ENOENT" });
 });

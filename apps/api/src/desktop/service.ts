@@ -13,6 +13,7 @@ import { authOf } from "../auth/principal.ts";
 import type { ApiDeps, ApiEnv } from "../deps.ts";
 import { ApiError } from "../http/errors.ts";
 import { resolveSandboxRef } from "../map/sandbox.ts";
+import { previewUrl } from "../preview-url.ts";
 import { poolOf } from "../routes/internal/common.ts";
 
 /**
@@ -93,7 +94,7 @@ export async function desktopPolicy(deps: ApiDeps, id: string) {
 	return p;
 }
 export const desktopUrl = (deps: ApiDeps, slug: string) =>
-	`https://${slug}-desktop.${deps.settings.umiakDomain}/`;
+	`${previewUrl(`${slug}-desktop`, deps.settings)}/`;
 export const ticketHash = (ticket: string) =>
 	createHash("sha256").update(ticket).digest();
 export async function issueDesktopLink(

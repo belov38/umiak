@@ -56,6 +56,11 @@ for (const scenario of [
 	"disabled-firewall",
 	"pending-sdn",
 	"pending-subnet",
+	...["zone", "vnet", "subnet"].flatMap((kind) =>
+		["new", "changed", "deleted"].map(
+			(state) => `pending-state-${kind}-${state}`,
+		),
+	),
 	"collected-timer",
 	"partial-failure-rerun",
 	"nonempty-delete",
@@ -75,3 +80,20 @@ for (const scenario of [
 		assert.equal(result.stderr, "");
 	});
 }
+
+for (const kind of ["zone", "vnet", "subnet"])
+	for (const state of ["new", "changed", "deleted"]) {
+		test(`read-only adoption refuses pending ${kind} ${state}`, () => {
+			const result = spawnSync(
+				"python3",
+				[
+					"deploy/compose/quickstart/setup-prep-fake.py",
+					"deploy/compose/quickstart/setup-adopt.py",
+					`pending-state-${kind}-${state}`,
+				],
+				{ encoding: "utf8" },
+			);
+			assert.equal(result.status, 0, result.stderr);
+			assert.match(result.stdout, /SCENARIO PASS/);
+		});
+	}

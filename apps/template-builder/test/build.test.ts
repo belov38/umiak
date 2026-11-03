@@ -965,3 +965,14 @@ describe("register output", () => {
 		]);
 	});
 });
+
+it("builds a new version in an explicit free template slot instead of recipe dev slots", async () => {
+	const s = setup({ templateVmid: 598 });
+	s.node.handlers["lv.usage"] = () => ({
+		sizeBytes: 64 * 2 ** 30,
+		dataPercent: 9.4,
+	});
+	const manifest = await buildTemplate(s.deps, s.opts);
+	expect(manifest.pveVmid).toBe(598);
+	expect(s.pve.vms.has(597)).toBe(false);
+});

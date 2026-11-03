@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -61,17 +62,19 @@ const maxStateCookies = 8
 
 // Config configures Auth.
 type Config struct {
-	AuthMode    string
-	Codec       *Codec
-	API         cpapi.Client
-	AuthURL     string // UMIAK_GATEWAY_AUTH_URL; may carry its own query
-	UmiakDomain string
-	CrossSite   bool // SameSite=None; Partitioned instead of SameSite=Lax
-	TokenTTL    time.Duration
-	SSOTTL      time.Duration
-	StateTTL    time.Duration
-	Limits      *ratelimit.Limits // nil disables the auth-failure limit
-	Metrics     *obs.Metrics      // nil disables metrics
+	AuthMode      string
+	Codec         *Codec
+	API           cpapi.Client
+	AuthURL       string // UMIAK_GATEWAY_AUTH_URL; may carry its own query
+	UmiakDomain   string
+	PreviewScheme string
+	PreviewPort   int
+	CrossSite     bool // SameSite=None; Partitioned instead of SameSite=Lax
+	TokenTTL      time.Duration
+	SSOTTL        time.Duration
+	StateTTL      time.Duration
+	Limits        *ratelimit.Limits // nil disables the auth-failure limit
+	Metrics       *obs.Metrics      // nil disables metrics
 }
 
 // Auth runs the token and sso checks. It is safe for concurrent use.
@@ -81,6 +84,15 @@ type Auth struct {
 
 // New returns an Auth. Zero TTLs get the defaults.
 func New(cfg Config) *Auth {
+	if cfg.PreviewScheme == "" {
+		cfg.PreviewScheme = "https"
+	}
+	if cfg.PreviewPort == 0 {
+		cfg.PreviewPort = 443
+		if cfg.PreviewScheme == "http" {
+			cfg.PreviewPort = 80
+		}
+	}
 	if cfg.TokenTTL <= 0 {
 		cfg.TokenTTL = DefaultTokenTTL
 	}
@@ -116,7 +128,7 @@ func (a *Auth) Check(w http.ResponseWriter, r *http.Request, l routes.Label, rt 
 	case AccessToken:
 		res = a.checkToken(w, r, l, rt, ip, requestID)
 	case AccessSSO:
-		if a.cfg.AuthMode == "none" {
+		if a.cfg.AuthMode == "none" || a.cfg.PreviewScheme == "http" {
 			http.Error(w, "sso_unavailable_in_local_mode: use token or public preview access", http.StatusForbidden)
 			res = Result{AuthResult: ResultInvalid}
 			break
@@ -264,7 +276,7 @@ func (a *Auth) evictStates(r *http.Request, l routes.Label, fresh string) []stri
 // reports whether any auth cookie was sent at all.
 func (a *Auth) validSession(r *http.Request, l routes.Label, mode string, epoch int64) (s Session, ok, present bool) {
 	for _, c := range r.Cookies() {
-		if c.Name != AuthCookie {
+		if c.Name != a.authCookieName() {
 			continue
 		}
 		present = true
@@ -302,7 +314,15 @@ func (a *Auth) sameURL(l routes.Label, path, rawQuery string) string {
 	if safePath(target) {
 		return target
 	}
-	return "https://" + l.Raw + "." + a.cfg.UmiakDomain + target
+	return a.previewOrigin(l) + target
+}
+
+func (a *Auth) previewOrigin(l routes.Label) string {
+	host := l.Raw + "." + a.cfg.UmiakDomain
+	if a.cfg.PreviewScheme == "http" && a.cfg.PreviewPort != 80 || a.cfg.PreviewScheme == "https" && a.cfg.PreviewPort != 443 {
+		host += ":" + strconv.Itoa(a.cfg.PreviewPort)
+	}
+	return a.cfg.PreviewScheme + "://" + host
 }
 
 // blocked writes 429 when the IP is blocked for auth failures. It must be
@@ -344,7 +364,15 @@ func (a *Auth) count(access, result string) {
 // sessionCookie seals s with expiry now+ttl.
 func (a *Auth) sessionCookie(s Session, ttl time.Duration) *http.Cookie {
 	s.Expiry = a.cfg.Codec.now().Add(ttl)
-	return a.cookie(AuthCookie, a.cfg.Codec.SealSession(s), ttl)
+	return a.cookie(a.authCookieName(), a.cfg.Codec.SealSession(s), ttl)
+}
+
+// HTTP cookies use a separate name: browsers require Secure for __Host-.
+func (a *Auth) authCookieName() string {
+	if a.cfg.PreviewScheme == "http" {
+		return "umiak_auth"
+	}
+	return AuthCookie
 }
 
 // cookie builds a gateway cookie. ttl <= 0 clears it (Max-Age=0).
@@ -353,7 +381,7 @@ func (a *Auth) cookie(name, value string, ttl time.Duration) *http.Cookie {
 		Name:     name,
 		Value:    value,
 		Path:     "/",
-		Secure:   true,
+		Secure:   a.cfg.PreviewScheme != "http",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(ttl / time.Second),
@@ -361,7 +389,7 @@ func (a *Auth) cookie(name, value string, ttl time.Duration) *http.Cookie {
 	if ttl <= 0 {
 		c.MaxAge = -1
 	}
-	if a.cfg.CrossSite {
+	if a.cfg.CrossSite && a.cfg.PreviewScheme != "http" {
 		c.SameSite = http.SameSiteNoneMode
 		c.Partitioned = true
 	}

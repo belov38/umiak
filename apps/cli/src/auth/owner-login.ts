@@ -16,17 +16,6 @@ export async function ownerLogin(options: {
 	sleep?: (ms: number) => Promise<void>;
 }): Promise<string> {
 	const origin = new URL(options.apiUrl).origin;
-	if (
-		new URL(options.apiUrl).protocol !== "https:" &&
-		!["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname)
-	) {
-		throw new CliError({
-			code: NOT_LOGGED_IN,
-			message:
-				"Owner pairing requires HTTPS. Trust the deployment CA with --cacert <file>.",
-			retryable: false,
-		});
-	}
 	async function post(
 		path: string,
 		body: unknown,

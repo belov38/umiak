@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
@@ -8,32 +8,35 @@ test("local dashboard/admin, tokenless CLI create/exec/delete and blocked CIDR",
 	page,
 	request,
 }) => {
-	const api = "http://localhost:18080";
+	const api = process.env.UMIAK_E2E_PUBLIC_API_URL ?? "http://localhost:18080";
 	const services = execFileSync(
 		"docker",
 		[
 			"ps",
 			"--filter",
-			"label=com.docker.compose.project=umiak-local-e2e",
+			`label=com.docker.compose.project=${process.env.COMPOSE_PROJECT_NAME ?? "umiak-local-e2e"}`,
 			"--format",
 			'{{.Label "com.docker.compose.service"}}',
 		],
 		{ encoding: "utf8" },
 	);
 	expect(services).not.toMatch(/keycloak|oauth2-proxy/);
-	const mcp = await request.post("http://localhost:18090/mcp", {
-		headers: { accept: "application/json, text/event-stream" },
-		data: {
-			jsonrpc: "2.0",
-			id: 1,
-			method: "initialize",
-			params: {
-				protocolVersion: "2025-03-26",
-				capabilities: {},
-				clientInfo: { name: "s15-e2e", version: "1" },
+	const mcp = await request.post(
+		process.env.UMIAK_LOCAL_E2E_MCP_URL ?? "http://localhost:18090/mcp",
+		{
+			headers: { accept: "application/json, text/event-stream" },
+			data: {
+				jsonrpc: "2.0",
+				id: 1,
+				method: "initialize",
+				params: {
+					protocolVersion: "2025-03-26",
+					capabilities: {},
+					clientInfo: { name: "s15-e2e", version: "1" },
+				},
 			},
 		},
-	});
+	);
 	expect(mcp.status()).toBe(200);
 	expect(mcp.headers()["www-authenticate"]).toBeUndefined();
 
@@ -114,9 +117,36 @@ test("local dashboard/admin, tokenless CLI create/exec/delete and blocked CIDR",
 	await expect(page.getByRole("dialog")).toBeVisible();
 	await noTeamUi();
 	await page.keyboard.press("Escape");
+	await page.goto("/app/templates");
+	await noTeamUi();
+	await expect(
+		page.getByRole("heading", { name: "Templates", exact: true }),
+	).toBeVisible();
+	await expect(page.getByTestId("template-card").first()).toContainText(
+		"ready",
+	);
+	await expect(page.getByTestId("template-card").first()).toContainText(
+		"Slot / VMID",
+	);
+	const visualDir =
+		process.env.UMIAK_VISUAL_DIR || test.info().outputPath("round4");
+	mkdirSync(visualDir, { recursive: true });
+	for (const theme of ["Light", "Dark"]) {
+		await page.getByRole("button", { name: theme, exact: true }).click();
+		await page.screenshot({
+			path: join(visualDir, `templates-${theme.toLowerCase()}.png`),
+			fullPage: true,
+		});
+	}
 	await page.goto(internal.replace(/\/keys$/, "/sandboxes/new"));
 	await expect(page.getByRole("dialog")).toBeVisible();
 	await noTeamUi();
+	await expect(
+		page.getByRole("combobox", { name: "TTL", exact: true }),
+	).toContainText("Platform default (no TTL)");
+	await expect(
+		page.getByRole("combobox", { name: "Idle stop after", exact: true }),
+	).toContainText("Platform default (15 min)");
 
 	expect(
 		(
@@ -211,12 +241,15 @@ test("local dashboard/admin, tokenless CLI create/exec/delete and blocked CIDR",
 	expect(config).not.toMatch(/accessToken|refreshToken/);
 	expect(
 		(
-			await request.get("http://localhost:14181/app", {
-				headers: {
-					"x-umiak-client-ip": "127.0.0.1",
-					"x-forwarded-for": "127.0.0.1",
+			await request.get(
+				process.env.UMIAK_LOCAL_E2E_DENIED_URL ?? "http://localhost:14181/app",
+				{
+					headers: {
+						"x-umiak-client-ip": "127.0.0.1",
+						"x-forwarded-for": "127.0.0.1",
+					},
 				},
-			})
+			)
 		).status(),
 	).toBe(403);
 });

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from collections.abc import Mapping
 from typing import Any, TypeVar, cast
 
@@ -7,6 +8,7 @@ from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
 from ..models.template_os import TemplateOs
+from ..types import UNSET, Unset
 
 T = TypeVar("T", bound="Template")
 
@@ -24,6 +26,8 @@ class Template:
         os (TemplateOs):
         slug (str):  Example: linux.
         version (None | str): Version of the active build; null while none is active
+        build_created_at (datetime.datetime | None | Unset): Creation date of the active build
+        pve_vmid (int | None | Unset): VMID of the active sealed template
     """
 
     allowed_sizes: list[str]
@@ -35,6 +39,8 @@ class Template:
     os: TemplateOs
     slug: str
     version: None | str
+    build_created_at: datetime.datetime | None | Unset = UNSET
+    pve_vmid: int | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -57,6 +63,20 @@ class Template:
         version: None | str
         version = self.version
 
+        build_created_at: None | str | Unset
+        if isinstance(self.build_created_at, Unset):
+            build_created_at = UNSET
+        elif isinstance(self.build_created_at, datetime.datetime):
+            build_created_at = self.build_created_at.isoformat()
+        else:
+            build_created_at = self.build_created_at
+
+        pve_vmid: int | None | Unset
+        if isinstance(self.pve_vmid, Unset):
+            pve_vmid = UNSET
+        else:
+            pve_vmid = self.pve_vmid
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
@@ -72,6 +92,10 @@ class Template:
                 "version": version,
             }
         )
+        if build_created_at is not UNSET:
+            field_dict["buildCreatedAt"] = build_created_at
+        if pve_vmid is not UNSET:
+            field_dict["pveVmid"] = pve_vmid
 
         return field_dict
 
@@ -101,6 +125,32 @@ class Template:
 
         version = _parse_version(d.pop("version"))
 
+        def _parse_build_created_at(data: object) -> datetime.datetime | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                build_created_at_type_0 = datetime.datetime.fromisoformat(data)
+
+                return build_created_at_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(datetime.datetime | None | Unset, data)
+
+        build_created_at = _parse_build_created_at(d.pop("buildCreatedAt", UNSET))
+
+        def _parse_pve_vmid(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        pve_vmid = _parse_pve_vmid(d.pop("pveVmid", UNSET))
+
         template = cls(
             allowed_sizes=allowed_sizes,
             capabilities=capabilities,
@@ -111,6 +161,8 @@ class Template:
             os=os,
             slug=slug,
             version=version,
+            build_created_at=build_created_at,
+            pve_vmid=pve_vmid,
         )
 
         template.additional_properties = d

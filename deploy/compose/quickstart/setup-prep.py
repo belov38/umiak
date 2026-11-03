@@ -48,8 +48,8 @@ def command(*args, capture=True):
     return result.stdout.strip() if capture else ""
 
 
-def get(path):
-    return json.loads(command("pvesh", "get", path, "--output-format", "json"))
+def get(path, *options):
+    return json.loads(command("pvesh", "get", path, *options, "--output-format", "json"))
 
 
 def exists(path):
@@ -72,9 +72,9 @@ if int(get("/cluster/firewall/options").get("enable", 0)) != 1:
 # Read host-rule options without changing them: they do not gate VM isolation.
 node_firewall = get(f"/nodes/{config['node']}/firewall/options")
 # Applying SDN commits all pending changes, so refuse any unrelated transaction.
-vnets = get("/cluster/sdn/vnets")
+vnets = get("/cluster/sdn/vnets", "--pending", "1")
 for path in ["/cluster/sdn/zones", "/cluster/sdn/vnets", *["/cluster/sdn/vnets/" + row["vnet"] + "/subnets" for row in vnets]]:
-    if any(row.get("pending") or row.get("state") in ["new", "changed", "deleted"] for row in get(path)):
+    if any(row.get("pending") or row.get("state") in ["new", "changed", "deleted"] for row in get(path, "--pending", "1")):
         raise SystemExit("Pending SDN changes must be applied or reverted by the administrator first")
 for path, expected in [
     ("/cluster/sdn/zones/umiak", {"type": "simple", "ipam": "pve", "dhcp": "dnsmasq"}),
@@ -117,10 +117,12 @@ storage = get("/storage/" + storage_name)
 if storage.get("type") != "lvmthin" or not storage.get("vgname") or not storage.get("thinpool"):
     raise SystemExit("Selected storage must be an existing LVM-thin storage with VG and thinpool")
 guest_dns = str(ipaddress.ip_address(config.get("guestDns", "1.1.1.1")))
-ca = Path(config.get("caPath", "/root/.config/umiak/quickstart-ca.pem"))
-if not ca.exists():
-    raise SystemExit("Copy the verified quickstart CA to " + str(ca))
-context = ssl.create_default_context(cafile=str(ca))
+ca = Path(config.get("caPath", "/etc/ssl/certs/ca-certificates.crt"))
+context = None
+if config["origin"].startswith("https://"):
+    if not ca.exists():
+        raise SystemExit("HTTPS proxy trust store is missing: " + str(ca))
+    context = ssl.create_default_context(cafile=str(ca))
 binary = urllib.request.urlopen(config["origin"] + "/pve-setup.sh?token=" + config["token"] + "&asset=node-agent", context=context, timeout=30).read()
 if not config.get("nodeSha256") or hashlib.sha256(binary).hexdigest() != config["nodeSha256"]:
     raise SystemExit("Node-agent checksum mismatch or unavailable manifest")
@@ -245,11 +247,11 @@ if not token_path.exists():
     token = json.loads(mutate(["pveum", "user", "token", "add", user_id, token_name, "--privsep", "1", "--output-format", "json"], ["pveum", "user", "token", "remove", user_id, token_name]))["value"]
     token_path.write_text(token)
     token_path.chmod(0o600)
-for role, privileges in [("UmiakTemplateMedia", "Datastore.AllocateTemplate Datastore.Audit"), ("UmiakConsole", "VM.Console")]:
+for role, privileges in [("UmiakTemplateMedia", "Datastore.AllocateTemplate Datastore.Audit"), ("UmiakConsole", "VM.Console"), ("UmiakMediaDownload", "Sys.AccessNetwork")]:
     if not any(x["roleid"] == role for x in roles):
         mutate(["pveum", "role", "add", role, "--privs", privileges], ["pveum", "role", "delete", role])
 for principal_flag, principal in [("--users", user_id), ("--tokens", user_id + "!" + token_name)]:
-    for path, role in [("/pool/umiak", "UmiakPoC"), ("/storage/" + storage_name, "PVEDatastoreUser"), ("/sdn/zones/umiak", "PVESDNUser"), ("/storage/" + media_name, "UmiakTemplateMedia"), ("/pool/umiak", "UmiakConsole")]:
+    for path, role in [("/pool/umiak", "UmiakPoC"), ("/storage/" + storage_name, "PVEDatastoreUser"), ("/sdn/zones/umiak", "PVESDNUser"), ("/storage/" + media_name, "UmiakTemplateMedia"), ("/pool/umiak", "UmiakConsole"), ("/nodes/" + config["node"], "UmiakMediaDownload")]:
         if not any(x.get("path") == path and x.get("ugid") == principal and x.get("roleid") == role for x in acls):
             mutate(["pveum", "acl", "modify", path, principal_flag, principal, "--roles", role], ["pveum", "acl", "delete", path, principal_flag, principal, "--roles", role])
 
@@ -283,9 +285,9 @@ isoDir = {json.dumps(media_path.rstrip("/") + "/template/iso")}
 importDir = {json.dumps(media_path.rstrip("/") + "/import")}
 vmidMin = 500
 vmidMax = 589
-templateVmidMin = 595
-templateVmidMax = 599
-templateVmid = 599
+templateVmidMin = {config.get("templateVmidMin", 600)}
+templateVmidMax = {config.get("templateVmidMax", 699)}
+templateVmid = 0
 sdnZone = "umiak"
 vnet = "umiak0"
 clusterId = 1

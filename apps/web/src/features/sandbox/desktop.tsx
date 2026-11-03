@@ -6,6 +6,7 @@ import { ConfirmButton } from "@/components/app/confirm-button";
 import { QueryError } from "@/components/app/query-error";
 import { useLocalMode } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
+import { desktopBrowserGuidance } from "@/lib/browser-guidance";
 import { useAttempt } from "@/lib/client-call";
 import { fetchDesktopLink } from "./desktop-link";
 import { headerActions } from "./rules";
@@ -25,6 +26,17 @@ export function DesktopTab({
 	const [error, setError] = useState<unknown>(null);
 	const [revision, setRevision] = useState(0);
 	const [busy, setBusy] = useState(false);
+	const [browserGuidance, setBrowserGuidance] = useState<string | null>(null);
+	useEffect(() => {
+		setBrowserGuidance(
+			desktopBrowserGuidance({
+				secureContext: window.isSecureContext,
+				webCodecs: "VideoDecoder" in window,
+				webRTC: "RTCPeerConnection" in window,
+				...(url ? { viewerUrl: url } : {}),
+			}),
+		);
+	}, [url]);
 	const frame = useRef<HTMLIFrameElement>(null);
 	const ready = sandbox.state === "ready" && !sandbox.blocked;
 	const status = useQuery({
@@ -143,6 +155,7 @@ export function DesktopTab({
 					Disconnect all viewers
 				</ConfirmButton>
 			</div>
+			{browserGuidance && <p role="status">{browserGuidance}</p>}
 			{status.error && (
 				<QueryError
 					error={status.error}

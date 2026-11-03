@@ -26,6 +26,8 @@ export function proxy(req: NextRequest): NextResponse {
 				});
 	const headers = securityHeaders({
 		umiakDomain: env.umiakDomain,
+		previewScheme: env.previewScheme,
+		previewPort: env.previewPort,
 		dev: process.env.NODE_ENV === "development",
 	});
 	for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);

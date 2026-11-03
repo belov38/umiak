@@ -4,8 +4,9 @@ set -eu
 umask 077
 origin='__UMIAK_ORIGIN__'
 case "$origin" in
- https://*|http://localhost:*|http://127.0.0.1:*) ;;
- *) printf '%s\n' 'Installer requires HTTPS (or loopback HTTP).' >&2; exit 1;;
+ https://*) ;;
+ http://*) printf '%s\n' 'Warning: HTTP installation integrity relies on the local network; SHA256SUMS is downloaded over the same channel.' >&2;;
+ *) printf '%s\n' 'Installer requires an HTTP or HTTPS origin.' >&2; exit 1;;
 esac
 case "$(uname -s)" in
  Darwin) os=darwin;;
@@ -33,8 +34,10 @@ cleanup() {
  rm -f "$scratch/binary" "$scratch/archive.gz" "$scratch/SHA256SUMS" "$scratch/DOWNLOADS"
  rmdir "$scratch"
 }
-trap cleanup EXIT HUP INT TERM
-ca=${UMIAK_CA_CERT:-${CURL_CA_BUNDLE:-}}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 fetch() {
  # Metadata remains quiet; only the large archive displays terminal progress.
  if [ "$3" = progress ] && [ -t 2 ]; then
@@ -42,11 +45,7 @@ fetch() {
  else
   set -- "$1" "$2" --silent
  fi
- if [ -n "$ca" ]; then
-  curl --fail --show-error --proto '=https,http' --cacert "$ca" "$3" "$1" -o "$2"
- else
-  curl --fail --show-error --proto '=https,http' "$3" "$1" -o "$2"
- fi
+ curl --fail --show-error --proto '=https,http' "$3" "$1" -o "$2"
 }
 name="umiak-$os-$arch"
 fetch "$origin/downloads/SHA256SUMS" "$scratch/SHA256SUMS" quiet
@@ -91,15 +90,7 @@ if [ "${UMIAK_INSTALL_SKIP_LOGIN:-0}" = 1 ]; then
  quote() { printf "'"; printf '%s' "$1" | sed "s/'/'\\\\''/g"; printf "'"; }
  printf 'Next: umiak login --api-url '
  quote "$origin"
- if [ -n "$ca" ]; then
-  printf ' --cacert '
-  quote "$ca"
- fi
  printf '\n'
  exit 0
 fi
-if [ -n "$ca" ]; then
- "$install_dir/umiak" login --api-url "$origin" --cacert "$ca"
-else
- "$install_dir/umiak" login --api-url "$origin"
-fi
+"$install_dir/umiak" login --api-url "$origin"

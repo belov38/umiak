@@ -16,7 +16,8 @@ import (
 	"github.com/belov38/umiak/services/gateway/internal/config"
 )
 
-// Cookie names. All are __Host- cookies: no Domain, Path=/, Secure.
+// HTTPS cookie names use __Host-: no Domain, Path=/, Secure. HTTP previews
+// use the separate host-only umiak_auth cookie without Secure.
 //
 // Every login gets its own state cookie, StateCookiePrefix + "_" + the first
 // stateKeyLen characters of its state, so parallel logins (several tabs,

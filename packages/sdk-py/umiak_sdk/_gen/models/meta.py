@@ -7,6 +7,7 @@ from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
 from ..models.meta_auth_mode import MetaAuthMode
+from ..models.meta_preview_scheme import MetaPreviewScheme
 from ..models.meta_tenancy import MetaTenancy
 from ..types import UNSET, Unset
 
@@ -30,8 +31,11 @@ class Meta:
         min_cli_version (None | str): Older CLIs warn and keep working Example: 0.4.0.
         oidc (MetaOidcType0 | None): Keycloak for people (device flow of `umiak login`); null when only team keys work
         ssh (MetaSsh):
-        umiak_domain (str): Domain of published ports: https://<slug>-<port>.<umiakDomain> Example: umiak.example.com.
+        umiak_domain (str): Domain of published ports: <previewScheme>://<slug>-<port>.<umiakDomain>[:previewPort]
+            Example: umiak.example.com.
         auth_mode (MetaAuthMode | Unset):
+        preview_port (int | Unset): Public preview listener port; omit from URLs when it is the scheme default
+        preview_scheme (MetaPreviewScheme | Unset): Scheme of published port URLs; absent on older servers means https
         tenancy (MetaTenancy | Unset): Presentation model for this deployment. Missing on older servers means teams;
             independent of credential kind.
     """
@@ -46,6 +50,8 @@ class Meta:
     ssh: MetaSsh
     umiak_domain: str
     auth_mode: MetaAuthMode | Unset = UNSET
+    preview_port: int | Unset = UNSET
+    preview_scheme: MetaPreviewScheme | Unset = UNSET
     tenancy: MetaTenancy | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -80,6 +86,12 @@ class Meta:
         if not isinstance(self.auth_mode, Unset):
             auth_mode = self.auth_mode.value
 
+        preview_port = self.preview_port
+
+        preview_scheme: str | Unset = UNSET
+        if not isinstance(self.preview_scheme, Unset):
+            preview_scheme = self.preview_scheme.value
+
         tenancy: str | Unset = UNSET
         if not isinstance(self.tenancy, Unset):
             tenancy = self.tenancy.value
@@ -101,6 +113,10 @@ class Meta:
         )
         if auth_mode is not UNSET:
             field_dict["authMode"] = auth_mode
+        if preview_port is not UNSET:
+            field_dict["previewPort"] = preview_port
+        if preview_scheme is not UNSET:
+            field_dict["previewScheme"] = preview_scheme
         if tenancy is not UNSET:
             field_dict["tenancy"] = tenancy
 
@@ -160,6 +176,15 @@ class Meta:
         else:
             auth_mode = MetaAuthMode(_auth_mode)
 
+        preview_port = d.pop("previewPort", UNSET)
+
+        _preview_scheme = d.pop("previewScheme", UNSET)
+        preview_scheme: MetaPreviewScheme | Unset
+        if isinstance(_preview_scheme, Unset):
+            preview_scheme = UNSET
+        else:
+            preview_scheme = MetaPreviewScheme(_preview_scheme)
+
         _tenancy = d.pop("tenancy", UNSET)
         tenancy: MetaTenancy | Unset
         if isinstance(_tenancy, Unset):
@@ -178,6 +203,8 @@ class Meta:
             ssh=ssh,
             umiak_domain=umiak_domain,
             auth_mode=auth_mode,
+            preview_port=preview_port,
+            preview_scheme=preview_scheme,
             tenancy=tenancy,
         )
 

@@ -39,8 +39,16 @@ export const MetaSchema = z
 		apiUrl: z.url().openapi({ example: "https://api.example.com" }),
 		umiakDomain: z.string().openapi({
 			description:
-				"Domain of published ports: https://<slug>-<port>.<umiakDomain>",
+				"Domain of published ports: <previewScheme>://<slug>-<port>.<umiakDomain>[:previewPort]",
 			example: "umiak.example.com",
+		}),
+		previewScheme: z.enum(["http", "https"]).optional().openapi({
+			description:
+				"Scheme of published port URLs; absent on older servers means https",
+		}),
+		previewPort: z.number().int().min(1).max(65535).optional().openapi({
+			description:
+				"Public preview listener port; omit from URLs when it is the scheme default",
 		}),
 		oidc: z
 			.object({
@@ -135,6 +143,8 @@ export function metaOf(deps: ApiDeps): Meta {
 		appUrl: s.appUrl,
 		apiUrl: s.apiUrl,
 		umiakDomain: s.umiakDomain,
+		previewScheme: s.previewScheme,
+		previewPort: s.previewPort,
 		oidc:
 			s.oidc === null
 				? null

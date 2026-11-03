@@ -14,7 +14,10 @@ import {
 	test,
 } from "./fixtures.ts";
 
-const PROJECT = process.env.UMIAK_E2E_PROJECT ?? "umiak-e2e";
+const PROJECT =
+	process.env.UMIAK_E2E_PROJECT ??
+	process.env.COMPOSE_PROJECT_NAME ??
+	"umiak-e2e";
 
 function docker(args: string[]): {
 	ok: boolean;
@@ -190,12 +193,19 @@ test("web answers 401 without the identity header and only oauth2-proxy reaches 
 });
 
 test("the web image has no dev auth proxy", () => {
+	const image = docker([
+		"inspect",
+		`${PROJECT}-web-1`,
+		"--format",
+		"{{.Config.Image}}",
+	]);
+	expect(image.ok, image.out).toBe(true);
 	const r = docker([
 		"run",
 		"--rm",
 		"--entrypoint",
 		"sh",
-		"umiak-web:dev",
+		image.out.trim(),
 		"-c",
 		[
 			"find / -xdev \\( -name 'auth-proxy*' -o -path '*/apps/web/dev' -o -path '*/apps/web/e2e' \\) -printf 'BAD:%p\\n' 2>/dev/null",

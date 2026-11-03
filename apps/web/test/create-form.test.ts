@@ -281,3 +281,21 @@ describe("helpers", () => {
 		expect(parseSecretFileMode("abc")).toBeNull();
 	});
 });
+
+describe("platform default labels", () => {
+	it("shows API durations, null defaults and unavailable values honestly", async () => {
+		const { platformDefaultLabel } = await import("../src/lib/create-form.ts");
+		expect(platformDefaultLabel(null, "no TTL")).toBe(
+			"Platform default (no TTL)",
+		);
+		expect(platformDefaultLabel(900, "never")).toBe(
+			"Platform default (15 min)",
+		);
+		expect(platformDefaultLabel(7200, "never")).toBe(
+			"Platform default (2 hours)",
+		);
+		expect(platformDefaultLabel(undefined, "never")).toBe(
+			"Platform default (unavailable)",
+		);
+	});
+});
