@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { hostTarget, TARGETS } from "../scripts/build.ts";
 
@@ -52,6 +53,14 @@ describe("build", () => {
 			const data = readFileSync(join(CLI_DIR, "dist", file));
 			expect(createHash("sha256").update(data).digest("hex")).toBe(sum);
 		}
+		const archive = readFileSync(`${bin}.gz`);
+		expect(gunzipSync(archive).equals(readFileSync(bin))).toBe(true);
+		expect(sums).toContain(
+			`${createHash("sha256").update(archive).digest("hex")}  ${target.file}.gz\n`,
+		);
+		expect(readFileSync(join(CLI_DIR, "dist", "DOWNLOADS"), "utf8")).toContain(
+			`0.1.0 ${target.file}.gz ${archive.length}\n`,
+		);
 		const out = execFileSync(bin, ["version", "--json"], {
 			encoding: "utf8",
 			env: { PATH: process.env.PATH ?? "", HOME: CLI_DIR },

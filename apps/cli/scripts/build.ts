@@ -2,7 +2,8 @@
 //   bun scripts/build.ts         the current platform only (`pnpm build`)
 //   bun scripts/build.ts --all   the five release targets (`pnpm build:all`;
 //                                Bun downloads the other runtimes once)
-// Output: dist/umiak-<os>-<arch>[.exe] and dist/SHA256SUMS (sha256sum format)
+// Output: dist/umiak-<os>-<arch>[.exe], gzip archives, DOWNLOADS version/size
+// metadata and SHA256SUMS (sha256sum format, archive and extracted checksums)
 // of every umiak-* binary in dist/ after this run, so the file always matches
 // what is there (a host-only build after --all keeps the other entries).
 // dist/ is not committed.
@@ -12,6 +13,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 
 export interface Target {
 	/** `<os>-<arch>` of the release, e.g. linux-x64. */
@@ -77,6 +79,18 @@ export function build(targets: readonly Target[]): void {
 			);
 		}
 	}
+	const version = JSON.parse(
+		readFileSync(join(CLI_DIR, "package.json"), "utf8"),
+	).version as string;
+	const downloads: string[] = [];
+	for (const t of TARGETS) {
+		const path = join(dist, t.file);
+		if (!readdirSync(dist).includes(t.file)) continue;
+		const compressed = gzipSync(readFileSync(path), { level: 9 });
+		writeFileSync(`${path}.gz`, compressed);
+		downloads.push(`${version} ${t.file}.gz ${compressed.length}\n`);
+	}
+	writeFileSync(join(dist, "DOWNLOADS"), downloads.join(""));
 	const sums = readdirSync(dist)
 		.filter((f) => f.startsWith("umiak-"))
 		.sort()
