@@ -39,6 +39,7 @@ describe("drizzle schema", () => {
 			[
 				"runtime.providers",
 				"runtime.nodes",
+				"runtime.node_build_jobs",
 				"runtime.storages",
 				"runtime.template_builds",
 				"runtime.vmid_leases",
