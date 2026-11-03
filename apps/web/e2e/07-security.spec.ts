@@ -197,7 +197,7 @@ test("the web image has no dev auth proxy", () => {
 		"inspect",
 		`${PROJECT}-web-1`,
 		"--format",
-		"{{.Image}}",
+		"{{.Config.Image}}",
 	]);
 	expect(image.ok, image.out).toBe(true);
 	const r = docker([
