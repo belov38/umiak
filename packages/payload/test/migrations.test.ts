@@ -611,3 +611,85 @@ describe.skipIf(skipPg())(
 		});
 	},
 );
+
+describe.skipIf(skipPg())(
+	"Windows identity collisions during catalog migration",
+	() => {
+		let t: TestDatabase;
+		let payload: Payload;
+		beforeAll(async () => {
+			t = await createTestDatabase();
+			payload = await openPayload(t.url);
+			await migrateUmiakPayload(payload);
+		});
+		afterAll(async () => {
+			if (t) await closePayload(t.url);
+			await t?.drop();
+		});
+		it.each([
+			{
+				name: "custom slots and versions",
+				canonicalSlot: 700,
+				desktopSlot: 701,
+				version: "custom-desktop",
+			},
+			{
+				name: "duplicate desktop registration from an older bootstrap",
+				canonicalSlot: 595,
+				desktopSlot: 595,
+				version: "20261101.7",
+			},
+		])(
+			"merges active identities safely: $name",
+			async ({ canonicalSlot, desktopSlot, version }) => {
+				const provider = randomUUID(),
+					node = randomUUID(),
+					storage = randomUUID(),
+					canonical = randomUUID(),
+					desktop = randomUUID();
+				await t.pool.query(
+					"INSERT INTO runtime.providers (id,kind,name,cluster_mac_id,vmid_min,vmid_max,api_url,secret_ref) VALUES ($1,'proxmox',$1::uuid::text,$2,500,589,'https://pve:8006','s17')",
+					[provider, canonicalSlot === 700 ? 247 : 248],
+				);
+				await t.pool.query(
+					"INSERT INTO runtime.nodes (id,provider_id,name,ram_cap_mb,node_agent_ref) VALUES ($1,$2,'pve',8192,'node')",
+					[node, provider],
+				);
+				await t.pool.query(
+					"INSERT INTO runtime.storages (id,provider_id,node_id,name,driver) VALUES ($1,$2,$3,'local-lvm','lvmthin')",
+					[storage, provider, node],
+				);
+				await t.pool.query(
+					`INSERT INTO runtime.template_builds (id,template_slug,version,os,provider_id,node_id,storage_id,pve_vmid,disk_layout,hw,boot_timeout_s,status)
+   VALUES ($1,'windows',$6,'windows',$3,$4,$5,$7,'{}','{}',1200,'active'),
+          ($2,'windows-desktop',$6,'windows',$3,$4,$5,$8,'{}','{}',1200,'active')`,
+					[
+						canonical,
+						desktop,
+						provider,
+						node,
+						storage,
+						version,
+						canonicalSlot,
+						desktopSlot,
+					],
+				);
+				await t.pool.query(
+					"DELETE FROM payload.payload_migrations WHERE name='20261103_000000_windows_single'",
+				);
+				await migrateUmiakPayload(payload);
+				const result = (
+					await t.pool.query(
+						"SELECT id, template_slug, status FROM runtime.template_builds WHERE node_id=$1",
+						[node],
+					)
+				).rows;
+				expect(result).toHaveLength(2);
+				expect(result.every((b) => b.template_slug === "windows")).toBe(true);
+				expect(result.filter((b) => b.status === "active")).toHaveLength(1);
+				if (canonicalSlot === 700)
+					expect(result.find((b) => b.id === desktop)?.status).toBe("active");
+			},
+		);
+	},
+);

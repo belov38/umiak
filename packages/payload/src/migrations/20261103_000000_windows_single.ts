@@ -27,13 +27,21 @@ export async function up({ db }: MigrateUpArgs): Promise<void> {
         UPDATE runtime.template_builds SET status = 'retired'
           WHERE template_slug = 'windows' AND pve_vmid = 598;
         UPDATE runtime.template_builds b SET status = 'deprecated'
-          WHERE b.template_slug = 'windows' AND b.status = 'active'
+          WHERE b.template_slug IN ('windows', 'windows-desktop') AND b.status = 'active'
           AND EXISTS (SELECT 1 FROM runtime.template_builds d WHERE d.node_id = b.node_id
             AND d.pve_vmid = 595 AND d.version = '20261101.7' AND d.os = 'windows');
+        -- Custom installations may use other slots/versions. Prefer their
+        -- active desktop build over the old canonical headless identity.
+        UPDATE runtime.template_builds b SET status = 'deprecated'
+          WHERE b.template_slug = 'windows' AND b.status = 'active'
+          AND EXISTS (SELECT 1 FROM runtime.template_builds d WHERE d.node_id = b.node_id
+            AND d.template_slug = 'windows-desktop' AND d.status = 'active');
         UPDATE runtime.template_builds SET template_slug = 'windows'
           WHERE template_slug = 'windows-desktop';
         UPDATE runtime.template_builds SET status = 'active', promoted_at = COALESCE(promoted_at, now())
-          WHERE template_slug = 'windows' AND pve_vmid = 595 AND version = '20261101.7';
+          WHERE id IN (SELECT DISTINCT ON (node_id) id FROM runtime.template_builds
+            WHERE template_slug = 'windows' AND pve_vmid = 595 AND version = '20261101.7'
+            ORDER BY node_id, created_at, id);
         UPDATE runtime.sandboxes SET template_slug = 'windows' WHERE template_slug = 'windows-desktop';
       END IF;
     END $migration$;
