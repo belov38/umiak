@@ -8,9 +8,12 @@ import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import type { SandboxData } from "@umiak/sdk";
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { EmptyState } from "@/components/app/empty-state";
 import { QueryError } from "@/components/app/query-error";
 import { Button } from "@/components/ui/button";
+import { LoadingState } from "@/components/ui/feedback";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/panel";
 import {
 	Select,
 	SelectContent,
@@ -100,7 +103,7 @@ export function OperatorPage({ teams }: { teams: OperatorTeam[] }) {
 	return (
 		<section className="space-y-4">
 			<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-				<h1 className="text-xl font-semibold">Operator</h1>
+				<PageHeader title="Operator" />
 				<p className="text-sm text-muted-foreground">
 					Sandboxes of every team. Templates, sizes, quotas, teams and users are
 					configured in the admin.
@@ -156,13 +159,11 @@ export function OperatorPage({ teams }: { teams: OperatorTeam[] }) {
 					onRetry={() => list.refetch()}
 				/>
 			)}
-			{list.isPending && (
-				<p className="text-sm text-muted-foreground">Loading…</p>
-			)}
+			{list.isPending && <LoadingState />}
 			{list.data && rows.length === 0 && (
-				<div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+				<EmptyState kind="sandboxes">
 					No sandbox matches the filters.
-				</div>
+				</EmptyState>
 			)}
 			{rows.length > 0 && (
 				<OperatorTable

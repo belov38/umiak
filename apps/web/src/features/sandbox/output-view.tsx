@@ -10,6 +10,7 @@ import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { useAttempt } from "@/lib/client-call";
 import { useDescribeError } from "@/lib/use-error";
 import {
@@ -114,31 +115,31 @@ export function OutputView({
 	return (
 		<div className="flex flex-col gap-2" data-testid="output-view">
 			<div className="flex flex-wrap items-center gap-2 text-sm">
-				<code className="max-w-md truncate rounded bg-muted px-1.5 py-0.5 text-xs">
+				<code className="max-w-md truncate rounded-none bg-muted px-1.5 py-0.5 text-xs">
 					{c.command ?? c.argv?.join(" ") ?? c.id}
 				</code>
 				{!pty && (
-					<select
+					<NativeSelect
 						aria-label="Streams"
-						className="h-7 rounded-md border bg-transparent px-1 text-xs"
+						className="h-7 rounded-none border bg-transparent px-1 text-xs"
 						value={filter}
 						onChange={(e) => setFilter(e.target.value as OutputFilter)}
 					>
 						<option value="all">stdout + stderr</option>
 						<option value="stdout">stdout only</option>
 						<option value="stderr">stderr only</option>
-					</select>
+					</NativeSelect>
 				)}
 				{hasLongOutput(c) && (
-					<select
+					<NativeSelect
 						aria-label="From"
-						className="h-7 rounded-md border bg-transparent px-1 text-xs"
+						className="h-7 rounded-none border bg-transparent px-1 text-xs"
 						value={from}
 						onChange={(e) => setFrom(e.target.value as "start" | "tail")}
 					>
 						<option value="tail">last 1 MiB</option>
 						<option value="start">from the start</option>
-					</select>
+					</NativeSelect>
 				)}
 				{failed && (
 					<Button
@@ -151,9 +152,9 @@ export function OutputView({
 				)}
 				{isRunning(c.status) && (
 					<div className="ml-auto flex items-center gap-1">
-						<select
+						<NativeSelect
 							aria-label="Send a signal"
-							className="h-7 rounded-md border bg-transparent px-1 text-xs"
+							className="h-7 rounded-none border bg-transparent px-1 text-xs"
 							value=""
 							disabled={busy || controlOff !== null}
 							title={controlOff ?? undefined}
@@ -168,7 +169,7 @@ export function OutputView({
 									{s}
 								</option>
 							))}
-						</select>
+						</NativeSelect>
 						<Button
 							size="xs"
 							variant="destructive"
@@ -218,9 +219,9 @@ function Downloads({
 	return (
 		<div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
 			<span>Download up to 4 MiB of</span>
-			<select
+			<NativeSelect
 				aria-label="Stream to download"
-				className="h-7 rounded-md border bg-transparent px-1"
+				className="h-7 rounded-none border bg-transparent px-1"
 				value={stream}
 				onChange={(e) => setStream(e.target.value as (typeof streams)[number])}
 			>
@@ -229,7 +230,7 @@ function Downloads({
 						{s}
 					</option>
 				))}
-			</select>
+			</NativeSelect>
 			<span>from byte</span>
 			<Input
 				aria-label="Offset"

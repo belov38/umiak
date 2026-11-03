@@ -7,6 +7,7 @@ import type { Sandbox, SandboxData } from "@umiak/sdk";
 import Link from "next/link";
 import { CopyLine } from "@/components/app/copy-button";
 import { QueryError } from "@/components/app/query-error";
+import { LoadingState } from "@/components/ui/feedback";
 
 export function SshTab({
 	teamId,
@@ -39,7 +40,7 @@ export function SshTab({
 				onRetry={() => q.refetch()}
 			/>
 		);
-	if (!q.data) return <p className="text-sm text-muted-foreground">Loading…</p>;
+	if (!q.data) return <LoadingState />;
 	const s = q.data;
 	return (
 		<div className="max-w-3xl space-y-4 text-sm">
@@ -50,7 +51,7 @@ export function SshTab({
 			)}
 			{!s.hasKeys && (
 				<p
-					className="rounded-lg border border-warning/35 bg-warning-tint p-3 text-warning"
+					className="rounded-none border border-warning/35 bg-warning-tint p-3 text-warning"
 					data-testid="ssh-no-keys"
 				>
 					You have no SSH keys yet.{" "}

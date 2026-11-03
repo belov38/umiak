@@ -10,6 +10,7 @@ import {
 } from "@payloadcms/ui";
 import type { JSONFieldClientComponent } from "payload";
 import { useEffect, useRef, useState } from "react";
+import { Textarea } from "@/components/ui/textarea";
 
 function show(v: unknown): string {
 	return v === undefined || v === null ? "" : JSON.stringify(v, null, 2);
@@ -47,7 +48,7 @@ export const JsonField: JSONFieldClientComponent = ({
 				required={field.required === true}
 			/>
 			<FieldError path={path} showError={showError} />
-			<textarea
+			<Textarea
 				id={`field-${path.replace(/\./g, "__")}`}
 				value={text}
 				readOnly={disabled}

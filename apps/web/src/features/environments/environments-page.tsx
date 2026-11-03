@@ -16,6 +16,8 @@ import {
 } from "@/components/app/session-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { LoadingState } from "@/components/ui/feedback";
+import { ActionBar, PageHeader } from "@/components/ui/panel";
 import {
 	Select,
 	SelectContent,
@@ -81,14 +83,12 @@ export function EnvironmentsPage({
 		list.data?.[0];
 	return (
 		<section className="environments-page space-y-4">
-			<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-				<h1 className="text-xl font-semibold">Environment</h1>
-			</div>
+			<PageHeader title="Environment" />
 			<p className="text-sm text-muted-foreground">
 				Named env, secrets, secret files and repositories that new sandboxes get
 				at create. Changes apply to new sandboxes only.
 			</p>
-			<div className="environment-toolbar">
+			<ActionBar>
 				{selected && (
 					<Select value={selected.id} onValueChange={setSelectedId}>
 						<SelectTrigger
@@ -109,7 +109,7 @@ export function EnvironmentsPage({
 				)}
 				{canManage && (
 					<Button
-						variant="ghost"
+						variant="default"
 						size="icon"
 						aria-label="New environment"
 						title="New environment"
@@ -118,7 +118,7 @@ export function EnvironmentsPage({
 						<PlusIcon />
 					</Button>
 				)}
-			</div>
+			</ActionBar>
 			{!canManage && (
 				<p className="text-sm text-muted-foreground">
 					{singleOwner
@@ -133,9 +133,7 @@ export function EnvironmentsPage({
 					onRetry={() => list.refetch()}
 				/>
 			)}
-			{list.isPending && (
-				<p className="text-sm text-muted-foreground">Loading…</p>
-			)}
+			{list.isPending && <LoadingState />}
 			{list.data && list.data.length === 0 && (
 				<DashboardEmpty kind="environments">
 					No environments yet.
@@ -154,14 +152,16 @@ export function EnvironmentsPage({
 					>
 						<header className="flex flex-wrap items-center gap-2">
 							<h2>
-								<button
+								<Button
+									variant="ghost"
+									size="sm"
 									type="button"
 									className="environment-name"
 									aria-expanded={e.id === selected?.id}
 									onClick={() => setSelectedId(e.id)}
 								>
 									{e.name}
-								</button>
+								</Button>
 							</h2>
 							{e.isDefault && <Badge>default</Badge>}
 							{e.excludeOwnerSecrets && (

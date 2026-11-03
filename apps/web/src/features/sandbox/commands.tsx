@@ -12,7 +12,9 @@ import { Field, FormDialog } from "@/components/app/form-dialog";
 import { QueryError } from "@/components/app/query-error";
 import { useAppSession } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
+import { LoadingState } from "@/components/ui/feedback";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import {
 	Table,
 	TableBody,
@@ -21,6 +23,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { envKeyProblem } from "@/lib/create-form";
 import { formatAgo } from "@/lib/format";
 import { type IdempotencySlot, slotAfter, slotFor } from "@/lib/idempotency";
@@ -108,9 +111,9 @@ export function CommandsTab({
 	return (
 		<div className="space-y-3">
 			<div className="flex flex-wrap items-center gap-2">
-				<select
+				<NativeSelect
 					aria-label="Status"
-					className="h-8 rounded-lg border bg-transparent px-2 text-sm"
+					className="h-8 rounded-none border bg-transparent px-2 text-sm"
 					value={status}
 					onChange={(e) => setStatus(e.target.value)}
 				>
@@ -120,7 +123,7 @@ export function CommandsTab({
 							{s}
 						</option>
 					))}
-				</select>
+				</NativeSelect>
 				<Button
 					size="sm"
 					className="ml-auto"
@@ -138,9 +141,7 @@ export function CommandsTab({
 					onRetry={() => list.refetch()}
 				/>
 			)}
-			{list.isPending && (
-				<p className="text-sm text-muted-foreground">Loading…</p>
-			)}
+			{list.isPending && <LoadingState />}
 			{list.data && rows.length === 0 && (
 				<p className="text-sm text-muted-foreground">No commands yet.</p>
 			)}
@@ -178,7 +179,9 @@ export function CommandsTab({
 									{c.status}
 								</TableCell>
 								<TableCell className="max-w-80">
-									<button
+									<Button
+										variant="ghost"
+										size="sm"
 										type="button"
 										className="block w-full truncate text-left font-mono text-xs hover:underline"
 									>
@@ -186,7 +189,7 @@ export function CommandsTab({
 											<span className="mr-1 text-muted-foreground">[pty]</span>
 										)}
 										{c.command ?? c.argv?.join(" ") ?? "login shell"}
-									</button>
+									</Button>
 								</TableCell>
 								<TableCell>
 									{c.exitCode ?? (c.signal ? c.signal : "—")}
@@ -200,7 +203,10 @@ export function CommandsTab({
 								<TableCell>
 									<div className="flex flex-wrap gap-1">
 										{Object.entries(c.tags).map(([k, v]) => (
-											<code key={k} className="rounded bg-muted px-1 text-xs">
+											<code
+												key={k}
+												className="rounded-none bg-muted px-1 text-xs"
+											>
 												{k}={v}
 											</code>
 										))}
@@ -347,8 +353,8 @@ function RunDialog({
 			}}
 		>
 			<Field label="Command">
-				<textarea
-					className="min-h-16 rounded-lg border bg-transparent px-2.5 py-1.5 font-mono text-sm"
+				<Textarea
+					className="min-h-16 rounded-none border bg-transparent px-2.5 py-1.5 font-mono text-sm"
 					spellCheck={false}
 					value={cmd}
 					placeholder="npm test"
@@ -376,8 +382,8 @@ function RunDialog({
 				error={env.error}
 				hint="KEY=value per line; not stored"
 			>
-				<textarea
-					className="min-h-14 rounded-lg border bg-transparent px-2.5 py-1.5 font-mono text-xs"
+				<Textarea
+					className="min-h-14 rounded-none border bg-transparent px-2.5 py-1.5 font-mono text-xs"
 					spellCheck={false}
 					autoComplete="off"
 					value={envText}

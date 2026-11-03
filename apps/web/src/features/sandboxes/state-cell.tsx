@@ -5,6 +5,7 @@
 import type { SandboxData } from "@umiak/sdk";
 import { LoaderCircleIcon, LockIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { StatusDot } from "@/components/ui/feedback";
 import {
 	Tooltip,
 	TooltipContent,
@@ -88,11 +89,11 @@ export function StateCell({ sandbox }: { sandbox: SandboxData }) {
 				sandbox.state === "ready" && "text-[var(--success)]",
 			)}
 		>
-			<span
-				aria-hidden="true"
+			<StatusDot
 				className={cn(
-					"size-1.5 rounded-full",
-					sandbox.state === "ready" ? "bg-[var(--success)]" : "bg-[#c4c4c4]",
+					sandbox.state === "ready"
+						? "bg-[var(--success)]"
+						: "bg-[var(--status-inactive)]",
 				)}
 			/>
 			{sandbox.state}

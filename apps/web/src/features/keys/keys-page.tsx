@@ -16,6 +16,8 @@ import {
 } from "@/components/app/session-context";
 import { TeamNotices } from "@/components/app/team-notices";
 import { Badge } from "@/components/ui/badge";
+import { LoadingState } from "@/components/ui/feedback";
+import { PageHeader, Panel } from "@/components/ui/panel";
 import {
 	Table,
 	TableBody,
@@ -109,10 +111,8 @@ export function KeysPage({
 					canRevoke={canRevoke}
 				/>
 			)}
-			<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-				<h1 className="text-xl font-semibold">API keys</h1>
-			</div>
-			<div className="dashboard-card keys-card">
+			<PageHeader title="API keys" />
+			<Panel className="keys-card">
 				<div className="key-intro">
 					<h2>
 						{singleOwner ? "Automation keys" : `${team0?.name ?? "Team"} keys`}
@@ -151,9 +151,7 @@ export function KeysPage({
 						onRetry={() => keys.refetch()}
 					/>
 				)}
-				{keys.isPending && (
-					<p className="text-sm text-muted-foreground">Loading…</p>
-				)}
+				{keys.isPending && <LoadingState />}
 				{keys.data && live.length === 0 && (
 					<DashboardEmpty kind="keys">No active keys.</DashboardEmpty>
 				)}
@@ -200,7 +198,7 @@ export function KeysPage({
 						</div>
 					</details>
 				)}
-			</div>
+			</Panel>
 			<SecretDialog shown={shown} onClose={() => setShown(null)} />
 		</section>
 	);

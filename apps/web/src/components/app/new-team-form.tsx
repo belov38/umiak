@@ -4,6 +4,7 @@ import { type FormEvent, useState, useTransition } from "react";
 import { createTeam } from "@/actions/teams";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PageHeader, Panel } from "@/components/ui/panel";
 import { useAttempt } from "@/lib/client-call";
 import { teamPath } from "@/lib/team-path";
 
@@ -24,9 +25,9 @@ export function NewTeamForm() {
 		});
 	};
 	return (
-		<section className="dashboard-card max-w-md space-y-4">
+		<Panel className="max-w-md space-y-4">
 			<div>
-				<h1 className="text-xl font-semibold">New team</h1>
+				<PageHeader title="New team" />
 				<p className="text-sm text-muted-foreground">
 					A shared team for working together. You become its owner and can
 					invite others by email.
@@ -50,6 +51,6 @@ export function NewTeamForm() {
 					Create team
 				</Button>
 			</form>
-		</section>
+		</Panel>
 	);
 }

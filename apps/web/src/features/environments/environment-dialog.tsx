@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { useSingleOwner } from "@/components/app/session-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/choice";
 import {
 	Dialog,
 	DialogClose,
@@ -216,9 +217,12 @@ function EnvironmentForm({
 				/>
 			</Section>
 			<div className="grid gap-2 text-sm">
-				<label className="flex items-start gap-2">
-					<input
-						type="checkbox"
+				<label
+					htmlFor="environment-dialog-choice-1"
+					className="flex items-start gap-2"
+				>
+					<Checkbox
+						id="environment-dialog-choice-1"
 						className="mt-0.5"
 						checked={form.isDefault}
 						onChange={(e) => set({ isDefault: e.target.checked })}
@@ -234,9 +238,12 @@ function EnvironmentForm({
 						</span>
 					</span>
 				</label>
-				<label className="flex items-start gap-2">
-					<input
-						type="checkbox"
+				<label
+					htmlFor="environment-dialog-choice-2"
+					className="flex items-start gap-2"
+				>
+					<Checkbox
+						id="environment-dialog-choice-2"
 						className="mt-0.5"
 						checked={form.excludeOwnerSecrets}
 						onChange={(e) => set({ excludeOwnerSecrets: e.target.checked })}
@@ -279,7 +286,9 @@ function EnvironmentForm({
 									className={removed ? "line-through opacity-60" : ""}
 								>
 									<span className="font-mono">{k}</span> •••
-									<button
+									<Button
+										variant="ghost"
+										size="sm"
 										type="button"
 										className="ml-1 text-xs underline"
 										onClick={() =>
@@ -287,7 +296,7 @@ function EnvironmentForm({
 										}
 									>
 										{removed ? "keep" : "remove"}
-									</button>
+									</Button>
 								</Badge>
 							);
 						})}
@@ -324,7 +333,9 @@ function EnvironmentForm({
 										{formatBytes(f.sizeBytes)}
 										{f.linkPath ? ` · → ${f.linkPath}` : ""}
 									</span>
-									<button
+									<Button
+										variant="ghost"
+										size="sm"
 										type="button"
 										className="text-xs underline"
 										onClick={() =>
@@ -337,7 +348,7 @@ function EnvironmentForm({
 										}
 									>
 										{removed ? "keep" : "remove"}
-									</button>
+									</Button>
 								</li>
 							);
 						})}

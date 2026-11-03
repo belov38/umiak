@@ -34,6 +34,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { NavItem } from "@/components/ui/nav-item";
 import {
 	Tooltip,
 	TooltipContent,
@@ -153,7 +154,7 @@ export function AppShell({
 				aria-label={singleOwner ? "Navigation" : "Team navigation"}
 			>
 				{NAV.map((n) => (
-					<Button
+					<NavItem
 						key={n.label}
 						asChild
 						variant={active(n.section) ? "secondary" : "ghost"}
@@ -171,10 +172,10 @@ export function AppShell({
 							<n.icon />
 							{n.label}
 						</Link>
-					</Button>
+					</NavItem>
 				))}
 
-				<Button
+				<NavItem
 					asChild
 					variant={pathname === "/app/templates" ? "secondary" : "ghost"}
 					size="sm"
@@ -187,9 +188,9 @@ export function AppShell({
 						<LayersIcon />
 						Templates
 					</Link>
-				</Button>
+				</NavItem>
 
-				<Button
+				<NavItem
 					asChild
 					variant={pathname === "/app/getting-started" ? "secondary" : "ghost"}
 					size="sm"
@@ -204,9 +205,9 @@ export function AppShell({
 						<BookOpenIcon />
 						Getting started
 					</Link>
-				</Button>
+				</NavItem>
 				{singleOwner ? (
-					<Button
+					<NavItem
 						asChild
 						variant={pathname === "/app/settings" ? "secondary" : "ghost"}
 						size="sm"
@@ -219,10 +220,10 @@ export function AppShell({
 							<SettingsIcon />
 							Settings
 						</Link>
-					</Button>
+					</NavItem>
 				) : (
 					<>
-						<Button
+						<NavItem
 							asChild
 							variant={pathname === "/app/account" ? "secondary" : "ghost"}
 							size="sm"
@@ -235,8 +236,8 @@ export function AppShell({
 								<UserIcon />
 								Account
 							</Link>
-						</Button>
-						<Button
+						</NavItem>
+						<NavItem
 							asChild
 							variant={active("settings") ? "secondary" : "ghost"}
 							size="sm"
@@ -249,24 +250,30 @@ export function AppShell({
 								<SettingsIcon />
 								Team
 							</Link>
-						</Button>
+						</NavItem>
 					</>
 				)}
 			</nav>
 			<div className="dashboard-sidebar-footer">
 				{quickstart && (
 					<>
-						<Button asChild variant="ghost" size="sm">
-							<a href="/setup">Setup</a>
-						</Button>
-						<Button asChild variant="ghost" size="sm">
-							<a href="/owner/sessions">Owner sessions</a>
-						</Button>
+						<NavItem asChild variant="ghost" size="sm">
+							<a href="/setup">
+								<SettingsIcon />
+								Setup
+							</a>
+						</NavItem>
+						<NavItem asChild variant="ghost" size="sm">
+							<a href="/owner/sessions">
+								<UserIcon />
+								Owner sessions
+							</a>
+						</NavItem>
 					</>
 				)}
 				{session.isOperator && !singleOwner && (
 					<>
-						<Button
+						<NavItem
 							asChild
 							variant={pathname === "/app/operator" ? "secondary" : "ghost"}
 							size="sm"
@@ -277,20 +284,20 @@ export function AppShell({
 							>
 								Operator
 							</Link>
-						</Button>
-						<Button asChild variant="ghost" size="sm">
+						</NavItem>
+						<NavItem asChild variant="ghost" size="sm">
 							{/* The admin is another root layout: a full page load. */}
 							<a href="/admin">Admin</a>
-						</Button>
+						</NavItem>
 					</>
 				)}
 				{!singleOwner && (
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
-							<Button variant="ghost" size="sm" data-testid="user-menu">
+							<NavItem variant="ghost" size="sm" data-testid="user-menu">
 								<span className="max-w-56 truncate">{session.user.email}</span>
 								<ChevronDownIcon />
-							</Button>
+							</NavItem>
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end" className="min-w-56">
 							<DropdownMenuLabel className="font-normal">
@@ -383,22 +390,22 @@ function ThemeSwitch({
 }) {
 	return (
 		<fieldset className="dashboard-theme" aria-label="Appearance">
-			<Button
+			<NavItem
 				variant={!dark ? "secondary" : "ghost"}
 				aria-pressed={!dark}
 				onClick={() => onChange(false)}
 			>
 				<SunIcon />
 				Light
-			</Button>
-			<Button
+			</NavItem>
+			<NavItem
 				variant={dark ? "secondary" : "ghost"}
 				aria-pressed={dark}
 				onClick={() => onChange(true)}
 			>
 				<MoonIcon />
 				Dark
-			</Button>
+			</NavItem>
 		</fieldset>
 	);
 }

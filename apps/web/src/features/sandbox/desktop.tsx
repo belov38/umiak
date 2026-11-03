@@ -6,6 +6,7 @@ import { ConfirmButton } from "@/components/app/confirm-button";
 import { QueryError } from "@/components/app/query-error";
 import { useLocalMode } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
+import { NativeSelect } from "@/components/ui/native-select";
 import { useAttempt } from "@/lib/client-call";
 import { fetchDesktopLink } from "./desktop-link";
 import { headerActions } from "./rules";
@@ -102,11 +103,12 @@ export function DesktopTab({
 				>
 					Full screen
 				</Button>
-				<label className="text-sm">
+				<label htmlFor="desktop-choice-1" className="text-sm">
 					Access{" "}
-					<select
+					<NativeSelect
+						id="desktop-choice-1"
 						aria-label="Desktop access"
-						className="rounded border p-1"
+						className="rounded-none border p-1"
 						value={status.data?.access ?? "token"}
 						disabled={busy || !status.data}
 						onChange={async (event) => {
@@ -125,7 +127,7 @@ export function DesktopTab({
 						<option value="token">Secret link</option>
 						{!localMode && <option value="sso">Team members</option>}
 						<option value="public">Public</option>
-					</select>
+					</NativeSelect>
 				</label>
 				<ConfirmButton
 					variant="outline"

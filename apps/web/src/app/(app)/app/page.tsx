@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { DefaultTeamShell } from "@/components/app/default-team-shell";
+import { PageHeader } from "@/components/ui/panel";
 import { SandboxList } from "@/features/sandboxes/sandbox-list";
 import { getDeploymentMeta } from "@/lib/deployment-meta";
 import { getAppSession } from "@/lib/session";
@@ -17,7 +18,7 @@ export default async function AppIndex() {
 	if (s.defaultTeamId !== "") redirect(`/app/t/${s.defaultTeamId}`);
 	return (
 		<main className="mx-auto max-w-xl p-8">
-			<h1 className="text-xl font-semibold">No team</h1>
+			<PageHeader title="No team" />
 			<p className="mt-2 text-muted-foreground">
 				You are not a member of any team. Ask a team owner to invite you.
 			</p>

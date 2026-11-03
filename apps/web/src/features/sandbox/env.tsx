@@ -12,6 +12,7 @@ import { ConfirmButton } from "@/components/app/confirm-button";
 import { Field, FormDialog } from "@/components/app/form-dialog";
 import { QueryError } from "@/components/app/query-error";
 import { Button } from "@/components/ui/button";
+import { LoadingState } from "@/components/ui/feedback";
 import { Input } from "@/components/ui/input";
 import {
 	Table,
@@ -21,6 +22,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { useAttempt } from "@/lib/client-call";
 import {
 	bytesToBase64,
@@ -86,7 +88,7 @@ export function EnvTab({
 		return (
 			<QueryError error={q.error} what="env" onRetry={() => q.refetch()} />
 		);
-	if (!q.data) return <p className="text-sm text-muted-foreground">Loading…</p>;
+	if (!q.data) return <LoadingState />;
 	const env = Object.entries(q.data.env).sort(([a], [b]) => a.localeCompare(b));
 	const secrets = [...q.data.secretKeys].sort();
 	const files = q.data.secretFiles;
@@ -98,7 +100,7 @@ export function EnvTab({
 				<p
 					role="status"
 					data-testid="env-undelivered"
-					className="rounded-lg border border-warning/35 bg-warning-tint p-3 text-warning"
+					className="rounded-none border border-warning/35 bg-warning-tint p-3 text-warning"
 				>
 					Saved. It applies at the next start: the sandbox is not ready or its
 					agent did not answer.
@@ -402,8 +404,8 @@ function EditDialog({
 						</Button>
 					</div>
 				) : (
-					<textarea
-						className="min-h-16 rounded-lg border bg-transparent px-2.5 py-1.5 font-mono text-xs"
+					<Textarea
+						className="min-h-16 rounded-none border bg-transparent px-2.5 py-1.5 font-mono text-xs"
 						spellCheck={false}
 						value={v}
 						onChange={(e) => setValue(e.target.value)}
@@ -487,7 +489,7 @@ function SecretFileDialog({
 			}}
 		>
 			<Field label="File" error={sizeProblem}>
-				<input
+				<Input
 					type="file"
 					onChange={(e) => {
 						const f = e.target.files?.[0] ?? null;

@@ -12,6 +12,7 @@ import { acknowledgeNotice } from "@/actions/notices";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/choice";
 import { useUmiak } from "@/lib/api";
 import { useAttempt } from "@/lib/client-call";
 import { formatTime } from "@/lib/format";
@@ -115,7 +116,7 @@ function Notice({
 	return (
 		<div
 			role="alert"
-			className="rounded-lg border border-warning/35 bg-warning-tint p-4 text-sm text-warning"
+			className="rounded-none border border-warning/35 bg-warning-tint p-4 text-sm text-warning"
 		>
 			<div className="flex items-start gap-2">
 				<TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
@@ -131,8 +132,7 @@ function Notice({
 						<ul className="space-y-1">
 							{notice.apiKeys.map((k) => (
 								<li key={k.id} className="flex items-center gap-2">
-									<input
-										type="checkbox"
+									<Checkbox
 										className="size-4"
 										aria-label={`Select key ${k.name}`}
 										disabled={k.revoked || !canRevoke}

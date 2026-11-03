@@ -135,13 +135,15 @@ export function TerminalTab({
 		<div className="flex h-[70vh] min-h-80 flex-col gap-2">
 			<div className="flex flex-wrap items-center gap-1" role="tablist">
 				{tabs.map((t) => (
-					<button
+					<Button
+						variant="ghost"
+						size="sm"
 						key={t.id}
 						type="button"
 						role="tab"
 						aria-selected={t.id === active}
 						className={cn(
-							"rounded-md border px-2 py-1 font-mono text-xs",
+							"rounded-none border px-2 py-1 font-mono text-xs",
 							t.id === active
 								? "bg-muted font-medium"
 								: "text-muted-foreground",
@@ -150,7 +152,7 @@ export function TerminalTab({
 					>
 						{ptyTitle(t)}
 						{t.detached && " (detached)"}
-					</button>
+					</Button>
 				))}
 				<Button
 					size="sm"
@@ -178,11 +180,11 @@ export function TerminalTab({
 				)}
 			</div>
 			{current === null ? (
-				<div className="flex flex-1 items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">
+				<div className="flex flex-1 items-center justify-center rounded-none border border-dashed text-sm text-muted-foreground">
 					No terminal open. “New terminal” starts a login shell.
 				</div>
 			) : current.detached ? (
-				<div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-sm text-muted-foreground">
+				<div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-none border border-dashed text-sm text-muted-foreground">
 					<p>
 						Detached: the shell keeps running. The agent ends it after 10 min
 						without a client.
@@ -337,7 +339,7 @@ function TerminalSession({
 						role="status"
 						data-testid="pty-status"
 						className={cn(
-							"flex items-center gap-1 rounded px-2 py-0.5",
+							"flex items-center gap-1 rounded-none px-2 py-0.5",
 							phase === "failed"
 								? "bg-destructive/10 text-destructive"
 								: "bg-warning-tint text-warning",

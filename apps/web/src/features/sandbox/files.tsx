@@ -5,7 +5,7 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 // Files tab (S8 §9.6): GET /files/list with pages, breadcrumbs, hidden
-// files, a text preview of up to 1 MiB in <pre> (never HTML or an iframe),
+// files, a text preview of up to 1 MiB in <CodeBlock> (never HTML or an iframe),
 // download through a link with `?team=`, upload by button or drag and drop
 // (≤ 64 MiB one PUT, larger in resumable chunks with progress), mkdir,
 // move/rename, delete (recursive with a confirmation).
@@ -24,6 +24,7 @@ import { ConfirmButton } from "@/components/app/confirm-button";
 import { Field, FormDialog } from "@/components/app/form-dialog";
 import { QueryError } from "@/components/app/query-error";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/choice";
 import {
 	Dialog,
 	DialogContent,
@@ -31,6 +32,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import { CodeBlock, LoadingState } from "@/components/ui/feedback";
 import { Input } from "@/components/ui/input";
 import {
 	Table,
@@ -156,8 +158,7 @@ export function FilesTab({
 			/>
 		);
 	}
-	if (cwd === null)
-		return <p className="text-sm text-muted-foreground">Loading…</p>;
+	if (cwd === null) return <LoadingState />;
 
 	const upload = async (files: File[]) => {
 		const lifetime = life.current?.signal;
@@ -240,7 +241,7 @@ export function FilesTab({
 		<section
 			aria-label="Files; drop files here to upload them"
 			className={cn(
-				"space-y-3 rounded-lg",
+				"space-y-3 rounded-none",
 				dragging && "outline-2 outline-dashed outline-primary",
 			)}
 			onDragOver={(e) => {
@@ -259,26 +260,31 @@ export function FilesTab({
 					{breadcrumbs(cwd).map((c, i) => (
 						<span key={c.path} className="flex items-center">
 							{i > 1 && <span className="text-muted-foreground">/</span>}
-							<button
+							<Button
+								variant="ghost"
+								size="sm"
 								type="button"
-								className="rounded px-0.5 hover:underline"
+								className="rounded-none px-0.5 hover:underline"
 								onClick={() => setDir(c.path)}
 							>
 								{c.name}
-							</button>
+							</Button>
 						</span>
 					))}
 				</nav>
 				<div className="ml-auto flex flex-wrap items-center gap-2">
-					<label className="flex items-center gap-1 text-sm">
-						<input
-							type="checkbox"
+					<label
+						htmlFor="files-choice-1"
+						className="flex items-center gap-1 text-sm"
+					>
+						<Checkbox
+							id="files-choice-1"
 							checked={hidden}
 							onChange={(e) => setHidden(e.target.checked)}
 						/>
 						Hidden files
 					</label>
-					<input
+					<Input
 						ref={picker}
 						type="file"
 						multiple
@@ -337,20 +343,24 @@ export function FilesTab({
 					{cwd !== "/" && (
 						<TableRow>
 							<TableCell colSpan={6}>
-								<button
+								<Button
+									variant="ghost"
+									size="sm"
 									type="button"
 									className="font-mono hover:underline"
 									onClick={() => setDir(parentPath(cwd))}
 								>
 									..
-								</button>
+								</Button>
 							</TableCell>
 						</TableRow>
 					)}
 					{rows.map((f) => (
 						<TableRow key={f.path} data-testid="file-row">
 							<TableCell>
-								<button
+								<Button
+									variant="ghost"
+									size="sm"
 									type="button"
 									className="flex items-center gap-1.5 font-mono text-sm hover:underline"
 									onClick={() => {
@@ -363,7 +373,7 @@ export function FilesTab({
 									}}
 								>
 									{f.type === "dir" ? (
-										<FolderIcon className="size-4 text-primary" />
+										<FolderIcon className="size-4 text-link" />
 									) : f.type === "symlink" ? (
 										<LinkIcon className="size-4 text-muted-foreground" />
 									) : (
@@ -376,7 +386,7 @@ export function FilesTab({
 											→ {f.symlinkTarget}
 										</span>
 									)}
-								</button>
+								</Button>
 							</TableCell>
 							<TableCell className="text-muted-foreground">
 								{f.type === "dir" ? "—" : formatBytes(f.sizeBytes)}
@@ -441,9 +451,7 @@ export function FilesTab({
 					))}
 				</TableBody>
 			</Table>
-			{list.isPending && (
-				<p className="text-sm text-muted-foreground">Loading…</p>
-			)}
+			{list.isPending && <LoadingState />}
 			{list.data && rows.length === 0 && (
 				<p className="text-sm text-muted-foreground">
 					Empty{hidden ? "" : " (hidden files are not shown)"}. Drop files here
@@ -493,7 +501,7 @@ function Uploads({
 	if (items.length === 0) return null;
 	return (
 		<ul
-			className="space-y-1 rounded-lg border p-2 text-sm"
+			className="space-y-1 rounded-none border p-2 text-sm"
 			data-testid="uploads"
 		>
 			{items.map((u) => (
@@ -501,9 +509,9 @@ function Uploads({
 					<span className="w-48 truncate font-mono text-xs">{u.name}</span>
 					{u.state === "uploading" ? (
 						<>
-							<div className="h-1.5 flex-1 overflow-hidden rounded bg-muted">
+							<div className="h-1.5 flex-1 overflow-hidden rounded-none bg-muted">
 								<div
-									className="h-full rounded bg-primary transition-all"
+									className="h-full rounded-none bg-primary transition-all"
 									style={{
 										width: `${u.size === 0 ? 0 : Math.round((u.sent / u.size) * 100)}%`,
 									}}
@@ -604,9 +612,7 @@ function PreviewDialog({
 							</a>
 						</DialogDescription>
 					</DialogHeader>
-					{q.isPending && (
-						<p className="text-sm text-muted-foreground">Loading…</p>
-					)}
+					{q.isPending && <LoadingState />}
 					{q.isError && (
 						<p className="text-sm text-destructive">
 							{describeError(q.error).message}
@@ -618,12 +624,12 @@ function PreviewDialog({
 						</p>
 					)}
 					{typeof q.data === "string" && (
-						<pre
+						<CodeBlock
 							data-testid="file-preview"
-							className="max-h-[60vh] overflow-auto rounded-lg bg-muted p-3 font-mono text-xs whitespace-pre"
+							className="max-h-[60vh] overflow-auto rounded-none bg-muted p-3 font-mono text-xs whitespace-pre"
 						>
 							{q.data}
-						</pre>
+						</CodeBlock>
 					)}
 				</DialogContent>
 			)}

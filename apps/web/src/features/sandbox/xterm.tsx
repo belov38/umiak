@@ -29,13 +29,6 @@ export interface XtermViewProps {
 	className?: string;
 }
 
-const THEME = {
-	background: "#0b0d10",
-	foreground: "#e6e6e6",
-	cursor: "#e6e6e6",
-	selectionBackground: "#3b4252",
-};
-
 export default function XtermView({
 	readOnly = false,
 	convertEol = false,
@@ -59,7 +52,17 @@ export default function XtermView({
 			fontSize: 13,
 			fontFamily:
 				'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-			theme: THEME,
+			theme: (() => {
+				const css = getComputedStyle(document.documentElement);
+				const token = (name: string) =>
+					css.getPropertyValue(`--terminal-${name}`).trim();
+				return {
+					background: token("background"),
+					foreground: token("foreground"),
+					cursor: token("foreground"),
+					selectionBackground: token("selection"),
+				};
+			})(),
 		});
 		const fitAddon = new FitAddon();
 		const searchAddon = new SearchAddon();
@@ -132,7 +135,7 @@ export default function XtermView({
 			<div
 				ref={box}
 				data-testid="xterm"
-				className="min-h-0 flex-1 overflow-hidden rounded-lg bg-[#0b0d10] p-1"
+				className="min-h-0 flex-1 overflow-hidden rounded-none bg-[var(--terminal-background)] p-1"
 			/>
 		</div>
 	);

@@ -123,7 +123,7 @@ export function SecretFiles({
 			{errors.secretFiles && (
 				<p className="text-xs text-destructive">{errors.secretFiles}</p>
 			)}
-			<input
+			<Input
 				ref={input}
 				type="file"
 				multiple

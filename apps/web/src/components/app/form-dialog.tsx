@@ -1,7 +1,7 @@
 "use client";
 // A small dialog with a form: fields as children, one submit button. The
 // submit handler resolves to true when done (the dialog closes).
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, type ReactNode, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -12,6 +12,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import { FieldContext } from "@/components/ui/field-context";
 
 export function FormDialog({
 	open,
@@ -81,22 +82,49 @@ export function Field({
 	label,
 	error,
 	hint,
+	required = false,
 	children,
 }: {
 	label: string;
 	error?: string | null | undefined;
 	hint?: ReactNode;
+	required?: boolean | undefined;
 	children: ReactNode;
 }) {
+	const id = useId();
+	const messageId = `${id}-message`;
+
 	return (
-		// biome-ignore lint/a11y/noLabelWithoutControl: the control is the child
-		<label className="grid gap-1 text-sm">
-			<span className="font-medium">{label}</span>
-			{children}
-			{hint && !error && (
-				<span className="text-xs text-muted-foreground">{hint}</span>
-			)}
-			{error && <span className="text-xs text-destructive">{error}</span>}
-		</label>
+		<FieldContext.Provider
+			value={{
+				id,
+				messageId: error || hint ? messageId : undefined,
+				invalid: Boolean(error),
+				required,
+			}}
+		>
+			{/* biome-ignore lint/a11y/noLabelWithoutControl: the control is the child */}
+			<label className="grid gap-1 text-sm">
+				<span className="font-medium">
+					{label}
+					{required && <span aria-hidden="true"> *</span>}
+				</span>
+				{children}
+				{hint && !error && (
+					<span id={messageId} className="text-xs text-muted-foreground">
+						{hint}
+					</span>
+				)}
+				{error && (
+					<span
+						id={messageId}
+						role="alert"
+						className="text-xs text-destructive"
+					>
+						{error}
+					</span>
+				)}
+			</label>
+		</FieldContext.Provider>
 	);
 }
