@@ -253,3 +253,69 @@ test("local dashboard/admin, tokenless CLI create/exec/delete and blocked CIDR",
 		).status(),
 	).toBe(403);
 });
+
+test("local main pages in light and dark", async ({ page }, info) => {
+	// UI-only build metadata; no template build is started by this test.
+	await page.route("**/quickstart/setup/build", (route) =>
+		route.request().method() === "GET"
+			? route.fulfill({ json: { buildJob: null, builds: [] } })
+			: route.fallback(),
+	);
+	await page.route("**/quickstart/setup/media/storages", (route) =>
+		route.fulfill({ json: { storages: [] } }),
+	);
+	const dir = process.env.UMIAK_VISUAL_DIR ?? info.outputPath("local-ui");
+	mkdirSync(dir, { recursive: true });
+	await page.setViewportSize({ width: 1900, height: 1000 });
+	await page.goto("/app");
+	const keys = await page
+		.getByRole("link", { name: "API keys", exact: true })
+		.getAttribute("href");
+	if (!keys) throw new Error("Missing API keys navigation");
+	const base = keys.replace(/\/keys$/, "");
+	for (const [name, path] of [
+		["sandboxes", "/app"],
+		["settings", "/app/settings"],
+		["templates", "/app/templates"],
+		["getting-started", "/app/getting-started"],
+		["keys", keys],
+		["environments", `${base}/environments`],
+		["snapshots", `${base}/snapshots`],
+		["create", `${base}/sandboxes/new`],
+	] as const) {
+		await page.goto(path);
+		await expect(page.getByRole("heading", { level: 1 }).last()).toBeVisible();
+		await expect(page.getByText("Loading…", { exact: true })).toHaveCount(0);
+		await page.evaluate(() => document.fonts.ready);
+		if (name === "templates" && process.env.UMIAK_UI_QUICKSTART === "1") {
+			await expect(
+				page
+					.getByTestId("template-card")
+					.first()
+					.getByRole("button", { name: /Build…|Rebuild…/ }),
+			).toHaveAttribute("data-variant", "default");
+			for (const label of ["Setup", "Owner sessions"])
+				await expect(
+					page.getByRole("link", { name: label, exact: true }),
+				).toHaveAttribute("data-nav-item", "");
+		}
+
+		for (const theme of ["light", "dark"]) {
+			await page.evaluate((t) => {
+				const name = t === "dark" ? "Dark" : "Light";
+				const button = Array.from(
+					document.querySelectorAll<HTMLButtonElement>(
+						".dashboard-theme button",
+					),
+				).find((b) => b.textContent?.trim() === name);
+				if (!button) throw new Error("Appearance control missing");
+				button.click();
+			}, theme);
+			await page.screenshot({
+				path: join(dir, `${name}-${theme}.png`),
+				fullPage: true,
+				animations: "disabled",
+			});
+		}
+	}
+});

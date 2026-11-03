@@ -753,327 +753,327 @@ L438 Button type="submit" disabled={busy}>
 
 /* From shadcn/tailwind.css (the shadcn CLI package is not a dependency). */
 /* Custom variants */
-@custom-variant data-open 
+@custom-variant data-open
 
 	&:where([data-state="open"]),
-	&:where([data-open]:not([data-open="false"])) 
+	&:where([data-open]:not([data-open="false"]))
 
 
-@custom-variant data-closed 
+@custom-variant data-closed
 
 	&:where([data-state="closed"]),
-	&:where([data-closed]:not([data-closed="false"])) 
+	&:where([data-closed]:not([data-closed="false"]))
 
 
-@custom-variant data-checked 
+@custom-variant data-checked
 
 	&:where([data-state="checked"]),
-	&:where([data-checked]:not([data-checked="false"])) 
+	&:where([data-checked]:not([data-checked="false"]))
 
 
-@custom-variant data-unchecked 
+@custom-variant data-unchecked
 
 	&:where([data-state="unchecked"]),
-	&:where([data-unchecked]:not([data-unchecked="false"])) 
+	&:where([data-unchecked]:not([data-unchecked="false"]))
 
 
-@custom-variant data-selected 
+@custom-variant data-selected
 
-	&:where([data-selected="true"]) 
+	&:where([data-selected="true"])
 
 
-@custom-variant data-disabled 
+@custom-variant data-disabled
 
 	&:where([data-disabled="true"]),
-	&:where([data-disabled]:not([data-disabled="false"])) 
+	&:where([data-disabled]:not([data-disabled="false"]))
 
 
-@custom-variant data-active 
+@custom-variant data-active
 
 	&:where([data-state="active"]),
-	&:where([data-active]:not([data-active="false"])) 
+	&:where([data-active]:not([data-active="false"]))
 
 
-@custom-variant data-horizontal 
+@custom-variant data-horizontal
 
-	&:where([data-orientation="horizontal"]) 
-
-
-@custom-variant data-vertical 
-
-	&:where([data-orientation="vertical"]) 
+	&:where([data-orientation="horizontal"])
 
 
-@theme inline 
+@custom-variant data-vertical
+
+	&:where([data-orientation="vertical"])
 
 
-:root 
-
-.dark 
-
-@media (min-width: 768px) 
-
-	:root 
+@theme inline
 
 
-@layer base 
+:root
 
-	* 
+.dark
 
-	body 
+@media (min-width: 768px)
 
-	html 
+	:root
+
+
+@layer base
+
+	*
+
+	body
+
+	html
 
 
 /* Independently implemented from the measured reference values in research/. */
-html 
+html
 
-body 
+body
 
-.dashboard-shell 
+.dashboard-shell
 
-.dashboard-sidebar 
+.dashboard-sidebar
 
-.dashboard-sidebar-content 
+.dashboard-sidebar-content
 
-.dashboard-brand 
+.dashboard-brand
 
-.dashboard-brand svg 
+.dashboard-brand svg
 
-.desktop-team-switcher 
+.desktop-team-switcher
 
-.dashboard-nav 
+.dashboard-nav
 
-.dashboard-nav [data-slot="button"] 
+.dashboard-nav [data-slot="button"]
 
-.dashboard-nav [aria-current="page"] 
+.dashboard-nav [aria-current="page"]
 
-.dashboard-sidebar-footer 
+.dashboard-sidebar-footer
 
-.dashboard-sidebar-footer > [data-testid="user-menu"] 
+.dashboard-sidebar-footer > [data-testid="user-menu"]
 
-.dashboard-theme 
+.dashboard-theme
 
-.dashboard-theme [data-slot="button"] 
+.dashboard-theme [data-slot="button"]
 
-.dashboard-theme [data-slot="button"] + [data-slot="button"] 
+.dashboard-theme [data-slot="button"] + [data-slot="button"]
 
-.dashboard-content 
+.dashboard-content
 
-.dashboard-page 
+.dashboard-page
 
 .dashboard-page > section,
-.dashboard-page > div 
+.dashboard-page > div
 
-h1 
+h1
 
 h2,
-h3 
+h3
 
-.dashboard-page > .space-y-4 > :not(:last-child) 
+.dashboard-page > .space-y-4 > :not(:last-child)
 
-.dashboard-page > .sandbox-list > :not(:last-child) 
+.dashboard-page > .sandbox-list > :not(:last-child)
 
-.dashboard-card 
+.dashboard-card
 
 .dashboard-card > h2,
-.dashboard-card > header 
+.dashboard-card > header
 
-.dashboard-page .border-dashed 
+.dashboard-page .border-dashed
 
-.dashboard-empty-icon 
+.dashboard-empty-icon
 
-.sandbox-detail-heading 
+.sandbox-detail-heading
 
-.sandbox-title 
+.sandbox-title
 
-.sandbox-actions 
+.sandbox-actions
 
-.sandbox-facts 
+.sandbox-facts
 
-.sandbox-fact 
+.sandbox-fact
 
-.sandbox-fact dd 
+.sandbox-fact dd
 
-.sandbox-overview 
+.sandbox-overview
 
-.sandbox-overview > section 
+.sandbox-overview > section
 
-.sandbox-overview h2 
+.sandbox-overview h2
 
-.sandbox-workspace 
+.sandbox-workspace
 
-.snapshot-panel 
+.snapshot-panel
 
-.snapshot-panel .border-dashed 
+.snapshot-panel .border-dashed
 
-.dashboard-skip 
+.dashboard-skip
 
-.dashboard-skip:focus 
+.dashboard-skip:focus
 
-.dashboard-mobile-header 
+.dashboard-mobile-header
 
-.key-form 
+.key-form
 
-.key-form fieldset 
+.key-form fieldset
 
 
-.key-preset 
+.key-preset
 
-.key-preset:has(input:checked) 
+.key-preset:has(input:checked)
 
-.key-preset:last-child 
+.key-preset:last-child
 
-.key-preset strong 
+.key-preset strong
 
-.environment-toolbar 
+.environment-toolbar
 
-.environment-summary 
+.environment-summary
 
-.environment-summary dl 
+.environment-summary dl
 
-.environment-summary dt 
+.environment-summary dt
 
-.environment-summary dd 
+.environment-summary dd
 
-.create-dialog 
+.create-dialog
 
-.create-dialog h1 
+.create-dialog h1
 
-.create-dialog [data-testid="create-form"] > div 
+.create-dialog [data-testid="create-form"] > div
 
-.create-dialog [data-testid="create-form"] > div:last-child 
+.create-dialog [data-testid="create-form"] > div:last-child
 
-.create-dialog [data-testid="create-form"] > div > div:first-child 
+.create-dialog [data-testid="create-form"] > div > div:first-child
 
-.create-dialog [data-testid="create-form"] > div > div:last-child 
+.create-dialog [data-testid="create-form"] > div > div:last-child
 
-@media (max-width: 1023px) 
+@media (max-width: 1023px)
 
-	.dashboard-mobile-header 
+	.dashboard-mobile-header
 
-	.dashboard-mobile-header .dashboard-brand svg 
+	.dashboard-mobile-header .dashboard-brand svg
 
-	.dashboard-sidebar 
+	.dashboard-sidebar
 
-	.dashboard-sidebar-content 
+	.dashboard-sidebar-content
 
-	.dashboard-sidebar-content > .dashboard-brand 
+	.dashboard-sidebar-content > .dashboard-brand
 
-	.dashboard-nav 
+	.dashboard-nav
 
-	.dashboard-nav [data-slot="button"] 
+	.dashboard-nav [data-slot="button"]
 
-	.dashboard-sidebar-footer 
+	.dashboard-sidebar-footer
 
-	.dashboard-theme 
+	.dashboard-theme
 
-	.dashboard-content 
+	.dashboard-content
 
-	.sandbox-facts 
+	.sandbox-facts
 
-@media (max-width: 639px) 
+@media (max-width: 639px)
 
-	.dashboard-content 
+	.dashboard-content
 
-	.sandbox-facts 
+	.sandbox-facts
 
-	.sandbox-actions 
+	.sandbox-actions
 
-	.sandbox-workspace 
+	.sandbox-workspace
 
 
-.dashboard-empty 
+.dashboard-empty
 
-.snapshot-panel .dashboard-empty 
+.snapshot-panel .dashboard-empty
 
 
-.sandbox-cards 
+.sandbox-cards
 
-.sandbox-row-name 
+.sandbox-row-name
 
-.sandbox-row-name:hover 
+.sandbox-row-name:hover
 
-.sandbox-desktop-table [data-slot="table-cell"] 
+.sandbox-desktop-table [data-slot="table-cell"]
 
-@media (max-width: 1399px) 
+@media (max-width: 1399px)
 
-	.sandbox-desktop-table 
+	.sandbox-desktop-table
 
-	.sandbox-cards 
+	.sandbox-cards
 
-.sandbox-card 
+.sandbox-card
 
-@media (max-width: 1023px) 
+@media (max-width: 1023px)
 
-	.desktop-team-switcher 
+	.desktop-team-switcher
 
-	.mobile-team-switcher 
+	.mobile-team-switcher
 
-.create-dialog [data-slot="select-trigger"] 
+.create-dialog [data-slot="select-trigger"]
 
-[data-sonner-toast] 
+[data-sonner-toast]
 
 
-.sandbox-title > :where(div) 
+.sandbox-title > :where(div)
 
-[data-slot="dialog-header"] 
+[data-slot="dialog-header"]
 
-.key-form fieldset 
+.key-form fieldset
 
-.key-form fieldset > label 
+.key-form fieldset > label
 
-.key-form .key-preset 
+.key-form .key-preset
 
 .dashboard-shell *,
-[data-slot="dialog-content"] * 
+[data-slot="dialog-content"] *
 
 [data-slot="dropdown-menu-content"],
 [data-slot="select-content"],
-[data-slot="tooltip-content"] 
+[data-slot="tooltip-content"]
 
 
-[data-slot="dialog-content"] 
+[data-slot="dialog-content"]
 
-[data-slot="dialog-header"] 
+[data-slot="dialog-header"]
 
 
 /* Secondary field labels measured independently from the input's text. */
 .key-form label[for],
-.key-form legend 
+.key-form legend
 
-.create-dialog [data-testid="create-form"] > div > div:first-child 
-
-
-.dashboard-drawer[data-slot="dialog-content"] 
-
-.dashboard-drawer .desktop-team-switcher 
-
-.dashboard-drawer .dashboard-sidebar-content > .dashboard-brand 
-
-.dashboard-drawer .dashboard-sidebar-footer 
-
-.dashboard-drawer .dashboard-theme 
+.create-dialog [data-testid="create-form"] > div > div:first-child
 
 
-input[type="checkbox"] 
+.dashboard-drawer[data-slot="dialog-content"]
 
-input[type="checkbox"]::after 
+.dashboard-drawer .desktop-team-switcher
 
-input[type="checkbox"]:checked 
+.dashboard-drawer .dashboard-sidebar-content > .dashboard-brand
 
-input[type="checkbox"]:checked::after 
+.dashboard-drawer .dashboard-sidebar-footer
+
+.dashboard-drawer .dashboard-theme
+
+
+input[type="checkbox"]
+
+input[type="checkbox"]::after
+
+input[type="checkbox"]:checked
+
+input[type="checkbox"]:checked::after
 
 input[type="checkbox"]:focus-visible,
-input[type="radio"]:focus-visible 
+input[type="radio"]:focus-visible
 
-input[type="radio"] 
+input[type="radio"]
 
 
 /* The display heading keeps the reference's measured -0.02em tracking. */
-.dashboard-page h1:not(.sandbox-detail-heading) 
+.dashboard-page h1:not(.sandbox-detail-heading)
 
-[data-slot="select-trigger"] > svg 
+[data-slot="select-trigger"] > svg
 
 
 /* Acceptance fixes: preserve intrinsic content without growing the viewport. */
@@ -1083,89 +1083,89 @@ input[type="radio"]
 .sandbox-overview > section,
 .sandbox-workspace,
 [data-slot="dialog-content"] > *,
-.create-field > * 
+.create-field > *
 
-.dashboard-page dd 
+.dashboard-page dd
 
-.sandbox-overview 
+.sandbox-overview
 
-.sandbox-workspace 
+.sandbox-workspace
 
-.sandbox-row-actions [data-slot="button"] svg 
+.sandbox-row-actions [data-slot="button"] svg
 
-[data-testid="sandbox-state"] 
+[data-testid="sandbox-state"]
 
-.sandbox-card 
+.sandbox-card
 
-.sandbox-card .sandbox-row-actions 
+.sandbox-card .sandbox-row-actions
 
-.sandbox-title > :where(div) 
+.sandbox-title > :where(div)
 
-.sandbox-header .sandbox-actions 
+.sandbox-header .sandbox-actions
 
-.key-form fieldset 
+.key-form fieldset
 
-.key-form label > span 
+.key-form label > span
 
-.key-preset:has(input:checked) .key-preset-title 
+.key-preset:has(input:checked) .key-preset-title
 
-.key-intro 
+.key-intro
 
-.key-intro h2 
+.key-intro h2
 
-.environments-page > p 
+.environments-page > p
 
-.environment-summary 
+.environment-summary
 
-.environment-name 
+.environment-name
 
-.environment-summary[data-selected="true"] .environment-name 
+.environment-summary[data-selected="true"] .environment-name
 
 .environment-summary dt,
-.environment-summary dd 
+.environment-summary dd
 
 .create-dialog,
 .create-dialog [data-testid="create-form"],
-.create-field 
+.create-field
 
-.create-dialog [data-testid="create-form"] > .create-field 
+.create-dialog [data-testid="create-form"] > .create-field
 
 .create-dialog [data-slot="input"],
-.create-dialog [data-slot="select-trigger"] 
+.create-dialog [data-slot="select-trigger"]
 
-.create-dialog .create-field label 
+.create-dialog .create-field label
 
-.create-dialog p 
+.create-dialog p
 
-@media (max-width: 639px) 
+@media (max-width: 639px)
 
-	.sandbox-list-header > h1 
+	.sandbox-list-header > h1
 
-	.sandbox-list-header > [data-testid="quota-line"] 
+	.sandbox-list-header > [data-testid="quota-line"]
 
-	.sandbox-filters > [data-slot="input"] 
+	.sandbox-filters > [data-slot="input"]
 
-	.create-dialog 
+	.create-dialog
 
 
 /* Getting started uses the dashboard palette in both appearance modes. */
-.guide-layout 
+.guide-layout
 
-.guide-toc 
+.guide-toc
 
-.onboarding-checklist 
+.onboarding-checklist
 
-.onboarding-checklist li 
+.onboarding-checklist li
 
-.onboarding-number 
+.onboarding-number
 
-.onboarding-checklist a:hover 
+.onboarding-checklist a:hover
 
-@media (max-width: 900px) 
+@media (max-width: 900px)
 
-	.guide-layout 
+	.guide-layout
 
-	.guide-toc 
+	.guide-toc
 
-	.onboarding-checklist 
+	.onboarding-checklist
 ```
