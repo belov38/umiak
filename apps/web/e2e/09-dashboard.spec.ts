@@ -162,6 +162,9 @@ test("dashboard navigation, appearance, responsive layout and page captures", as
 	await expect(
 		page.getByRole("combobox", { name: "Size", exact: true }),
 	).toContainText("template default");
+	await page
+		.getByRole("combobox", { name: "TTL", exact: true })
+		.scrollIntoViewIfNeeded();
 	await capture("create");
 	await page.evaluate(() => document.documentElement.classList.add("dark"));
 	await capture("create-dark");
