@@ -11,16 +11,16 @@ openssl x509 -in umiak-ca.pem -noout -fingerprint -sha256
 
 Use the local Docker console as the trust channel. Install this verified CA in your
 browser trust store, then open `https://localhost:8444` on the Docker host, or
-`https://<docker-host-DNS-name>:8444` remotely. DNS can be LAN DNS, mDNS, MagicDNS or
+`https://<configured-DNS-name>:8444` remotely. Set `UMIAK_QUICKSTART_TLS_NAMES` before boot for remote DNS names. DNS can be LAN DNS, mDNS, MagicDNS or
 ordinary DNS; Tailscale is optional. No external relay is used.
 
 Enter the one-time setup code from the logs to claim ownership. Other LAN/tailnet
-peers cannot operate the deployment. Owner cookies expire after 180 days; CLI pairing
+peers cannot operate the deployment. Owner cookies expire after 180 days; CLI sessions after at most 30 days. CLI pairing
 requests expire after five minutes. Credentials and claim state survive container recreation.
 
 For raw LAN/tailnet IP URLs, first open by localhost or a DNS name and visit
 `/owner/tls` to add the IPs to the certificate. This takes effect immediately and is
-persisted without an `.env` file. Certificates for DNS names are issued on demand.
+persisted without an `.env` file. Only configured names are accepted. Adding names requires explicit CA rotation and renewed trust; unknown SNI is rejected. The CA expires after one year; rotate it before expiry.
 The guest gateway on port 443 uses its own independent CA.
 
 ## Wizard
@@ -51,8 +51,8 @@ Open `/setup`. Each step records status and errors in Postgres and can be retrie
 6. Run the smoke test: one 2 GiB Linux sandbox, exec, deletion. Setup is complete only
    after every step succeeds. Running sandbox RAM is checked before creating a VM.
 
-Help is at `/app/help` with this deployment's actual CLI, MCP and SDK URLs and copy
-buttons. The dashboard sidebar links Help and Setup.
+Getting started is at `/app/getting-started` (`/app/help` redirects) with this deployment's actual CLI, MCP and SDK URLs and copy
+buttons. The dashboard sidebar links Getting started and Setup.
 
 ## Install and pair the CLI
 
@@ -67,7 +67,7 @@ For a publicly trusted certificate the command is simply
 `curl -fsSL https://HOST:8444/install.sh | sh`. The installer detects Darwin/Linux
 arm64/x64, verifies SHA256SUMS, installs to `~/.local/bin` (`UMIAK_INSTALL_DIR` overrides
 it) and starts `umiak login`. Open its pairing URL in the claimed browser, compare
-the request identifier and approve. Never approve a request you did not start. If your owner browser uses another
+the short code and enter it to approve. Never approve a request you did not start. If your owner browser uses another
 hostname for this same deployment, open the pairing path and request ID on that
 claimed hostname; cookies are intentionally host-only.
 
@@ -100,3 +100,38 @@ DB simultaneously. Protect and back up named volumes; `down -v` deletes state.
 CT590 deployment: `infra/dev-cp/deploy-quickstart.sh`; rollback:
 `UMIAK_DEVCP_AUTH_MODE=none infra/dev-cp/deploy.sh` (or `oidc`). No PVE objects,
 gateway CA or guest port are replaced by that quickstart deployment.
+
+## Optional Tailscale Serve (publicly trusted owner HTTPS)
+
+Enable HTTPS certificates and MagicDNS in your tailnet, then run:
+
+```sh
+TS_AUTHKEY=YOUR_KEY TS_HOSTNAME=umiak docker compose -f compose.yaml -f deploy/compose/quickstart/compose.tailscale.yaml up -d --build
+```
+
+Open the node's `https://umiak.YOUR-TAILNET.ts.net` URL (see
+`docker compose -f compose.yaml -f deploy/compose/quickstart/compose.tailscale.yaml exec tailscale tailscale status`).
+Claim with the Docker log code, then `curl -fsSL https://umiak.YOUR-TAILNET.ts.net/install.sh | sh`
+and enter the CLI short code in the owner browser. No CA download or `--cacert` is needed.
+The state volume retains node identity; protect the auth key and do not commit it.
+Serve uses userspace networking and connects only to the private owner ingress;
+its internal HTTPS target skips certificate verification within the isolated compose
+network. It never bypasses the owner gate. Tailscale identity headers are stripped,
+not used as authentication. Funnel is disabled. The fixed sidecar address is used
+only to report public certificate handling in metadata, never to grant access.
+
+Serve cannot issue wildcard certificates. Sandbox previews continue to use the
+gateway wildcard domain/certificate and its separate trust configuration. The LAN
+owner endpoint remains available with the constrained owner CA; Tailscale is optional.
+
+Pairing pending limits and request limits use the socket source, never arbitrary
+forwarded headers. Docker Desktop NAT and Serve can collapse multiple clients into
+one source: they share its limits. Pending entries expire after five minutes;
+short codes, timestamp and client details help detect unsolicited pairing attempts.
+CLI sessions expire after 30 days and can be individually revoked at `/owner/sessions`.
+
+If you change Serve's HTTPS port, set `UMIAK_QUICKSTART_SERVE_PORT` on the owner
+service to that port (default443). The trusted sidecar peer plus MagicDNS origin
+port select the installer instructions only. This avoids confusing direct private
+HTTPS with Serve when Docker NAT gives both the same socket source; neither source
+nor origin port confers owner authorization.

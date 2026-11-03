@@ -1,6 +1,6 @@
 # S16: zero-config self-host quickstart
 
-Decision: Ilia, 2026-11-03. Status: implemented and verified on the dev stand; independent acceptance pending.
+Decision: Ilia, 2026-11-03. Status: acceptance fixes and additions implemented on s16-fix, verified on CT590; independent acceptance pending.
 
 ## Intent and acceptance
 
@@ -29,10 +29,9 @@ These are implementer decisions under Ilia's explicit delegation of technical de
    requests must pass same-origin checks. Neither CIDR membership nor identity
    headers confer ownership. Claim/pair attempts are bounded and rate limited.
 4. HTTPS is required for remote ownership. A separate quickstart CA issues certificates
-   for observed SNI names/IPs; operators obtain and verify the CA through the local
+   only for configured/owner-approved names and local addresses, with critical X.509 name constraints; operators obtain and verify the CA through the local
    Docker trust channel before remote curl. Never recommend `curl -k | sh`.
-   Arbitrary Host headers do not select proxy destinations. Browser DNS rebinding
-   is constrained by TLS and strict same-origin mutation checks.
+   Arbitrary Host headers do not select proxy destinations. Unknown TLS SNI names are rejected before HTTP. Strict same-origin mutation checks remain required; TLS alone is not a general DNS-rebinding defence.
 5. CLI pairing creates a short-lived request; a claimed browser approves it and the
    CLI receives a revocable bearer credential. A code alone does not approve pairing.
    The CLI persists the CA for subsequent requests; installer assets are unauthenticated
@@ -117,3 +116,40 @@ CT590 exposes the owner service on tailnet8444 and, for LAN access, HTTPS4180 (t
 existing allowed S15 port). Both terminate at the same owner gate. This avoids
 changing PVE firewall policy or guest gateway443. Generic root compose stays on
 8444. The Mac live run used MagicDNS and tailnet IP per Ilia's follow-up.
+
+### Acceptance follow-up rulings (2026-11-03)
+
+- CA constraints are immutable: owner-approved expansion requires explicit CA rotation and renewed client trust. Handshakes never invoke openssl.
+- CLI credentials have a 30-day maximum lifetime, cannot approve pairing or manage owner sessions, and are individually revocable. Authentication reads state without locking or updating it; no last-seen writes are required.
+- Optional Tailscale Serve terminates publicly trusted MagicDNS HTTPS before the same owner ingress. LAN/private-DNS remains independent. Serve is neither ownership proof nor a wildcard preview certificate service.
+- Getting started uses the native Next dashboard shell in every authentication mode. Owner bootstrap pages share theme tokens while remaining on the isolated ingress.
+
+- Public network configuration is distributed through a dedicated volume, separate from PVE credentials and service secrets. Web/API/worker receive only their own secret subdirectories; worker gets only its gateway token/public SSH CA, and gateway gets no PVE credential mount.
+- Undifferentiated legacy owner sessions are rejected on upgrade: their browser/CLI scope cannot be recovered safely. Console recovery produces a fresh claim.
+- Proxmox node firewall enable controls host rules independently of guest isolation. Adoption reads it without changing it; cluster enable and managed sandbox VM/NIC settings are mandatory. Sealed templates are read-only and excluded from running-sandbox firewall checks.
+
+### Single-owner presentation ruling (Ilia/master, 2026-11-03)
+
+Anonymous `/v1/meta` declares `tenancy: single|teams`: single for S15 none and
+S16 owner; teams for OIDC. Missing values from old servers mean teams. This field,
+not credential type or a second web environment decision, controls presentation.
+The internal local team and all API resources remain unchanged. MCP tools and
+outputs remain unchanged. Both SDK metadata models include tenancy.
+
+Single deployments hide team switcher/new team/membership/invites/roles, expose
+plain Settings and owner/operator actions, and land directly on sandboxes. Internal
+team-scoped URLs remain implementation details. Guide/wizard wording is personal.
+CLI profiles cache tenancy at login, refresh daily or with an existing metadata
+fetch, and use it for whoami/limits/ls/help. API-key profiles follow server tenancy;
+explicit `--team` and `UMIAK_TEAM` remain supported.
+
+CLI help uses the persisted tenancy cache offline. Commands that present tenancy
+(whoami/limits/ls) refresh it after24 hours with a bounded anonymous request;
+network failure retains the last known value. Old/absent metadata defaults teams.
+Explicit team overrides remain accepted even when their help entry is hidden.
+
+The web network remains isolated from the API control network. A minimal read-only
+bridge on both networks forwards only exact anonymous GET /v1/meta, with no
+credentials/identity headers and no host-published port. It exposes no other API
+route. The dashboard consumes the same API tenancy through this bridge. Existing
+SSH metadata reads also refresh the CLI tenancy cache without another request.

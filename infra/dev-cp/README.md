@@ -348,29 +348,42 @@ agent state through QGA as SYSTEM and retries `503 desktop_starting` with a fres
 Create 139–146 s, first stream open ~22 s. `UMIAK_E2E_SANDBOX=<slug>` reuses an existing sandbox
 for diagnostics (it is not deleted; idle observation needs the `e2e=desktop` label).
 
-## S16 quickstart stand (2026-11-03)
+## S16 quickstart stand (2026-11-03, s16-fix)
 
-Deploy from the Mac: `infra/dev-cp/deploy-quickstart.sh`. It uses root compose with
-`infra/dev-cp/compose.quickstart.yaml`, preserving the existing DB, all four template
-registrations and guest gateway CA/certificates. Legacy unauthenticated ingress is
-stopped; API/MCP/Next listeners have no host-published control ports.
+Primary URL (Tailscale Serve, public Let's Encrypt TLS):
+**https://umiak-dev-cp.tail0000.ts.net:8443/app**.
+No owner CA import is required on this URL. This single-owner dashboard opens
+Your sandboxes directly and uses plain Settings; teams remain internal. Existing CT tailscaled serves8443 to
+localhost8444; Docker guest gateway remains bound to0.0.0.0:443, with unchanged
+certificates and CA. Serve identity headers do not grant access.
 
-- Owner dashboard: `https://umiak-dev-cp.tail0000.ts.net:8444/app`
-- Tailnet IP: `https://100.64.10.7:8444/app`
-- LAN URL: `https://192.168.68.90:4180/app` (not checked from the off-LAN Mac).
-- Wizard: `/setup`; help: `/app/help`; installer: `/install.sh`; remote MCP: `/mcp`.
-- Guest gateway stays on CT590:443 with the original constrained dev CA.
+The stand is configured and left **unclaimed** after testing. All test owner
+browser/CLI sessions were revoked and the exposed old claim code invalidated.
 
-The stand is configured but left unclaimed after testing. All test owner sessions
-and CLI pairings were revoked. Claim with the newest setup code in the logs:
+1. Read the newest one-time code privately:
 
-```sh
-ssh umiak@100.64.10.7
-cd ~/umiak
-docker compose --env-file deploy/compose/.env -f compose.yaml -f infra/dev-cp/compose.quickstart.yaml logs --tail=20 quickstart
-```
+   ```sh
+   ssh umiak@100.64.10.7
+   cd ~/umiak
+   docker compose --env-file deploy/compose/.env -f compose.yaml -f infra/dev-cp/compose.quickstart.yaml logs --tail=20 quickstart
+   ```
 
-Obtain the owner CA through the same trusted SSH connection (on the Mac):
+2. Open the primary URL and enter the newest code. No CA setup is needed.
+3. Open Getting started in the sidebar. Install and pair the CLI:
+
+   ```sh
+   curl -fsSL https://umiak-dev-cp.tail0000.ts.net:8443/install.sh | sh
+   ```
+
+4. Open the CLI pairing link in the same claimed browser and type its short code.
+   Never approve a login you did not start. Owner sessions are individually
+   revocable at `/owner/sessions` (also linked from the sidebar).
+
+Getting started: `/app/getting-started`; `/app/help` redirects. Wizard: `/setup`;
+installer: `/install.sh`; remote MCP: `/mcp`. Existing templates595–598 remain ready.
+
+Secondary private-CA URLs: LAN `https://192.168.68.90:4180/app`, tailnet direct
+`https://100.64.10.7:8444/app`. Only those paths need the separate owner CA:
 
 ```sh
 mkdir -p ~/.config/umiak
@@ -378,24 +391,21 @@ ssh umiak@100.64.10.7 'docker exec umiak-quickstart-1 cat /var/lib/umiak/owner/t
 openssl x509 -in ~/.config/umiak/quickstart-ca.pem -noout -fingerprint -sha256
 ```
 
-Owner CA SHA256: `DA:6F:9A:6E:25:60:6F:62:0B:AE:6F:D1:2A:E9:53:04:21:E5:8F:21:4E:2B:61:53:6D:65:D6:DE:C9:C9:4F:3E`.
-Trust this CA in the browser, open the dashboard and enter the latest code. For the
-CLI, use the install command in `/app/help`; pass this CA to both curl and the
-installer. Approve the CLI's request ID from the claimed browser. Setup state and
-existing templates remain ready; no PVE reprovisioning is needed.
+Owner CA SHA256 (rotated for s16-fix):
+`7F:3A:CA:91:3B:D1:E6:B3:FA:2C:11:9E:C1:32:A0:0A:09:91:45:13:36:6A:2A:F4:48:E0:E7:85:51:52:20:F5`.
+The earlier downloaded CA is obsolete; it must not be trusted. This CA permits only
+configured/local names. Adding a name in `/owner/tls` requires explicit CA rotation
+and renewed trust. CA lifetime365 days; rotate before expiry. LAN reachability was
+not tested from the off-LAN Mac; direct tailnet TLS and arbitrary-SNI rejection were.
 
-Rollback remains one command from the Mac:
-`UMIAK_DEVCP_AUTH_MODE=none infra/dev-cp/deploy.sh` (or `oidc`). When off the LAN,
-add `UMIAK_DEVCP_SSH=umiak@100.64.10.7`. The rollback reuses the S15 DB and secrets;
-quickstart tables are harmless to legacy services. No firewall change was needed.
+Previews still use the independent wildcard guest gateway certificate: Serve does
+not support wildcard preview certificates. No firewall or PVE network settings
+were changed by the deployment. Read-only adoption reports verify cluster firewall
+and sandbox isolation; the node host-firewall enable flag controls host rules,
+independently from VM rules. Sealed templates intentionally have disabled VM rules;
+worker enables sandbox isolation during creation.
 
-Live checks used Tailscale per Ilia's follow-up: MagicDNS and tailnet IP installer,
-browser pairing, wizard read-only adoption, registering templates 595–598, smoke and
-CLI Linux create/exec/delete. A stale unrelated `vmdata` storage reference exposed
-an existing global delete scan; the fix explicitly disables that scan and keeps
-cleanup limited to referenced/tagged disks. No foreign storage configuration changed.
-
-The LAN HTTPS4180 alias reuses the port already admitted by the existing PVE CT
-firewall. Port8444 is the verified Tailscale entry point. PVE's LAN source is denied
-by ingress (403); an unpaired tailnet client receives401. The old plaintext S15
-4180 service remains stopped. No firewall rule was added or widened.
+Deploy: `infra/dev-cp/deploy-quickstart.sh`. Generic optional sidecar:
+`deploy/compose/quickstart/README.md`. No new Tailscale node/key is needed on CT590.
+Rollback: `UMIAK_DEVCP_SSH=umiak@100.64.10.7 UMIAK_DEVCP_AUTH_MODE=none infra/dev-cp/deploy.sh`
+(or `oidc`), reusing S15 DB and secrets. Rollback restores its Serve configuration.
