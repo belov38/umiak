@@ -157,8 +157,9 @@ A `--non-interactive` mode with flags for every answer exists for tests.
   by the control plane, not by the guest** (Ilia, 2026-11-04, option a).
   A compromised sandbox must never run script on the owner origin. So:
   - the control plane ships a trusted copy of the pinned moonlight-web
-    frontend (same version as templates, v3.0.1, built with the path prefix)
-    and serves its HTML/JS/CSS itself;
+    frontend (same release tarball and SHA256 as templates, v3.0.1) and
+    serves its HTML/JS/CSS itself. The prefix is runtime config: the
+    ingress serves `/desktop/<slug>/config.js` with `path_prefix`;
   - only moonlight-web API and stream endpoints (`/api/...`, including the
     `web_socket` upgrade) are proxied through the gateway and tunnel to the
     guest. Responses from the guest are treated as data: the ingress forwards
@@ -169,8 +170,9 @@ A `--non-interactive` mode with flags for every answer exists for tests.
   - the owner session authorizes the viewer; the gateway receives a
     per-request service credential naming the sandbox (no guest-visible
     owner cookie, no per-sandbox browser cookie);
-  - the guest agent keeps moonlight-web's own config in sync with the prefix
-    when the server needs it for API routes;
+  - the guest moonlight-web config is unchanged; the ingress strips the
+    prefix before forwarding (the guest agent's own admin calls stay
+    unprefixed);
   - homelab desktop links default to `dataTransport=websocket`: media goes
     through gateway and tunnel, no TURN, no 15-second WebRTC wait.
   Hostname-based desktop/preview routing stays for corporate deployments.
