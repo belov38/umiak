@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
@@ -156,5 +157,28 @@ func TestMediaRemoveAcceptsBuildIsos(t *testing.T) {
 	}
 	if !exists(user) {
 		t.Error("user ISO was removed")
+	}
+}
+
+func TestMediaSha256SelectedStorage(t *testing.T) {
+	h, d, _ := sha256Harness(t)
+	name := "selected.iso"
+	path := filepath.Join(d.iso, name)
+	if err := os.WriteFile(path, []byte("selected storage media"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.srv.Host.Run = func(_ context.Context, command string, args ...string) ([]byte, error) {
+		if command != "pvesm" || len(args) != 2 || args[0] != "path" || args[1] != "media:iso/selected.iso" {
+			t.Fatalf("unexpected command %s %v", command, args)
+		}
+		return []byte(path + "\n"), nil
+	}
+	m := resultMap(t, h.call(t, "media.sha256", map[string]any{"name": name, "storage": "media"}))
+	if m["sha256"] == "" {
+		t.Fatal("missing checksum")
+	}
+	r := h.call(t, "media.sha256", map[string]any{"name": name, "storage": "../private"})
+	if r.OK {
+		t.Fatal("accepted invalid storage")
 	}
 }

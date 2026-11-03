@@ -200,3 +200,50 @@ curl -fsSL https://your-deployment/install.sh | UMIAK_INSTALL_SKIP_LOGIN=1 sh
 
 A native Darwin arm64 build measured 90,976,226 bytes before gzip and 40,887,362
 bytes downloaded (55.1% smaller); exact release sizes are in `/downloads/DOWNLOADS`.
+
+### Windows ISO URLs
+
+The Windows and Windows desktop build forms accept an uploaded ISO file name
+(or `storage:iso/name.iso`) or the owner's HTTPS URL. Umiak never ships or hosts
+Windows media; supply media covered by your own license. Select an active ISO
+storage, or leave storage blank to use the first storage advertising `iso` content.
+Use **Validate ISO inputs only** to validate without downloading or building.
+
+SHA256 is optional for both Windows and VirtIO URLs. If supplied, it must be 64
+hexadecimal characters and PVE verifies it during its native `download-url` task.
+If omitted, the form and build log say **Not verified: the ISO will be used as
+downloaded**. Umiak records the node-computed SHA256 before passing the media to
+S5; recording a digest does not verify the source. Existing known-checksum media
+is reused only after hashing it on the node. Without a supplied checksum, URL
+reuse checks the file name and the source's HEAD Content-Length against the stored
+size and remains explicitly unverified. Mismatches never overwrite an existing ISO.
+
+Obtain the Windows SHA256 from the Microsoft or licensed vendor download portal.
+VirtIO defaults to Fedora's official stable alias:
+<https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso>.
+Its checksum field deliberately starts empty: the alias moves and Fedora's
+`CHECKSUM` currently lists RPM MD5s, not an ISO SHA256. Download the ISO on a
+trusted workstation and compute `sha256sum virtio-win.iso` (Linux),
+`shasum -a 256 virtio-win.iso` (macOS), or `Get-FileHash virtio-win.iso -Algorithm
+SHA256` (PowerShell); confirm it against your trusted distribution source.
+
+Native downloads need `Datastore.AllocateTemplate` on `/storage/<iso-storage>`
+and `Sys.AccessNetwork` on `/nodes/<node>`. Fresh preparation generates the
+scoped `UmiakMediaDownload` role; adoption reports whether this optional capability
+is present. Existing hosts are not modified by adoption. A missing capability
+blocks downloads with an actionable error, without blocking ordinary adoption.
+Do not grant cluster-wide `Sys.Modify` just for ISO downloads. These checks match
+[PVE's API implementation](https://github.com/proxmox/pve-storage/blob/master/src/PVE/API2/Storage/Status.pm).
+
+URLs reject credentials, non-HTTPS schemes, and internal/loopback DNS answers
+unless the owner explicitly checks the internal URL permission. HEAD preflight
+validates each redirect before handing the final HTTPS URL to PVE. Fedora's
+same-host HTTP redirect is upgraded to HTTPS. PVE performs its own later DNS
+lookup and GET, so the administrator must trust the source and DNS; Umiak does not
+proxy the bytes or control a source that changes between preflight and download.
+Progress and failures are taken from the PVE task log. No ISO download or Windows
+build is part of validation-only checks.
+
+The selected ISO storage is resolved by the restricted node-agent's read-only
+`media.sha256` operation through `pvesm path <storage>:iso/<name>`. Update the
+node-agent when using this new optional storage argument on an existing host.

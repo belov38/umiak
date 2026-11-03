@@ -1,3 +1,4 @@
+import { prepareWindowsMedia, validateWindowsMedia } from "./setup-iso.mjs";
 // Owner-only setup orchestration. PVE adoption never writes to the host API.
 
 import { execFile } from "node:child_process";
@@ -13,6 +14,13 @@ import {
 	TemplateBuildJobs,
 } from "./setup-build.mjs";
 import { renderAdoption, renderPreparation } from "./setup-prep.mjs";
+
+import {
+	allocateTemplateVmid,
+	templateRange,
+	validateTemplateInventory,
+	validateTemplateRange,
+} from "./setup-vmids.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -113,7 +121,17 @@ export function validateLimits(input) {
 		Number.isInteger(ramCapMb) && ramCapMb >= 2048 && ramCapMb <= 8192,
 		"Sandbox RAM cap must be 2048–8192 MiB",
 	);
-	return { storage, vmidMin, vmidMax, ramCapMb };
+	return {
+		storage,
+		vmidMin,
+		vmidMax,
+		ramCapMb,
+		...validateTemplateRange({
+			...input,
+			templateVmidMin: input.templateVmidMin ?? 600,
+			templateVmidMax: input.templateVmidMax ?? 699,
+		}),
+	};
 }
 export function validateNetwork(input) {
 	const host = input.gatewayAddress;
@@ -397,7 +415,14 @@ export function createSetupHandler({
 			};
 		},
 		async limits(input, state) {
-			const limits = validateLimits(input);
+			const limits = validateLimits({ ...templateRange(state), ...input });
+			Object.assign(
+				limits,
+				validateTemplateInventory(
+					limits,
+					await (await pveOf(state)).get("/cluster/resources"),
+				),
+			);
 			const connection = connectionOf(state);
 			const api = await pveOf(state);
 			const storage = await api.get(
@@ -473,9 +498,15 @@ export function createSetupHandler({
 				);
 				requireValue(
 					Number.isInteger(build.pveVmid) &&
-						build.pveVmid >= 595 &&
-						build.pveVmid <= 598,
-					"Existing template VMIDs must be 595–598",
+						build.pveVmid >= 500 &&
+						build.pveVmid !== 590 &&
+						build.pveVmid !== 599 &&
+						build.pveVmid !== 9000 &&
+						build.pveVmid !== 9001 &&
+						!(
+							build.pveVmid >= limits.vmidMin && build.pveVmid <= limits.vmidMax
+						),
+					"Existing template VMID is protected or overlaps the sandbox range",
 				);
 				const config = await api.get(
 					`/nodes/${connection.node}/qemu/${build.pveVmid}/config`,
@@ -495,6 +526,9 @@ export function createSetupHandler({
 					builds.push({
 						templateSlug: build.templateSlug,
 						pveVmid: build.pveVmid,
+						mediaVerification: build.mediaVerification,
+						isoSha256: build.isoSha256,
+						virtioSha256: build.virtioSha256,
 						id: existing.rows[0].id,
 					});
 					continue;
@@ -536,13 +570,9 @@ export function createSetupHandler({
 					"rng0",
 				])
 					if (config[key] !== undefined) hw[key] = config[key];
-				await query(
-					`UPDATE runtime.template_builds SET status='deprecated' WHERE node_id=$1 AND template_slug=$2 AND status='active'`,
-					[limits.nodeId, build.templateSlug],
-				);
 				const row = (
 					await query(
-						`INSERT INTO runtime.template_builds(template_slug,version,os,provider_id,node_id,storage_id,pve_vmid,disk_layout,hw,agent_version,boot_timeout_s,status,promoted_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active',now()) RETURNING id`,
+						`WITH deprecated AS (UPDATE runtime.template_builds SET status='deprecated' WHERE node_id=$5 AND template_slug=$1 AND status='active' RETURNING id) INSERT INTO runtime.template_builds(template_slug,version,os,provider_id,node_id,storage_id,pve_vmid,disk_layout,hw,agent_version,boot_timeout_s,status,promoted_at) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active',now() FROM (SELECT count(*) FROM deprecated) AS previous RETURNING id`,
 						[
 							build.templateSlug,
 							build.version || `adopted-${build.pveVmid}`,
@@ -561,6 +591,9 @@ export function createSetupHandler({
 				builds.push({
 					templateSlug: build.templateSlug,
 					pveVmid: build.pveVmid,
+					mediaVerification: build.mediaVerification,
+					isoSha256: build.isoSha256,
+					virtioSha256: build.virtioSha256,
 					id: row.id,
 				});
 			}
@@ -672,6 +705,31 @@ export function createSetupHandler({
 					state.steps[step]?.status === "ready",
 					`Complete ${step} before building`,
 				);
+			if (slug.startsWith("windows")) {
+				await validateWindowsMedia(input);
+				if (input.isoUrl)
+					input.iso = input.isoSha256
+						? `windows-${input.isoSha256.toLowerCase()}.iso`
+						: decodeURIComponent(
+								new URL(input.isoUrl).pathname.split("/").pop(),
+							);
+				input.mediaVerification =
+					input.isoSha256 && (!input.virtioUrl || input.virtioSha256)
+						? "verified"
+						: "unverified";
+			}
+			const api = await pveOf(state);
+			const existing = state.steps.templates?.data?.builds?.find(
+				(build) => build.templateSlug === slug,
+			);
+			requireValue(
+				!existing || input.confirmRebuild === slug,
+				"Explicitly confirm rebuilding this template by its name",
+			);
+			input.templateVmid = await allocateTemplateVmid(api, {
+				...state.steps.limits.data,
+				...templateRange(state),
+			});
 			const invocation = buildInvocation(
 				slug,
 				state,
@@ -679,15 +737,14 @@ export function createSetupHandler({
 				"https://build.invalid",
 				assetsDir,
 				"validate",
-				input,
+				{ ...input, isoSha256: input.isoSha256 || "0".repeat(64) },
 			);
-			const api = await pveOf(state);
 			const vms = await api.get(
 				`/nodes/${state.steps.connection.data.node}/qemu`,
 			);
 			requireValue(
 				!vms.some((vm) => Number(vm.vmid) === invocation.slot),
-				"Template slot is occupied. Adopt the existing template; this wizard never retires or rebuilds it.",
+				"Template slot became occupied; retry to allocate a different free VMID.",
 			);
 			const used = vms
 				.filter(
@@ -699,8 +756,28 @@ export function createSetupHandler({
 				"Stop running sandbox VMs before a sequential template build",
 			);
 		},
-		run: async (slug, state, job, input, context) =>
-			runTemplateBuild(
+		run: async (slug, state, job, input, context, onProgress) => {
+			let prepared = input;
+			if (slug.startsWith("windows"))
+				prepared = await prepareWindowsMedia(
+					await pveOf(state),
+					connectionOf(state).node,
+					input,
+					{
+						progress: onProgress,
+						checksum: async (name, storage) =>
+							(
+								await nodeCheck(connectionOf(state), secretsDir, {
+									op: "media.sha256",
+									args: { name, storage },
+								})
+							).sha256,
+					},
+				);
+			const existingVersions = (
+				await query("SELECT template_slug,version FROM runtime.template_builds")
+			).rows;
+			const manifest = await runTemplateBuild(
 				buildInvocation(
 					slug,
 					state,
@@ -708,10 +785,17 @@ export function createSetupHandler({
 					context.origin,
 					assetsDir,
 					job.id,
-					input,
+					prepared,
 				),
-				{ secretsDir, assetsDir },
-			),
+				{ secretsDir, assetsDir, onProgress, existingVersions },
+			);
+			return {
+				...manifest,
+				mediaVerification: prepared.mediaVerification,
+				isoSha256: prepared.isoSha256,
+				virtioSha256: prepared.virtioSha256,
+			};
+		},
 		register: async (manifest, context) => {
 			const state = await store.read();
 			const existing = state.steps.templates?.data?.builds || [];
@@ -913,8 +997,11 @@ export function createSetupHandler({
 					for (const vm of vms) {
 						if (
 							Number(vm.template) !== 1 ||
-							vm.vmid < 595 ||
-							vm.vmid > 598 ||
+							vm.vmid < 500 ||
+							vm.vmid === 590 ||
+							vm.vmid === 599 ||
+							vm.vmid === 9000 ||
+							vm.vmid === 9001 ||
 							!String(vm.tags || "")
 								.split(";")
 								.includes("umiak-tpl")
@@ -955,8 +1042,57 @@ export function createSetupHandler({
 			html(res, renderSetup(state, context.origin));
 			return true;
 		}
+		if (req.method === "GET" && path === "/quickstart/setup/media/storages") {
+			try {
+				const state = await store.read();
+				const api = await pveOf(state);
+				const items = await api.get(
+					`/nodes/${connectionOf(state).node}/storage`,
+				);
+				json(res, 200, {
+					storages: items.filter((x) =>
+						String(x.content || "")
+							.split(",")
+							.includes("iso"),
+					),
+				});
+			} catch (error) {
+				json(res, 400, { error: error.message });
+			}
+			return true;
+		}
 		if (req.method === "GET" && path === "/quickstart/setup/state") {
 			json(res, 200, await store.read());
+			return true;
+		}
+		if (req.method === "GET" && path === "/quickstart/setup/build") {
+			json(res, 200, { buildJob: (await store.read()).buildJob || null });
+			return true;
+		}
+		if (
+			req.method === "POST" &&
+			[
+				"/quickstart/setup/media/validate",
+				"/quickstart/setup/validate-media",
+			].includes(path)
+		) {
+			try {
+				const input = await body(req);
+				await validateWindowsMedia(input);
+				json(res, 200, {
+					ok: true,
+					mediaVerification:
+						input.isoSha256 && (!input.virtioUrl || input.virtioSha256)
+							? "verified"
+							: "unverified",
+					message:
+						!input.isoSha256 || (input.virtioUrl && !input.virtioSha256)
+							? "Not verified: the ISO will be used as downloaded"
+							: "ISO inputs are valid; no download or build was started",
+				});
+			} catch (error) {
+				json(res, 400, { error: error.message });
+			}
 			return true;
 		}
 		if (req.method === "POST" && path === "/quickstart/setup/build") {

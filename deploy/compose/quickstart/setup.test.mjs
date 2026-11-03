@@ -71,6 +71,8 @@ test("adoption reads only existing PVE objects and fails closed on missing zone"
 	const api = {
 		get: async (path) => {
 			paths.push(path);
+			if (path.endsWith("/storage"))
+				return [{ storage: "local", content: "iso" }];
 			return path === "/cluster/firewall/options"
 				? { enable: 1 }
 				: path.includes("/zones/")
@@ -96,7 +98,11 @@ test("adoption reads only existing PVE objects and fails closed on missing zone"
 									: path.includes("/users/")
 										? { enable: 1 }
 										: path === "/access/permissions"
-											? { "/pool/umiak": { "VM.Audit": 1 } }
+											? {
+													"/pool/umiak": { "VM.Audit": 1 },
+													"/nodes/pve": { "Sys.AccessNetwork": 1 },
+													"/storage/local": { "Datastore.AllocateTemplate": 1 },
+												}
 											: {};
 		},
 	};

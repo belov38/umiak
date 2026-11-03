@@ -197,6 +197,13 @@ export function prepareWindows(
 		throw new Error(
 			`--iso ${isoFile}: expected the file name of an ISO in ${MEDIA_STORAGE}:iso (not an umiak-* name)`,
 		);
+	if (
+		o.virtioIso !== undefined &&
+		(!ISO_FILE_RE.test(o.virtioIso) || !HEX64_RE.test(o.virtioSha256 ?? ""))
+	)
+		throw new Error(
+			"--virtio-iso requires an ISO file name and --virtio-sha256",
+		);
 	const isoSha256 = o.isoSha256?.toLowerCase();
 	if (isoSha256 !== undefined && !HEX64_RE.test(isoSha256))
 		throw new Error("--iso-sha256: expected 64 hex characters");
@@ -395,7 +402,10 @@ async function checkUserIso(
 	const { file, sha256: expected } = p.versions.iso;
 	let r: { name: string; size: number; sha256: string };
 	try {
-		r = await deps.node.call("media.sha256", { name: file });
+		r = await deps.node.call("media.sha256", {
+			name: file,
+			...(MEDIA_STORAGE !== "local" ? { storage: MEDIA_STORAGE } : {}),
+		});
 	} catch (err) {
 		const hint = /not.?found/i.test(errorText(err))
 			? "; put it there with umiak-tpl iso upload <file> or the Proxmox web UI"
@@ -458,15 +468,25 @@ export async function stageMedia(
 	const { recipe, versions } = p;
 	await checkUserIso(deps, o, p, st, save);
 
-	if (!deps.fetchVirtioWin)
-		throw new Error("this build has no virtio-win downloader");
-	const vw = versions.virtioWin;
-	const got = await deps.fetchVirtioWin(vw);
-	if (got.sha256 !== vw.sha256)
-		throw new Error(
-			`virtio-win ${vw.version}: sha256 ${got.sha256}, pinned ${vw.sha256}`,
-		);
-	await ensureMedia(deps, o.node, "iso", virtioIsoName(vw.version), got);
+	if (o.virtioIso) {
+		const existing = await deps.node.call<{ sha256: string }>("media.sha256", {
+			name: o.virtioIso,
+			...(MEDIA_STORAGE !== "local" ? { storage: MEDIA_STORAGE } : {}),
+		});
+		if (existing.sha256 !== o.virtioSha256?.toLowerCase())
+			throw new Error("VirtIO ISO checksum mismatch");
+		deps.log(`Using verified VirtIO ISO ${o.virtioIso}`);
+	} else {
+		if (!deps.fetchVirtioWin)
+			throw new Error("this build has no virtio-win downloader");
+		const vw = versions.virtioWin;
+		const got = await deps.fetchVirtioWin(vw);
+		if (got.sha256 !== vw.sha256)
+			throw new Error(
+				`virtio-win ${vw.version}: sha256 ${got.sha256}, pinned ${vw.sha256}`,
+			);
+		await ensureMedia(deps, o.node, "iso", virtioIsoName(vw.version), got);
+	}
 
 	const dir = mkdtempSync(join(tmpdir(), "umiak-tpl-iso-"));
 	try {
@@ -587,7 +607,7 @@ export async function stageWindowsVm(
 		// break sysprep.
 		net0: `virtio=${mac},bridge=${o.vnet},firewall=1,link_down=1`,
 		ide2: cd(versions.iso.file),
-		sata1: cd(virtioIsoName(versions.virtioWin.version)),
+		sata1: cd(o.virtioIso ?? virtioIsoName(versions.virtioWin.version)),
 		sata2: cd(buildIsoName(st.m)),
 		boot: `order=${recipe.disk.slot};ide2`,
 		description: `umiak-tpl build ${st.m.buildId}\ngit ${o.gitCommit}`,

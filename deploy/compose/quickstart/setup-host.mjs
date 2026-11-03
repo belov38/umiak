@@ -1,3 +1,4 @@
+import { downloadPermission } from "./setup-iso.mjs";
 // Pinned, read-only Proxmox transport and restricted node-agent checks.
 
 import { spawn } from "node:child_process";
@@ -63,17 +64,25 @@ export function pinnedPve(connection, tokenSecret) {
 	return {
 		certificate: () => leaf,
 		get(path) {
+			return this.request("GET", path);
+		},
+		post(path, data) {
+			return this.request("POST", path, data);
+		},
+		request(method, path, data) {
 			if (!/^\/[a-zA-Z0-9_@!./%-]+$/.test(path))
 				throw new Error("Invalid PVE API path");
 			const url = new URL(`/api2/json${path}`, connection.apiUrl);
 			return new Promise((resolve, reject) => {
-				const request = https.get(
+				const request = https.request(
 					url,
 					{
 						agent,
+						method,
 						headers: tokenSecret
 							? {
 									Authorization: `PVEAPIToken=${connection.tokenId}=${tokenSecret}`,
+									"Content-Type": "application/x-www-form-urlencoded",
 								}
 							: {},
 						timeout: 15000,
@@ -107,11 +116,25 @@ export function pinnedPve(connection, tokenSecret) {
 					request.destroy(new Error("PVE request timed out")),
 				);
 				request.on("error", reject);
+				request.end(
+					data
+						? new URLSearchParams(
+								Object.entries(data).map(([key, value]) => [
+									key,
+									String(value),
+								]),
+							).toString()
+						: undefined,
+				);
 			});
 		},
 	};
 }
-export async function checkNode(connection, secretsDir) {
+export async function checkNode(
+	connection,
+	secretsDir,
+	operation = { op: "version", args: {} },
+) {
 	const key = join(secretsDir, "umiak-node_ed25519");
 	const known = join(secretsDir, "known_hosts");
 	const host = connection.sshHost || new URL(connection.apiUrl).hostname;
@@ -156,7 +179,7 @@ export async function checkNode(connection, secretsDir) {
 				);
 			try {
 				const result = JSON.parse(output);
-				if (result.error) throw new Error("node-agent rejected version");
+				if (result.error) throw new Error("node-agent rejected operation");
 				resolve(result.result ?? result);
 			} catch {
 				reject(new Error("Node-agent returned an invalid version response"));
@@ -164,8 +187,7 @@ export async function checkNode(connection, secretsDir) {
 		});
 		child.stdin.end(
 			`${JSON.stringify({
-				op: "version",
-				args: {},
+				...operation,
 				requestId: "quickstart-verify",
 			})}\n`,
 		);
@@ -414,9 +436,21 @@ export async function verifyAdoption(api, connection, nodeCheck) {
 		"token",
 		`/access/users/${encodeURIComponent(uid)}/token/${encodeURIComponent(token)}`,
 	);
-	await check("permissions", "/access/permissions", (x) =>
+	const permissions = await check("permissions", "/access/permissions", (x) =>
 		Boolean(x["/pool/umiak"]?.["VM.Audit"] || x["/"]?.["VM.Audit"]),
 	);
+	const media = (await api.get(`/nodes/${connection.node}/storage`)).find((x) =>
+		String(x.content || "")
+			.split(",")
+			.includes("iso"),
+	);
+	checks.push({
+		name: "native ISO download permission (Datastore.AllocateTemplate + node Sys.AccessNetwork)",
+		ok: Boolean(
+			media && downloadPermission(permissions, connection.node, media.storage),
+		),
+		optional: true,
+	});
 	await check("pool", "/pools/umiak");
 	await check(
 		"SDN zone",

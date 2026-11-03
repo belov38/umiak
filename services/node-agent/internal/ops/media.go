@@ -163,9 +163,10 @@ func (s *Server) writeShaCache(cache map[string]shaCacheEntry) error {
 
 // mediaSHA256 hashes one .iso file directly in IsoDir. Read-only and not limited to our own name
 // patterns: the builder uses it to verify the user's Windows ISO.
-func (s *Server) mediaSHA256(_ context.Context, raw json.RawMessage) (any, error) {
+func (s *Server) mediaSHA256(ctx context.Context, raw json.RawMessage) (any, error) {
 	var args struct {
-		Name string `json:"name"`
+		Name    string `json:"name"`
+		Storage string `json:"storage,omitempty"`
 	}
 	if err := decodeArgs(raw, &args); err != nil {
 		return nil, err
@@ -180,6 +181,21 @@ func (s *Server) mediaSHA256(_ context.Context, raw json.RawMessage) (any, error
 		return nil, forbidden("media name %q is not an .iso file", name)
 	}
 	path := filepath.Join(s.Cfg.IsoDir, name)
+	cacheKey := name
+	if args.Storage != "" {
+		if !regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,62}$`).MatchString(args.Storage) {
+			return nil, badReq("invalid ISO storage name")
+		}
+		out, err := s.Host.Run(ctx, "pvesm", "path", args.Storage+":iso/"+name)
+		if err != nil {
+			return nil, fmt.Errorf("resolve ISO storage: %w", err)
+		}
+		path = strings.TrimSpace(string(out))
+		if !filepath.IsAbs(path) || filepath.Base(path) != name {
+			return nil, forbidden("invalid PVE ISO path")
+		}
+		cacheKey = args.Storage + ":" + path
+	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
@@ -189,7 +205,7 @@ func (s *Server) mediaSHA256(_ context.Context, raw json.RawMessage) (any, error
 	}
 
 	cache := s.loadShaCache()
-	if e, ok := cache[name]; ok && e.Size == info.Size() && e.MTime == info.ModTime().UnixNano() {
+	if e, ok := cache[cacheKey]; ok && e.Size == info.Size() && e.MTime == info.ModTime().UnixNano() {
 		return map[string]any{"name": name, "size": e.Size, "sha256": e.SHA256}, nil
 	}
 
@@ -216,7 +232,7 @@ func (s *Server) mediaSHA256(_ context.Context, raw json.RawMessage) (any, error
 	sum := hex.EncodeToString(h.Sum(nil))
 	// Cache only if the file did not change while it was being read.
 	if after, err := f.Stat(); err == nil && after.Size() == opened.Size() && after.ModTime().Equal(opened.ModTime()) {
-		cache[name] = shaCacheEntry{Size: opened.Size(), MTime: opened.ModTime().UnixNano(), SHA256: sum}
+		cache[cacheKey] = shaCacheEntry{Size: opened.Size(), MTime: opened.ModTime().UnixNano(), SHA256: sum}
 		s.saveShaCache(cache)
 	}
 	return map[string]any{"name": name, "size": opened.Size(), "sha256": sum}, nil

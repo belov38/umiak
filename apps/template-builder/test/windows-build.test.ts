@@ -1357,3 +1357,24 @@ describe("iso-install build: failures", () => {
 		expect(s.node.calls.filter((c) => c.op === "media.remove")).toHaveLength(1);
 	});
 });
+
+describe("pre-downloaded VirtIO media", () => {
+	it("uses the supplied verified ISO without fetching drivers through Umiak", async () => {
+		const s = setup({ virtioIso: "virtio-stable.iso", virtioSha256: ISO_SHA });
+		const m = await buildTemplate(s.deps, s.opts);
+		expect(m.status).toBe("ready");
+		expect(s.log.some((line) => line.startsWith("virtio:fetch"))).toBe(false);
+		expect(
+			s.node.calls.filter((c) => c.op === "media.sha256").map((c) => c.args),
+		).toContainEqual({ name: "virtio-stable.iso" });
+	});
+	it("rejects mismatching already-downloaded drivers", async () => {
+		const s = setup({
+			virtioIso: "virtio-stable.iso",
+			virtioSha256: "0".repeat(64),
+		});
+		await expect(buildTemplate(s.deps, s.opts)).rejects.toThrow(
+			/VirtIO ISO checksum mismatch/,
+		);
+	});
+});

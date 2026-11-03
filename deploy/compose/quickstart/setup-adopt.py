@@ -33,6 +33,7 @@ report = {
     "user": get("/access/users/" + uid),
     "token": get("/access/users/" + uid + "/token/" + token),
     "role": get("/access/roles/UmiakPoC"),
+    "downloadPrivileges": {"requiredNodePrivilege": "Sys.AccessNetwork", "requiredStoragePrivilege": "Datastore.AllocateTemplate", "acl": get("/access/acl")},
     "pool": get("/pools/umiak"),
     "zone": get("/cluster/sdn/zones/umiak"),
     "vnet": get("/cluster/sdn/vnets/umiak0"),

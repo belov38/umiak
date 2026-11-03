@@ -245,11 +245,11 @@ if not token_path.exists():
     token = json.loads(mutate(["pveum", "user", "token", "add", user_id, token_name, "--privsep", "1", "--output-format", "json"], ["pveum", "user", "token", "remove", user_id, token_name]))["value"]
     token_path.write_text(token)
     token_path.chmod(0o600)
-for role, privileges in [("UmiakTemplateMedia", "Datastore.AllocateTemplate Datastore.Audit"), ("UmiakConsole", "VM.Console")]:
+for role, privileges in [("UmiakTemplateMedia", "Datastore.AllocateTemplate Datastore.Audit"), ("UmiakConsole", "VM.Console"), ("UmiakMediaDownload", "Sys.AccessNetwork")]:
     if not any(x["roleid"] == role for x in roles):
         mutate(["pveum", "role", "add", role, "--privs", privileges], ["pveum", "role", "delete", role])
 for principal_flag, principal in [("--users", user_id), ("--tokens", user_id + "!" + token_name)]:
-    for path, role in [("/pool/umiak", "UmiakPoC"), ("/storage/" + storage_name, "PVEDatastoreUser"), ("/sdn/zones/umiak", "PVESDNUser"), ("/storage/" + media_name, "UmiakTemplateMedia"), ("/pool/umiak", "UmiakConsole")]:
+    for path, role in [("/pool/umiak", "UmiakPoC"), ("/storage/" + storage_name, "PVEDatastoreUser"), ("/sdn/zones/umiak", "PVESDNUser"), ("/storage/" + media_name, "UmiakTemplateMedia"), ("/pool/umiak", "UmiakConsole"), ("/nodes/" + config["node"], "UmiakMediaDownload")]:
         if not any(x.get("path") == path and x.get("ugid") == principal and x.get("roleid") == role for x in acls):
             mutate(["pveum", "acl", "modify", path, principal_flag, principal, "--roles", role], ["pveum", "acl", "delete", path, principal_flag, principal, "--roles", role])
 
