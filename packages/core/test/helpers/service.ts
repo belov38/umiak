@@ -53,6 +53,8 @@ export function principal(over: Partial<Principal> = {}): Principal {
 }
 
 export interface EnvOptions {
+	templateSlug?: string;
+	capabilities?: string[];
 	os?: "linux" | "windows";
 	enabled?: boolean;
 	allowedSizes?: string[];
@@ -85,7 +87,7 @@ export async function serviceEnv(
 	opts: EnvOptions = {},
 ): Promise<ServiceEnv> {
 	seq += 1;
-	const template = `tpl${process.pid}x${seq}`;
+	const template = opts.templateSlug ?? `tpl${process.pid}x${seq}`;
 	const topo = await createTopology(pool, {
 		...opts.topology,
 		build: {
@@ -101,6 +103,7 @@ export async function serviceEnv(
 				slug: template,
 				os: opts.os ?? "linux",
 				enabled: opts.enabled ?? true,
+				...(opts.capabilities ? { capabilities: opts.capabilities } : {}),
 				defaultSize: "2gb",
 				allowedSizes: opts.allowedSizes ?? ["2gb", "4gb"],
 			},

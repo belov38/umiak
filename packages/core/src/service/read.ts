@@ -1,3 +1,4 @@
+import { canonicalTemplateSlug } from "@umiak/config";
 import { withTx } from "@umiak/db";
 import {
 	invalidState,
@@ -173,7 +174,9 @@ export async function listSandboxes(
 		where.push(`s.labels @> ${arg(JSON.stringify(filter.labels))}::jsonb`);
 	}
 	if (filter.template !== undefined) {
-		where.push(`s.template_slug = ${arg(filter.template)}`);
+		where.push(
+			`s.template_slug = ${arg(canonicalTemplateSlug(filter.template))}`,
+		);
 	}
 	if (filter.q !== undefined && filter.q !== "") {
 		const like = arg(`${escapeLike(filter.q)}%`);

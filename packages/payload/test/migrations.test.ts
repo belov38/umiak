@@ -97,7 +97,7 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 	it("seeds desktop capability and 4gb/8gb without a pool", async () => {
 		for (const [slug, os] of [
 			["linux-desktop", "linux"],
-			["windows-desktop", "windows"],
+			["windows", "windows"],
 		] as const) {
 			const templates = await payload.find({
 				collection: "templates",
@@ -168,9 +168,9 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 			os: "windows",
 			enabled: true,
 			defaultSize: "4gb",
-			allowedSizes: ["4gb"],
+			allowedSizes: ["4gb", "8gb"],
 			loginUser: "user",
-			capabilities: ["exec", "files", "ssh"],
+			capabilities: ["exec", "files", "ssh", "desktop"],
 		});
 		const sizes = await payload.find({
 			collection: "sizes",
@@ -534,3 +534,80 @@ describe.skipIf(skipPg())("src/migrate.ts", () => {
 		expect(r.out).toContain("PAYLOAD_SECRET");
 	});
 });
+
+describe.skipIf(skipPg())(
+	"single Windows catalog upgrade on the dev stand",
+	() => {
+		let t: TestDatabase;
+		let payload: Payload;
+		const migration = "20261103_000000_windows_single";
+		beforeAll(async () => {
+			t = await createTestDatabase();
+			payload = await openPayload(t.url);
+			await migrateUmiakPayload(payload);
+		});
+		afterAll(async () => {
+			if (t) await closePayload(t.url);
+			await t?.drop();
+		});
+		it("rekeys desktop builds, retires 598, keeps snapshot build IDs and is idempotent", async () => {
+			const provider = randomUUID(),
+				node = randomUUID(),
+				storage = randomUUID();
+			const headless = randomUUID(),
+				desktop = randomUUID(),
+				snapshot = randomUUID();
+			await t.pool.query(
+				"INSERT INTO runtime.providers (id,kind,name,cluster_mac_id,vmid_min,vmid_max,api_url,secret_ref) VALUES ($1,'proxmox','s17',250,500,589,'https://pve:8006','s17')",
+				[provider],
+			);
+			await t.pool.query(
+				"INSERT INTO runtime.nodes (id,provider_id,name,ram_cap_mb,node_agent_ref) VALUES ($1,$2,'pve',8192,'node')",
+				[node, provider],
+			);
+			await t.pool.query(
+				"INSERT INTO runtime.storages (id,provider_id,node_id,name,driver) VALUES ($1,$2,$3,'local-lvm','lvmthin')",
+				[storage, provider, node],
+			);
+			await t.pool.query(
+				`INSERT INTO runtime.template_builds (id,template_slug,version,os,provider_id,node_id,storage_id,pve_vmid,disk_layout,hw,boot_timeout_s,status)
+  VALUES ($1,'windows','headless','windows',$3,$4,$5,598,'{}','{}',1200,'active'), ($2,'windows-desktop','20261101.7','windows',$3,$4,$5,595,'{}','{}',1200,'active')`,
+				[headless, desktop, provider, node, storage],
+			);
+			await t.pool.query(
+				"INSERT INTO runtime.snapshots (id,kind,team_id,name,provider_id,node_id,storage_id,template_build_id,lv_id,state) VALUES ($1,'saved',$2,'headless',$3,$4,$5,$6,replace($1::uuid::text,'-',''),'ready')",
+				[snapshot, randomUUID(), provider, node, storage, headless],
+			);
+			for (let i = 0; i < 2; i++) {
+				await t.pool.query(
+					"DELETE FROM payload.payload_migrations WHERE name = $1",
+					[migration],
+				);
+				await migrateUmiakPayload(payload);
+			}
+			expect(
+				(
+					await t.pool.query(
+						"SELECT id, template_slug, status FROM runtime.template_builds ORDER BY pve_vmid",
+					)
+				).rows,
+			).toEqual([
+				{ id: desktop, template_slug: "windows", status: "active" },
+				{ id: headless, template_slug: "windows", status: "retired" },
+			]);
+			expect(
+				(
+					await t.pool.query(
+						"SELECT template_build_id FROM runtime.snapshots WHERE id=$1",
+						[snapshot],
+					)
+				).rows[0].template_build_id,
+			).toBe(headless);
+			expect(
+				(await payload.find({ collection: "templates" })).docs
+					.map((x) => x.slug)
+					.sort(),
+			).toEqual(["linux", "linux-desktop", "windows"]);
+		});
+	},
+);

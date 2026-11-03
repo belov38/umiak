@@ -5,6 +5,7 @@
 // sandbox stores them (decision 7).
 import { decodeUuid, encodeUuid } from "@umiak/auth";
 import type { ConfigReader } from "@umiak/config";
+import { canonicalTemplateSlug } from "@umiak/config";
 import { isUuid, type Sandbox } from "@umiak/core";
 import type pg from "pg";
 import { notFoundError } from "../http/errors.ts";
@@ -18,6 +19,8 @@ import { iso, isoOrNull, toOperationResource } from "./operation.ts";
 export interface SandboxExtras {
 	/** Version of `template_builds`; null if the build is gone. */
 	templateVersion: string | null;
+	/** S9 build on VM 598 remains headless after the catalog consolidation. */
+	legacyHeadlessWindows?: boolean;
 	/** Name of the origin snapshot while it is ready; null once deleted or replaced. */
 	snapshotName: string | null;
 	updatedAt: Date | null;
@@ -85,7 +88,7 @@ export function toSandboxResource(
 		createdBy: s.createdBy === null ? null : encodeUuid("user", s.createdBy),
 		createdByKey:
 			s.createdByKey === null ? null : encodeUuid("apiKey", s.createdByKey),
-		template: s.templateSlug,
+		template: canonicalTemplateSlug(s.templateSlug),
 		templateVersion: x?.templateVersion ?? null,
 		size: s.sizeSlug,
 		vcpu: s.vcpu,
@@ -131,10 +134,12 @@ export async function loadSandboxExtras(
 	const r = await pool.query<{
 		id: string;
 		version: string | null;
+		legacy_headless_windows: boolean;
 		snapshot_name: string | null;
 		updated_at: Date | null;
 	}>(
 		`SELECT s.id, b.version, s.updated_at,
+                (b.os = 'windows' AND b.pve_vmid = 598) AS legacy_headless_windows,
 		        CASE WHEN sn.state = 'ready' THEN sn.name END AS snapshot_name
 		 FROM runtime.sandboxes s
 		 LEFT JOIN runtime.template_builds b ON b.id = s.template_build_id
@@ -145,6 +150,7 @@ export async function loadSandboxExtras(
 	for (const row of r.rows) {
 		out.set(row.id, {
 			templateVersion: row.version,
+			legacyHeadlessWindows: row.legacy_headless_windows,
 			snapshotName: row.snapshot_name,
 			updatedAt: row.updated_at,
 		});
@@ -169,6 +175,7 @@ export async function sandboxResources(
 				extras: extras.get(s.id),
 			});
 			if (
+				!extras.get(s.id)?.legacyHeadlessWindows &&
 				(await deps.config?.template(s.templateSlug))?.capabilities.includes(
 					"desktop",
 				)
