@@ -166,8 +166,9 @@ SSH metadata reads also refresh the CLI tenancy cache without another request.
   warn in logs, certificates and setup, then require owner UI or Docker console
   rotation. Check leaf expiry daily and renew under the same CA without restart.
 - Serve sidecars share a dedicated network only with ingress; they cannot reach
-  API, MCP, web or Postgres. An always-present ingress IP SAN avoids CA expansion
-  when enabling Serve. Source addresses may be Docker NAT addresses; approval
+  API, MCP, web or Postgres. A fixed internal IP target avoids SNI and CA expansion
+  when enabling Serve; certificate verification on this isolated internal proxy
+  link remains skipped. CLI TLS verification is unchanged. Source addresses may be Docker NAT addresses; approval
   relies on the short code and client details, never source identity.
 - Wizard uses collapsible sequential steps. Apply network settings with
   `docker compose up -d --force-recreate gateway-secrets && docker compose restart gateway worker api web`.
