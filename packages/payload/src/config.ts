@@ -130,6 +130,13 @@ export async function buildUmiakConfig(
 			avatar: "default",
 			components: {
 				beforeNavLinks: ["/src/components/admin/brand#Logo"],
+				...(parseAuthMode() === "owner"
+					? {
+							logout: {
+								Button: "/src/components/admin/owner-logout#OwnerLogout",
+							},
+						}
+					: {}),
 				graphics: {
 					Logo: "/src/components/admin/brand#Logo",
 					Icon: "/src/components/admin/brand#Icon",

@@ -168,7 +168,7 @@ command = "umiak"
 args = ["mcp"]
 ```
 
-Remote MCP is available at https://app.example.com/mcp. Local mode needs no credential. OIDC supports browser sign-in; quickstart remote MCP uses an owner credential. Prefer stdio for quickstart so credentials stay in the CLI profile. Clients using your own HTTPS proxy must trust its certificate.
+Remote MCP is available at https://app.example.com/mcp. OIDC supports browser sign-in; owner-mode remote MCP uses the paired owner credential sent through the ingress. Prefer stdio for quickstart so credentials stay in the CLI profile. Clients using your own HTTPS proxy must trust its certificate.
 
 **Claude Code · remote HTTP**
 
@@ -257,7 +257,7 @@ If quota_exceeded or out_of_capacity appears, stop or delete an unused sandbox, 
 
 ## Troubleshooting (owner)
 
-Connection timeout: check the URL, LAN or tailnet reachability and deployment network policy. Local mode is only reachable from allowed networks. On macOS, check the browser's Local Network permission if curl works but the browser cannot connect.
+Connection timeout: check the URL, LAN or tailnet reachability and deployment network policy. The owner ingress admits only the networks it is configured for. On macOS, check the browser's Local Network permission if curl works but the browser cannot connect.
 
 Certificate error: check the certificate configured on your own HTTPS proxy or guest gateway. Obtain any required CA through a trusted operator channel and compare its fingerprint. Do not bypass certificate verification for an installer.
 
@@ -289,90 +289,6 @@ TS_AUTHKEY=... TS_HOSTNAME=umiak docker compose -f compose.yaml -f deploy/compos
 ```
 
 Serve covers this dashboard hostname. It cannot serve wildcard preview hostnames: quickstart previews still use the guest gateway HTTP listener on port 8085 and IP-derived sslip.io DNS by default. Setup and Settings show the Funnel public-exposure warning on a `.ts.net` origin. See the operator quickstart for trusted proxy headers and host configuration.
-
-## Install the CLI (none)
-
-Build the CLI from the repository checkout. Choose the output for your OS and CPU (darwin/linux, arm64/x64), or umiak-windows-x64.exe on Windows. Copy it to a directory on PATH; a shell alias is insufficient for agent clients.
-
-**Build the CLI**
-
-```text
-mise exec -- pnpm install
-mise exec -- pnpm --filter @umiak/cli build
-```
-
-**Install CLI (macOS arm64 example)**
-
-```text
-mkdir -p ~/.local/bin
-cp apps/cli/dist/umiak-darwin-arm64 ~/.local/bin/umiak
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-**Log in to this deployment**
-
-```text
-umiak login --api-url 'https://api.example.com'
-umiak whoami
-```
-
-No sign-in is required in local mode. Access is restricted by the deployment's network policy; never expose the local listener to an untrusted network.
-
-## Connect an agent with MCP (none)
-
-The recommended stdio transport uses your paired CLI profile. Put umiak on PATH, then register it in Claude Code or add the Codex configuration below.
-
-**Claude Code · stdio**
-
-```text
-claude mcp add --transport stdio --scope user umiak -- umiak mcp
-```
-
-**Codex · ~/.codex/config.toml**
-
-```text
-[mcp_servers.umiak]
-command = "umiak"
-args = ["mcp"]
-```
-
-Remote MCP is available at https://app.example.com/mcp. Local mode needs no credential. OIDC supports browser sign-in; quickstart remote MCP uses an owner credential. Prefer stdio for quickstart so credentials stay in the CLI profile. Clients using your own HTTPS proxy must trust its certificate.
-
-**Claude Code · remote HTTP**
-
-```text
-claude mcp add --transport http --scope user umiak-remote 'https://app.example.com/mcp'
-```
-
-**Codex · remote HTTP configuration**
-
-```text
-[mcp_servers.umiak-remote]
-url = "https://app.example.com/mcp"
-```
-
-Ask your agent: "Create a Linux sandbox, clone my repository into it and run the tests." umiak mcp --help explains read-only mode, toolsets and sandbox restrictions.
-
-## Troubleshooting (none)
-
-Connection timeout: check the URL, LAN or tailnet reachability and deployment network policy. Local mode is only reachable from allowed networks. On macOS, check the browser's Local Network permission if curl works but the browser cannot connect.
-
-Certificate error: check the certificate configured on your own HTTPS proxy or guest gateway. Obtain any required CA through a trusted operator channel and compare its fingerprint. Do not bypass certificate verification for an installer.
-
-Template unavailable: ask the operator to register a template build in Admin. Template builders live in apps/template-builder in the repository.
-
-**Inspect CLI commands**
-
-```text
-umiak --help
-umiak mcp --help
-```
-
-**Inspect stack logs (Docker host)**
-
-```text
-docker compose logs --tail=100 api worker gateway
-```
 
 ## The model in one minute (oidc)
 
@@ -428,7 +344,7 @@ command = "umiak"
 args = ["mcp"]
 ```
 
-Remote MCP is available at https://app.example.com/mcp. Local mode needs no credential. OIDC supports browser sign-in; quickstart remote MCP uses an owner credential. Prefer stdio for quickstart so credentials stay in the CLI profile. Clients using your own HTTPS proxy must trust its certificate.
+Remote MCP is available at https://app.example.com/mcp. OIDC supports browser sign-in; owner-mode remote MCP uses the paired owner credential sent through the ingress. Prefer stdio for quickstart so credentials stay in the CLI profile. Clients using your own HTTPS proxy must trust its certificate.
 
 **Claude Code · remote OAuth**
 
@@ -511,6 +427,27 @@ umiak ls
 
 If quota_exceeded or out_of_capacity appears, stop or delete an unused sandbox, or ask the operator about capacity. Desktop templates need at least the size shown in New sandbox.
 
+
+## Troubleshooting (oidc)
+
+Connection timeout: check the URL, LAN or tailnet reachability and deployment network policy. On macOS, check the browser's Local Network permission if curl works but the browser cannot connect.
+
+Certificate error: check the certificate configured on your own HTTPS proxy or guest gateway. Obtain any required CA through a trusted operator channel and compare its fingerprint. Do not bypass certificate verification for an installer.
+
+Template unavailable: ask the operator to register a template build in Admin. Template builders live in apps/template-builder in the repository.
+
+**Inspect CLI commands**
+
+```text
+umiak --help
+umiak mcp --help
+```
+
+**Inspect stack logs (Docker host)**
+
+```text
+docker compose logs --tail=100 api worker gateway
+```
 
 ## LAN install and private proxy CAs
 

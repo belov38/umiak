@@ -448,7 +448,7 @@ func TestIsNavigation(t *testing.T) {
 	}
 }
 
-func TestLocalModeRejectsSSOPreview(t *testing.T) {
+func TestOwnerModeRejectsSSOPreview(t *testing.T) {
 	a := New(Config{AuthMode: "owner"})
 	w := httptest.NewRecorder()
 	r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "https://preview.example/", nil)

@@ -68,7 +68,7 @@ describe("owner API", () => {
 			expect(res.status).toBe(200);
 			const body = await res.json();
 			expect(JSON.stringify(body)).not.toContain("attacker");
-			expect(JSON.stringify(body)).toContain("owner");
+			expect(JSON.stringify(body)).toContain("umiak:local");
 		});
 		it(`${listener}: rejects peers outside the ingress network even on metadata, ignores spoofed XFF`, async () => {
 			const { request } = setup(listener);

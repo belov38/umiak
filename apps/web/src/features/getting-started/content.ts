@@ -175,7 +175,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 					'[mcp_servers.umiak]\ncommand = "umiak"\nargs = ["mcp"]',
 				),
 				text(
-					`Remote MCP is available at ${mcp}. OIDC supports browser sign-in; quickstart remote MCP uses an owner credential. Prefer stdio for quickstart so credentials stay in the CLI profile. For HTTPS through your own proxy, remote clients must trust its certificate.`,
+					`Remote MCP is available at ${mcp}. OIDC supports browser sign-in; owner-mode remote MCP uses the paired owner credential sent through the ingress. Prefer stdio for quickstart so credentials stay in the CLI profile. For HTTPS through your own proxy, remote clients must trust its certificate.`,
 				),
 				...(d.mode === "oidc"
 					? [
@@ -271,7 +271,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 			title: "Troubleshooting",
 			blocks: [
 				text(
-					"Connection timeout: check the URL, LAN or tailnet reachability and deployment network policy. Local mode is only reachable from allowed networks. On macOS, check the browser's Local Network permission if curl works but the browser cannot connect.",
+					"Connection timeout: check the URL, LAN or tailnet reachability and deployment network policy. The owner ingress admits only the networks it is configured for. On macOS, check the browser's Local Network permission if curl works but the browser cannot connect.",
 				),
 				text(
 					"Certificate error: check the certificate configured on your HTTPS proxy or guest gateway. Obtain any required CA through a trusted operator channel and compare its fingerprint. Do not bypass certificate verification for an installer.",

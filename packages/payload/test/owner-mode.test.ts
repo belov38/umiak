@@ -41,7 +41,9 @@ describe("owner Payload identity boundary", () => {
 		});
 		expect(c.cookiePrefix).toBe("payload");
 		expect(c.csrf).toEqual(["http://192.168.1.10:4180"]);
-		expect(c.admin.components?.logout).toBeUndefined();
+		expect(c.admin.components?.logout?.Button).toBe(
+			"/src/components/admin/owner-logout#OwnerLogout",
+		);
 	});
 	it("retains the Host cookie for HTTPS owner deployments", async () => {
 		vi.stubEnv("UMIAK_AUTH_MODE", "owner");
