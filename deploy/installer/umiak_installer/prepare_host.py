@@ -60,6 +60,8 @@ TOPOLOGY = [
     ("/cluster/sdn/vnets/umiak0", {"zone": "umiak", "isolate-ports": 1}),
 ]
 SUBNET = "/cluster/sdn/vnets/umiak0/subnets/umiak-10.88.0.0-24"
+GATEWAY_COMMENT = "Umiak guest gateway"
+FORCED_COMMAND = f'restrict,command="{NODE_BINARY} --stdio" '
 SECRET_FILES = ("pve-token", "pve-token-id", "pve-root-ca.pem", "umiak-node_ed25519", "umiak-node_ed25519.pub",
                 "known_hosts")
 
@@ -135,6 +137,17 @@ def _validate(cfg: PrepareConfig) -> None:
         raise InstallerError("Sandbox and template VMID ranges overlap")
 
 
+def node_address(runner: Runner, node: str) -> str:
+    """This node's cluster address from /cluster/status (the control plane's SSH and API target)."""
+    node_ip = next(
+        (row.get("ip") for row in get(runner, "/cluster/status") if row.get("type") == "node" and row.get("name") == node),
+        None,
+    )
+    if not node_ip:
+        raise InstallerError("Cannot determine this node's address; pass it explicitly")
+    return node_ip
+
+
 def _preflight(runner: Runner, cfg: PrepareConfig) -> dict:
     """All checks, strictly read-only. Raises InstallerError before any change."""
     _validate(cfg)
@@ -189,12 +202,7 @@ def _preflight(runner: Runner, cfg: PrepareConfig) -> dict:
         raise InstallerError("Selected storage must be an existing LVM-thin storage with VG and thinpool")
     if not NAME.fullmatch(str(storage["vgname"])) or not NAME.fullmatch(str(storage["thinpool"])):
         raise InstallerError("Unexpected LVM names on the selected storage")
-    node_ip = cfg.node_ip or next(
-        (row.get("ip") for row in get(runner, "/cluster/status") if row.get("type") == "node" and row.get("name") == cfg.node),
-        None,
-    )
-    if not node_ip:
-        raise InstallerError("Cannot determine this node's address; pass it explicitly")
+    node_ip = cfg.node_ip or node_address(runner, cfg.node)
     ipaddress.ip_address(node_ip)
     host_key = runner.path("/etc/ssh/ssh_host_ed25519_key.pub").read_text().split()
     if len(host_key) < 2 or host_key[0] != "ssh-ed25519":
@@ -332,7 +340,7 @@ def _apply(runner: Runner, cfg: PrepareConfig, facts: dict, out_dir: Path, journ
     journal.create("/cluster/firewall/ipset", "/cluster/firewall/ipset/umiak-gateway", "--name", "umiak-gateway")
     ipset = "/cluster/firewall/ipset/umiak-gateway"
     if not any(row.get("cidr") == cfg.gateway_ip for row in get(runner, ipset)):
-        journal.mutate(["pvesh", "create", ipset, "--cidr", cfg.gateway_ip, "--comment", "Umiak guest gateway"],
+        journal.mutate(["pvesh", "create", ipset, "--cidr", cfg.gateway_ip, "--comment", GATEWAY_COMMENT],
                        ["pvesh", "delete", ipset + "/" + cfg.gateway_ip])
     group = "/cluster/firewall/groups/umiak-egress"
     journal.create("/cluster/firewall/groups", group, "--group", "umiak-egress", "--comment", "Umiak sandbox egress")
@@ -497,6 +505,15 @@ def _remove_key_line(keys: Path, line: str) -> None:
         _replace(keys, ("\n".join(kept) + "\n" if kept else "").encode(), None)
 
 
+def remove_node_agent_key_lines(keys: Path) -> None:
+    """Drop every umiak-node forced-command line (any key) atomically; other lines stay."""
+    content = keys.read_text() if keys.exists() else ""
+    lines = content.splitlines()
+    kept = [item for item in lines if not item.startswith(FORCED_COMMAND)]
+    if kept != lines:
+        _replace(keys, ("\n".join(kept) + "\n" if kept else "").encode(), None)
+
+
 def install_node_agent(runner: Runner, binary: Path, sha256: str, public_key: str) -> None:
     """Install the restricted node-agent on this node after prepare().
 
@@ -516,7 +533,7 @@ def install_node_agent(runner: Runner, binary: Path, sha256: str, public_key: st
         raise InstallerError("Node-agent checksum mismatch")
     target, config, keys = runner.path(NODE_BINARY), runner.path(NODE_CONFIG), runner.path(AUTHORIZED_KEYS)
     saved = {path: _snapshot(path) for path in (target, config)}
-    line = f'restrict,command="{NODE_BINARY} --stdio" {public_key}'
+    line = FORCED_COMMAND + public_key
     added_line = False
     try:
         target.parent.mkdir(parents=True, exist_ok=True)

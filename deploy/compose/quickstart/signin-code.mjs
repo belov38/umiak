@@ -5,7 +5,12 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { OwnerStore, PgOwnerRepository } from "./owner.mjs";
 
-export async function printSigninCode(store, write = console.log) {
+/** With link, the first line is the path form `/signin#<code>` for a one-click link. */
+export async function printSigninCode(
+	store,
+	write = console.log,
+	{ link = false } = {},
+) {
 	let issued;
 	try {
 		issued = await store.signinCode({
@@ -20,14 +25,18 @@ export async function printSigninCode(store, write = console.log) {
 		);
 		return null;
 	}
-	write(`One-time owner sign-in code: ${issued.code}`);
+	write(
+		link
+			? `/signin#${encodeURIComponent(issued.code)}`
+			: `One-time owner sign-in code: ${issued.code}`,
+	);
 	write(
 		`Expires: ${new Date(issued.expires).toISOString()}. Existing sessions remain valid.`,
 	);
 	return issued;
 }
-export async function runSigninCode(store, write = console.log) {
-	return (await printSigninCode(store, write)) ? 0 : 2;
+export async function runSigninCode(store, write = console.log, options = {}) {
+	return (await printSigninCode(store, write, options)) ? 0 : 2;
 }
 
 if (
@@ -36,7 +45,7 @@ if (
 ) {
 	if (process.argv.includes("--help")) {
 		console.log(
-			"Usage: umiak-signin\nIssue a one-time owner browser sign-in code. Existing sessions remain valid.",
+			"Usage: umiak-signin [--link]\nIssue a one-time owner browser sign-in code. Existing sessions remain valid.\n--link  print the code as the path /signin#<code> for a one-click link",
 		);
 	} else {
 		const { default: pg } = await import("pg");
@@ -47,6 +56,8 @@ if (
 					audit: (event) =>
 						appendFileSync("/proc/1/fd/1", `${JSON.stringify(event)}\n`),
 				}),
+				console.log,
+				{ link: process.argv.includes("--link") },
 			);
 		} finally {
 			await pool.end();

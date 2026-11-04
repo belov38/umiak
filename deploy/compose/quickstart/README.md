@@ -255,7 +255,10 @@ From a shell in the control plane container:
 docker compose exec quickstart umiak-signin
 ```
 
-The wrapper reads the generated database credential inside the container. Or use
+`umiak-signin --link` prints `/signin#<code>` instead: append it to the
+deployment origin for a one-click sign-in link (the homelab installer's **Sign in
+a new browser** prints the full link). The wrapper reads the generated database
+credential inside the container. Or use
 **Owner sessions → Sign in another browser** in a signed-in browser and copy the
 code. Codes last ten minutes and work once. Keep them private. After a typo or
 rate-limit error, check the code or obtain a new one; source limits reset after ten

@@ -292,10 +292,18 @@ export function createQuickstartServer({
 				// Signed-in or already-claimed deployments have nothing to claim.
 				const claimed = owner || (await store.claimed());
 				if (claimed) {
-					res.writeHead(302, { location: owner ? "/app" : "/" });
+					res.writeHead(302, { location: owner ? "/app" : "/signin" });
 					return res.end();
 				}
 				return page(res, "Claim this Umiak deployment", claimContent(), false);
+			}
+			if (path === "/signin" && req.method === "GET") {
+				// One-click sign-in links (`umiak-signin --link`) carry the code in the fragment.
+				if (owner || !(await store.claimed())) {
+					res.writeHead(302, { location: owner ? "/app" : "/claim" });
+					return res.end();
+				}
+				return page(res, "Sign in", signinContent({ fromHash: true }), false);
 			}
 			if (!owner) {
 				if (req.headers.accept?.includes("application/json"))

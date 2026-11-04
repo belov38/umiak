@@ -13,6 +13,9 @@ continues idempotently from saved answers):
 The node-agent is installed before the first `up` so the quickstart bootstrap
 import (which probes it) succeeds on the very first start.
 
+A finished install offers the day-2 actions in day2.py (Update, Sign in a new
+browser, Reset owner access, Uninstall); `--action` runs one without the menu.
+
 Exit codes: 0 ok, 1 failure, 2 usage (missing or invalid answers, --yes needed), 3 tailnet not
 ready in --non-interactive mode, 130 interrupted.
 """
@@ -24,10 +27,10 @@ import sys
 import time
 from pathlib import Path
 
-from . import checklist, ct, host_report, prepare_host, release, stack, state, tailnet
+from . import checklist, ct, day2, prepare_host, release, stack, state, tailnet
 from .pve import CommandError, InstallerError, Runner, lvmthin_storages
 
-SECRETS_DIR = prepare_host.STATE_DIR + "/secrets"
+SECRETS_DIR = day2.SECRETS_DIR
 GUEST_DNS = "1.1.1.1"
 SANDBOX_RANGE = (500, 589)
 PROTECTED_VMIDS = (590, 599, 9000, 9001)
@@ -62,7 +65,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--template-range", help="template VMIDs (default 600-699)")
     parser.add_argument("--ram-cap-mb", type=int, help=f"sandbox RAM cap in MiB, 2048-8192 (default {DEFAULT_RAM_CAP})")
     parser.add_argument("--hostname", help="tailnet hostname of the control plane (default umiak)")
+    parser.add_argument("--action", choices=sorted(ACTIONS), help="day-2 action without the menu (non-interactive)")
+    parser.add_argument("--version", help="Update: release version (default: the latest release)")
+    parser.add_argument("--remove-guests", action="store_true",
+                        help="Uninstall: also destroy Umiak sandboxes and templates in pool umiak")
+    parser.add_argument("--remove-pve-objects", action="store_true",
+                        help="Uninstall: also remove Umiak Proxmox objects and the node-agent")
     return parser
+
+
+ACTIONS = {"update": "Update", "signin": "Sign in a new browser", "reset-owner": "Reset owner access",
+           "uninstall": "Uninstall"}
 
 
 class Ui:
@@ -97,6 +110,20 @@ class Ui:
             value = self.input("Choose an action: ").strip()
             if value.isdigit() and 1 <= int(value) <= len(options):
                 return options[int(value) - 1]
+
+    def typed(self, prompt: str, word: str) -> bool:
+        """A destructive confirmation: the exact word, or --yes."""
+        if self.yes:
+            return True
+        if not self.interactive:
+            raise UsageError("This action needs confirmation: rerun with --yes")
+        return self.input(f"{prompt}: ").strip() == word
+
+    def ask_bool(self, prompt: str, flag_value: bool) -> bool:
+        """An opt-in choice: the flag, otherwise a prompt (interactive); never implied by --yes."""
+        if flag_value or not self.interactive:
+            return flag_value
+        return self.input(f"{prompt} [y/N]: ").strip().lower() in ("y", "yes")
 
     def wait_enter(self, prompt: str) -> None:
         self.input(prompt)
@@ -304,39 +331,48 @@ class Flow:
         return tailnet.claim_link(identity.dns_name, code)
 
     def start_stack(self, a: dict, result, identity: tailnet.TailnetInfo, out_dir: Path) -> None:
-        runner, ct_id, node = self.runner, a["ct_id"], self.runner.hostname()
-        work = runner.path(prepare_host.STATE_DIR) / "work"
-        preview = stack.preview_domain(identity.ipv4)
-        stack.write(runner, ct_id, self.bundle, {
-            "UMIAK_VERSION": self.bundle.version,
-            "UMIAK_PUBLIC_URL": f"https://{identity.dns_name}",
-            "UMIAK_PREVIEW_DOMAIN": preview,
-            "UMIAK_SSH_HOST": identity.ipv4,
-        }, work)
-        stack.write_firewall(runner, ct_id, result.node_ip)
-        stack.pull(runner, ct_id)
-        stack.create(runner, ct_id)
-        image = stack.quickstart_image(self.bundle.version)
-        binary = stack.extract_node_agent(runner, ct_id, image, work / "umiak-node-linux-amd64")
-        prepare_host.install_node_agent(runner, binary, self.bundle.node_agent_sha256, result.public_key)
-        host_report.write(host_report.collect(runner, node, a["vmid_min"], a["vmid_max"]), out_dir)
-        limits = {"storage": a["storage"], "vmidMin": a["vmid_min"], "vmidMax": a["vmid_max"],
-                  "ramCapMb": a["ram_cap_mb"], "templateVmidMin": a["tpl_min"], "templateVmidMax": a["tpl_max"]}
-        stack.write_install_json(stack.install_json(
-            release=self.bundle.version, node=node, node_ip=result.node_ip, fingerprint=stack.pve_fingerprint(runner),
-            ct_ip=a["ct_ip"], guest_dns=a["guest_dns"], tailnet_dns=identity.dns_name, tailnet_ip=identity.ipv4,
-            limits=limits,
-        ), out_dir)
-        stack.write_network(runner, ct_id, stack.network_json(a["ct_ip"], preview, a["guest_dns"]), image, work)
-        # The bootstrap import runs only when quickstart starts: if it already
-        # runs (Resume, earlier partial run), restart it after the new secrets land.
-        was_running = stack.quickstart_running(runner, ct_id)
-        stack.push_secrets(runner, ct_id, {name: out_dir / name for name in stack.SECRET_NAMES}, image)
-        stack.start(runner, ct_id, sleep=self.sleep)
-        if was_running:
-            stack.restart(runner, ct_id, "quickstart")
-            stack.wait_healthy(runner, ct_id, sleep=self.sleep)
-        stack.wait_bootstrap(runner, ct_id, sleep=self.sleep)
+        day2.apply_stack(self.runner, a["ct_id"], self.bundle, a, result.node_ip, result.public_key, identity, out_dir,
+                         self.sleep, agent_only_if_changed=False)
+
+    def day2(self, action: str, args, download, latest) -> int:
+        current, ui = self.current, self.ui
+        common = {"ui": ui, "progress": self.progress}
+        if action == "Update":
+            self.step = "Choosing the release"
+            version = args.version
+            if not version:
+                try:
+                    version = latest()
+                except (InstallerError, OSError) as error:
+                    if not ui.interactive:
+                        raise InstallerError(f"Cannot determine the latest release ({error}); pass --version") from error
+                if ui.interactive:
+                    version = ui.ask("Release version", version, "--version")
+            version = release.valid_version(version)
+            if version == self.bundle.version:
+                bundle = self.bundle
+            else:
+                self.progress(f"Downloading release {version}")
+                bundle = download(version, self.runner.path(prepare_host.STATE_DIR) / "releases")
+            day2.update(self.runner, current, bundle, sleep=self.sleep, state_path=self.state_path, **common)
+            ui.say(f"Umiak is updated to {bundle.version}.")
+        elif action == "Sign in a new browser":
+            link = day2.signin(self.runner, current, **common)
+            ui.say("The link below signs in one browser within 10 minutes; other sessions stay valid. Do not share it.")
+            ui.say(f"Open {link}")
+        elif action == "Reset owner access":
+            link = day2.reset_owner(self.runner, current, **common)
+            if link is None:
+                return 1
+            ui.say("Owner access was reset. The link below is a one-time owner claim; do not share it.")
+            ui.say(f"Open {link}")
+        elif action == "Uninstall":
+            self.step = "Uninstall questions"
+            guests = ui.ask_bool("Also destroy the Umiak sandboxes and templates in pool umiak?", args.remove_guests)
+            objects = ui.ask_bool("Also remove the Umiak Proxmox objects and the node-agent?", args.remove_pve_objects)
+            day2.uninstall(self.runner, current, objects, guests, state_path=self.state_path, **common)
+            ui.say("Umiak is uninstalled.")
+        return 0
 
 
 def describe_failure(step: str, error: CommandError, tail: int = 20) -> str:
@@ -356,7 +392,8 @@ def describe_failure(step: str, error: CommandError, tail: int = 20) -> str:
 
 
 def main(argv=None, runner: Runner | None = None, bundle: release.Release | None = None, out=print, input_fn=input,
-         sleep=time.sleep, state_path: Path | None = None) -> int:
+         sleep=time.sleep, state_path: Path | None = None, download=release.download,
+         latest=release.latest_version) -> int:
     args = build_parser().parse_args(argv)
     runner = runner or Runner()
     ui = Ui(interactive=not args.non_interactive, yes=args.yes, input_fn=input_fn, out=out)
@@ -369,16 +406,19 @@ def main(argv=None, runner: Runner | None = None, bundle: release.Release | None
         bundle = bundle or release.current()
         flow = Flow(runner, ui, bundle, state_path or runner.path(str(state.DEFAULT_PATH)), sleep)
         options = menu_options(flow.current)
-        if ui.interactive:
+        if args.action:
+            action = ACTIONS[args.action]
+            if action not in options:
+                raise UsageError(f"{action} is not available now; available: {', '.join(options)}")
+        elif ui.interactive:
             out(f"Umiak installer {bundle.version}")
             action = ui.choose(options)
         elif options[0] in ("Install", "Resume install"):
             action = options[0]
         else:
-            raise UsageError("Umiak is already installed; run the installer interactively for Update and other actions")
+            raise UsageError("Umiak is already installed; pass --action (" + ", ".join(sorted(ACTIONS)) + ")")
         if action not in ("Install", "Resume install"):
-            out(f"{action} is not available in this installer version yet.")
-            return 1
+            return flow.day2(action, args, download, latest)
         link = flow.run(args)
         out("Umiak is ready. The link below is a one-time owner claim; do not share it.")
         out(f"Open {link}")

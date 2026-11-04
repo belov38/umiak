@@ -1,6 +1,7 @@
-// Client snippet shared by one-click link pages (/claim now, /signin later): reads the
-// code from the URL fragment and removes it from the address bar and history.
-export const takeHashCode = `function takeHashCode(){const c=decodeURIComponent(location.hash.slice(1));if(location.hash)history.replaceState(null,'',location.pathname+location.search);return c}`;
+// Client snippet shared by one-click link pages (/claim, /signin): reads the code from
+// the URL fragment and removes it from the address bar and history first, so a
+// malformed fragment (e.g. #%zz) never stays visible; undecodable text is used raw.
+export const takeHashCode = `function takeHashCode(){const h=location.hash.slice(1);if(location.hash)history.replaceState(null,'',location.pathname+location.search);try{return decodeURIComponent(h)}catch{return h}}`;
 
 /** Body of the claim page: auto-submits a fragment code, falls back to manual entry. */
 export function claimContent() {

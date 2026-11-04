@@ -1,9 +1,20 @@
+import { takeHashCode } from "./claim-ui.mjs";
+
 const command = "docker compose exec quickstart umiak-signin";
 const copyScript = `async function copyText(text){try{if(navigator.clipboard){await navigator.clipboard.writeText(text);return}}catch{}const t=document.createElement('textarea');t.value=text;document.body.append(t);t.select();try{if(!document.execCommand('copy'))throw Error('copy_failed')}finally{t.remove()}}`;
-export function signinContent() {
+/** Sign-in page body; with fromHash (GET /signin) a code in the URL fragment is submitted at once. */
+export function signinContent({ fromHash = false } = {}) {
 	return `<style>.copy code{display:block;white-space:pre-wrap;overflow-wrap:anywhere}.copy button{display:block;margin-top:12px;max-width:100%}</style><p>Owner sessions live per browser and per hostname. Sign in here without affecting your other browsers or CLIs.</p><section><h2>Get a one-time sign-in code</h2><p>On the Docker host, use the deployment’s Compose project:</p><div class="copy"><code id="host-command">${command}</code><button class="outline" type="button" data-copy="host-command">Copy command</button></div><p>From an already signed-in browser: open Owner sessions and select “Sign in another browser”. Codes expire after 10 minutes. CLI credentials cannot create browser sessions.</p></section><form id="signin"><label for="signin-code">Sign-in code</label><input id="signin-code" autocomplete="off" spellcheck="false" required aria-describedby="message"><button>Sign in</button></form><p id="message" role="status" class="error"></p><details><summary>Lost every session? Reset owner access</summary><p>Warning: recovery revokes all browser sessions and CLI credentials and pending pairings. Use only as a last resort.</p><div class="copy"><code id="recovery-command">docker compose exec quickstart node deploy/compose/quickstart/run.mjs node deploy/compose/quickstart/recover.mjs</code><button class="outline" type="button" data-copy="recovery-command">Copy recovery command</button></div></details><script>${copyScript}
  document.querySelectorAll('[data-copy]').forEach(b=>b.onclick=async()=>{const text=document.getElementById(b.dataset.copy).textContent;try{await copyText(text);b.textContent='Copied'}catch{b.textContent='Select and copy the command'}});
- document.getElementById('signin').onsubmit=async e=>{e.preventDefault();const b=e.target.querySelector('button');b.disabled=true;try{const r=await fetch('/owner/signin',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:document.getElementById('signin-code').value})});if(r.ok)location.reload();else if(r.status===429){const seconds=Number(r.headers.get('Retry-After'))||600;document.getElementById('message').textContent='Too many attempts, try again in '+Math.ceil(seconds/60)+' minutes.'}else{document.getElementById('signin-code').setAttribute('aria-invalid','true');document.getElementById('message').textContent='Sign-in failed. Check the code or request a new one; codes expire and can only be used once.'}}catch{document.getElementById('message').textContent='Connection failed. Try again.'}finally{b.disabled=false}};
+ const signinForm=document.getElementById('signin'),signinButton=signinForm.querySelector('button');
+ async function signin(code){signinButton.disabled=true;try{const r=await fetch('/owner/signin',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code})});if(r.ok){location.reload();return true}if(r.status===429){const seconds=Number(r.headers.get('Retry-After'))||600;document.getElementById('message').textContent='Too many attempts, try again in '+Math.ceil(seconds/60)+' minutes.'}else{document.getElementById('signin-code').setAttribute('aria-invalid','true');document.getElementById('message').textContent='Sign-in failed. Check the code or request a new one; codes expire and can only be used once.'}}catch{document.getElementById('message').textContent='Connection failed. Try again.'}finally{signinButton.disabled=false}return false}
+ signinForm.onsubmit=e=>{e.preventDefault();signin(document.getElementById('signin-code').value)};${
+		fromHash
+			? `
+ ${takeHashCode}
+ const hashCode=takeHashCode();if(hashCode){signinForm.hidden=true;document.getElementById('message').textContent='Signing in...';signin(hashCode).then(ok=>{if(!ok)signinForm.hidden=false})}`
+			: ""
+ }
  </script>`;
 }
 export function signinIssueContent() {

@@ -706,7 +706,38 @@ test("GET /claim serves a hash-reading claim page when unclaimed and redirects t
 		await store.claim(code);
 		const after = await fetch(`${base}/claim`, { redirect: "manual" });
 		assert.equal(after.status, 302);
-		assert.equal(after.headers.get("location"), "/");
+		assert.equal(after.headers.get("location"), "/signin");
+	} finally {
+		server.close();
+	}
+});
+
+test("GET /signin serves a page that posts the fragment code to /owner/signin", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository(), {
+		audit: () => {},
+	});
+	const code = await store.init();
+	const server = createQuickstartServer({ store, env: {}, transport: http });
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const base = `http://127.0.0.1:${server.address().port}`;
+	try {
+		const unclaimed = await fetch(`${base}/signin`, { redirect: "manual" });
+		assert.equal(unclaimed.status, 302);
+		assert.equal(unclaimed.headers.get("location"), "/claim");
+		await store.claim(code);
+		const res = await fetch(`${base}/signin`, {
+			headers: { accept: "text/html" },
+		});
+		assert.equal(res.status, 200);
+		const html = await res.text();
+		assert.match(html, /location\.hash/);
+		assert.match(html, /history\.replaceState/);
+		assert.match(html, /\/owner\/signin/);
+		assert.match(html, /signin\(hashCode\)/);
+		assert.match(html, /id="signin"/);
+		// The generic sign-in page shown on other routes does not auto-submit fragments.
+		const root = await fetch(`${base}/`, { headers: { accept: "text/html" } });
+		assert.doesNotMatch(await root.text(), /takeHashCode/);
 	} finally {
 		server.close();
 	}
