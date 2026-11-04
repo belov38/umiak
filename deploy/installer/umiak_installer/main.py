@@ -378,7 +378,7 @@ class Flow:
         else:
             if self.ui.interactive:
                 self.ui.say("")
-                self.ui.say(style.step("Questions") + style.dim("  (Enter keeps the value in brackets)"))
+                self.ui.say(style.step("Questions"))
             a = gather(self.runner, args, self.ui, saved)
         self.plan(a)
         runner, ct_id = self.runner, a["ct_id"]
@@ -533,7 +533,7 @@ def main(argv=None, runner: Runner | None = None, bundle: release.Release | None
             return flow.day2(action, args, download, latest)
         link = flow.run(args)
         out("")
-        out(style.ok("✓ Umiak is ready."))
+        out(style.ok("Umiak is ready."))
         out("")
         out("Recommended: " + tailnet.key_expiry_hint(urllib.parse.urlsplit(link).hostname))
         style.action(out, "Open this link on any device in your tailnet to finish setup:", link,

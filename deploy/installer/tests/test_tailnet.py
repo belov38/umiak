@@ -87,3 +87,26 @@ def test_key_expiry_hint_names_the_machine():
         "Disable key expiry for the machine 'lab' in the Tailscale admin console (Machines → … → Disable key "
         "expiry), otherwise it drops off your tailnet after ~180 days. https://login.tailscale.com/admin/machines"
     )
+
+
+def test_style_uses_emoji_only_on_a_utf8_tty(monkeypatch):
+    from umiak_installer import style
+
+    class Tty:
+        encoding = "utf-8"
+
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(style.sys, "stdout", Tty())
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.delenv("LC_ALL", raising=False)
+    monkeypatch.delenv("LC_CTYPE", raising=False)
+    monkeypatch.setenv("LANG", "en_US.UTF-8")
+    assert style.step("Creating container").startswith("📦 ")
+    monkeypatch.setenv("TERM", "linux")
+    assert "==>" in style.step("Creating container")
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("LANG", "C")
+    assert "==>" in style.step("Creating container")
