@@ -10,6 +10,7 @@ CREATE = [
     "--unprivileged", "1", "--features", "nesting=1,keyctl=1", "--dev0", "/dev/net/tun",
     "--memory", "4096", "--cores", "2", "--rootfs", "local-lvm:32",
     "--net0", "name=eth0,bridge=vmbr0,ip=192.168.68.50/22,gw=192.168.68.1",
+    "--nameserver", "1.1.1.1",
     "--onboot", "1", "--tags", "umiak", "--hostname", "umiak-cp",
 ]
 
@@ -124,8 +125,53 @@ def test_refuses_address_already_in_use(runner):
     assert not any(a[:2] == ["pct", "create"] for a in runner.commands)
 
 
+def test_create_sets_explicit_nameserver_without_searchdomain(runner):
+    spec = ct.CtSpec(id=591, ip="192.168.68.50", cidr=22, gw="192.168.68.1", storage="local-lvm", dns="1.1.1.1,9.9.9.9")
+    ct.create(runner, spec, sleep=lambda _: None)
+    create = next(a for a in runner.commands if a[:2] == ["pct", "create"])
+    assert create[create.index("--nameserver") + 1] == "1.1.1.1 9.9.9.9"
+    assert "--searchdomain" not in create
+
+
+def test_neighbour_probe_detects_device_that_ignores_icmp(runner):
+    runner.ip_arp_only = True
+    with pytest.raises(InstallerError, match="in use"):
+        ct.create(runner, SPEC, sleep=lambda _: None)
+    assert ["ip", "neigh", "flush", "to", "192.168.68.50", "dev", "vmbr0"] in runner.commands
+    assert ["ip", "neigh", "show", "to", "192.168.68.50", "dev", "vmbr0"] in runner.commands
+    assert not any(a[:2] == ["pct", "create"] for a in runner.commands)
+
+
+def test_free_address_has_incomplete_neighbour_entry(runner):
+    ct.create(runner, SPEC, sleep=lambda _: None)
+    assert ["ping", "-c", "1", "-W", "1", "192.168.68.50"] in runner.commands
+    assert any(a[:3] == ["ip", "neigh", "show"] for a in runner.commands)
+
+
+@pytest.mark.parametrize("table,used", [
+    ("", False), ("192.168.68.50 INCOMPLETE", False), ("192.168.68.50 dev vmbr0  FAILED", False),
+    ("192.168.68.50 dev vmbr0 lladdr 80:83:f6:dc:3c:71 STALE", True),
+    ("192.168.68.50 lladdr 80:83:f6:dc:3c:71 REACHABLE", True),
+    ("192.168.68.50 lladdr 80:83:f6:dc:3c:71 PERMANENT", True),
+])
+def test_neighbour_states(runner, table, used):
+    original = runner.run
+    runner.run = lambda argv, input=None: table if argv[:3] == ["ip", "neigh", "show"] else original(argv, input)
+    assert ct.address_in_use(runner, "192.168.68.50") is used
+
+
+def test_dns_wait_times_out_with_clear_error_and_progress(runner):
+    runner.dns_broken = True
+    sleeps, said = [], []
+    with pytest.raises(InstallerError, match=r"resolv\.conf.*100\.100\.100\.100"):
+        ct.create(runner, SPEC, sleep=sleeps.append, say=said.append)
+    assert len(sleeps) == 60 and sum(sleeps) == 120
+    assert said and "DNS" in said[0]
+    assert not any("apt-get" in a for a in runner.ct_commands())
+
+
 @pytest.mark.parametrize("change", [{"ip": "192.168.68.300"}, {"cidr": 33}, {"gw": "10.0.0.1"}, {"storage": "-x"},
-                                    {"id": 50}, {"ip": "192.168.68.1"}])
+                                    {"id": 50}, {"ip": "192.168.68.1"}, {"dns": "not-an-ip"}, {"dns": ""}])
 def test_rejects_invalid_spec(runner, change):
     values = {"id": 591, "ip": "192.168.68.50", "cidr": 22, "gw": "192.168.68.1", "storage": "local-lvm"}
     values.update(change)

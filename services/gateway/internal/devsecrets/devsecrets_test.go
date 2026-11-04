@@ -346,11 +346,58 @@ func TestDevSecretsChownExisting(t *testing.T) {
 	}
 	for _, name := range all {
 		want := [2]int{65532, 65532}
-		if name == "worker-gateway-token" || name == "ingress-desktop-key" {
+		if name == "worker-gateway-token" {
 			want = [2]int{1000, 1000}
+		}
+		if name == "ingress-desktop-key" {
+			want = [2]int{65532, 1000}
 		}
 		if got[name] != want {
 			t.Errorf("%s chowned to %v, want %v", name, got[name], want)
 		}
+	}
+}
+
+// The ingress key is read by the gateway (owner) and the quickstart ingress
+// (group): mode 0640 on generation and after a re-run that finds 0600.
+func TestIngressDesktopKeyMode(t *testing.T) {
+	dir := t.TempDir()
+	o := devsecrets.Options{
+		Dir:         dir,
+		Owner:       &devsecrets.Owner{UID: os.Getuid(), GID: os.Getgid()},
+		WorkerOwner: &devsecrets.Owner{UID: os.Getuid(), GID: os.Getgid()},
+	}
+	if _, err := devsecrets.Generate(o); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "ingress-desktop-key")
+	mode := func() os.FileMode {
+		st, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st.Mode().Perm()
+	}
+	if m := mode(); m != 0o640 {
+		t.Fatalf("generated mode %o", m)
+	}
+	if err := os.Chmod(p, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string][2]int{}
+	defer devsecrets.SetLchown(func(path string, uid, gid int) error {
+		got[filepath.Base(path)] = [2]int{uid, gid}
+		return nil
+	})()
+	o.Owner = &devsecrets.Owner{UID: 65532, GID: 65532}
+	o.WorkerOwner = &devsecrets.Owner{UID: 1000, GID: 1001}
+	if _, err := devsecrets.Generate(o); err != nil {
+		t.Fatal(err)
+	}
+	if m := mode(); m != 0o640 {
+		t.Fatalf("mode after re-run %o", m)
+	}
+	if want := [2]int{65532, 1001}; got["ingress-desktop-key"] != want {
+		t.Fatalf("owner after re-run %v, want %v", got["ingress-desktop-key"], want)
 	}
 }

@@ -9,7 +9,7 @@ The examples below use `https://api.example.com`, `https://app.example.com` and 
 
 ## Install on Proxmox
 
-Prerequisites: a Proxmox VE 9.x node, a root shell on it, and a Tailscale account with MagicDNS and HTTPS certificates enabled (the installer checks both). Tailscale runs inside the control plane container, not on the Proxmox host. You also need a free static IPv4 address on the node's LAN for the control plane container (the installer has no DHCP option).
+Prerequisites: a Proxmox VE 9.x node, a root shell on it, and a Tailscale account with MagicDNS and HTTPS certificates enabled (the installer checks both). Tailscale runs inside the control plane container, not on the Proxmox host. You also need a free static IPv4 address on the node's LAN for the control plane container (the installer has no DHCP option). Pick an address outside your router's DHCP range, so it is never handed to another device; the installer probes it through the node's ARP table (no extra packages) and refuses an address that answers, even one that ignores ping. The container and the sandboxes use the DNS server from `--guest-dns` (default `1.1.1.1`), never the Proxmox host's resolver, so a host running Tailscale MagicDNS does not break the container.
 
 The node must serve the default Proxmox certificate on port 8006. A custom or ACME certificate (`/etc/pve/nodes/<node>/pveproxy-ssl.pem`) is not supported in Umiak 0.1; the installer checklist stops with a message if it finds one.
 

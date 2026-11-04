@@ -15,6 +15,7 @@ ENV = {
     "UMIAK_PUBLIC_URL": "https://umiak.tail0000.ts.net",
     "UMIAK_PREVIEW_DOMAIN": "umiak.100-64-10-20.sslip.io",
     "UMIAK_SSH_HOST": "100.64.10.20",
+    "UMIAK_GATEWAY_TLS_BIND": "192.168.68.60",
 }
 
 

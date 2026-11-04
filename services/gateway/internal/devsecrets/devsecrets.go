@@ -58,13 +58,16 @@ const (
 	FileWorkerGWToken = "worker-gateway-token"
 	// FileIngressDesktopKey is 32 raw random bytes: the HMAC key shared by the
 	// gateway and the owner ingress (UMIAK_GATEWAY_INGRESS_DESKTOP_KEY_FILE).
-	// Readers per stack: quickstart (root compose.yaml) - the gateway runs as
-	// root and the quickstart service as uid 1000, which owns the file
-	// (-worker-owner). Dev stack / dev-cp (deploy/compose/gateway.yaml) - no
-	// owner ingress, the gateway runs as 65532 and must NOT be pointed at the
-	// file; the feature stays disabled there.
+	// Two readers in the quickstart stack: the gateway (uid Owner.UID, after
+	// the root wrapper drops privileges) reads it as the file owner, and the
+	// quickstart ingress (Node, uid/gid WorkerOwner, read-only mount) reads
+	// it through the group. So the file is owned by Owner.UID:WorkerOwner.GID
+	// with mode 0640. Dev stack / dev-cp (deploy/compose/gateway.yaml) - no
+	// owner ingress, the gateway must NOT be pointed at the file; the feature
+	// stays disabled there.
 	FileIngressDesktopKey = "ingress-desktop-key"
 	modeSecret            = 0o600
+	modeGroupRead         = 0o640
 	modePublic            = 0o644
 	caValidity            = 10 * 365 * 24 * time.Hour
 	leafValidity          = 397 * 24 * time.Hour // within the browser and macOS caps
@@ -155,7 +158,7 @@ func Generate(o Options) ([]string, error) {
 		func() error { return g.once(FileServiceTokens, modeSecret, serviceTokens) },
 		func() error { return g.once(FileAPIToken, modeSecret, tokenFile) },
 		func() error { return g.derived(FileWorkerGWToken, modeSecret, g.workerToken) },
-		func() error { return g.once(FileIngressDesktopKey, modeSecret, randomKey) },
+		func() error { return g.once(FileIngressDesktopKey, g.mode(FileIngressDesktopKey), randomKey) },
 		g.chownAll,
 	}
 	for _, s := range steps {
@@ -178,14 +181,33 @@ var allFiles = []string{
 // lchown changes the owner of a file; tests replace it.
 var lchown = os.Lchown
 
-// owner returns the owner of name: WorkerOwner for the worker token and the
-// ingress key (the quickstart service runs as the worker's user and signs
-// with it; the gateway runs as root there) when set, else Owner.
+// owner returns the owner of name: WorkerOwner for the worker token, when
+// set, else Owner. The ingress key is split: the gateway's UID (owner read)
+// and the worker's GID (group read by the quickstart ingress).
 func (g *gen) owner(name string) *Owner {
-	if (name == FileWorkerGWToken || name == FileIngressDesktopKey) && g.o.WorkerOwner != nil {
-		return g.o.WorkerOwner
+	switch name {
+	case FileWorkerGWToken:
+		if g.o.WorkerOwner != nil {
+			return g.o.WorkerOwner
+		}
+	case FileIngressDesktopKey:
+		switch {
+		case g.o.Owner != nil && g.o.WorkerOwner != nil:
+			return &Owner{UID: g.o.Owner.UID, GID: g.o.WorkerOwner.GID}
+		case g.o.WorkerOwner != nil:
+			return g.o.WorkerOwner
+		}
 	}
 	return g.o.Owner
+}
+
+// mode returns the mode of the once-created file name: the ingress key is
+// group-readable when a worker group is configured.
+func (g *gen) mode(name string) fs.FileMode {
+	if name == FileIngressDesktopKey && g.o.WorkerOwner != nil {
+		return modeGroupRead
+	}
+	return modeSecret
 }
 
 // chownAll hands every existing file of the set to its owner, so files
@@ -206,6 +228,11 @@ func (g *gen) chownAll() error {
 		}
 		if err := lchown(g.path(name), o.UID, o.GID); err != nil {
 			return err
+		}
+		if name == FileIngressDesktopKey {
+			if err := os.Chmod(g.path(name), g.mode(name)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

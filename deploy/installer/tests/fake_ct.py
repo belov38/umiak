@@ -41,7 +41,9 @@ class CtFake(FakeRunner):
         self.available = ["debian-12-standard_12.12-1_amd64.tar.zst", "debian-13-standard_13.4-1_amd64.tar.zst",
                           "debian-13-standard_13.6-1_amd64.tar.zst", "ubuntu-24.04-standard_24.04-2_amd64.tar.zst"]
         self.quickstart_running = False
-        self.ip_in_use = False
+        self.ip_in_use = False  # answers ping and ARP
+        self.ip_arp_only = False  # answers ARP only, like a device that ignores ICMP
+        self.dns_broken = False
         self.ts_states = []  # successive tailscale status payloads, last one repeats
         self.ps_payloads = []  # successive `docker compose ps` row lists, last one repeats
         self.logs = (f"Umiak one-time setup code: {CODE}\n"
@@ -55,7 +57,7 @@ class CtFake(FakeRunner):
 
     def run(self, argv, input=None):
         argv = list(argv)
-        if argv[0] not in ("pct", "pveam", "ping") and argv[:2] != ["ip", "-j"]:
+        if argv[0] not in ("pct", "pveam", "ping") and argv[:2] not in (["ip", "-j"], ["ip", "neigh"]):
             return super().run(argv, input)
         assert all(isinstance(part, str) for part in argv), argv
         self.commands.append(argv)
@@ -69,6 +71,13 @@ class CtFake(FakeRunner):
         if argv[:2] == ["pveam", "download"]:
             self.local_templates.append(argv[3])
             return ""
+        if argv[:3] == ["ip", "neigh", "flush"]:
+            return ""
+        if argv[:3] == ["ip", "neigh", "show"]:
+            ip = argv[4]
+            if self.ip_in_use or self.ip_arp_only:
+                return f"{ip} lladdr 80:83:f6:dc:3c:71 REACHABLE"
+            return f"{ip} INCOMPLETE"
         if argv[0] == "ping":
             if self.ip_in_use:
                 return "64 bytes from"
@@ -93,6 +102,12 @@ class CtFake(FakeRunner):
         return ""
 
     def _in_ct(self, argv, input):
+        if argv[:1] == ["timeout"]:
+            argv = argv[2:]
+        if argv[:2] == ["getent", "hosts"] and self.dns_broken:
+            raise CommandError(argv, 2, "", "")
+        if argv[:2] == ["cat", "/etc/resolv.conf"]:
+            return "search taileb6984.ts.net\nnameserver 100.100.100.100"
         if argv[:2] == ["gpg", "--show-keys"]:
             fpr = ct.DOCKER_KEY_FPR if "docker" in argv[-1] else ct.TAILSCALE_KEY_FPR
             return f"pub:-:4096:1:X:1::::::scESC::::::23::0:\nfpr:::::::::{fpr}:\nsub:-:4096\nfpr:::::::::00AA:\n"

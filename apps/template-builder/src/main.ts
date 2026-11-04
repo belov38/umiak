@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -36,6 +35,7 @@ import { FileRegistry } from "./registry.ts";
 import { configuredBuilds, retire } from "./retire.ts";
 import { pveGuestIo } from "./runner.ts";
 import { makeIso } from "./seed.ts";
+import { sourceCommit } from "./source-commit.ts";
 import { fileSha256, MEDIA_STORAGE, TASK_TIMEOUT_MS } from "./stages.ts";
 import { defaultSecretFiles, verifyTemplate } from "./verify.ts";
 import { formatRecipeVersions, updateVersionsFile } from "./versions-update.ts";
@@ -204,13 +204,6 @@ async function cmdIsoUpload(
 	}
 }
 
-function gitCommit(): string {
-	const git = (...args: string[]) =>
-		execFileSync("git", args, { cwd: REPO_ROOT, encoding: "utf8" }).trim();
-	const head = git("rev-parse", "HEAD");
-	return git("status", "--porcelain").length > 0 ? `${head}-dirty` : head;
-}
-
 function connectOption(v: {
 	"connect-url"?: string | undefined;
 	"dev-cp-ssh"?: string | undefined;
@@ -309,7 +302,7 @@ async function cmdBuild(
 			noVerify,
 			templatesDir: TEMPLATES_DIR,
 			updateKeysFile: UPDATE_KEYS_FILE,
-			gitCommit: gitCommit(),
+			gitCommit: sourceCommit(REPO_ROOT),
 			logDir: LOG_DIR,
 			...opt("umiak-cli", "umiakCli"),
 			...opt("api-url", "apiUrl"),

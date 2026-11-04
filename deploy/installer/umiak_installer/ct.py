@@ -52,6 +52,11 @@ class CtSpec:
     memory: int = 4096
     cores: int = 2
     disk_gb: int = 32
+    # Explicit resolver: without --nameserver pct copies the HOST's resolv.conf (e.g. Tailscale MagicDNS
+    # 100.100.100.100), which does not answer inside the CT before tailscaled runs. With a nameserver
+    # given and no --searchdomain, pct writes no search line (it inherits both only when neither is set).
+    dns: str = "1.1.1.1"
+    bridge: str = "vmbr0"
 
 
 def exec_argv(ct_id: int, *argv: str) -> list[str]:
@@ -79,6 +84,12 @@ def validate(spec: CtSpec) -> None:
         gw = ipaddress.IPv4Address(spec.gw)
     except ValueError as error:
         raise InstallerError(f"Invalid address: {error}") from error
+    try:
+        resolvers = [ipaddress.ip_address(item) for item in spec.dns.replace(",", " ").split()]
+    except ValueError as error:
+        raise InstallerError(f"Invalid DNS server: {error}") from error
+    if not resolvers:
+        raise InstallerError("Invalid DNS server: none given")
     network = ipaddress.IPv4Network(f"{spec.gw}/{spec.cidr}", strict=False)
     if ip not in network or ip == gw or ip in (network.network_address, network.broadcast_address):
         raise InstallerError(f"CT address {ip} must be a host address in {network} other than the router")
@@ -93,12 +104,26 @@ def is_umiak_ct(row: dict) -> bool:
     return row.get("type") == "lxc" and TAG in tags
 
 
-def address_in_use(runner: Runner, ip: str) -> bool:
+PROBE_WAIT = 1.0
+LIVE_NEIGH = ("REACHABLE", "STALE", "DELAY", "PROBE", "PERMANENT")
+
+
+def address_in_use(runner: Runner, ip: str, bridge: str = "vmbr0") -> bool:
+    """Package-free ARP probe: ping only triggers ARP; the neighbour table says who answered.
+
+    Devices that ignore ICMP (phones, tablets) still answer ARP, so a resolved lladdr means in use.
+    """
+    for argv in (["ip", "neigh", "flush", "to", ip, "dev", bridge], ["ping", "-c", "1", "-W", "1", ip]):
+        try:
+            runner.run(argv)
+        except CommandError:
+            pass
+    time.sleep(PROBE_WAIT)
     try:
-        runner.run(["ping", "-c", "1", "-W", "1", ip])
-        return True
+        table = runner.run(["ip", "neigh", "show", "to", ip, "dev", bridge])
     except CommandError:
         return False
+    return any("lladdr" in line and line.split()[-1] in LIVE_NEIGH for line in table.splitlines())
 
 
 def check_target(runner: Runner, spec: CtSpec) -> dict | None:
@@ -109,7 +134,7 @@ def check_target(runner: Runner, spec: CtSpec) -> dict | None:
     row = existing(runner, spec.id)
     if row is not None and not is_umiak_ct(row):
         raise InstallerError(f"Guest {spec.id} exists and is not an Umiak container; choose another CT ID")
-    if row is None and address_in_use(runner, spec.ip):
+    if row is None and address_in_use(runner, spec.ip, spec.bridge):
         raise InstallerError(f"Address {spec.ip} is already in use on the LAN; choose a free static address")
     return row
 
@@ -145,19 +170,30 @@ def create_argv(spec: CtSpec, template: str) -> list[str]:
         "pct", "create", str(spec.id), f"{TEMPLATE_STORAGE}:vztmpl/{template}",
         "--unprivileged", "1", "--features", "nesting=1,keyctl=1", "--dev0", "/dev/net/tun",
         "--memory", str(spec.memory), "--cores", str(spec.cores), "--rootfs", f"{spec.storage}:{spec.disk_gb}",
-        "--net0", f"name=eth0,bridge=vmbr0,ip={spec.ip}/{spec.cidr},gw={spec.gw}",
+        "--net0", f"name=eth0,bridge={spec.bridge},ip={spec.ip}/{spec.cidr},gw={spec.gw}",
+        "--nameserver", " ".join(spec.dns.replace(",", " ").split()),
         "--onboot", "1", "--tags", TAG, "--hostname", spec.hostname,
     ]
 
 
-def _wait_network(runner: Runner, ct_id: int, sleep, attempts: int = 60) -> None:
-    for _ in range(attempts):
+def _wait_network(runner: Runner, ct_id: int, sleep, say=lambda _: None, attempts: int = 60) -> None:
+    """Wait up to attempts*2 s (default 120 s) for DNS in the CT; each probe is itself time-limited."""
+    for n in range(1, attempts + 1):
         try:
-            run_in(runner, ct_id, "getent", "hosts", "deb.debian.org")
+            run_in(runner, ct_id, "timeout", "5", "getent", "hosts", "deb.debian.org")
             return
         except CommandError:
+            if n % 5 == 1:
+                say(f"Waiting for DNS in container {ct_id} (attempt {n}/{attempts})")
             sleep(2)
-    raise InstallerError("The control-plane container has no working network or DNS")
+    try:
+        resolv = run_in(runner, ct_id, "cat", "/etc/resolv.conf").strip()
+    except CommandError:
+        resolv = "(unreadable)"
+    raise InstallerError(
+        f"The control-plane container {ct_id} has no working network or DNS after {attempts * 2} s. "
+        f"Its /etc/resolv.conf says: {resolv!r}. Check the CT address (pct config {ct_id}) "
+        "for an IP conflict and that the DNS server is reachable")
 
 
 def _trust_key(runner: Runner, ct_id: int, url: str, path: str, fingerprint: str) -> None:
@@ -185,7 +221,7 @@ def install_packages(runner: Runner, ct_id: int) -> None:
     run_in(runner, ct_id, "systemctl", "enable", "--now", "docker.service", "tailscaled.service")
 
 
-def create(runner: Runner, spec: CtSpec, sleep=time.sleep) -> None:
+def create(runner: Runner, spec: CtSpec, sleep=time.sleep, say=lambda _: None) -> None:
     """Create and start the CT (or resume an existing Umiak CT), then install packages. Idempotent."""
     validate(spec)
     if check_target(runner, spec) is None:
@@ -193,5 +229,5 @@ def create(runner: Runner, spec: CtSpec, sleep=time.sleep) -> None:
     status = runner.run(["pct", "status", str(spec.id)])
     if "running" not in status:
         runner.run(["pct", "start", str(spec.id)])
-    _wait_network(runner, spec.id, sleep)
+    _wait_network(runner, spec.id, sleep, say)
     install_packages(runner, spec.id)
