@@ -48,9 +48,11 @@ def test_non_interactive_install_end_to_end(env):
     runner, run, printed = env
     assert run(FLAGS) == 0
     # The claim link stands alone near the end, set off by blank lines.
-    assert printed[-3:] == ["▶ Open this link on any device in your tailnet to finish setup:",
+    assert printed[-4:] == ["▶ On a device in your tailnet, open:",
                             f"  https://umiak.tail0000.ts.net/claim#{CODE}",
-                            "  It is a one-time owner claim; do not share it."]
+                            "  This link works once and makes that browser the owner; do not share it.",
+                            "  Then follow Setup: build the Linux template (about 10 minutes) and run the installation "
+                            "test."]
     assert (
         "Recommended: Disable key expiry for the machine 'umiak' in the Tailscale admin console (Machines → … → Disable key "
         "expiry), otherwise it drops off your tailnet after ~180 days. https://login.tailscale.com/admin/machines"
@@ -364,3 +366,43 @@ def test_interactive_install_reasks_bad_answers_and_suggests_a_free_ip(env):
     assert any(p.startswith("Control-plane static IPv4 address [192.168.68.51]") for p in prompts)
     assert saved(runner).ct_ip == "192.168.68.51" and saved(runner).ct_id == 591
 
+
+
+def test_interactive_install_offers_the_other_cluster_nodes(env, monkeypatch):
+    from umiak_installer import nodes
+
+    runner, run, printed = env
+    added = []
+    monkeypatch.setattr(nodes, "candidates", lambda runner, current: ["pve2", "pve3"])
+
+    def add(runner, current, bundle, node, *, ui):
+        if node == "pve3":
+            raise main.InstallerError("no LVM-thin storage")
+        added.append(node)
+
+    monkeypatch.setattr(nodes, "add_node", add)
+    monkeypatch.setattr(nodes, "remember", lambda runner, current, path: current)
+    prompts = []
+
+    def answer(prompt=""):
+        prompts.append(prompt)
+        return "y" if "[y/N]" in prompt else ""
+
+    assert run(FLAGS[2:], input_fn=answer) == 0
+    assert "Add pve2 as a sandbox node? [Y/n]: " in prompts and added == ["pve2"]
+    assert any("Could not add pve3: no LVM-thin storage" in line for line in printed)
+    assert any("Add or remove sandbox nodes" in line for line in printed)
+    assert printed[-3] == f"  https://umiak.tail0000.ts.net/claim#{CODE}"
+
+
+def test_candidates_are_online_members_that_are_not_sandbox_nodes(tmp_path):
+    from fake_pve import FakeRunner
+    from umiak_installer import nodes
+
+    runner = FakeRunner(tmp_path)
+
+    class Console:
+        def call(self, op):
+            return {"nodes": [{"name": "pve"}]}
+
+    assert nodes.candidates(runner, sample("complete"), console=Console()) == ["pve2"]

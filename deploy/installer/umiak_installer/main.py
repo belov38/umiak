@@ -146,6 +146,10 @@ class Ui:
             return flag_value
         return self.read(f"{prompt} [y/N]: ").lower() in ("y", "yes")
 
+    def ask_yes(self, prompt: str) -> bool:
+        """A yes/no question that defaults to yes (interactive only)."""
+        return self.read(f"{prompt} [Y/n]: ").lower() in ("", "y", "yes")
+
     def wait_enter(self, prompt: str) -> None:
         self.read(prompt)
 
@@ -352,6 +356,38 @@ class Flow:
         )
         state.save(self.current, self.state_path)
 
+    def offer_nodes(self) -> None:
+        """After a fresh install: offer the other online cluster nodes as sandbox nodes."""
+        from . import nodes
+        try:
+            others = nodes.candidates(self.runner, self.current)
+        except (InstallerError, CommandError, ValueError, KeyError):
+            return  # The node offer is optional; the menu action stays available.
+        if not others:
+            return
+        ui = self.ui
+        self.progress("Other cluster nodes")
+        ui.say(f"This cluster has {len(others)} more online node(s): {', '.join(others)}. Sandboxes can run there "
+               "too; the installer adds a restricted node-agent to each node you choose.")
+        later = "You can add it later: rerun the installer and choose 'Add or remove sandbox nodes'."
+        for node in others:
+            if not ui.ask_yes(f"Add {node} as a sandbox node?"):
+                continue
+            self.step = f"Adding sandbox node {node}"
+            try:
+                nodes.add_node(self.runner, self.current, self.bundle, node, ui=ui)
+                ui.say(style.ok(f"Sandbox node {node} added."))
+            except CommandError as error:
+                ui.say(style.error(describe_failure(self.step, error)))
+                ui.say(later)
+            except InstallerError as error:
+                ui.say(style.error(f"Could not add {node}: {error}"))
+                ui.say(later)
+        try:
+            self.current = nodes.remember(self.runner, self.current, self.state_path)
+        except (InstallerError, CommandError):
+            pass
+
     def plan(self, a: dict) -> None:
         self.ui.say("")
         self.ui.say(style.step("The installer will:"))
@@ -466,7 +502,14 @@ class Flow:
             operation = args.node_action or ui.ask("Node action (add/remove)", None, "--node-action")
             if operation not in ("add", "remove"):
                 raise UsageError("--node-action must be add or remove")
-            node = args.node or ui.ask("Sandbox node name", None, "--node")
+            node = args.node
+            if not node:
+                names = (nodes.candidates(self.runner, current) if operation == "add"
+                         else [n for n in current.sandbox_nodes if n != current.node])
+                if operation == "add" and not names:
+                    raise InstallerError("Every online cluster node is already a sandbox node")
+                hint = f" ({', '.join(names)})" if names else ""
+                node = ui.ask(f"Sandbox node name{hint}", names[0] if len(names) == 1 else None, "--node")
             if operation == "add":
                 nodes.add_node(self.runner, current, self.bundle, node, ui=ui, storage=args.storage,
                                ram_cap_mb=args.ram_cap_mb)
@@ -532,12 +575,15 @@ def main(argv=None, runner: Runner | None = None, bundle: release.Release | None
         if action not in ("Install", "Resume install"):
             return flow.day2(action, args, download, latest)
         link = flow.run(args)
+        if ui.interactive:
+            flow.offer_nodes()
         out("")
-        out(style.ok("Umiak is ready."))
+        out(style.ok("The installation is complete. Continue setup in your browser."))
         out("")
         out("Recommended: " + tailnet.key_expiry_hint(urllib.parse.urlsplit(link).hostname))
-        style.action(out, "Open this link on any device in your tailnet to finish setup:", link,
-                     "It is a one-time owner claim; do not share it.")
+        style.action(out, "On a device in your tailnet, open:", link,
+                     "This link works once and makes that browser the owner; do not share it.")
+        out("  Then follow Setup: build the Linux template (about 10 minutes) and run the installation test.")
         return 0
     except UsageError as error:
         out(style.error(f"Error: {error}"))

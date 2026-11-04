@@ -125,6 +125,14 @@ def _capable(console):
         raise InstallerError("Update the control plane to a multi-node-capable release first") from error
 
 
+def candidates(runner, current, console=None):
+    """Online cluster nodes that are not sandbox nodes yet (read-only)."""
+    console = console or NodeConsole(runner, current)
+    taken = {n["name"] for n in console.call("list")["nodes"]} | {current.node}
+    members = [n for n in get(runner, "/cluster/status") if n.get("type") == "node"]
+    return sorted(n["name"] for n in members if n.get("online") == 1 and n.get("name") not in taken)
+
+
 def _target(runner, node):
     if not prepare_host.NAME.fullmatch(node or ""):
         raise InstallerError("Invalid cluster node name")
