@@ -240,6 +240,7 @@ export const execRun = defineTool({
 		};
 		let command: Command | undefined;
 		let replayed = false;
+		let startedFrameSeen = false;
 		let exit: ExitEvent | undefined;
 		const started = Date.now();
 
@@ -257,7 +258,10 @@ export const execRun = defineTool({
 		const timer = setTimeout(
 			() => {
 				waitOver = true;
-				if (command !== undefined) end();
+				if (command !== undefined) {
+					if (startedFrameSeen) end();
+					else grace ??= setTimeout(end, STARTED_GRACE_MS);
+				}
 			},
 			ctx.deadline.waitMs(args.wait_seconds ?? DEFAULT_RUN_WAIT_SECONDS),
 		);
@@ -282,9 +286,10 @@ export const execRun = defineTool({
 					command = c;
 					// The wait is over: answer once the started frame (replayed)
 					// is read, or shortly if it does not come.
-					if (waitOver) grace = setTimeout(end, STARTED_GRACE_MS);
+					if (waitOver) grace ??= setTimeout(end, STARTED_GRACE_MS);
 				},
 				onStarted: (s) => {
+					startedFrameSeen = true;
 					replayed = s.replayed;
 					if (waitOver) end();
 				},

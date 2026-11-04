@@ -1,6 +1,6 @@
 // Command tools (S11 8.3, 9.1-9.3, 10.2) against the fake API, and ByteTail.
 import { createHash } from "node:crypto";
-import { Umiak } from "@umiak/sdk";
+import { Command, Umiak } from "@umiak/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MAX_RESULT_CHARS } from "../src/output/result.ts";
 import { ByteTail } from "../src/output/tail.ts";
@@ -404,6 +404,43 @@ describe("exec_run", () => {
 		expect(r.texts[0]).toContain("sandbox_resume");
 		expect(r.texts[0]).toContain(`exec_output command_id=${id}`);
 		expect(r.texts[0]).toContain("idempotency_key: k-lost");
+	});
+
+	it("zero wait preserves replay when the timer falls between command headers and started frame", async () => {
+		const hh = await start();
+		const sb = await sandbox(hh);
+		const handle = hh.umiak.sandboxes.handle(sb);
+		const command = new Command(handle, "cmd_headergap");
+		const run = vi.spyOn(handle, "run").mockImplementation(async function* (
+			_command,
+			options = {},
+		) {
+			options.onStart?.(command);
+			// Let the zero-wait timer fire before the stream's started frame arrives.
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			options.signal?.throwIfAborted();
+			options.onStarted?.({ commandId: command.id, replayed: true });
+		});
+		const handles = vi
+			.spyOn(hh.umiak.sandboxes, "handle")
+			.mockReturnValue(handle);
+		try {
+			const result = await hh.call("exec_run", {
+				sandbox: sb,
+				command: "echo replay",
+				wait_seconds: 0,
+				idempotency_key: "header-gap",
+			});
+			expect(result.isError).toBe(false);
+			expect(result.json).toMatchObject({
+				command_id: command.id,
+				replayed: true,
+				status: "running",
+			});
+		} finally {
+			handles.mockRestore();
+			run.mockRestore();
+		}
 	});
 
 	it("wait_seconds 0 still gets the command id; a retry with the key attaches", async () => {
