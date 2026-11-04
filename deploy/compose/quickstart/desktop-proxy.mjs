@@ -11,9 +11,17 @@
 // (path_prefix + "/", no query) when a stream ends. Desktop links minted by the
 // API always carry a query (`?dataTransport=websocket[...]`), so a request with
 // a query string opens the desktop and a bare path shows the "Stream ended"
-// page, whose Reconnect button opens `?dataTransport=websocket` again.
+// page. config.js (our own script, running on stream.html) remembers the open
+// parameters in sessionStorage so Reconnect can reopen with the same fps,
+// bitrate, language and dataTransport; without it Reconnect uses websocket.
+//
+// Content-Security-Policy is the last line of defence should the trusted
+// viewer render hostile guest data through a DOM sink: viewer files allow only
+// same-origin script (plus hashes of inline scripts in the pinned stream.html),
+// own pages allow only hashes of their inline scripts, and proxied API
+// responses are sandboxed.
 
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
@@ -23,6 +31,8 @@ import { renderPage } from "./ui.mjs";
 const PREFIX = "/desktop";
 const CREDENTIAL_TTL = 30; // seconds; the gateway accepts up to 60
 const OPEN_TIMEOUT = 45000; // starting the streamer can take ~20 s
+// Idle (not total) timeout of proxied API calls: a streaming
+// application/x-ndjson response is cut after 60 s without any bytes.
 const API_IDLE_TIMEOUT = 60000;
 const HANDSHAKE_TIMEOUT = 20000;
 const OPEN_PARAMS = ["fps", "bitrate", "dataTransport", "language"];
@@ -47,19 +57,19 @@ const RESPONSE_HEADERS = [
 	"retry-after",
 	"umiak-error",
 ];
+// Extensions are never offered upstream, so frames stay uncompressed and the
+// 101 we build ourselves stays consistent with the relayed bytes.
 const WS_REQUEST_HEADERS = [
 	"sec-websocket-key",
 	"sec-websocket-version",
 	"sec-websocket-protocol",
-	"sec-websocket-extensions",
 ];
-const WS_RESPONSE_HEADERS = new Set([
-	"upgrade",
-	"connection",
-	"sec-websocket-accept",
-	"sec-websocket-protocol",
-	"sec-websocket-extensions",
-]);
+const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+const VIEWER_CSP = (hashes = []) =>
+	`default-src 'none'; script-src 'self' 'wasm-unsafe-eval'${hashes.map((h) => ` ${h}`).join("")}; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'; object-src 'none'`;
+const PAGE_CSP = (hashes) =>
+	`default-src 'none';${hashes.length ? ` script-src ${hashes.join(" ")};` : ""} style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; form-action 'self'; frame-ancestors 'self'; base-uri 'none'`;
+const DATA_CSP = "default-src 'none'; sandbox";
 const STATIC_TYPES = {
 	html: "text/html; charset=utf-8",
 	js: "text/javascript; charset=utf-8",
@@ -72,6 +82,29 @@ const STATIC_TYPES = {
 const STATIC_FILE =
 	/^(?:stream\.html|manifest\.json|[A-Za-z0-9_-]+\.(?:js|wasm|svg|png))$/;
 const WEB_SOCKET_PATH = "/api/host/stream/web_socket";
+
+/** CSP source expressions (`'sha256-…'`) for every inline <script> in `html`. */
+export function inlineScriptHashes(html) {
+	const hashes = [];
+	for (const [, attrs, body] of html.matchAll(
+		/<script(\s[^>]*)?>([\s\S]*?)<\/script>/gi,
+	)) {
+		if (/\ssrc\s*=/i.test(attrs ?? "")) continue;
+		hashes.push(
+			`'sha256-${createHash("sha256").update(body).digest("base64")}'`,
+		);
+	}
+	return hashes;
+}
+
+const esc = (value) =>
+	String(value).replace(
+		/[&<>"']/g,
+		(c) =>
+			({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+				c
+			],
+	);
 
 /** `Umiak-Ingress-Desktop` value: `<label>.<exp>.<base64url HMAC-SHA256>`; `now` in Unix seconds. */
 export function signDesktop(key, label, now = Date.now() / 1000) {
@@ -160,6 +193,8 @@ const json = (res, status, value, headers = {}) => {
 	res.writeHead(status, {
 		"content-type": "application/json",
 		"cache-control": "no-store",
+		"content-security-policy": DATA_CSP,
+		"cross-origin-resource-policy": "same-origin",
 		...headers,
 	});
 	res.end(JSON.stringify(value));
@@ -172,18 +207,43 @@ const rejected = (res) =>
 	json(res, 502, { error: "desktop_upstream_rejected" });
 
 function html(res, status, title, content, extraHead = "", headers = {}) {
+	const page = renderPage(title, content, { authenticated: false }).replace(
+		"<head>",
+		`<head>${extraHead}`,
+	);
 	res.writeHead(status, {
 		"content-type": "text/html; charset=utf-8",
 		"cache-control": "no-store",
+		"content-security-policy": PAGE_CSP(inlineScriptHashes(page)),
 		...headers,
 	});
-	res.end(
-		renderPage(title, content, { authenticated: false }).replace(
-			"<head>",
-			`<head>${extraHead}`,
-		),
-	);
+	res.end(page);
 }
+
+/** Hidden inputs that reopen the desktop with the given open parameters. */
+function openInputs(params) {
+	const query = openQuery(params);
+	return [...query]
+		.map(
+			([name, value]) =>
+				`<input type="hidden" name="${esc(name)}" value="${esc(value)}">`,
+		)
+		.join("");
+}
+
+/** fps/bitrate/dataTransport/language in request order; dataTransport defaults to websocket. */
+function openQuery(search) {
+	const query = new URLSearchParams();
+	for (const [name, value] of new URLSearchParams(search))
+		if (OPEN_PARAMS.includes(name) && value && !query.has(name))
+			query.set(name, value);
+	if (!query.has("dataTransport")) query.set("dataTransport", "websocket");
+	return query;
+}
+
+// Restores the parameters config.js stored for this prefix; constant text, so one CSP hash.
+const RECONNECT_SCRIPT =
+	'try{const f=document.getElementById("reconnect");const q=new URLSearchParams(sessionStorage.getItem("umiak-desktop:"+f.getAttribute("action"))||"");for(const k of ["fps","bitrate","language","dataTransport"]){const v=q.get(k);if(!v)continue;let i=f.querySelector("input[name="+k+"]");if(!i){i=document.createElement("input");i.type="hidden";i.name=k;f.appendChild(i)}i.value=v}}catch{}';
 
 const SPINNER =
 	"<style>.spinner{width:2rem;height:2rem;border:2px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin 1s linear infinite;margin-bottom:1rem}@keyframes spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.spinner{animation:none}}</style>";
@@ -204,17 +264,17 @@ function streamEndedPage(res, slug) {
 		res,
 		200,
 		"Stream ended",
-		`<h1>Stream ended</h1><p>The desktop stream has ended. The sandbox keeps running.</p><form method="get" action="${PREFIX}/${slug}/"><input type="hidden" name="dataTransport" value="websocket"><button type="submit">Reconnect</button></form>`,
+		`<h1>Stream ended</h1><p>The desktop stream has ended. The sandbox keeps running.</p><form id="reconnect" method="get" action="${PREFIX}/${slug}/">${openInputs("")}<button type="submit">Reconnect</button></form><script>${RECONNECT_SCRIPT}</script>`,
 	);
 }
 
-function unavailablePage(res, code) {
+function unavailablePage(res, code, search) {
 	const safe = /^[a-z_]{1,64}$/.test(code ?? "") ? code : "desktop_unavailable";
 	html(
 		res,
 		502,
 		"Desktop unavailable",
-		`<h1>Desktop unavailable</h1><p>The desktop could not be opened. Try again in a moment.</p><p><code>${safe}</code></p><form method="get"><input type="hidden" name="dataTransport" value="websocket"><button type="submit">Try again</button></form>`,
+		`<h1>Desktop unavailable</h1><p>The desktop could not be opened. Try again in a moment.</p><p><code>${safe}</code></p><form method="get">${openInputs(search)}<button type="submit">Try again</button></form>`,
 	);
 }
 
@@ -236,40 +296,61 @@ function pick(headers, names) {
 	return out;
 }
 
+// stream.html is pinned upstream content with an inline script; hash it once per file version.
+const streamHashCache = new Map();
+function streamHashes(file, info) {
+	const key = `${file}:${info.mtimeMs}:${info.size}`;
+	if (!streamHashCache.has(key)) {
+		streamHashCache.clear();
+		streamHashCache.set(key, inlineScriptHashes(readFileSync(file, "utf8")));
+	}
+	return streamHashCache.get(key);
+}
+
 function serveStatic(req, res, ctx, rest) {
 	const name = rest.slice(1);
 	if (!ctx.assetsDir || !STATIC_FILE.test(name))
 		return fail(res, 404, "not_found");
 	const file = join(ctx.assetsDir, name);
-	let size;
+	let info;
 	try {
-		const info = statSync(file);
+		info = statSync(file);
 		if (!info.isFile()) throw new Error("not_file");
-		size = info.size;
 	} catch {
 		return fail(res, 404, "not_found");
 	}
-	res.writeHead(200, {
-		"content-type": STATIC_TYPES[name.slice(name.lastIndexOf(".") + 1)],
-		"content-length": size,
+	const csp = VIEWER_CSP(
+		name === "stream.html" ? streamHashes(file, info) : [],
+	);
+	const modified = Math.floor(info.mtimeMs / 1000) * 1000;
+	const since = Date.parse(req.headers["if-modified-since"] ?? "");
+	const common = {
+		"last-modified": new Date(modified).toUTCString(),
 		"cache-control": "no-cache",
+		"content-security-policy": csp,
+	};
+	if (!Number.isNaN(since) && modified <= since) {
+		res.writeHead(304, common);
+		return res.end();
+	}
+	res.writeHead(200, {
+		...common,
+		"content-type": STATIC_TYPES[name.slice(name.lastIndexOf(".") + 1)],
+		"content-length": info.size,
 	});
 	if (req.method === "HEAD") return res.end();
 	createReadStream(file).pipe(res);
 }
 
 function open(res, ctx, slug, search) {
-	const query = new URLSearchParams();
-	for (const [name, value] of new URLSearchParams(search))
-		if (OPEN_PARAMS.includes(name) && value && !query.has(name))
-			query.set(name, value);
+	const query = openQuery(search);
 	const target = gatewayTarget(ctx, slug);
 	const upstream = http.request(
 		{
 			host: target.host,
 			port: target.port,
 			method: "GET",
-			path: query.size ? `/?${query}` : "/",
+			path: `/?${query}`,
 			headers: {
 				host: target.hostHeader,
 				accept: "application/json",
@@ -293,12 +374,12 @@ function open(res, ctx, slug, search) {
 			const code = reply.headers["umiak-error"];
 			if (reply.statusCode === 503 && code === "desktop_starting")
 				return startingPage(res);
-			unavailablePage(res, code);
+			unavailablePage(res, code, search);
 		},
 	);
 	upstream.on("timeout", () => upstream.destroy(new Error("timeout")));
 	upstream.on("error", () => {
-		if (!res.headersSent) unavailablePage(res, "desktop_unreachable");
+		if (!res.headersSent) unavailablePage(res, "desktop_unreachable", search);
 		else res.destroy();
 	});
 	upstream.end();
@@ -320,7 +401,11 @@ function proxyApi(req, res, ctx, slug, rest, search) {
 		(reply) => {
 			const type = reply.headers["content-type"];
 			const media = type?.split(";")[0].trim().toLowerCase();
-			const out = pick(reply.headers, RESPONSE_HEADERS);
+			const out = {
+				...pick(reply.headers, RESPONSE_HEADERS),
+				"content-security-policy": DATA_CSP,
+				"cross-origin-resource-policy": "same-origin",
+			};
 			if (media) {
 				if (!DATA_TYPES.has(media)) {
 					reply.destroy();
@@ -405,15 +490,22 @@ export function handleDesktop(req, res, ctx) {
 		res.writeHead(302, { location: `${PREFIX}/${slug}/${search}` });
 		res.end();
 	} else if (rest === "/") {
-		if (search.length > 1) open(res, ctx, slug, search);
-		else streamEndedPage(res, slug);
+		if (search.length <= 1) streamEndedPage(res, slug);
+		else if (req.method === "GET") open(res, ctx, slug, search);
+		else {
+			res.setHeader("allow", "GET");
+			fail(res, 405, "method_not_allowed");
+		}
 	} else if (rest === "/config.js") {
+		const prefix = `${PREFIX}/${slug}`;
 		res.writeHead(200, {
 			"content-type": "text/javascript; charset=utf-8",
 			"cache-control": "no-store",
+			"content-security-policy": VIEWER_CSP(),
 		});
+		// The second statement remembers the open parameters for Reconnect.
 		res.end(
-			`window.__CONFIG_JS__ = ${JSON.stringify({ path_prefix: `${PREFIX}/${slug}` })};\n`,
+			`window.__CONFIG_JS__ = ${JSON.stringify({ path_prefix: prefix })};\ntry{const q=new URLSearchParams(location.search),s=new URLSearchParams();for(const k of ["fps","bitrate","language","dataTransport"]){const v=q.get(k);if(v)s.set(k,v)}if(q.has("hostId"))sessionStorage.setItem(${JSON.stringify(`umiak-desktop:${prefix}/`)},s.toString())}catch{}\n`,
 		);
 	} else serveStatic(req, res, ctx, rest);
 	return true;
@@ -427,6 +519,13 @@ function refuse(socket, status, reason, code) {
 		`HTTP/1.1 ${status} ${reason}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`,
 	);
 }
+
+// Any control character other than HTAB (CR/LF were already split on).
+const hasControl = (line) =>
+	[...line].some((c) => {
+		const code = c.charCodeAt(0);
+		return (code < 32 && code !== 9) || code === 127;
+	});
 
 /** WebSocket for the viewer stream; same `ctx` as handleDesktop. */
 export function handleDesktopUpgrade(req, socket, head, ctx) {
@@ -448,6 +547,18 @@ export function handleDesktopUpgrade(req, socket, head, ctx) {
 		refuse(socket, 503, "Service Unavailable", "desktop_unavailable");
 		return true;
 	}
+	const clientKey = req.headers["sec-websocket-key"] ?? "";
+	if (!/^[A-Za-z0-9+/]{22}==$/.test(clientKey)) {
+		refuse(socket, 400, "Bad Request", "invalid_websocket_key");
+		return true;
+	}
+	const expectedAccept = createHash("sha1")
+		.update(clientKey + WS_GUID)
+		.digest("base64");
+	const offered = (req.headers["sec-websocket-protocol"] ?? "")
+		.split(",")
+		.map((x) => x.trim())
+		.filter(Boolean);
 	const gw = gatewayTarget(ctx, target.slug);
 	const headers = {
 		host: gw.hostHeader,
@@ -485,16 +596,28 @@ export function handleDesktopUpgrade(req, socket, head, ctx) {
 		}
 		const lines = buffered.subarray(0, end).toString("latin1").split("\r\n");
 		if (!/^HTTP\/1\.1 101 /.test(lines[0])) return abort();
+		// Rebuild the 101 ourselves; upstream values are validated, never copied.
+		const fields = new Map();
+		for (const line of lines.slice(1)) {
+			const colon = line.indexOf(":");
+			if (colon < 1 || hasControl(line)) return abort();
+			const name = line.slice(0, colon).trim().toLowerCase();
+			if (fields.has(name)) return abort();
+			fields.set(name, line.slice(colon + 1).trim());
+		}
+		const protocol = fields.get("sec-websocket-protocol");
+		if (
+			fields.get("upgrade")?.toLowerCase() !== "websocket" ||
+			fields.get("sec-websocket-accept") !== expectedAccept ||
+			fields.has("sec-websocket-extensions") ||
+			(protocol !== undefined && !offered.includes(protocol))
+		)
+			return abort();
 		upstream.off("data", onHandshake);
 		upstream.setTimeout(0);
 		relaying = true;
-		const kept = lines
-			.slice(1)
-			.filter((line) =>
-				WS_RESPONSE_HEADERS.has(line.split(":")[0].trim().toLowerCase()),
-			);
 		socket.write(
-			`HTTP/1.1 101 Switching Protocols\r\n${kept.join("\r\n")}\r\n\r\n`,
+			`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${expectedAccept}\r\n${protocol ? `Sec-WebSocket-Protocol: ${protocol}\r\n` : ""}\r\n`,
 		);
 		const rest = buffered.subarray(end + 4);
 		if (rest.length) socket.write(rest);

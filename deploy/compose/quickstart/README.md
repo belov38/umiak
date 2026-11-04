@@ -49,7 +49,13 @@ credential (key `/gateway-secrets/ingress-desktop-key`). Only browser owner
 sessions may use it; guest responses pass only as JSON/SDP/NDJSON/binary or an
 empty body, never HTML or JavaScript, and without `Set-Cookie`. A request to
 `/desktop/<slug>/` with a query string opens the desktop; the bare path (where
-the viewer navigates when a stream ends) shows "Stream ended" with Reconnect.
+the viewer navigates when a stream ends) shows "Stream ended" with Reconnect,
+which reuses the fps, bitrate, language and dataTransport of the last open
+(kept in the tab's sessionStorage by the viewer's `config.js`). Viewer files,
+own pages and proxied API responses carry a strict Content-Security-Policy.
+Proxied API calls have a 60-second idle timeout: a streaming
+`application/x-ndjson` response that sends no bytes for 60 seconds is cut.
+The stream WebSocket is not affected.
 
 ## Browser secure contexts
 

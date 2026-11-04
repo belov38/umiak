@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
@@ -57,6 +57,27 @@ test("Dockerfile pins the same moonlight-web release and SHA256 as the desktop t
 	assert.match(dockerfile, /\/app\/quickstart-assets\/moonlight-web/);
 });
 
+const accept = (key) =>
+	createHash("sha1")
+		.update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+		.digest("base64");
+const VIEWER_CSP_RE =
+	/^default-src 'none'; script-src 'self' 'wasm-unsafe-eval'.*; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'; object-src 'none'$/;
+const sha = (text) =>
+	`'sha256-${createHash("sha256").update(text).digest("base64")}'`;
+function assertPageCsp(res) {
+	const csp = res.headers["content-security-policy"];
+	assert.match(csp, /^default-src 'none';/);
+	assert.match(
+		csp,
+		/style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; form-action 'self'; frame-ancestors 'self'; base-uri 'none'$/,
+	);
+	assert.doesNotMatch(csp, /script-src[^;]*unsafe/);
+	for (const [, body] of res.body.matchAll(/<script>([\s\S]*?)<\/script>/g))
+		assert.ok(csp.includes(sha(body)), "inline script hash in CSP");
+}
+const DATA_CSP = "default-src 'none'; sandbox";
+
 function verifyIngress(value, label) {
 	const [l, exp, mac] = value.split(".");
 	assert.equal(l, label);
@@ -71,7 +92,10 @@ function verifyIngress(value, label) {
 async function fixture(t) {
 	const assets = mkdtempSync(join(tmpdir(), "umiak-desktop-assets-"));
 	mkdirSync(assets, { recursive: true });
-	writeFileSync(join(assets, "stream.html"), "<!doctype html>TRUSTED-STREAM");
+	writeFileSync(
+		join(assets, "stream.html"),
+		"<!doctype html>TRUSTED-STREAM<script src=./config.js></script><script>INLINE()</script><script src=stream.js></script>",
+	);
 	writeFileSync(join(assets, "stream.js"), "console.log('trusted')");
 	writeFileSync(join(assets, "5d0c0d09e21580d5f403.wasm"), "\0asm");
 	writeFileSync(join(assets, "moonlight.svg"), "<svg/>");
@@ -99,9 +123,9 @@ async function fixture(t) {
 		});
 	});
 	const upgrades = [];
-	let upgradeReply = (socket) => {
+	let upgradeReply = (socket, req) => {
 		socket.write(
-			"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSet-Cookie: guest=1\r\nSec-WebSocket-Accept: abc\r\n\r\nHELLO",
+			`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSet-Cookie: guest=1\r\nX-Evil: 1\r\nSec-WebSocket-Accept: ${accept(req.headers["sec-websocket-key"])}\r\n\r\nHELLO`,
 		);
 		socket.on("data", (d) => socket.write(d));
 	};
@@ -110,7 +134,7 @@ async function fixture(t) {
 		open.add(socket);
 		socket.on("close", () => open.delete(socket));
 		upgrades.push({ url: req.url, headers: req.headers });
-		upgradeReply(socket);
+		upgradeReply(socket, req);
 	});
 	await new Promise((r) => gateway.listen(0, "127.0.0.1", r));
 
@@ -222,11 +246,14 @@ test("config.js carries the per-slug path prefix", async (t) => {
 	const res = await f.call(`/desktop/${SLUG}/config.js`);
 	assert.equal(res.status, 200);
 	assert.match(res.headers["content-type"], /^text\/javascript/);
-	assert.equal(
-		res.body,
-		`window.__CONFIG_JS__ = {"path_prefix":"/desktop/${SLUG}"};\n`,
+	assert.ok(
+		res.body.startsWith(
+			`window.__CONFIG_JS__ = {"path_prefix":"/desktop/${SLUG}"};\n`,
+		),
 	);
+	assert.match(res.body, new RegExp(`"umiak-desktop:/desktop/${SLUG}/"`));
 	assert.equal(res.headers["x-frame-options"], "SAMEORIGIN");
+	assert.match(res.headers["content-security-policy"], VIEWER_CSP_RE);
 	const other = await f.call("/desktop/quiet-red-fox/config.js");
 	assert.match(other.body, /"\/desktop\/quiet-red-fox"/);
 	assert.equal(f.seen.length, 0);
@@ -236,11 +263,33 @@ test("viewer files come from the trusted assets directory only", async (t) => {
 	const f = await fixture(t);
 	const html = await f.call(`/desktop/${SLUG}/stream.html?hostId=1&appId=2`);
 	assert.equal(html.status, 200);
-	assert.equal(html.body, "<!doctype html>TRUSTED-STREAM");
+	assert.match(html.body, /^<!doctype html>TRUSTED-STREAM/);
 	assert.match(html.headers["content-type"], /^text\/html/);
 	assert.equal(html.headers["x-frame-options"], "SAMEORIGIN");
+	const csp = html.headers["content-security-policy"];
+	assert.match(csp, VIEWER_CSP_RE);
+	assert.match(
+		csp,
+		new RegExp(
+			`script-src 'self' 'wasm-unsafe-eval' ${sha("INLINE()").replace(/[+/]/g, "\\$&")};`,
+		),
+	);
+	assert.doesNotMatch(csp, /'unsafe-eval'|script-src[^;]*unsafe-inline/);
 	const js = await f.call(`/desktop/${SLUG}/stream.js`);
 	assert.match(js.headers["content-type"], /^text\/javascript/);
+	assert.match(js.headers["content-security-policy"], VIEWER_CSP_RE);
+	assert.doesNotMatch(js.headers["content-security-policy"], /sha256/);
+	const modified = js.headers["last-modified"];
+	assert.ok(modified && !Number.isNaN(Date.parse(modified)));
+	const cached = await f.call(`/desktop/${SLUG}/stream.js`, {
+		headers: { "if-modified-since": modified },
+	});
+	assert.equal(cached.status, 304);
+	assert.equal(cached.body, "");
+	const stale = await f.call(`/desktop/${SLUG}/stream.js`, {
+		headers: { "if-modified-since": new Date(0).toUTCString() },
+	});
+	assert.equal(stale.status, 200);
 	const wasm = await f.call(`/desktop/${SLUG}/5d0c0d09e21580d5f403.wasm`);
 	assert.equal(wasm.headers["content-type"], "application/wasm");
 	const svg = await f.call(`/desktop/${SLUG}/moonlight.svg`);
@@ -276,6 +325,13 @@ test("opening the desktop proxies GET / and rewrites the stream redirect", async
 	assert.equal(sent.headers.cookie, undefined);
 	assert.equal(sent.headers.authorization, undefined);
 	verifyIngress(sent.headers["umiak-ingress-desktop"], `${SLUG}-desktop`);
+
+	await f.call(`/desktop/${SLUG}/?fps=30`);
+	assert.equal(f.seen.at(-1).url, "/?fps=30&dataTransport=websocket");
+	const count = f.seen.length;
+	const head = await f.call(`/desktop/${SLUG}/?fps=30`, { method: "HEAD" });
+	assert.equal(head.status, 405);
+	assert.equal(f.seen.length, count);
 });
 
 test("a starting desktop gets the owner's own Starting page, never the gateway HTML", async (t) => {
@@ -296,14 +352,30 @@ test("a starting desktop gets the owner's own Starting page, never the gateway H
 	assert.match(res.body, /<meta http-equiv="refresh" content="5">/);
 	assert.doesNotMatch(res.body, /GATEWAY-HTML/);
 	assert.equal(res.headers["x-frame-options"], "SAMEORIGIN");
+	assertPageCsp(res);
 
 	f.replies.set("GET /", (_req, res) => {
 		res.writeHead(200, { "content-type": "text/html" });
 		res.end("<script>GUEST-HTML</script>");
 	});
-	const odd = await f.call(`/desktop/${SLUG}/?dataTransport=websocket`);
+	const odd = await f.call(
+		`/desktop/${SLUG}/?fps=60&bitrate=9000&language=de&dataTransport=webrtc&x="><b>`,
+	);
 	assert.equal(odd.status, 502);
 	assert.doesNotMatch(odd.body, /GUEST-HTML/);
+	assert.match(odd.body, />Try again<\/button>/);
+	for (const [k, v] of [
+		["fps", "60"],
+		["bitrate", "9000"],
+		["language", "de"],
+		["dataTransport", "webrtc"],
+	])
+		assert.match(
+			odd.body,
+			new RegExp(`<input type="hidden" name="${k}" value="${v}">`),
+		);
+	assert.doesNotMatch(odd.body, /<b>/);
+	assertPageCsp(odd);
 });
 
 test("the stream-end navigation shows a Stream ended page with Reconnect", async (t) => {
@@ -314,6 +386,9 @@ test("the stream-end navigation shows a Stream ended page with Reconnect", async
 	assert.match(res.body, /<button[^>]*>Reconnect<\/button>/);
 	assert.match(res.body, new RegExp(`action="/desktop/${SLUG}/"`));
 	assert.match(res.body, /name="dataTransport" value="websocket"/);
+	assert.match(res.body, /sessionStorage\.getItem\("umiak-desktop:"/);
+	assertPageCsp(res);
+	assert.match(res.headers["content-security-policy"], /script-src 'sha256-/);
 	assert.equal(f.seen.length, 0);
 	const bare = await f.call(`/desktop/${SLUG}?fps=30`);
 	assert.equal(bare.status, 302);
@@ -347,6 +422,8 @@ test("API calls are proxied as data with the prefix stripped and credentials rep
 	assert.equal(res.headers.refresh, undefined);
 	assert.equal(res.headers.link, undefined);
 	assert.equal(res.headers["x-frame-options"], "SAMEORIGIN");
+	assert.equal(res.headers["content-security-policy"], DATA_CSP);
+	assert.equal(res.headers["cross-origin-resource-policy"], "same-origin");
 	const sent = f.seen.at(-1);
 	assert.equal(sent.url, "/api/host/stream/webrtc?x=1");
 	assert.equal(sent.body, "v=0 offer");
@@ -403,6 +480,8 @@ test("non-data upstream responses become 502 desktop_upstream_rejected", async (
 		assert.deepEqual(JSON.parse(res.body), {
 			error: "desktop_upstream_rejected",
 		});
+		assert.equal(res.headers["content-security-policy"], DATA_CSP);
+		assert.equal(res.headers["cross-origin-resource-policy"], "same-origin");
 		assert.match(res.headers["content-type"], /^application\/json/);
 	}
 	f.replies.set("GET /api/authenticate", (_req, res) => {
@@ -467,8 +546,13 @@ test("WebSocket upgrade relays only after an upstream 101", async (t) => {
 		{},
 		"PING-ECHO",
 	);
-	assert.match(ok, /^HTTP\/1\.1 101 /);
-	assert.doesNotMatch(ok, /set-cookie/i);
+	assert.ok(
+		ok.startsWith(
+			`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept("dGhlIHNhbXBsZSBub25jZQ==")}\r\n\r\nHELLO`,
+		),
+		ok,
+	);
+	assert.doesNotMatch(ok, /set-cookie|x-evil/i);
 	assert.match(ok, /HELLO/);
 	assert.match(ok, /PING-ECHO/);
 	const up = f.upgrades.at(-1);
@@ -512,4 +596,50 @@ test("WebSocket upgrade relays only after an upstream 101", async (t) => {
 		/^HTTP\/1\.1 101/,
 	);
 	assert.equal(f.upgrades.length, count);
+});
+
+test("the 101 is rebuilt and refused unless accept, protocol, extensions and bytes are valid", async (t) => {
+	const f = await fixture(t);
+	const path = `/desktop/${SLUG}/api/host/stream/web_socket`;
+	const reply = (extra, acceptValue) => (socket, req) => {
+		socket.write(
+			`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${acceptValue ?? accept(req.headers["sec-websocket-key"])}\r\n${extra}\r\nHELLO`,
+		);
+		socket.on("data", (d) => socket.write(d));
+	};
+	f.setUpgradeReply(reply("Sec-WebSocket-Protocol: b\r\n"));
+	const chosen = await f.rawUpgrade(
+		path,
+		{ "sec-websocket-protocol": "a, b" },
+		"PING-ECHO",
+	);
+	assert.match(chosen, /^HTTP\/1\.1 101 /);
+	assert.match(chosen, /\r\nSec-WebSocket-Protocol: b\r\n/);
+	assert.equal(f.upgrades.at(-1).headers["sec-websocket-protocol"], "a, b");
+
+	const refused = async (fn, headers = {}) => {
+		f.setUpgradeReply(fn);
+		const out = await f.rawUpgrade(path, headers);
+		assert.doesNotMatch(out, /^HTTP\/1\.1 101/);
+		assert.doesNotMatch(out, /HELLO/);
+	};
+	await refused(reply("Sec-WebSocket-Protocol: c\r\n"), {
+		"sec-websocket-protocol": "a, b",
+	});
+	await refused(reply("Sec-WebSocket-Protocol: a\r\n"));
+	await refused(reply("", "AAAAAAAAAAAAAAAAAAAAAAAAAAA="));
+	await refused(reply("Sec-WebSocket-Extensions: permessage-deflate\r\n"));
+	await refused(reply("X-Bad: a\x01b\r\n"));
+	await refused(reply("X-Split: a\nInjected: 1\r\n"));
+
+	const before = f.upgrades.length;
+	assert.doesNotMatch(
+		await f.rawUpgrade(path, { "sec-websocket-key": "short" }),
+		/^HTTP\/1\.1 101/,
+	);
+	assert.equal(f.upgrades.length, before);
+	assert.equal(
+		f.upgrades.at(-1).headers["sec-websocket-extensions"],
+		undefined,
+	);
 });
