@@ -46,6 +46,9 @@ FIREWALL_UNIT = "/etc/systemd/system/umiak-ports.service"
 # Owner HTTP, port previews and sandbox SSH; 443 (guest tunnel) stays open on the LAN.
 TAILNET_ONLY_PORTS = (4180, 8085, 2222)
 CLAIM_CODE = re.compile(r"Umiak one-time setup code: (\S+)")
+# Printed by deploy/compose/quickstart/server.mjs: the import runs before listening.
+QUICKSTART_READY = "Umiak owner HTTP ingress ready on"
+IMPORT_FAILED = re.compile(r"installer import failed: (.*)")
 # Quickstart services run as uid/gid 1000 (image user `node`).
 APP_UID = "1000"
 
@@ -185,10 +188,12 @@ def firewall_script(node_lan_ip: str) -> str:
     )
 
 
+# Before docker.service: the rules exist before Docker starts any container at
+# boot (Docker keeps an existing DOCKER-USER chain and only adds its jump to it).
+# PartOf re-runs the script whenever Docker restarts.
 FIREWALL_UNIT_TEXT = f"""[Unit]
 Description=Umiak: restrict owner, preview and SSH ports to the tailnet
-After=docker.service
-Requires=docker.service
+Before=docker.service
 PartOf=docker.service
 
 [Service]
@@ -263,6 +268,32 @@ def up(runner: Runner, ct_id: int, sleep=time.sleep, clock=time.monotonic, timeo
 
 def restart(runner: Runner, ct_id: int, *services: str) -> None:
     run_in(runner, ct_id, *compose("restart", *services))
+
+
+def quickstart_running(runner: Runner, ct_id: int) -> bool:
+    return bool(run_in(runner, ct_id, *compose("ps", "-q", "--status", "running", "quickstart")).strip())
+
+
+def wait_bootstrap(runner: Runner, ct_id: int, sleep=time.sleep, attempts: int = 90) -> None:
+    """Wait until quickstart listens; fail if its installer import failed since its last start.
+
+    safeBootstrap only logs the failure (the server still starts), so the health
+    wait alone cannot see it.
+    """
+    container = run_in(runner, ct_id, *compose("ps", "-q", "quickstart")).strip()
+    if not container:
+        raise InstallerError("The quickstart service has no container")
+    started = run_in(runner, ct_id, "docker", "inspect", "--format", "{{.State.StartedAt}}", container).strip()
+    for _ in range(attempts):
+        logs = run_in(runner, ct_id, *compose("logs", "--no-color", "--no-log-prefix", "--since", started, "quickstart"))
+        failures = IMPORT_FAILED.findall(logs)
+        if failures:
+            raise InstallerError("The control plane could not import the installer facts: " + failures[-1].strip())
+        if QUICKSTART_READY in logs:
+            return
+        sleep(2)
+    raise InstallerError(f"The quickstart service did not start listening; see: pct exec {ct_id} -- "
+                         f"docker compose --project-directory {DIR} logs quickstart")
 
 
 def extract_node_agent(runner: Runner, ct_id: int, image: str, dest: Path) -> Path:

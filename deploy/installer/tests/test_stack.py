@@ -126,7 +126,10 @@ def test_firewall_unit_drops_owner_ports_on_eth0_except_from_node(runner, tmp_pa
     assert "iptables -C DOCKER-USER -j UMIAK-PORTS" in script
     unit = next(i for a, i in zip(runner.commands, runner.inputs, strict=True)
                 if a[:2] == ["pct", "exec"] and a[-1] == stack.FIREWALL_UNIT)
-    assert "After=docker.service" in unit and "PartOf=docker.service" in unit
+    # Rules exist before Docker starts containers at boot; Docker keeps an existing DOCKER-USER chain.
+    assert "Before=docker.service" in unit and "After=docker.service" not in unit
+    assert "WantedBy=multi-user.target docker.service" in unit
+    assert script.index("iptables -N DOCKER-USER") < script.index("iptables -C DOCKER-USER")
     assert ["systemctl", "enable", "umiak-ports.service"] in runner.ct_commands()
     assert ["systemctl", "restart", "umiak-ports.service"] in runner.ct_commands()
     with pytest.raises(InstallerError):
@@ -197,3 +200,23 @@ def test_install_json_matches_bootstrap_contract():
         "publicUrl": "https://umiak.tail0000.ts.net",
     }
     json.dumps(data)
+
+
+def test_wait_bootstrap_reports_import_failure_since_last_start(runner):
+    runner.logs = "installer import failed: boom\nUmiak owner HTTP ingress ready on :4180\n"
+    with pytest.raises(InstallerError, match="boom"):
+        stack.wait_bootstrap(runner, 591, sleep=lambda _: None)
+    runner.logs = "Umiak owner HTTP ingress ready on :4180\n"
+    stack.wait_bootstrap(runner, 591, sleep=lambda _: None)
+
+
+def test_wait_bootstrap_times_out_without_ready_line(runner):
+    runner.logs = "starting\n"
+    with pytest.raises(InstallerError, match="did not start"):
+        stack.wait_bootstrap(runner, 591, sleep=lambda _: None, attempts=3)
+
+
+def test_quickstart_running_probe(runner):
+    assert stack.quickstart_running(runner, 591) is False
+    runner.quickstart_running = True
+    assert stack.quickstart_running(runner, 591) is True

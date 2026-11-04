@@ -6,6 +6,7 @@ import pytest
 from fake_ct import AGENT, CERT_DER, CODE, TS_STATUS, CtFake
 from test_stack import make_bundle
 from umiak_installer import main, stack, state
+from umiak_installer.pve import CommandError
 
 FLAGS = ["--non-interactive", "--yes", "--storage", "local-lvm", "--ct-id", "591", "--ct-ip", "192.168.68.50",
          "--gateway-cidr", "192.168.68.1/22", "--vmid-range", "500-589", "--template-range", "600-699",
@@ -128,7 +129,7 @@ def test_non_interactive_requires_ct_ip(env):
 def test_failing_check_without_yes_is_not_fixed_non_interactive(env):
     runner, run, printed = env
     runner.ip_forward = "0"
-    assert run([f for f in FLAGS if f != "--yes"]) == 1
+    assert run([f for f in FLAGS if f != "--yes"]) == 2
     assert not runner.path("/etc/sysctl.d/99-umiak.conf").exists()
     assert any("ip-forward" in line or "forwarding" in line for line in printed)
 
@@ -160,3 +161,138 @@ def test_complete_install_does_not_reinstall(env):
     state.save(sample("complete"), runner.path(str(state.DEFAULT_PATH)))
     assert run(["--non-interactive"]) == 2
     assert not any(a[0] == "pct" for a in runner.commands)
+
+
+def test_non_interactive_without_yes_is_a_usage_error_before_changes(env):
+    runner, run, printed = env
+    assert run([f for f in FLAGS if f != "--yes"]) == 2
+    assert any("--yes" in line for line in printed)
+    assert runner.mutations() == []
+
+
+@pytest.mark.parametrize("flag,value", [("--ct-ip", "192.168.68.1"), ("--ct-ip", "10.0.0.5"), ("--gateway-cidr", "x")])
+def test_invalid_answers_are_usage_errors(env, flag, value):
+    runner, run, printed = env
+    flags = list(FLAGS)
+    flags[flags.index(flag) + 1] = value
+    assert run(flags) == 2
+    assert runner.mutations() == []
+
+
+def test_foreign_ct_id_and_used_ip_are_refused_before_any_change(env):
+    runner, run, printed = env
+    runner.objects["/cluster/resources"].append({"vmid": 591, "type": "lxc", "name": "other", "tags": "home"})
+    assert run(FLAGS) == 2
+    assert any("591" in line for line in printed)
+    assert runner.mutations() == [] and state.load(runner.path(str(state.DEFAULT_PATH))) is None
+    runner.objects["/cluster/resources"].pop()
+    runner.ip_in_use = True
+    assert run(FLAGS) == 2
+    assert any("in use" in line for line in printed)
+    assert runner.mutations() == []
+
+
+def stuck_state(runner, phase="prepared", **answers):
+    base = {"storage": "local-lvm", "vmid_min": 500, "vmid_max": 589, "tpl_min": 600, "tpl_max": 699,
+            "ram_cap_mb": 8192, "ct_id": 591, "ct_ip": "192.168.68.50", "gw": "192.168.68.1", "cidr": 22,
+            "hostname": "umiak", "guest_dns": "1.1.1.1"}
+    base.update(answers)
+    state.save(state.InstallState(version=1, ct_id=base["ct_id"], ct_ip=base["ct_ip"], node="pve", release="1.2.3",
+                                  tailnet_host=None, phase=phase, answers=base),
+               runner.path(str(state.DEFAULT_PATH)))
+
+
+def test_resume_before_ct_created_accepts_flag_overrides_for_bad_saved_answers(env):
+    runner, run, printed = env
+    runner.objects["/cluster/resources"].append({"vmid": 591, "type": "lxc", "name": "other", "tags": "home"})
+    stuck_state(runner)
+    # Saved CT ID belongs to someone else: resume refuses with a usage error ...
+    assert run(["--non-interactive", "--yes"]) == 2
+    assert not any(a[:2] == ["pct", "create"] for a in runner.commands)
+    # ... and a flag override fixes it.
+    assert run(["--non-interactive", "--yes", "--ct-id", "592"]) == 0
+    final = saved(runner)
+    assert final.phase == "complete" and final.ct_id == 592 and final.answers["ct_id"] == 592
+    assert any(a[:3] == ["pct", "create", "592"] for a in runner.commands)
+
+
+def test_interactive_resume_re_asks_with_saved_defaults(env):
+    runner, run, printed = env
+    runner.ip_in_use = True
+    stuck_state(runner)
+    prompts = []
+
+    def answer(prompt=""):
+        prompts.append(prompt)
+        if prompt.startswith("Choose"):
+            return "1"
+        if "[y/N]" in prompt:
+            return "y"
+        if prompt.startswith("Control-plane static IPv4 address"):
+            runner.ip_in_use = False
+            return "192.168.68.51"
+        return ""
+
+    assert run([], input_fn=answer) == 0
+    assert any(p.startswith("Control-plane CT ID [591]") for p in prompts)
+    assert any(p.startswith("Control-plane static IPv4 address [192.168.68.50]") for p in prompts)
+    assert saved(runner).ct_ip == "192.168.68.51"
+
+
+def test_resume_after_ct_created_keeps_saved_answers(env):
+    runner, run, printed = env
+    runner.objects["/cluster/resources"].append({"vmid": 591, "type": "lxc", "name": "umiak-cp", "tags": "umiak"})
+    runner.ip_in_use = True  # the CT itself answers ping
+    stuck_state(runner, phase="ct-created")
+    assert run(["--non-interactive", "--yes"]) == 0
+    assert not any(a[:2] == ["pct", "create"] for a in runner.commands)
+
+
+def test_failed_bootstrap_import_stops_before_stack_up(env):
+    runner, run, printed = env
+    runner.logs = ("Umiak one-time setup code: X\n"
+                   "installer import failed: Restricted node-agent configuration mismatch\n"
+                   "Umiak owner HTTP ingress ready on :4180\n")
+    assert run(FLAGS) == 1
+    assert any("Restricted node-agent configuration mismatch" in line for line in printed)
+    assert not any("/claim#" in line for line in printed)
+    assert saved(runner).phase == "tailnet-up"
+    logs = next(a for a in runner.ct_commands() if "logs" in a)
+    assert "--since" in logs and logs[logs.index("--since") + 1] == "2026-11-04T10:00:00.000000000Z"
+
+
+def test_quickstart_running_before_secrets_is_restarted(env):
+    runner, run, printed = env
+    runner.quickstart_running = True
+    assert run(FLAGS) == 0
+    inside = runner.ct_commands()
+    push = max(n for n, a in enumerate(inside) if a[:2] == ["docker", "run"])
+    restart = next(n for n, a in enumerate(inside) if a[:2] == ["docker", "compose"] and "restart" in a)
+    assert push < restart and "quickstart" in inside[restart]
+
+
+def test_fresh_start_is_not_restarted(env):
+    runner, run, printed = env
+    assert run(FLAGS) == 0
+    assert not any(a[:2] == ["docker", "compose"] and "restart" in a for a in runner.ct_commands())
+
+
+def test_command_failure_names_step_inner_command_and_stderr_tail(env):
+    runner, run, printed = env
+    original = runner.run
+    stderr = "".join(f"err line {n}\n" for n in range(1, 31))
+
+    def failing(argv, input=None):
+        if argv[:2] == ["pct", "exec"] and "pull" in argv and "compose" in argv:
+            raise CommandError(list(argv), 18, "", stderr)
+        return original(argv, input)
+
+    runner.run = failing
+    assert run(FLAGS) == 1
+    text = "\n".join(printed)
+    assert "Starting the Umiak stack" in text
+    assert "docker compose --project-directory /opt/umiak pull --quiet" in text
+    assert "pct exec 591" not in text
+    assert "exit code 18" in text
+    lines = text.splitlines()
+    assert "err line 30" in lines and "err line 11" in lines and "err line 10" not in lines

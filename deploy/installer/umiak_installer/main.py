@@ -13,7 +13,7 @@ continues idempotently from saved answers):
 The node-agent is installed before the first `up` so the quickstart bootstrap
 import (which probes it) succeeds on the very first start.
 
-Exit codes: 0 ok, 1 failure, 2 usage (missing answers, no TTY), 3 tailnet not
+Exit codes: 0 ok, 1 failure, 2 usage (missing or invalid answers, --yes needed), 3 tailnet not
 ready in --non-interactive mode, 130 interrupted.
 """
 
@@ -87,7 +87,7 @@ class Ui:
         if self.yes:
             return True
         if not self.interactive:
-            return False
+            raise UsageError("The listed host changes need confirmation: rerun with --yes")
         return self.input(f"{prompt} [y/N]: ").strip().lower() in ("y", "yes")
 
     def choose(self, options: list[str]) -> str:
@@ -131,40 +131,60 @@ def _lan_defaults(runner: Runner) -> str | None:
         return None
 
 
-def gather(runner: Runner, args, ui: Ui) -> dict:
-    """Answers from flags, otherwise prompts (interactive) with defaults. Validated before any change."""
+def gather(runner: Runner, args, ui: Ui, saved: dict | None = None) -> dict:
+    """Answers from flags, otherwise prompts (interactive) with defaults. Validated before any change.
+
+    `saved` (answers of an unfinished install) become the defaults, so Resume
+    can correct an answer (flag or prompt) instead of failing the same way again.
+    """
+    saved = saved or {}
+
+    def default(key, fallback):
+        return str(saved[key]) if key in saved else fallback
+
     lvm = [row["storage"] for row in lvmthin_storages(runner, runner.hostname())]
-    storage = args.storage or ui.ask("LVM-thin storage for sandboxes", lvm[0] if lvm else None, "--storage")
+    storage = args.storage or ui.ask("LVM-thin storage for sandboxes", default("storage", lvm[0] if lvm else None),
+                                     "--storage")
     vmids = _range(args.vmid_range or ui.ask("Sandbox VMID range", "500-589", "--vmid-range"), "--vmid-range")
     if vmids != SANDBOX_RANGE:
         raise UsageError("This release supports only the sandbox VMID range 500-589")
-    templates = _range(args.template_range or ui.ask("Template VMID range", "600-699", "--template-range"),
+    tpl_default = f"{saved['tpl_min']}-{saved['tpl_max']}" if "tpl_min" in saved else "600-699"
+    templates = _range(args.template_range or ui.ask("Template VMID range", tpl_default, "--template-range"),
                        "--template-range")
     if templates[0] < 500 or (templates[0] <= vmids[1] and vmids[0] <= templates[1]):
         raise UsageError("Template VMIDs must start at 500 or above and not overlap the sandbox range")
     if any(templates[0] <= vmid <= templates[1] for vmid in PROTECTED_VMIDS):
         raise UsageError("Template VMID range contains a protected VMID (590, 599, 9000, 9001)")
-    ram = args.ram_cap_mb or _int(ui.ask("Sandbox RAM cap (MiB)", str(DEFAULT_RAM_CAP), "--ram-cap-mb"), "--ram-cap-mb")
+    ram = args.ram_cap_mb or _int(ui.ask("Sandbox RAM cap (MiB)", default("ram_cap_mb", str(DEFAULT_RAM_CAP)), "--ram-cap-mb"),
+                                    "--ram-cap-mb")
     if not 2048 <= ram <= 8192:
         raise UsageError("Sandbox RAM cap must be 2048-8192 MiB")
-    ct_id = args.ct_id or _int(ui.ask("Control-plane CT ID", str(DEFAULT_CT_ID), "--ct-id"), "--ct-id")
+    ct_id = args.ct_id or _int(ui.ask("Control-plane CT ID", default("ct_id", str(DEFAULT_CT_ID)), "--ct-id"), "--ct-id")
     if any(low <= ct_id <= high for low, high in (vmids, templates)):
         raise UsageError("The CT ID must lie outside the sandbox and template ranges")
-    lan = args.gateway_cidr or ui.ask("LAN router and prefix", _lan_defaults(runner), "--gateway-cidr")
-    if not args.ct_ip:
+    lan_default = f"{saved['gw']}/{saved['cidr']}" if "gw" in saved else _lan_defaults(runner)
+    lan = args.gateway_cidr or ui.ask("LAN router and prefix", lan_default, "--gateway-cidr")
+    if not args.ct_ip and "ct_ip" not in saved:
         ui.say("The control plane needs a static LAN address outside your router's DHCP pool "
                "(reserve it on the router); guests reach the gateway there.")
-    ct_ip = args.ct_ip or ui.ask("Control-plane static IPv4 address", None, "--ct-ip")
-    hostname = args.hostname or ui.ask("Tailnet hostname", "umiak", "--hostname")
+    ct_ip = args.ct_ip or ui.ask("Control-plane static IPv4 address", default("ct_ip", None), "--ct-ip")
+    hostname = args.hostname or ui.ask("Tailnet hostname", default("hostname", "umiak"), "--hostname")
     try:
         gw, prefix = lan.split("/")
         spec = ct.CtSpec(id=ct_id, ip=str(ipaddress.IPv4Address(ct_ip)), cidr=int(prefix),
                          gw=str(ipaddress.IPv4Address(gw)), storage=storage)
     except ValueError as error:
         raise UsageError(f"Invalid address: {error}") from error
-    ct.validate(spec)
     if not tailnet.HOSTNAME.fullmatch(hostname):
         raise UsageError("Invalid tailnet hostname: use lowercase letters, digits and hyphens")
+    try:
+        ct.validate(spec)
+        # Read-only: CT ID ownership and a free address, before any host change.
+        ct.check_target(runner, spec)
+    except UsageError:
+        raise
+    except InstallerError as error:
+        raise UsageError(str(error)) from error
     return {"storage": storage, "vmid_min": vmids[0], "vmid_max": vmids[1], "tpl_min": templates[0],
             "tpl_max": templates[1], "ram_cap_mb": ram, "ct_id": ct_id, "ct_ip": spec.ip, "gw": spec.gw,
             "cidr": spec.cidr, "hostname": hostname, "guest_dns": GUEST_DNS}
@@ -198,6 +218,11 @@ class Flow:
         self.state_path = state_path
         self.sleep = sleep
         self.current: state.InstallState | None = state.load(state_path)
+        self.step = "Starting the installer"
+
+    def progress(self, step: str) -> None:
+        self.step = step
+        self.ui.say(step + "…")
 
     def reached(self, phase: str) -> bool:
         return self.current is not None and state.PHASES.index(self.current.phase) >= state.PHASES.index(phase)
@@ -228,9 +253,14 @@ class Flow:
             raise InstallerError("Cancelled; nothing was changed by this step. Rerun with --yes to accept.")
 
     def run(self, args) -> str:
-        resumed = self.current is not None
-        run_checklist(self.runner, self.ui, (self.current.answers.get("storage") if resumed else None) or args.storage)
-        a = dict(self.current.answers) if resumed and self.current.answers else gather(self.runner, args, self.ui)
+        saved = dict(self.current.answers) if self.current is not None else {}
+        self.progress("Checking prerequisites")
+        run_checklist(self.runner, self.ui, args.storage or saved.get("storage"))
+        self.step = "Questions"
+        if saved and self.reached("ct-created"):
+            a = saved  # The CT exists with these answers; they are fixed from here on.
+        else:
+            a = gather(self.runner, args, self.ui, saved)
         self.plan(a)
         runner, ct_id = self.runner, a["ct_id"]
         node = runner.hostname()
@@ -239,16 +269,16 @@ class Flow:
                                          vmid_min=a["vmid_min"], vmid_max=a["vmid_max"], tpl_min=a["tpl_min"],
                                          tpl_max=a["tpl_max"])
         out_dir = runner.path(SECRETS_DIR)
-        self.ui.say("Preparing Proxmox objects…")
+        self.progress("Preparing Proxmox objects")
         result = prepare_host.prepare(runner, cfg, out_dir)
         self.save("prepared", a)
 
-        self.ui.say(f"Creating control-plane container {ct_id}…")
+        self.progress(f"Creating control-plane container {ct_id}")
         ct.create(runner, ct.CtSpec(id=ct_id, ip=a["ct_ip"], cidr=a["cidr"], gw=a["gw"], storage=a["storage"]),
                   sleep=self.sleep)
         self.save("ct-created", a)
 
-        self.ui.say("Connecting the control plane to your tailnet…")
+        self.progress("Connecting the control plane to your tailnet")
         tailnet.up(runner, ct_id, a["hostname"], out=self.ui.say, sleep=self.sleep)
         while True:
             info = tailnet.status(runner, ct_id)
@@ -263,16 +293,17 @@ class Flow:
         identity = tailnet.parse(info)
         self.save("tailnet-up", a, identity.dns_name)
 
-        self.ui.say("Starting the Umiak stack…")
-        self.start_stack(a, result, identity, out_dir, restart=self.reached("stack-up"))
+        self.progress("Starting the Umiak stack")
+        self.start_stack(a, result, identity, out_dir)
         self.save("stack-up", a)
 
+        self.progress("Publishing the control plane on your tailnet")
         tailnet.serve(runner, ct_id)
         code = stack.wait_claim_code(runner, ct_id, sleep=self.sleep)
         self.save("complete", a)
         return tailnet.claim_link(identity.dns_name, code)
 
-    def start_stack(self, a: dict, result, identity: tailnet.TailnetInfo, out_dir: Path, restart: bool) -> None:
+    def start_stack(self, a: dict, result, identity: tailnet.TailnetInfo, out_dir: Path) -> None:
         runner, ct_id, node = self.runner, a["ct_id"], self.runner.hostname()
         work = runner.path(prepare_host.STATE_DIR) / "work"
         preview = stack.preview_domain(identity.ipv4)
@@ -297,12 +328,31 @@ class Flow:
             limits=limits,
         ), out_dir)
         stack.write_network(runner, ct_id, stack.network_json(a["ct_ip"], preview, a["guest_dns"]), image, work)
+        # The bootstrap import runs only when quickstart starts: if it already
+        # runs (Resume, earlier partial run), restart it after the new secrets land.
+        was_running = stack.quickstart_running(runner, ct_id)
         stack.push_secrets(runner, ct_id, {name: out_dir / name for name in stack.SECRET_NAMES}, image)
         stack.start(runner, ct_id, sleep=self.sleep)
-        if restart:
-            # The bootstrap import runs at quickstart start; re-import refreshed facts.
+        if was_running:
             stack.restart(runner, ct_id, "quickstart")
             stack.wait_healthy(runner, ct_id, sleep=self.sleep)
+        stack.wait_bootstrap(runner, ct_id, sleep=self.sleep)
+
+
+def describe_failure(step: str, error: CommandError, tail: int = 20) -> str:
+    """Step, the command (inside the CT for `pct exec`) and the end of its stderr.
+
+    Secrets never travel in argv (files and stdin only), so the command is safe to show.
+    """
+    argv = error.argv
+    shown = argv[4:] if argv[:2] == ["pct", "exec"] and len(argv) > 4 else argv
+    lines = [f"Error during '{step}': `{' '.join(shown)}` failed with exit code {error.returncode}."]
+    output = (error.stderr or "").strip().splitlines()[-tail:]
+    if output:
+        lines.append(f"Last {len(output)} lines of its error output:")
+        lines.extend(output)
+    lines.append("Fix the cause and rerun the installer to resume.")
+    return "\n".join(lines)
 
 
 def main(argv=None, runner: Runner | None = None, bundle: release.Release | None = None, out=print, input_fn=input,
@@ -310,6 +360,11 @@ def main(argv=None, runner: Runner | None = None, bundle: release.Release | None
     args = build_parser().parse_args(argv)
     runner = runner or Runner()
     ui = Ui(interactive=not args.non_interactive, yes=args.yes, input_fn=input_fn, out=out)
+    flow = None
+
+    def step() -> str:
+        return flow.step if flow is not None else "Starting the installer"
+
     try:
         bundle = bundle or release.current()
         flow = Flow(runner, ui, bundle, state_path or runner.path(str(state.DEFAULT_PATH)), sleep)
@@ -335,11 +390,10 @@ def main(argv=None, runner: Runner | None = None, bundle: release.Release | None
         out(f"{error}\nThen rerun the installer to resume.")
         return 3
     except InstallerError as error:
-        out(f"Error: {error}")
+        out(f"Error during '{step()}': {error}")
         return 1
     except CommandError as error:
-        # Only the program name: arguments and output may carry data not meant for logs.
-        out(f"Error: {error}. Rerun the installer to resume.")
+        out(describe_failure(step(), error))
         return 1
     except KeyboardInterrupt:
         out("Interrupted. Rerun the installer to resume.")

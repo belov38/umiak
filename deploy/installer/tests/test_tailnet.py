@@ -72,3 +72,11 @@ def test_serve_runs_https_proxy_to_trusted_listener(runner):
 
 def test_claim_link_format():
     assert tailnet.claim_link("umiak.tail0000.ts.net", "Ab+c/d") == "https://umiak.tail0000.ts.net/claim#Ab%2Bc%2Fd"
+
+
+def test_up_asks_for_device_approval(runner):
+    printed = []
+    runner.ts_states = [{"BackendState": "NeedsMachineAuth"}, {"BackendState": "NeedsMachineAuth"}, TS_STATUS]
+    tailnet.up(runner, 591, "umiak", out=printed.append, sleep=lambda _: None)
+    line = "Approve this device in the Tailscale admin console: https://login.tailscale.com/admin/machines"
+    assert printed.count(line) == 1

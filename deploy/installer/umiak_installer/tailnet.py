@@ -17,6 +17,7 @@ from .ct import run_in
 from .pve import CommandError, InstallerError, Runner
 
 ADMIN_DNS_URL = "https://login.tailscale.com/admin/dns"
+MACHINES_URL = "https://login.tailscale.com/admin/machines"
 HOSTNAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 
 
@@ -72,6 +73,9 @@ def up(runner: Runner, ct_id: int, hostname: str, out=print, sleep=time.sleep, t
         if url and url != shown:
             out(f"To connect Umiak to your tailnet, open: {url}")
             shown = url
+        if info.get("BackendState") == "NeedsMachineAuth" and shown != MACHINES_URL:
+            out(f"Approve this device in the Tailscale admin console: {MACHINES_URL}")
+            shown = MACHINES_URL
         if clock() >= deadline:
             raise InstallerError("Tailscale login did not complete in time; rerun the installer to resume")
         sleep(2)

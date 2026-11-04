@@ -10,6 +10,7 @@ An existing guest with the requested ID is reused only when it is a CT tagged
 """
 
 import ipaddress
+import re
 import time
 from dataclasses import dataclass
 
@@ -17,7 +18,8 @@ from .prepare_host import NAME
 from .pve import CommandError, InstallerError, Runner, get
 
 TEMPLATE_STORAGE = "local"
-TEMPLATE = "debian-13-standard_13.6-1_amd64.tar.zst"
+# Any Debian 13 point release Proxmox publishes; the newest one wins.
+TEMPLATE_RE = re.compile(r"debian-13-standard_(\d+(?:\.\d+)*-\d+)_amd64\.tar\.zst")
 TAG = "umiak"
 DOCKER_KEY_URL = "https://download.docker.com/linux/debian/gpg"
 DOCKER_KEY = "/etc/apt/keyrings/docker.asc"
@@ -91,7 +93,7 @@ def is_umiak_ct(row: dict) -> bool:
     return row.get("type") == "lxc" and TAG in tags
 
 
-def _address_in_use(runner: Runner, ip: str) -> bool:
+def address_in_use(runner: Runner, ip: str) -> bool:
     try:
         runner.run(["ping", "-c", "1", "-W", "1", ip])
         return True
@@ -99,15 +101,48 @@ def _address_in_use(runner: Runner, ip: str) -> bool:
         return False
 
 
-def _ensure_template(runner: Runner) -> None:
-    listing = runner.run(["pveam", "list", TEMPLATE_STORAGE])
-    if f"{TEMPLATE_STORAGE}:vztmpl/{TEMPLATE}" not in listing.split():
-        runner.run(["pveam", "download", TEMPLATE_STORAGE, TEMPLATE])
+def check_target(runner: Runner, spec: CtSpec) -> dict | None:
+    """Read-only: the CT ID must be free or an Umiak CT; a new CT needs a free address.
+
+    Returns the existing Umiak CT row, or None when the CT will be created.
+    """
+    row = existing(runner, spec.id)
+    if row is not None and not is_umiak_ct(row):
+        raise InstallerError(f"Guest {spec.id} exists and is not an Umiak container; choose another CT ID")
+    if row is None and address_in_use(runner, spec.ip):
+        raise InstallerError(f"Address {spec.ip} is already in use on the LAN; choose a free static address")
+    return row
 
 
-def create_argv(spec: CtSpec) -> list[str]:
+def _newest(names) -> str | None:
+    found = [(tuple(int(n) for n in re.findall(r"\d+", m.group(1))), m.group(0))
+             for m in (TEMPLATE_RE.fullmatch(name) for name in names) if m]
+    return max(found)[1] if found else None
+
+
+def ensure_template(runner: Runner) -> str:
+    """Newest Debian 13 template already on `local`, else the newest available one (downloaded)."""
+    try:
+        runner.run(["pveam", "update"])
+    except CommandError:
+        pass  # A stale index still lists templates; a local one may already exist.
+    prefix = f"{TEMPLATE_STORAGE}:vztmpl/"
+    local = [word[len(prefix):] for word in runner.run(["pveam", "list", TEMPLATE_STORAGE]).split()
+             if word.startswith(prefix)]
+    name = _newest(local)
+    if name is None:
+        available = [line.split()[1] for line in runner.run(["pveam", "available", "--section", "system"]).splitlines()
+                     if len(line.split()) == 2]
+        name = _newest(available)
+        if name is None:
+            raise InstallerError("No Debian 13 container template is available from Proxmox (pveam available)")
+        runner.run(["pveam", "download", TEMPLATE_STORAGE, name])
+    return name
+
+
+def create_argv(spec: CtSpec, template: str) -> list[str]:
     return [
-        "pct", "create", str(spec.id), f"{TEMPLATE_STORAGE}:vztmpl/{TEMPLATE}",
+        "pct", "create", str(spec.id), f"{TEMPLATE_STORAGE}:vztmpl/{template}",
         "--unprivileged", "1", "--features", "nesting=1,keyctl=1", "--dev0", "/dev/net/tun",
         "--memory", str(spec.memory), "--cores", str(spec.cores), "--rootfs", f"{spec.storage}:{spec.disk_gb}",
         "--net0", f"name=eth0,bridge=vmbr0,ip={spec.ip}/{spec.cidr},gw={spec.gw}",
@@ -129,10 +164,10 @@ def _trust_key(runner: Runner, ct_id: int, url: str, path: str, fingerprint: str
     run_in(runner, ct_id, "install", "-d", "-m", "0755", path.rsplit("/", 1)[0])
     run_in(runner, ct_id, "curl", "-fsSL", "--proto", "=https", "-o", path, url)
     listing = run_in(runner, ct_id, "gpg", "--show-keys", "--with-colons", path)
-    # The first fpr record after the primary key ("pub") is its fingerprint.
+    # Exactly one primary key ("pub"); the fpr record right after it is its fingerprint.
     lines = listing.splitlines()
-    primary = next((lines[n + 1] for n, line in enumerate(lines[:-1]) if line.startswith("pub:")), "")
-    if primary.split(":")[9:10] != [fingerprint]:
+    primaries = [lines[n + 1] if n + 1 < len(lines) else "" for n, line in enumerate(lines) if line.startswith("pub:")]
+    if len(primaries) != 1 or primaries[0].split(":")[9:10] != [fingerprint]:
         run_in(runner, ct_id, "rm", "-f", path)
         raise InstallerError(f"Unexpected apt repository signing key from {url}; refusing to trust it")
     run_in(runner, ct_id, "chmod", "0644", path)
@@ -153,14 +188,8 @@ def install_packages(runner: Runner, ct_id: int) -> None:
 def create(runner: Runner, spec: CtSpec, sleep=time.sleep) -> None:
     """Create and start the CT (or resume an existing Umiak CT), then install packages. Idempotent."""
     validate(spec)
-    row = existing(runner, spec.id)
-    if row is not None and not is_umiak_ct(row):
-        raise InstallerError(f"Guest {spec.id} exists and is not an Umiak container; choose another CT ID")
-    if row is None:
-        if _address_in_use(runner, spec.ip):
-            raise InstallerError(f"Address {spec.ip} is already in use on the LAN; choose a free static address")
-        _ensure_template(runner)
-        runner.run(create_argv(spec))
+    if check_target(runner, spec) is None:
+        runner.run(create_argv(spec, ensure_template(runner)))
     status = runner.run(["pct", "status", str(spec.id)])
     if "running" not in status:
         runner.run(["pct", "start", str(spec.id)])

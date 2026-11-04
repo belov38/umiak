@@ -19,18 +19,44 @@ def runner(tmp_path):
     return CtFake(tmp_path / "host")
 
 
-def test_create_emits_exact_pct_create_and_downloads_missing_template(runner):
+NEWEST = "debian-13-standard_13.6-1_amd64.tar.zst"
+
+
+def test_create_emits_exact_pct_create_and_downloads_newest_available_template(runner):
     ct.create(runner, SPEC, sleep=lambda _: None)
-    assert ["pveam", "download", "local", ct.TEMPLATE] in runner.commands
+    assert runner.commands.index(["pveam", "update"]) < runner.commands.index(["pveam", "download", "local", NEWEST])
     assert CREATE in runner.commands
     assert ["pct", "start", "591"] in runner.commands
-    assert runner.commands.index(["pveam", "download", "local", ct.TEMPLATE]) < runner.commands.index(CREATE)
+    assert runner.commands.index(["pveam", "download", "local", NEWEST]) < runner.commands.index(CREATE)
 
 
-def test_create_skips_download_when_template_present(runner):
-    runner.template_present = True
+def test_create_uses_newest_local_debian_13_template_without_download(runner):
+    runner.local_templates = ["debian-13-standard_13.2-1_amd64.tar.zst", "debian-13-standard_13.10-1_amd64.tar.zst",
+                              "debian-12-standard_12.12-1_amd64.tar.zst"]
     ct.create(runner, SPEC, sleep=lambda _: None)
     assert not any(a[:2] == ["pveam", "download"] for a in runner.commands)
+    create = next(a for a in runner.commands if a[:2] == ["pct", "create"])
+    assert create[3] == "local:vztmpl/debian-13-standard_13.10-1_amd64.tar.zst"
+
+
+def test_newer_point_release_is_picked_up(runner):
+    runner.available.append("debian-13-standard_13.7-2_amd64.tar.zst")
+    ct.create(runner, SPEC, sleep=lambda _: None)
+    assert ["pveam", "download", "local", "debian-13-standard_13.7-2_amd64.tar.zst"] in runner.commands
+
+
+def test_no_debian_13_template_is_an_error(runner):
+    runner.available = ["debian-12-standard_12.12-1_amd64.tar.zst"]
+    with pytest.raises(InstallerError, match="Debian 13"):
+        ct.create(runner, SPEC, sleep=lambda _: None)
+    assert not any(a[:2] == ["pct", "create"] for a in runner.commands)
+
+
+def test_pveam_update_failure_still_uses_local_template(runner):
+    runner.local_templates = [NEWEST]
+    runner.fail_on = lambda argv: argv == ["pveam", "update"]
+    ct.create(runner, SPEC, sleep=lambda _: None)
+    assert CREATE in runner.commands
 
 
 def test_create_installs_docker_and_tailscale_from_signed_repos_without_pipe_to_shell(runner):
@@ -51,12 +77,19 @@ def test_create_installs_docker_and_tailscale_from_signed_repos_without_pipe_to_
     assert len(gpg) == 2 and gpg[-1] < update[-1]
 
 
-def test_create_rejects_wrong_repository_key(runner):
+@pytest.mark.parametrize("listing", [
+    "pub:-\nfpr:::::::::DEADBEEF:\n",
+    # The expected key plus a second primary key in the same file.
+    f"pub:-\nfpr:::::::::{ct.DOCKER_KEY_FPR}:\npub:-\nfpr:::::::::DEADBEEF:\n",
+    f"sub:-\nfpr:::::::::{ct.DOCKER_KEY_FPR}:\n",
+    "pub:-\n",
+])
+def test_create_rejects_wrong_repository_key(runner, listing):
     original = runner._in_ct
 
     def bad_key(argv, input):
         if argv[:2] == ["gpg", "--show-keys"]:
-            return "pub:-\nfpr:::::::::DEADBEEF:\n"
+            return listing
         return original(argv, input)
 
     runner._in_ct = bad_key
