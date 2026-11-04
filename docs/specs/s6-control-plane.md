@@ -1,52 +1,52 @@
-# S6. Ядро control plane: спецификация
+# S6. Control plane core: specification
 
-Статус: согласовано (master-сессия от имени Ильи), 2026-10-29. Дополнено MVP-рекомендациями R2, R10, R11 (`docs/roadmap-phase2.md` §6, решения master-сессии 2026-10-29). Область S6 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§3 модель данных, §6 warm pool, §10 развёртывание, §11 безопасность). Опирается на `docs/specs/s1-proxmox-foundation.md` (примитивы, аллокатор, SMBIOS §6.4, драйвер хранилища) и `docs/specs/s2-tunnel-protocol.md` (реестр, события, `agent-client`, §15).
+Status: agreed (the master session on Ilia's behalf), 2026-10-29. Supplemented with the MVP recommendations R2, R10, R11 (`docs/roadmap-phase2.md` §6, decisions of the master session 2026-10-29). Area S6 from `docs/roadmap.md`. Architecture: `docs/architecture.md` (§3 data model, §6 warm pool, §10 deployment, §11 security). Relies on `docs/specs/s1-proxmox-foundation.md` (primitives, allocator, SMBIOS §6.4, storage driver) and `docs/specs/s2-tunnel-protocol.md` (registry, events, `agent-client`, §15).
 
-Пометка **[решение S6]** — решение автора спеки в рамках брифа без отдельного согласования; его можно менять при планировании, если причина записана. Решения [решение S6] и правки по итогам независимого ревью тоже одобрены master-сессией. Остальное согласовано master-сессией от имени Ильи (ответы на Q1–Q7 и на открытые вопросы §21, 2026-10-29).
+The mark **[S6 decision]** is a decision of the spec author within the brief without separate agreement; it can be changed during planning if the reason is recorded. The [S6 decision]s and the edits after the independent review were also approved by the master session. The rest was agreed with the master session on Ilia's behalf (answers to Q1–Q7 and to the open questions of §21, 2026-10-29).
 
-## 1. Зачем
+## 1. Why
 
-S6 — TypeScript-ядро между публичным API (S7) и инфраструктурой (S1 Proxmox, S2 туннель). Оно знает, какие sandbox и machine существуют и в каком они состоянии, выполняет create / stop / resume / fork / delete надёжно при сбоях и повторах, держит warm pool и сверяет базу с реальностью Proxmox.
+S6 is the TypeScript core between the public API (S7) and the infrastructure (S1 Proxmox, S2 tunnel). It knows which sandboxes and machines exist and in what state, performs create / stop / resume / fork / delete reliably under failures and retries, holds the warm pool, and reconciles the database with the reality of Proxmox.
 
-Что считается успехом:
-1. Create из тёплого пула доходит до `ready` за секунды; холодный create работает, когда пул пуст.
-2. Ни одна операция не оставляет висящих VM, LV, VMID или строк при падении пода worker на любом шаге; повтор доводит её до конца.
-3. Две операции над одной sandbox никогда не выполняются одновременно; повтор запроса с тем же `Idempotency-Key` не создаёт второй sandbox.
-4. RAM на ноде никогда не превышает лимит (8 GB в PoC), даже при параллельных create из нескольких подов.
-5. Долгая работа агента внутри sandbox никогда не останавливается по простою.
+What counts as success:
+1. Create from the warm pool reaches `ready` in seconds; a cold create works when the pool is empty.
+2. No operation leaves dangling VMs, LVs, VMIDs, or rows when a worker pod dies at any step; a retry brings it to the end.
+3. Two operations on one sandbox never run at the same time; a repeated request with the same `Idempotency-Key` does not create a second sandbox.
+4. The RAM on a node never exceeds the limit (8 GB in the PoC), even with parallel creates from several pods.
+5. Long work of the agent inside a sandbox is never stopped for idleness.
 
-## 2. Цели, не-цели, анти-цели
+## 2. Goals, non-goals, anti-goals
 
-**Цели**
-- Модель данных рантайма в Postgres (схема `runtime`), готовая к нескольким кластерам и нодам.
-- Машины состояний Sandbox, Machine и Operation с явными переходами и инвариантами.
-- `apps/worker` на pg-boss: задания операций, контроллеры (пул, health, auto-stop, reconcile, cleanup), горизонтальное масштабирование в Kubernetes.
-- Warm pool с учётом RAM и версий шаблонов.
-- Оркестрация через примитивы S1 и события S2.
-- Хранение env и секретов sandbox в зашифрованном виде.
-- Интерфейсы для S7 (сервисный слой), S4 (маршруты), S3 (RPC агента), S5 (регистрация сборок шаблонов), S8 (конфигурация).
+**Goals**
+- The runtime data model in Postgres (schema `runtime`), ready for several clusters and nodes.
+- The state machines of Sandbox, Machine, and Operation with explicit transitions and invariants.
+- `apps/worker` on pg-boss: operation jobs, controllers (pool, health, auto-stop, reconcile, cleanup), horizontal scaling in Kubernetes.
+- A warm pool accounting for RAM and template versions.
+- Orchestration through the S1 primitives and the S2 events.
+- Storage of sandbox env and secrets in encrypted form.
+- Interfaces for S7 (the service layer), S4 (routes), S3 (agent RPC), S5 (registration of template builds), S8 (configuration).
 
-**Не-цели (другие области)**
-- Форма публичного REST API, коды HTTP, NDJSON, SDK (S7). Здесь только сервисный слой и доменные коды ошибок.
-- Payload, UI, пользователи, команды, API-ключи (S8). S6 только читает конфигурацию.
-- Внутренности агента (S3), gateway (S4), сборка шаблонов (S5), Windows (S9).
-- Перенос sandbox между нодами, архив в PBS, периодические снапшоты, webhooks (фаза 2).
+**Non-goals (other areas)**
+- The form of the public REST API, HTTP codes, NDJSON, SDKs (S7). Here only the service layer and domain error codes.
+- Payload, UI, users, teams, API keys (S8). S6 only reads the configuration.
+- Agent internals (S3), the gateway (S4), template builds (S5), Windows (S9).
+- Moving a sandbox between nodes, archive to PBS, periodic snapshots, webhooks (phase 2).
 
-**Анти-цели (провал, даже если всё работает)**
-- Machine выдана второй sandbox или вернулась в пул после того, как к ней прикоснулся арендатор.
-- Секрет (env, secret-файлы, bootstrap secret) попал в логи, в данные заданий pg-boss, в `operations.request`, в снапшот или в метрики.
-- Reconciler удалил что-то, что не помечено нами (не в pool `umiak`, без тега `umiak`, вне диапазона VMID).
-- Sandbox с запущенной командой или открытым PTY остановлена по простою.
-- Сумма RAM на ноде превысила лимит из-за гонки двух подов.
+**Anti-goals (a failure even if everything works)**
+- A machine is given to a second sandbox or returned to the pool after a tenant has touched it.
+- A secret (env, secret files, the bootstrap secret) gets into logs, pg-boss job data, `operations.request`, a snapshot, or metrics.
+- The reconciler deleted something that is not marked as ours (not in the pool `umiak`, without the tag `umiak`, outside the VMID range).
+- A sandbox with a running command or an open PTY was stopped for idleness.
+- The sum of RAM on a node exceeded the limit due to a race of two pods.
 
-## 3. Ограничения
+## 3. Constraints
 
-- Control plane в Kubernetes: `api`, `worker`, `web`, `gateway`. Postgres один, схемы: `runtime` (S6), `tunnel` (S2), `payload` (S8), `pgboss` (очередь).
-- PoC: одна нода `pve`, RAM всех sandbox и warm machine ≤ 8 GB, VMID 500–598, хранилище `local-lvm` (S1).
-- Toolchain из `mise.toml` (Node 26.13.0, pnpm 12.16.1). Версии библиотек в §17 проверены 2026-10-29; при реализации перепроверить (`CLAUDE.md`).
-- Раскладка репозитория по `CLAUDE.md`: TS в `apps/` и `packages/`, тесты vitest, линт biome.
+- The control plane in Kubernetes: `api`, `worker`, `web`, `gateway`. One Postgres, schemas: `runtime` (S6), `tunnel` (S2), `payload` (S8), `pgboss` (the queue).
+- PoC: one node `pve`, the RAM of all sandboxes and warm machines ≤ 8 GB, VMID 500–598, storage `local-lvm` (S1).
+- The toolchain from `mise.toml` (Node 26.13.0, pnpm 12.16.1). The library versions in §17 were checked on 2026-10-29; re-check during implementation (`CLAUDE.md`).
+- The repository layout per `CLAUDE.md`: TS in `apps/` and `packages/`, vitest tests, biome lint.
 
-## 4. Обзор
+## 4. Overview
 
 ```
                  apps/api (Hono)                         apps/worker (pg-boss)
@@ -61,29 +61,29 @@ S6 — TypeScript-ядро между публичным API (S7) и инфра�
            Payload Local API (payload.*)  — packages/config
 ```
 
-### 4.1 Пакеты
+### 4.1 Packages
 
-| Путь | Что | Кто использует |
+| Path | What | Who uses it |
 |---|---|---|
-| `packages/db` | Раннер SQL-миграций из `db/migrations/` (§5.12); Drizzle-схема `runtime` и описания таблиц `tunnel` для типов и запросов; Postgres-реализация `AllocatorStore` | core, worker, api |
-| `packages/core` | Доменная логика без HTTP: машины состояний (чистые функции переходов), `SandboxService`, admission и учёт RAM, идемпотентность, шифрование секретов, приём событий агента, маршруты для S4 | api, worker |
-| `packages/config` | `ConfigReader`: реализация на Payload Local API и статическая (YAML) для PoC до S8 и для тестов | core, worker, api |
-| `packages/pve` | S1 как есть; S6 подставляет Postgres-реализацию `AllocatorStore` (живёт в `packages/db`) | worker |
-| `packages/agent-client` | S2 как есть | worker, api |
-| `apps/worker` | Процесс worker: регистрация очередей pg-boss, обработчики, контроллеры, метрики, graceful shutdown | — |
-| `apps/api` | S7. S6 даёт ему внутренние ручки как тонкие обёртки над `packages/core` (§14.1) | — |
+| `packages/db` | The SQL migration runner from `db/migrations/` (§5.12); the Drizzle schema `runtime` and descriptions of the `tunnel` tables for types and queries; the Postgres implementation of `AllocatorStore` | core, worker, api |
+| `packages/core` | Domain logic without HTTP: state machines (pure transition functions), `SandboxService`, admission and RAM accounting, idempotency, secret encryption, agent event intake, routes for S4 | api, worker |
+| `packages/config` | `ConfigReader`: an implementation on the Payload Local API and a static one (YAML) for the PoC before S8 and for tests | core, worker, api |
+| `packages/pve` | S1 as is; S6 substitutes the Postgres implementation of `AllocatorStore` (lives in `packages/db`) | worker |
+| `packages/agent-client` | S2 as is | worker, api |
+| `apps/worker` | The worker process: pg-boss queue registration, handlers, controllers, metrics, graceful shutdown | — |
+| `apps/api` | S7. S6 gives it internal endpoints as thin wrappers over `packages/core` (§14.1) | — |
 
-Правило: `packages/core` не импортирует `packages/pve` напрямую в коде, который работает в `api`; обращения к Proxmox и к агенту в рамках операций делает только worker. `api` ходит к агенту только для команд, файлов и портов (S7) через `agent-client`.
+Rule: `packages/core` does not import `packages/pve` directly in code that runs in `api`; calls to Proxmox and the agent within operations are made only by the worker. `api` talks to the agent only for commands, files, and ports (S7) through `agent-client`.
 
-## 5. Модель данных (схема `runtime`)
+## 5. Data model (schema `runtime`)
 
-Общие правила [решение S6]:
-- Первичные ключи — UUIDv7 (`uuidv7()` из Postgres 18). Исключение: `commands.id` — ULID (S2 §9.1), `machines.id` = `machineId` из S2 (UUIDv7).
-- Время — `timestamptz`. Перечисления — `text` с `CHECK` (проще миграции, чем `enum`).
-- У изменяемых строк с машиной состояний есть `version int` для оптимистичной блокировки. Переход состояния — всегда `UPDATE … WHERE id = $1 AND state = ANY($from) RETURNING`; ноль строк означает конфликт.
-- Публичный формат id (префиксы, кодировка) решает S7 поверх UUID.
+General rules [S6 decision]:
+- Primary keys are UUIDv7 (`uuidv7()` from Postgres 18). Exceptions: `commands.id` is a ULID (S2 §9.1), `machines.id` = `machineId` from S2 (UUIDv7).
+- Time is `timestamptz`. Enumerations are `text` with `CHECK` (migrations are simpler than with `enum`).
+- Mutable rows with a state machine have `version int` for optimistic locking. A state transition is always `UPDATE … WHERE id = $1 AND state = ANY($from) RETURNING`; zero rows means a conflict.
+- The public id format (prefixes, encoding) is decided by S7 on top of the UUID.
 
-### 5.1 Топология (multi-cluster с первого дня)
+### 5.1 Topology (multi-cluster from day one)
 
 ```
 providers(                         -- one Proxmox cluster
@@ -114,9 +114,9 @@ storages(
   unique(provider_id, node_id, name))
 ```
 
-Строки топологии заводятся миграцией-сидом или CLI оператора (`umiak-admin` в `apps/worker`, §15). Секреты — только файлы из Kubernetes Secret по `secret_ref` (S1 §6.1).
+Topology rows are created by a seed migration or the operator CLI (`umiak-admin` in `apps/worker`, §15). Secrets are only files from a Kubernetes Secret by `secret_ref` (S1 §6.1).
 
-### 5.2 Сборки шаблонов
+### 5.2 Template builds
 
 ```
 template_builds(
@@ -136,9 +136,9 @@ template_builds(
 unique (template_slug, node_id) where status = 'active'
 ```
 
-Пишет S5 (пайплайн регистрирует сборку и переводит её в `active`). До S5 шаблон 599 заводится сидом. Переход в `active` меняет поколение пула (§9.4). `deprecated` не используется для новых machine, но существующие sandbox на нём живут: их диски свои.
+Written by S5 (the pipeline registers a build and moves it to `active`). Before S5 template 599 is created by a seed. The transition to `active` changes the pool generation (§9.4). `deprecated` is not used for new machines, but existing sandboxes on it live on: their disks are their own.
 
-### 5.3 Аллокатор (из S1 §6.5)
+### 5.3 Allocator (from S1 §6.5)
 
 ```
 vmid_leases(
@@ -151,9 +151,9 @@ vmid_leases(
 unique (machine_id) where machine_id is not null and state <> 'releasing'
 ```
 
-`AllocatorStore` из `packages/pve` реализуется поверх этой таблицы. Свободный VMID выбирается так же, как в S1: меньший из диапазона, которого нет ни в таблице, ни в Proxmox, ни среди LV. Выделение идемпотентно по `machine_id`: если у machine уже есть lease не в `releasing`, возвращается он (§7.4).
+`AllocatorStore` from `packages/pve` is implemented on top of this table. A free VMID is chosen as in S1: the smaller one from the range that is neither in the table, nor in Proxmox, nor among the LVs. Allocation is idempotent by `machine_id`: if a machine already has a lease not in `releasing`, it is returned (§7.4).
 
-### 5.4 Machines и диски
+### 5.4 Machines and disks
 
 ```
 machines(
@@ -188,11 +188,11 @@ disks(
   created_at, deleted_at)
 ```
 
-Триггер запрещает менять `machines.sandbox_id`, если он уже не `null`. Это и есть правило S2 «machine не переиспользуется».
+A trigger forbids changing `machines.sandbox_id` if it is no longer `null`. This is the S2 rule "a machine is not reused".
 
-`disks` — зеркало того, что вернул драйвер (`DiskSet`, `SnapshotRef`). Reconciler сверяет его с `umiak-node lv.list`.
+`disks` mirrors what the driver returned (`DiskSet`, `SnapshotRef`). The reconciler compares it with `umiak-node lv.list`.
 
-### 5.5 Снапшоты
+### 5.5 Snapshots
 
 ```
 snapshots(
@@ -254,9 +254,9 @@ sandbox_events(                     -- audit and outbox for later webhooks
   data jsonb, created_at)
 ```
 
-Строка `deleted` остаётся как надгробие (для `GET` и аудита) и удаляется cleanup через 30 дней [решение S6].
+A `deleted` row stays as a tombstone (for `GET` and audit) and is deleted by cleanup after 30 days [S6 decision].
 
-### 5.7 Операции и идемпотентность
+### 5.7 Operations and idempotency
 
 ```
 operations(
@@ -287,7 +287,7 @@ idempotency_keys(
   primary key(principal_id, scope, key))
 ```
 
-### 5.8 Команды и порты
+### 5.8 Commands and ports
 
 ```
 commands(
@@ -315,9 +315,9 @@ unique (sandbox_id, port) where deleted_at is null
 unique (label) where deleted_at is null
 ```
 
-Записи `commands` создаёт S7 (до вызова `Process/Start`), статус обновляют S7 (по стриму) и обработчик событий (§10). Терминальный статус не перезаписывается. Хранение 90 дней (cleanup).
+The `commands` records are created by S7 (before calling `Process/Start`), the status is updated by S7 (from the stream) and by the event handler (§10). A terminal status is not overwritten. Retention 90 days (cleanup).
 
-### 5.9 События агента
+### 5.9 Agent events
 
 ```
 agent_events(
@@ -334,15 +334,15 @@ agent_synthetic_events(
   primary key(machine_id, epoch, type))
 ```
 
-Хранятся 7 дней [решение S6].
+Kept 7 days [S6 decision].
 
-### 5.10 Таблицы S2 (схема `tunnel`)
+### 5.10 S2 tables (schema `tunnel`)
 
-S6 пишет только `tunnel_credentials.bs_hash` (при подготовке machine) и `tunnel_credentials.retired_at` (при удалении). Читает `tunnel_sessions` (подключена ли machine, `disconnected_at`, `boot_id`, `capabilities`) и `gateway_instances` (свежесть heartbeat). SQL-миграции схемы `tunnel` пишет S2 (`s2-impl`) в общем каталоге, в диапазоне номеров 0100–0199 (§5.12); `packages/db` описывает эти таблицы в Drizzle только для типов и запросов.
+S6 writes only `tunnel_credentials.bs_hash` (when preparing a machine) and `tunnel_credentials.retired_at` (on delete). It reads `tunnel_sessions` (whether a machine is connected, `disconnected_at`, `boot_id`, `capabilities`) and `gateway_instances` (heartbeat freshness). The SQL migrations of the `tunnel` schema are written by S2 (`s2-impl`) in the shared directory, in the number range 0100–0199 (§5.12); `packages/db` describes these tables in Drizzle only for types and queries.
 
-### 5.11 Конфигурация из Payload (S8)
+### 5.11 Configuration from Payload (S8)
 
-Payload владеет редактируемой конфигурацией. S6 читает её через `ConfigReader`:
+Payload owns the editable configuration. S6 reads it through `ConfigReader`:
 
 ```ts
 interface ConfigReader {
@@ -360,20 +360,20 @@ interface ConfigReader {
 }
 ```
 
-- Реализация `PayloadConfigReader` — Payload Local API (`getPayload({ config })`, без Next). Кэш в процессе на 10 s; сброс по `LISTEN umiak_config`. `NOTIFY umiak_config` шлют `afterChange`-хуки коллекций Payload (обязанность S8).
-- Payload-конфиг должен импортироваться из пакета без Next (обязанность S8, §16). До S8 используется `StaticConfigReader` с YAML-файлом (`UMIAK_CONFIG_FILE`).
-- Пользователи, команды, API-ключи читает S7; S6 получает уже проверенный `Principal { userId, teamId, apiKeyId?, scopes }`.
+- The `PayloadConfigReader` implementation is the Payload Local API (`getPayload({ config })`, without Next). A cache in the process for 10 s; reset by `LISTEN umiak_config`. `NOTIFY umiak_config` is sent by `afterChange` hooks of the Payload collections (S8's duty).
+- The Payload config must be importable from a package without Next (S8's duty, §16). Before S8 a `StaticConfigReader` with a YAML file is used (`UMIAK_CONFIG_FILE`).
+- Users, teams, and API keys are read by S7; S6 receives an already verified `Principal { userId, teamId, apiKeyId?, scopes }`.
 
-### 5.12 Миграции (решение master-сессии, касается и S2)
+### 5.12 Migrations (a decision of the master session, concerns S2 too)
 
-- Один каталог SQL-миграций для всех схем рантайма: `db/migrations/NNNN_<name>.sql` — обычные упорядоченные SQL-файлы, без генерации на лету.
-- Диапазоны номеров: **0100–0199** — схема `tunnel` (пишет `s2-impl`), **0200+** — схема `runtime` (S6). Схемы создаются своими миграциями (`CREATE SCHEMA`).
-- Раннер живёт в реализации S6 (`packages/db`): применяет файлы по номеру в транзакции, ведёт таблицу применённых миграций с хешем файла и берёт advisory-блокировку, чтобы поды `api` и `worker` не запускали миграции одновременно. Изменённый уже применённый файл — ошибка.
-- Drizzle-схема в TS нужна для типов и запросов и должна совпадать с SQL (тест сверяет её с живой БД после миграций).
-- Go-тесты (gateway, S2) применяют те же файлы напрямую.
-- Payload ведёт свои миграции для схемы `payload`; pg-boss создаёт и обновляет схему `pgboss` сам.
+- One directory of SQL migrations for all runtime schemas: `db/migrations/NNNN_<name>.sql` — plain ordered SQL files, no on-the-fly generation.
+- Number ranges: **0100–0199** — the schema `tunnel` (written by `s2-impl`), **0200+** — the schema `runtime` (S6). Schemas are created by their own migrations (`CREATE SCHEMA`).
+- The runner lives in the S6 implementation (`packages/db`): applies files by number in a transaction, keeps a table of applied migrations with the file hash, and takes an advisory lock so that `api` and `worker` pods do not run migrations at the same time. A changed already-applied file is an error.
+- The Drizzle schema in TS is needed for types and queries and must match the SQL (a test compares it with the live DB after migrations).
+- Go tests (gateway, S2) apply the same files directly.
+- Payload keeps its own migrations for the schema `payload`; pg-boss creates and updates the schema `pgboss` itself.
 
-## 6. Машины состояний
+## 6. State machines
 
 ### 6.1 Sandbox
 
@@ -394,45 +394,45 @@ interface ConfigReader {
    any non-terminal --delete--> deleting --> deleted (terminal)
 ```
 
-| Состояние | Значит | Команды и файлы (S7) |
+| State | Means | Commands and files (S7) |
 |---|---|---|
-| `creating` | идёт create, fork-цель или create из снапшота | ждут готовности (S7 решает, сколько) |
-| `ready` | VM работает, агент подключался и провижен | работают; при `health=degraded` — `503 agent_unavailable` по S2 |
-| `stopping` | идёт shutdown | `409` |
-| `stopped` | VM выключена, диски на ноде, RAM свободна | `409 sandbox_not_ready` |
-| `starting` | идёт resume (или повторный старт после recover из `error`) | ждут |
-| `error` | операция не удалась без автоматического пути назад, `error_code` | `409` |
-| `deleting` | идёт удаление | `409` |
-| `deleted` | терминально | `404` (решает S7) |
+| `creating` | a create, a fork target, or a create from a snapshot is running | wait for readiness (S7 decides how long) |
+| `ready` | the VM is running, the agent has connected and is provisioned | work; with `health=degraded` — `503 agent_unavailable` per S2 |
+| `stopping` | a shutdown is running | `409` |
+| `stopped` | the VM is off, disks on the node, RAM free | `409 sandbox_not_ready` |
+| `starting` | a resume is running (or a repeated start after recover from `error`) | wait |
+| `error` | an operation failed with no automatic way back, `error_code` | `409` |
+| `deleting` | a deletion is running | `409` |
+| `deleted` | terminal | `404` (S7 decides) |
 
-Переходы (только эти; всё остальное — `invalid_state`):
+Transitions (only these; everything else is `invalid_state`):
 
-| Из | Операция / событие | В | Кто |
+| From | Operation / event | To | Who |
 |---|---|---|---|
-| — | create, fork (цель), create from saved | `creating` | API |
-| `creating` | create завершён | `ready` | worker |
-| `creating` | create провален | `error` | worker |
-| `ready` | stop (пользователь, TTL, idle) | `stopping` | API / controller |
-| `stopping` | VM выключена | `stopped` | worker |
-| `stopping` | stop провален после дедлайна | `error` (`stop_failed`) | worker |
-| `ready` | VM неожиданно выключилась, первый раз за час (§11.3) | `starting` (системный resume) | reconciler |
-| `ready` | VM неожиданно выключилась второй раз за час (§11.3) | `stopped` (`unexpected_shutdown`) | reconciler |
-| `stopped`; `error`, если machine `stopped` (VM и диски на месте) | resume | `starting` | API |
-| `starting` | агент на связи, провижен | `ready` | worker |
-| `starting` | дедлайн или ошибка | `error` (`resume_failed`) | worker |
-| `ready`; `error`, если machine не `failed`/`deleting`/`deleted` | recover | `starting` | API |
-| `ready`, `stopped` | fork, save_snapshot | без смены состояния (операция на источнике) | API |
-| любое, кроме `deleting`/`deleted` | delete | `deleting` | API |
-| `deleting` | удаление проверено | `deleted` | worker |
-| `creating`, `ready`, `stopped`, `starting`, `stopping` без активной операции | VM machine пропала в Proxmox | `error` (`machine_lost`) | reconciler |
+| — | create, fork (target), create from saved | `creating` | API |
+| `creating` | create finished | `ready` | worker |
+| `creating` | create failed | `error` | worker |
+| `ready` | stop (user, TTL, idle) | `stopping` | API / controller |
+| `stopping` | the VM is shut down | `stopped` | worker |
+| `stopping` | stop failed after the deadline | `error` (`stop_failed`) | worker |
+| `ready` | the VM shut down unexpectedly, the first time within an hour (§11.3) | `starting` (system resume) | reconciler |
+| `ready` | the VM shut down unexpectedly a second time within an hour (§11.3) | `stopped` (`unexpected_shutdown`) | reconciler |
+| `stopped`; `error` if the machine is `stopped` (VM and disks in place) | resume | `starting` | API |
+| `starting` | the agent is connected, provisioned | `ready` | worker |
+| `starting` | deadline or error | `error` (`resume_failed`) | worker |
+| `ready`; `error` if the machine is not `failed`/`deleting`/`deleted` | recover | `starting` | API |
+| `ready`, `stopped` | fork, save_snapshot | no state change (an operation on the source) | API |
+| any except `deleting`/`deleted` | delete | `deleting` | API |
+| `deleting` | deletion verified | `deleted` | worker |
+| `creating`, `ready`, `stopped`, `starting`, `stopping` without an active operation | the machine's VM disappeared in Proxmox | `error` (`machine_lost`) | reconciler |
 
-`error` с `machine_lost` терминален по смыслу: VM-конфига нет, а восстановления VM из оставшихся дисков в фазе 1 нет. Разрешён только delete. Если пропажу обнаруживает шаг активной операции, операция сама падает с тем же кодом.
+`error` with `machine_lost` is terminal in meaning: there is no VM config, and restoring a VM from the remaining disks is not available in phase 1. Only delete is allowed. If the disappearance is detected by a step of an active operation, the operation itself fails with the same code.
 
-`error` с `machine_state_conflict`: шаг create (и fork-цели), stop, resume или recover нашёл machine не в том состоянии, которого ждал (её сдвинул другой участник — reconcile, delete, устаревший исполнитель; у sandbox нет machine; не записан VMID). VM при этом может существовать, поэтому machine не помечается `machine_lost`. Как и `machine_lost`, этот код побеждает код операции (`create_failed`, `stop_failed`, `resume_failed`). Create и fork-цель отдают свои machine на удаление (`deleting`, `machine-op delete`); stop, resume и recover machine не трогают (без hard stop) — её разбирает reconcile (§11). Дальше действуют общие правила `error`: delete — всегда; resume — если machine `stopped`; recover — если machine не `failed`/`deleting`/`deleted`.
+`error` with `machine_state_conflict`: a step of create (and of a fork target), stop, resume, or recover found the machine not in the state it expected (it was moved by another participant — reconcile, delete, a stale executor; the sandbox has no machine; the VMID is not recorded). The VM may exist, so the machine is not marked `machine_lost`. Like `machine_lost`, this code wins over the operation's code (`create_failed`, `stop_failed`, `resume_failed`). Create and a fork target hand their machines over for deletion (`deleting`, `machine-op delete`); stop, resume, and recover do not touch the machine (no hard stop) — it is handled by reconcile (§11). Then the general rules of `error` apply: delete — always; resume — if the machine is `stopped`; recover — if the machine is not `failed`/`deleting`/`deleted`.
 
-`health` и `activity` — поля, а не состояния:
-- `health = degraded`, если `state = ready` и агента нет дольше 60 s (§11.1). Возврат в `ok` — по событию `connected`.
-- `activity = busy | idle | unknown` из счётчиков агента и вызовов API (§12). `unknown`, пока агент недоступен.
+`health` and `activity` are fields, not states:
+- `health = degraded` if `state = ready` and the agent is absent for more than 60 s (§11.1). Return to `ok` on the event `connected`.
+- `activity = busy | idle | unknown` from the agent's counters and API calls (§12). `unknown` while the agent is unavailable.
 
 ### 6.2 Machine
 
@@ -443,271 +443,271 @@ allocating -> provisioning -> booting -> warm -> claiming -> running <-> stoppin
 any -> deleting -> deleted          any -> failed -> deleting (auto)
 ```
 
-| Состояние | Значит | RAM (§8.1) |
+| State | Means | RAM (§8.1) |
 |---|---|---|
-| `allocating` | строка создана как резерв RAM, VMID ещё нет | reserved |
-| `provisioning` | VMID и MAC выделены, BS записан, идёт конфиг и клон дисков (S1 create/fork) | reserved |
-| `booting` | VM запущена, ждём подключения агента и готовности | reserved, powered |
-| `warm` | в пуле, агент на связи, готов к claim (только `pool_key` не null, `sandbox_id` null) | reserved, powered |
-| `claiming` | назначена sandbox, идёт ротация MT и `System/Claim` | reserved, powered |
-| `running` | работает у sandbox | reserved, powered |
-| `stopping` / `starting` | переходы питания | reserved, powered |
-| `stopped` | выключена, диски есть | reserved, только если ждёт resume/recover |
-| `failed` | не удалась подготовка или потеряна; worker сам переводит в `deleting` (если не нужна для диагностики `error` sandbox) | powered, пока VM не остановлена |
-| `deleting` | `retired_at` выставлен, идёт S1 delete с проверкой | powered, пока VM не остановлена |
-| `deleted` | VMID освобождён, LV нет | — |
+| `allocating` | the row was created as a RAM reservation, no VMID yet | reserved |
+| `provisioning` | VMID and MAC allocated, BS written, config and disk clone in progress (S1 create/fork) | reserved |
+| `booting` | the VM is started, waiting for the agent to connect and be ready | reserved, powered |
+| `warm` | in the pool, the agent is connected, ready for claim (only `pool_key` non-null, `sandbox_id` null) | reserved, powered |
+| `claiming` | assigned to a sandbox, MT rotation and `System/Claim` in progress | reserved, powered |
+| `running` | running for a sandbox | reserved, powered |
+| `stopping` / `starting` | power transitions | reserved, powered |
+| `stopped` | off, disks present | reserved, only if waiting for resume/recover |
+| `failed` | preparation failed or the machine is lost; the worker itself moves it to `deleting` (unless it is needed for diagnostics of the sandbox `error`) | powered while the VM is not stopped |
+| `deleting` | `retired_at` is set, S1 delete with verification in progress | powered while the VM is not stopped |
+| `deleted` | the VMID is released, no LVs | — |
 
-Machine из пула (`pool_key` не null) после claim теряет `pool_key` и больше никогда не возвращается в `warm`.
+A machine from the pool (`pool_key` non-null) after claim loses `pool_key` and never returns to `warm`.
 
 ### 6.3 Operation
 
-`pending → running → succeeded | failed | superseded`. `superseded` ставит только delete (§7.2). Повтор шага после падения worker не меняет состояния операции: она остаётся `running`, `attempt` растёт.
+`pending → running → succeeded | failed | superseded`. `superseded` is set only by delete (§7.2). A repeat of a step after a worker crash does not change the operation's state: it stays `running`, `attempt` grows.
 
-### 6.4 Инварианты
+### 6.4 Invariants
 
-1. Не больше одной активной операции на sandbox (уникальный частичный индекс) и не больше одного исполнителя операции (fencing по `attempt`, §15.1).
-2. `machines.sandbox_id` после установки не меняется (триггер). Machine, побывавшая в `claiming`, после неудачи удаляется, а не возвращается в пул.
-3. `sandbox.state = ready` ⇒ у текущей machine `state = running`. Исключение — окно до обнаружения неожиданного выключения reconcile-ом (до 60 s, §11.3).
-4. Для каждой ноды `reserved ≤ ram_cap_mb` и `powered ≤ ram_cap_mb` (§8.1): первое обеспечивает admission, второе — проверка перед каждым стартом VM. Обе под advisory-блокировкой ноды.
-5. `vmid_leases.state = active` ⇔ есть machine не в `deleted`; `releasing` добирает reconciler.
-6. Снапшот `ready` ⇒ все его `disks` в `active`.
-7. `sandbox.node_id` не меняется после появления дисков (фаза 1: всё на одной ноде, где лежат LV).
-8. `deleted` — терминально: у sandbox нет machine не в `deleted`, нет `sandbox_secrets`, нет активных `hosted_ports`. Saved snapshots переживают sandbox.
-9. Секреты существуют только в `sandbox_secrets.ciphertext`, в памяти обработчика и в RPC к агенту.
+1. No more than one active operation per sandbox (a unique partial index) and no more than one executor of an operation (fencing by `attempt`, §15.1).
+2. `machines.sandbox_id` does not change once set (a trigger). A machine that has been in `claiming` is deleted after a failure, not returned to the pool.
+3. `sandbox.state = ready` ⇒ the current machine has `state = running`. The exception is the window before reconcile detects an unexpected shutdown (up to 60 s, §11.3).
+4. For each node `reserved ≤ ram_cap_mb` and `powered ≤ ram_cap_mb` (§8.1): the first is ensured by admission, the second by a check before every VM start. Both under the node's advisory lock.
+5. `vmid_leases.state = active` ⇔ there is a machine not in `deleted`; `releasing` is picked up by the reconciler.
+6. A `ready` snapshot ⇒ all its `disks` are `active`.
+7. `sandbox.node_id` does not change once disks appear (phase 1: everything on the one node where the LVs live).
+8. `deleted` is terminal: the sandbox has no machine not in `deleted`, no `sandbox_secrets`, no active `hosted_ports`. Saved snapshots outlive the sandbox.
+9. Secrets exist only in `sandbox_secrets.ciphertext`, in the handler's memory, and in RPC to the agent.
 
-## 7. Операции
+## 7. Operations
 
-### 7.1 Общий механизм
+### 7.1 General mechanism
 
-1. **API** (через `SandboxService`) в одной транзакции: проверяет состояние, квоты и admission (§8); переводит sandbox в переходное состояние; вставляет `operations` (`pending`); записывает `idempotency_keys` (для create и fork); отправляет задание pg-boss `sandbox-op {operationId}` (транзакционный `send` через адаптер Drizzle). Ответ — sandbox и операция.
-2. **Worker** берёт задание. Очередь `sandbox-op` с политикой `singleton` и `singletonKey = sandboxId`: одновременно активно не больше одного задания на sandbox. Обработчик:
-   - читает операцию; если она терминальна — выходит (повторная доставка);
-   - если у операции есть `parent_operation_id` и родитель ещё не `succeeded` — выходит без ошибки (её поставит родитель); если родитель `failed`/`superseded` — операция `failed` (`fork_failed`);
-   - переводит `pending → running` и увеличивает `attempt`; своё значение `attempt` обработчик держит как fencing token;
-   - выполняет шаги по порядку, начиная после `step`. Каждый шаг идемпотентен (проверка «уже сделано?» → действие → запись `step` и `progress`). Запись шага — `UPDATE … WHERE id = $1 AND attempt = $myAttempt AND state = 'running'`; ноль строк значит, что операцию уже выполняет другой исполнитель или она вытеснена, и обработчик сразу выходит;
-   - перед каждым шагом и раз в 2 s внутри долгих ожиданий (загрузка, подключение агента, RAM, shutdown) перечитывает операцию: если `superseded` или `attempt` не свой — выходит (компенсация — на delete);
-   - временная ошибка — исключение, pg-boss повторяет задание с backoff; постоянная ошибка — компенсация, операция `failed`, задание завершается без исключения.
-3. **Дедлайн операции** (`deadline_at`, §7.9). Если он истёк, следующая попытка не делает новых шагов, а выполняет компенсацию и `failed`.
-4. **`requestId` к агенту** — детерминированный UUIDv5 от `operationId:step`, поэтому повтор шага после падения пода передаёт агенту тот же id (S2 §9.2).
+1. The **API** (through `SandboxService`) in one transaction: checks the state, quotas, and admission (§8); moves the sandbox to a transitional state; inserts `operations` (`pending`); writes `idempotency_keys` (for create and fork); sends the pg-boss job `sandbox-op {operationId}` (a transactional `send` through the Drizzle adapter). The response is the sandbox and the operation.
+2. The **worker** takes the job. The queue `sandbox-op` with the policy `singleton` and `singletonKey = sandboxId`: no more than one job per sandbox is active at a time. The handler:
+   - reads the operation; if it is terminal — exits (a redelivery);
+   - if the operation has `parent_operation_id` and the parent is not yet `succeeded` — exits without error (the parent will enqueue it); if the parent is `failed`/`superseded` — the operation is `failed` (`fork_failed`);
+   - moves `pending → running` and increments `attempt`; the handler keeps its `attempt` value as a fencing token;
+   - executes the steps in order, starting after `step`. Each step is idempotent (an "already done?" check → action → write of `step` and `progress`). A step write is `UPDATE … WHERE id = $1 AND attempt = $myAttempt AND state = 'running'`; zero rows means the operation is already being executed by another executor or has been superseded, and the handler exits at once;
+   - before each step and every 2 s inside long waits (boot, agent connection, RAM, shutdown) it re-reads the operation: if `superseded` or `attempt` is not its own — it exits (compensation is left to delete);
+   - a transient error is an exception, pg-boss retries the job with backoff; a permanent error is compensation, the operation `failed`, the job finishes without an exception.
+3. **The operation deadline** (`deadline_at`, §7.9). If it has expired, the next attempt performs no new steps but runs compensation and `failed`.
+4. **The `requestId` to the agent** is a deterministic UUIDv5 of `operationId:step`, so a repeat of a step after a pod crash passes the same id to the agent (S2 §9.2).
 
-Повторы того же вида: `stop` при активном `stop` возвращает ту же операцию. Любая другая операция при активной — ошибка `operation_in_progress` (retryable, с id активной операции). Исключение — delete (§7.2).
+Repeats of the same kind: `stop` while a `stop` is active returns the same operation. Any other operation while one is active is the error `operation_in_progress` (retryable, with the id of the active operation). The exception is delete (§7.2).
 
-### 7.2 Delete вытесняет
+### 7.2 Delete preempts
 
-- Delete принимается в любом состоянии, кроме `deleting`/`deleted` (там возвращается текущая операция delete).
-- В одной транзакции: активная операция → `superseded` (`superseded_by` = delete), sandbox → `deleting`, вставка операции delete, задание `sandbox-op`.
-- Задание delete стоит в той же singleton-очереди и стартует, когда вытесненное задание выйдет. Вызовы S1 длятся секунды, а долгие ожидания проверяют `superseded` раз в 2 s (§7.1), поэтому delete ждёт не больше нескольких секунд.
-- Delete сам убирает всё, что успела создать вытесненная операция: он работает по фактическому состоянию (все machine с этим `sandbox_id` не в `deleted`, `progress` вытесненной операции, снапшоты `fork_source` с `consumer_sandbox_id` = эта sandbox, а также снапшоты в `creating` с `source_sandbox_id` = эта sandbox), а не по плану. Готовые `fork_source` чужих целей и saved snapshots переживают delete источника.
-- Шаги delete: `retire` (`tunnel_credentials.retired_at`), `stop` (S1 stop, сразу `power_observed = stopped`, чтобы освободить RAM для ждущих стартов), `destroy` (S1 `delete` с проверкой), `snapshots`, `ports` (`hosted_ports.deleted_at`, `NOTIFY umiak_routes`), `secrets` (удалить `sandbox_secrets`), `finish` (`deleted`).
-- Если цель fork ещё ждёт родителя, её delete просто вытесняет `pending`-операцию: родитель увидит это и после `ready` снапшота удалит его сам, раз цель уже `deleting`.
+- Delete is accepted in any state except `deleting`/`deleted` (there the current delete operation is returned).
+- In one transaction: the active operation → `superseded` (`superseded_by` = delete), the sandbox → `deleting`, insert the delete operation, the `sandbox-op` job.
+- The delete job is in the same singleton queue and starts when the superseded job exits. S1 calls take seconds, and long waits check `superseded` every 2 s (§7.1), so delete waits no more than a few seconds.
+- Delete itself removes everything the superseded operation managed to create: it works from the actual state (all machines with this `sandbox_id` not in `deleted`, the superseded operation's `progress`, the `fork_source` snapshots with `consumer_sandbox_id` = this sandbox, and also snapshots in `creating` with `source_sandbox_id` = this sandbox), not by a plan. Ready `fork_source` snapshots of other targets and saved snapshots outlive the source's delete.
+- Delete steps: `retire` (`tunnel_credentials.retired_at`), `stop` (S1 stop, immediately `power_observed = stopped` to free RAM for waiting starts), `destroy` (S1 `delete` with verification), `snapshots`, `ports` (`hosted_ports.deleted_at`, `NOTIFY umiak_routes`), `secrets` (delete `sandbox_secrets`), `finish` (`deleted`).
+- If a fork target is still waiting for its parent, its delete simply preempts the `pending` operation: the parent will see this and after the snapshot is `ready` will delete it itself, since the target is already `deleting`.
 
 ### 7.3 Create
 
-Вход: `template`, `size`, `name`, `slug`, `labels`, `env`, `secrets`, `secretFiles`, `ttlSeconds`, `idleTimeoutSeconds`, `from` (saved snapshot), `environment` и `excludeOwnerSecrets` (S8 §10), `failFast` — форму задаёт S7.
+Input: `template`, `size`, `name`, `slug`, `labels`, `env`, `secrets`, `secretFiles`, `ttlSeconds`, `idleTimeoutSeconds`, `from` (a saved snapshot), `environment` and `excludeOwnerSecrets` (S8 §10), `failFast` — the form is set by S7.
 
-**API (синхронно):** проверить шаблон (`enabled`, размер разрешён) и квоту команды. Затем admission (§8):
-- **claim:** есть `warm` machine этой пары с активной сборкой → в той же транзакции machine → `claiming`, `sandbox_id` установлен, `sandbox.machine_id`, `node_id` заполнены;
-- **cold:** иначе, если RAM хватает (с учётом вытеснения warm других пар) → новая machine `allocating` с `sandbox_id`;
-- иначе → `out_of_capacity` (S7 отдаёт `503`), ничего не создано.
+**API (synchronously):** check the template (`enabled`, the size is allowed) and the team quota. Then admission (§8):
+- **claim:** there is a `warm` machine of this pair with the active build → in the same transaction machine → `claiming`, `sandbox_id` set, `sandbox.machine_id`, `node_id` filled in;
+- **cold:** otherwise, if RAM suffices (accounting for eviction of warm machines of other pairs) → a new machine `allocating` with `sandbox_id`;
+- otherwise → `out_of_capacity` (S7 returns `503`), nothing is created.
 
-**`failFast`** (MVP-рек. R2): admission — только claim. Нет `warm` machine пары с активной сборкой → `pool_exhausted` (retryable), транзакция откатывается: нет sandbox, `sandbox_secrets`, операции, задания и строки `idempotency_keys`. Ветка cold и вытеснение warm не применяются. С `from` → `validation` (create из снапшота всегда cold). Шаблон и квота проверяются раньше, как обычно. `failFast` пишется в `operations.request`; повтор claim после отказа агента (ниже) тоже только из пула.
+**`failFast`** (MVP rec. R2): admission is claim only. No `warm` machine of the pair with the active build → `pool_exhausted` (retryable), the transaction rolls back: no sandbox, `sandbox_secrets`, operation, job, or `idempotency_keys` row. The cold branch and eviction of warm machines do not apply. With `from` → `validation` (a create from a snapshot is always cold). The template and quota are checked earlier, as usual. `failFast` is written to `operations.request`; a claim retry after an agent refusal (below) is also only from the pool.
 
-Sandbox `creating`, `sandbox_secrets` (зашифрованные env и файлы), операция `create`.
+Sandbox `creating`, `sandbox_secrets` (encrypted env and files), the operation `create`.
 
-**Worker, шаги:**
+**Worker, steps:**
 
-| Шаг | Что делает | Проверка «уже сделано» |
+| Step | What it does | "Already done" check |
 |---|---|---|
-| `provision` (только cold) | §7.4, включая проверку RAM и start | machine не в `allocating`/`provisioning` |
-| `boot` (только cold) | ждать подключения и фазы агента `pool_ready` (не дольше `boot_timeout_s`) | machine подключена, фаза получена |
-| `rotate_token` | `POST /v1/machines/{id}/rotate-token` на gateway (S2 §5.2) | идемпотентно само |
-| `claim` | `System/Claim{reason: claim, sandboxId, hostname: umiak-<slug>, env, secrets, secretFiles, authorizedKeys}` с `requestId`; ждать ответа с фазой `ready`; записать `provisioned_boot_id` | `requestId` агента |
-| `finish` | machine → `running`, sandbox → `ready`, `ready_at`, `deadline_at = now + ttl`, `sandbox_events`, `NOTIFY umiak_routes` | состояние |
+| `provision` (cold only) | §7.4, including the RAM check and start | the machine is not in `allocating`/`provisioning` |
+| `boot` (cold only) | wait for the connection and the agent phase `pool_ready` (no longer than `boot_timeout_s`) | the machine is connected, the phase was received |
+| `rotate_token` | `POST /v1/machines/{id}/rotate-token` on the gateway (S2 §5.2) | idempotent itself |
+| `claim` | `System/Claim{reason: claim, sandboxId, hostname: umiak-<slug>, env, secrets, secretFiles, authorizedKeys}` with `requestId`; wait for the response with the phase `ready`; write `provisioned_boot_id` | the agent's `requestId` |
+| `finish` | machine → `running`, sandbox → `ready`, `ready_at`, `deadline_at = now + ttl`, `sandbox_events`, `NOTIFY umiak_routes` | the state |
 
-Ошибки:
-- Агент недоступен — временная ошибка (повтор по S2 до 30 s на вызов, затем повтор задания).
-- Claim отклонён агентом или не прошёл до дедлайна: machine → `deleting` (к ней прикоснулся арендатор). Если machine была из пула, операция один раз пробует заново (admission: другой warm или cold; с `failFast` — только другой warm), иначе — sandbox `error` (`create_failed`).
-- Холодная подготовка не удалась: machine `failed → deleting`, sandbox `error` (`create_failed`).
+Errors:
+- The agent is unavailable — a transient error (a retry per S2 up to 30 s per call, then a retry of the job).
+- Claim rejected by the agent or did not finish before the deadline: machine → `deleting` (a tenant touched it). If the machine was from the pool, the operation tries once more (admission: another warm or cold; with `failFast` — only another warm), otherwise — the sandbox `error` (`create_failed`).
+- Cold preparation failed: machine `failed → deleting`, sandbox `error` (`create_failed`).
 
-`authorizedKeys` — публичные SSH-ключи пользователя (S8); если S8 их не даёт, пустой список.
+`authorizedKeys` are the user's public SSH keys (S8); if S8 does not provide them, an empty list.
 
-**Create из saved snapshot:** всегда cold, мимо пула. Нода — нода снапшота. Шаг `provision` использует S1 `fork(snapshot)` вместо `create(template)`. `template_build_id` берётся из снапшота.
+**Create from a saved snapshot:** always cold, bypassing the pool. The node is the snapshot's node. The `provision` step uses S1 `fork(snapshot)` instead of `create(template)`. `template_build_id` is taken from the snapshot.
 
-### 7.4 Подготовка machine (общий шаг для пула, cold create, fork, from-snapshot)
+### 7.4 Machine preparation (a shared step for the pool, cold create, fork, from-snapshot)
 
-Durable-маркер шага — состояние machine: `allocating`/`provisioning` значат «подготовка не завершена», переход в `booting` записывается **до** вызова start. Так одинаково работают и операция sandbox, и `machine-op` пула, у которого нет строки `operations`.
+The durable marker of the step is the machine state: `allocating`/`provisioning` mean "preparation not finished", the transition to `booting` is written **before** the start call. This works the same for a sandbox operation and for the pool's `machine-op`, which has no `operations` row.
 
 1. Machine → `provisioning`.
-2. Новый BS (32 байта): `tunnel_credentials(machine_id, bs_hash)` upsert. BS живёт только в памяти этого шага.
-3. Захватить слот клонирования ноды (§8.3).
-4. S1 `create(template, size, {smbios1})` или `fork(snapshot, size, {smbios1})`, `smbios1` по S2 §5.2 (`uuid = machineId`). VMID и MAC S1 берёт из `AllocatorStore`; реализация S6 идемпотентна по `machine_id` (§5.3). Записать в machine `vmid`, `mac`, в `disks` — `DiskSet`.
-5. Освободить слот.
-6. Проверка RAM перед стартом (§8.1) и в той же транзакции machine → `booting`. Только после этого — S1 `start`.
+2. A new BS (32 bytes): `tunnel_credentials(machine_id, bs_hash)` upsert. The BS lives only in this step's memory.
+3. Acquire the node's clone slot (§8.3).
+4. S1 `create(template, size, {smbios1})` or `fork(snapshot, size, {smbios1})`, `smbios1` per S2 §5.2 (`uuid = machineId`). The VMID and MAC are taken by S1 from `AllocatorStore`; the S6 implementation is idempotent by `machine_id` (§5.3). Write `vmid`, `mac` into the machine, the `DiskSet` into `disks`.
+5. Release the slot.
+6. A RAM check before start (§8.1) and in the same transaction machine → `booting`. Only after that — S1 `start`.
 
-**Повтор после падения** (machine всё ещё в `provisioning`): VM ещё ни разу не запускалась, поэтому частичный результат выбрасывается. Если у machine есть lease и VM или LV с этим VMID, вызывается S1 `delete(vmid)` (он проверяет удаление и освобождает lease), затем шаги 2–6 повторяются с новым BS и, возможно, другим VMID. BS не сохраняется нигде, поэтому повтор всегда идёт с новым; после перехода в `booting` BS не меняется никогда [решение S6]. Так S6 не нужен примитив «переписать `smbios1`».
+**A repeat after a crash** (the machine is still in `provisioning`): the VM has never been started, so the partial result is thrown away. If the machine has a lease and a VM or LVs with this VMID, S1 `delete(vmid)` is called (it verifies deletion and releases the lease), then steps 2–6 repeat with a new BS and possibly another VMID. The BS is not stored anywhere, so a repeat always goes with a new one; after the transition to `booting` the BS never changes [S6 decision]. This way S6 does not need a primitive "rewrite `smbios1`".
 
 ### 7.5 Stop
 
-Причина: `user`, `ttl`, `idle`. API: sandbox → `stopping`, операция `stop`.
+Reason: `user`, `ttl`, `idle`. API: sandbox → `stopping`, the operation `stop`.
 
-| Шаг | Что делает |
+| Step | What it does |
 |---|---|
-| `prepare` | Best effort, 10 s: `System/PrepareStop` (агент сбрасывает буферы и стирает секреты). Только подтверждение `secret_files_wiped = true` снимает `machines.secret_files_on_disk`; недоступность, timeout или `false` сохраняют флаг |
-| `shutdown` | S1 `shutdown(timeout 60 s Linux / 300 s Windows, S9 §24.9)`; если VM не выключилась — S1 `stop` (жёстко, `progress.shutdown = hard`). Задача, не взявшая VM lock (`can't lock file … got timeout`, qmeventd после stop и быстрого start), гостя не спрашивала: повтор (`retryOnVmLock`), а не hard stop |
-| `verify` | статус VM `stopped` |
-| `finish` | machine → `stopped`, sandbox → `stopped`, `stopped_at`, `stop_reason`; команды этой machine в `starting`/`running` → `lost`; `NOTIFY umiak_routes` |
+| `prepare` | Best effort, 10 s: `System/PrepareStop` (the agent flushes buffers and wipes secrets). Only the confirmation `secret_files_wiped = true` clears `machines.secret_files_on_disk`; unavailability, a timeout, or `false` keep the flag |
+| `shutdown` | S1 `shutdown(timeout 60 s Linux / 300 s Windows, S9 §24.9)`; if the VM did not shut down — S1 `stop` (hard, `progress.shutdown = hard`). A task that did not get the VM lock (`can't lock file … got timeout`, qmeventd after stop and a quick start) did not ask the guest: a retry (`retryOnVmLock`), not a hard stop |
+| `verify` | the VM status is `stopped` |
+| `finish` | machine → `stopped`, sandbox → `stopped`, `stopped_at`, `stop_reason`; this machine's commands in `starting`/`running` → `lost`; `NOTIFY umiak_routes` |
 
-S1 `stop` во всех путях worker (stop, recover, delete, компенсация, reconcile, аварийная остановка после failed thaw) повторяется через `retryOnVmLock`: 5 попыток с паузами 10 s покрывают 30 s очистки старого QEMU в qmeventd. Power lock освобождается между попытками, перед каждой заново проверяются fence вызывающей операции (если есть) и исходный владелец VMID; при ожидании fence проверяется каждые 2 s. Смена владельца или попытки прекращает повторы.
+S1 `stop` in all worker paths (stop, recover, delete, compensation, reconcile, an emergency stop after a failed thaw) is retried via `retryOnVmLock`: 5 attempts with 10 s pauses cover the 30 s of cleanup of the old QEMU in qmeventd. The power lock is released between attempts, before each the fence of the calling operation (if any) and the original owner of the VMID are checked again; while waiting, the fence is checked every 2 s. A change of owner or of the attempt stops the retries.
 
 ### 7.6 Resume
 
-API: состояние `stopped` или `error` с machine в `stopped` (§6.1). Квота и admission (§8.2) на ноде sandbox: RAM machine (с вытеснением warm других пар; если передан `size`, считается его RAM [решение S6]); если не хватает → `out_of_capacity`. Sandbox → `starting`, операция `resume`; machine остаётся `stopped` до шага `start`.
+API: the state `stopped` or `error` with the machine in `stopped` (§6.1). Quota and admission (§8.2) on the sandbox's node: the machine's RAM (with eviction of warm machines of other pairs; if `size` is passed, its RAM is counted [S6 decision]); if not enough → `out_of_capacity`. Sandbox → `starting`, the operation `resume`; the machine stays `stopped` until the `start` step.
 
-Вход: `size`, `ttlSeconds`, `env`, `secrets`, `secretFiles` (MVP-рек. R11). Переданные наборы в той же транзакции накладываются по ключу на `sandbox_secrets` sandbox (расшифровать, слить, проверить лимиты S7 §8.3, зашифровать): тот же ключ — побеждает запрос, secret-файлы — по имени, `null` удаляет ключ. Результат остаётся у sandbox, даже если resume потом не удался. В `operations.request` пишутся несекретные параметры (`size`, `ttlSeconds`) и hash канонического тела, значений env и секретов там нет; повтор resume при активном resume возвращает его, если hash совпадает (пустое тело — тоже тело), иначе `operation_in_progress` (S7 §8.2). Значения доходят до агента в шаге `provision`.
+Input: `size`, `ttlSeconds`, `env`, `secrets`, `secretFiles` (MVP rec. R11). The passed sets are in the same transaction overlaid by key on the sandbox's `sandbox_secrets` (decrypt, merge, check the S7 §8.3 limits, encrypt): the same key — the request wins, secret files — by name, `null` deletes the key. The result stays with the sandbox even if the resume later failed. `operations.request` gets the non-secret parameters (`size`, `ttlSeconds`) and the hash of the canonical body, no env and secret values; a repeated resume while a resume is active returns it if the hash matches (an empty body is also a body), otherwise `operation_in_progress` (S7 §8.2). The values reach the agent in the `provision` step.
 
-| Шаг | Что делает |
+| Step | What it does |
 |---|---|
-| `resize` (если `size` изменился) | `PUT config` cores и memory, пока VM выключена |
-| `start` | проверка RAM перед стартом (§8.1, ждать с опросом 1 s), затем S1 `start` |
-| `wait_agent` | новое подключение (`tunnel_sessions` с `boot_id`, отличным от `provisioned_boot_id`) |
-| `provision` | `System/UpdateEnv{env}`, `System/UpdateSecrets{secret_env, secret_files}` и `System/UpdateSshCa{keys}` (S3 §8.1: claim — один раз на идентичность, после загрузки наборы доставляются этими вызовами) — env и секреты передаются заново целиком (в госте секретов после загрузки нет, фаза `secrets: missing` у S3); `keys` — текущий набор SSH user CA worker (тот же, что в claim), так sandbox, созданные до смены CA или до её настройки, получают ключи при следующем resume; записать `provisioned_boot_id` |
-| `finish` | machine → `running`, sandbox → `ready`, `deadline_at = now + ttl` (TTL можно передать заново), `health=ok` |
+| `resize` (if `size` changed) | `PUT config` cores and memory while the VM is off |
+| `start` | a RAM check before start (§8.1, wait with 1 s polling), then S1 `start` |
+| `wait_agent` | a new connection (`tunnel_sessions` with a `boot_id` different from `provisioned_boot_id`) |
+| `provision` | `System/UpdateEnv{env}`, `System/UpdateSecrets{secret_env, secret_files}`, and `System/UpdateSshCa{keys}` (S3 §8.1: claim is once per identity, after boot the sets are delivered by these calls) — env and secrets are passed again in full (the guest has no secrets after boot, the S3 phase `secrets: missing`); `keys` is the worker's current set of SSH user CA keys (the same as in claim), so sandboxes created before a CA change or before it was configured get the keys on the next resume; write `provisioned_boot_id` |
+| `finish` | machine → `running`, sandbox → `ready`, `deadline_at = now + ttl` (the TTL can be passed again), `health=ok` |
 
-Ошибка или дедлайн: S1 `stop` (жёстко), machine → `stopped`, sandbox → `error` (`resume_failed`). Диски целы, resume можно повторить.
+An error or deadline: S1 `stop` (hard), machine → `stopped`, sandbox → `error` (`resume_failed`). The disks are intact, the resume can be repeated.
 
 ### 7.7 Fork
 
-Вход: источник в `ready` или `stopped` без активной операции; параметры цели (`name`, `slug`, `labels`, `ttlSeconds`, `idleTimeoutSeconds`, `size`, `env`, `secrets`, `secretFiles`) и `forceStop`. Источник Windows в `ready` без `forceStop: true` — `snapshot_requires_stop` (409) до любых записей, с подсказкой повторить с флагом (§7.8 «Windows только из остановленной VM»). Флаг для Linux и остановленного источника игнорируется и в `request` операции не пишется.
+Input: a source in `ready` or `stopped` without an active operation; the target's parameters (`name`, `slug`, `labels`, `ttlSeconds`, `idleTimeoutSeconds`, `size`, `env`, `secrets`, `secretFiles`) and `forceStop`. A Windows source in `ready` without `forceStop: true` — `snapshot_requires_stop` (409) before any writes, with a hint to repeat with the flag (§7.8 "Windows only from a stopped VM"). The flag is ignored for Linux and for a stopped source and is not written into the operation's `request`.
 
-**API:** admission RAM для цели на ноде источника (вытеснение warm разрешено; других нод нет — LV локальны). Создаются:
-- цель: sandbox `creating` (`origin = fork`, `forked_from_sandbox_id`), `sandbox_secrets` — копия env и секретов источника, поверх которой по ключу наложены `env`, `secrets`, `secretFiles` из запроса (MVP-рек. R11: правила, лимиты и `null` — как у resume, §7.6), зашифрованная с AAD цели; machine цели `allocating`;
-- операция `fork` на источнике (`pending`) и операция `create` на цели (`pending`, `parent_operation_id` = fork). Задание ставится только для `fork`.
+**API:** RAM admission for the target on the source's node (eviction of warm machines allowed; there are no other nodes — the LVs are local). Created are:
+- the target: sandbox `creating` (`origin = fork`, `forked_from_sandbox_id`), `sandbox_secrets` — a copy of the source's env and secrets, overlaid by key with `env`, `secrets`, `secretFiles` from the request (MVP rec. R11: rules, limits, and `null` as in resume, §7.6), encrypted with the target's AAD; the target's machine `allocating`;
+- a `fork` operation on the source (`pending`) and a `create` operation on the target (`pending`, `parent_operation_id` = fork). A job is enqueued only for `fork`.
 
-**Worker, операция `fork` на источнике:**
-1. `snapshot`: строка `snapshots` (`kind = fork_source`, `consumer_sandbox_id` = цель, `creating`). Если Linux-источник работает — S1 `snapshot` с `QuiesceHook` от S3 (`System/Quiesce` с lease и watchdog; запасной путь — QGA fsfreeze через S1), `consistency = quiesced`. Если агент и QGA не отвечают — ошибка `quiesce_failed`. Работающая Windows вживую не снимается (§7.8, S9 §24.8): только из остановленной VM. Если источник выключен — без freeze, `powered_off`. После thaw обработчик проверяет `quiesce_broken`: если watchdog успел разморозить ФС раньше, снапшот несогласован, операция падает с `quiesce_failed`.
-2. Снапшот → `ready`. В одной транзакции: операция `fork` → `succeeded`; у операции цели `deadline_at = now + дедлайн`; задание `sandbox-op` для цели. Если цель к этому моменту уже `deleting`/`deleted`, задание не ставится, а снапшот удаляется этой же операцией.
+**Worker, the `fork` operation on the source:**
+1. `snapshot`: a `snapshots` row (`kind = fork_source`, `consumer_sandbox_id` = the target, `creating`). If the Linux source is running — S1 `snapshot` with `QuiesceHook` from S3 (`System/Quiesce` with a lease and watchdog; the fallback path is QGA fsfreeze through S1), `consistency = quiesced`. If neither the agent nor QGA answers — the error `quiesce_failed`. A running Windows is not snapshotted live (§7.8, S9 §24.8): only from a stopped VM. If the source is off — without freeze, `powered_off`. After thaw the handler checks `quiesce_broken`: if the watchdog managed to thaw the FS earlier, the snapshot is inconsistent, the operation fails with `quiesce_failed`.
+2. The snapshot → `ready`. In one transaction: the `fork` operation → `succeeded`; the target operation gets `deadline_at = now + deadline`; the `sandbox-op` job for the target. If the target is already `deleting`/`deleted` by then, the job is not enqueued, and the snapshot is deleted by this same operation.
 
-**Worker, операция `create` на цели:** шаги `provision` (S1 `fork(snapshot)`), `boot`, `claim` (агент увидит смену `machineId` и сменит идентичность, S3), `finish` — как cold create. Затем `cleanup_source`: S1 `delete(snapshot)`, снапшот → `deleted` (thin-снимки независимы).
+**Worker, the `create` operation on the target:** the steps `provision` (S1 `fork(snapshot)`), `boot`, `claim` (the agent will see the `machineId` change and change its identity, S3), `finish` — as in cold create. Then `cleanup_source`: S1 `delete(snapshot)`, the snapshot → `deleted` (thin snapshots are independent).
 
-**Кто владеет снапшотом `fork_source`.** Пока снапшот `creating`, им владеет операция `fork` источника: при её провале или вытеснении она (или delete источника, §7.2) удаляет частично созданные LV. С момента `ready` им владеет цель: `cleanup_source`, компенсация create цели при ошибке и delete цели удаляют его. Cleanup (§15.4) трогает только `fork_source` в `ready`/`failed`, чья цель в `error`/`deleted`, или любой старше 1 h — страховка, а не основной путь.
+**Who owns the `fork_source` snapshot.** While the snapshot is `creating`, it is owned by the source's `fork` operation: on its failure or preemption it (or the source's delete, §7.2) deletes the partially created LVs. From the moment of `ready` it is owned by the target: `cleanup_source`, compensation of the target's create on error, and the target's delete remove it. Cleanup (§15.4) touches only `fork_source` in `ready`/`failed` whose target is in `error`/`deleted`, or any older than 1 h — a safety net, not the main path.
 
-Ошибки: провал или вытеснение операции на источнике → обработчик цели (по `parent_operation_id`, §7.1) переводит её операцию в `failed`, цель → `error` (`fork_failed`). Источник сам цель не трогает: каждая sandbox меняется только своей операцией.
+Errors: the failure or preemption of the operation on the source → the target's handler (by `parent_operation_id`, §7.1) moves its operation to `failed`, the target → `error` (`fork_failed`). The source does not touch the target itself: each sandbox is changed only by its own operation.
 
-Нода источника должна быть `active` (и её провайдер тоже): на ноде, выведенной из размещения (`cordoned`, провайдер `draining`), новые machine не создаются (§8.4), fork тоже; ошибка — `out_of_capacity` с `details.reason = node_not_active` (хранилище выше порогов — `storage_over_threshold`).
+The source's node must be `active` (and its provider too): on a node withdrawn from placement (`cordoned`, provider `draining`) new machines are not created (§8.4), nor is a fork; the error is `out_of_capacity` with `details.reason = node_not_active` (storage above thresholds — `storage_over_threshold`).
 
-Fork наследует от источника: диск, env и секреты (с наложением значений из запроса), `template_slug`, `size` (если не передан), `labels` (если не переданы), `exclude_owner_secrets` (S8 §10.1). Environment заново не применяется (S8 §10.1). Не наследует: TTL (берётся из запроса или из дефолта), hosted ports, историю команд.
+A fork inherits from the source: the disk, env and secrets (with the request's values overlaid), `template_slug`, `size` (if not passed), `labels` (if not passed), `exclude_owner_secrets` (S8 §10.1). The environment is not applied again (S8 §10.1). It does not inherit: the TTL (taken from the request or the default), hosted ports, command history.
 
 ### 7.8 Saved snapshot, recover, reprovision, update
 
-**Save snapshot** (операция `save_snapshot` на источнике в `ready`/`stopped`): снапшот `kind = saved`, `pending_name`, тем же способом, что в fork. Когда он `ready`, в одной транзакции: старый `ready`-снапшот с этим именем → `deleting` (имя снимается), новый получает `name`. При ошибке имя остаётся за прежним снапшотом. Linux держит секреты в tmpfs. Для Windows действует уточнение S9 §18.6 п. 5: остановленная machine с `machines.secret_files_on_disk = true` получает `snapshot_requires_clean_stop` до создания LVs (работающая Windows без `forceStop` отклоняется раньше, ниже). Fork этим правилом не ограничен.
+**Save snapshot** (the `save_snapshot` operation on a source in `ready`/`stopped`): a snapshot `kind = saved`, `pending_name`, the same way as in fork. When it is `ready`, in one transaction: the old `ready` snapshot with this name → `deleting` (the name is released), the new one gets `name`. On error the name stays with the previous snapshot. Linux keeps secrets in tmpfs. For Windows the refinement of S9 §18.6 item 5 applies: a stopped machine with `machines.secret_files_on_disk = true` gets `snapshot_requires_clean_stop` before the LVs are created (a running Windows without `forceStop` is rejected earlier, below). Fork is not limited by this rule.
 
-`secret_files_on_disk` консервативно ставится **до** `Claim` / `UpdateSecrets` с непустыми secret-файлами Windows (включая живые PUT/PATCH env): потерянный ответ мог означать успешную запись. Успешная доставка пустого набора снимает флаг, неудачная — сохраняет. Только подтверждённый `PrepareStop{secret_files_wiped: true}` снимает его при stop; hard stop сам по себе ничего не подтверждает. Миграция старых Windows-machine без подтверждения очистки выставляет `true`.
+`secret_files_on_disk` is conservatively set **before** `Claim` / `UpdateSecrets` with non-empty Windows secret files (including live PUT/PATCH env): a lost response could have meant a successful write. A successful delivery of an empty set clears the flag, an unsuccessful one keeps it. Only a confirmed `PrepareStop{secret_files_wiped: true}` clears it at stop; a hard stop by itself confirms nothing. The migration of old Windows machines without confirmed wiping sets `true`.
 
-**Windows только из остановленной VM (решение Ильи 2026-11-01, S9 §24.8).** QGA/VSS thaw зависает, а crash-consistent снимок работающей VM теряет или обнуляет недавние записи из кэша. Поэтому fork и saved snapshot Windows снимаются только с выключенной VM (`powered_off`); прежний crash-consistent fallback (§24.7) из публичного пути убран, новых `consistency = crash` нет (значение остаётся в схеме для старых снапшотов).
+**Windows only from a stopped VM (Ilia's decision 2026-11-01, S9 §24.8).** The QGA/VSS thaw hangs, and a crash-consistent snapshot of a running VM loses or zeroes recent writes from the cache. Therefore a Windows fork and saved snapshot are taken only from a powered-off VM (`powered_off`); the former crash-consistent fallback (§24.7) was removed from the public path, there are no new `consistency = crash` (the value stays in the schema for old snapshots).
 
-- API: источник Windows в `ready` без `forceStop: true` → `snapshot_requires_stop` (409), `details {reason: "windows_running", retryWith: {forceStop: true}, cli: "--force-stop"}`. Тот же код (сообщение с подсказкой) даёт и шаг `snapshot` worker, если работающую Windows застал без флага.
-- С `forceStop: true` API пишет `request.forceStop = true` (только для `ready` Windows), дедлайн операции = её дедлайн + дедлайн stop (§7.9). Шаги fork / save_snapshot: `stop_prepare` → `stop_shutdown` → `stop_verify` (путь stop §7.5: PrepareStop со стиранием секретов; тайм-аут shutdown тот же, что у stop (`SHUTDOWN_TIMEOUT_S`: 300 s Windows, 60 s Linux); **без hard stop**, см. ниже) → `stopped` (machine → `stopped` с `clean_stop`, команды → `lost`; progress `forceStopped`) → `snapshot` (`powered_off`; затем `deadline_at = max(deadline_at, now + max(дедлайн resume, boot_timeout_s + 5 min))`, progress `snapshotTaken: true`) → `restart` (проверка перед стартом §8.2 и S1 start с `retryOnVmLock` для lock qmeventd) → `restart_agent` (новая загрузка) → `restart_provision` (env, секреты, CA; machine → `running`; progress `sourceRestarted: true`) → finish (fork: передача цели). Sandbox всё это время `ready` с активной операцией; её machine проходит `running → stopping → stopped → starting → running`. RAM остановленной machine остаётся в `reserved`, пока активна операция с `forceStop` (§8.1).
-- Shutdown не уложился в тайм-аут (fix-приёмка 2026-11-01: первый shutdown свежего клона Windows шёл 118.4 s при прежнем лимите 120 s) → операция `failed` с `shutdown_timeout` (`retryable: true`: повтор запроса безопасен), снапшот не снимается. Компенсация, как при любом провале до снапшота: hard stop машины в `stopping` (известное состояние), затем запуск источника (`restartForcedSource`). Снапшот после hard stop никогда не помечается `powered_off`.
-- После снапшота (`progress.snapshotTaken`) операцию уже ничто не роняет. Дедлайн к ней больше не применяется (`deadlinePassed` = false: ни перед шагами, ни перед finish, ни при повторе задания); продлённый `deadline_at` только ограничивает ожидания перезапуска. Временные ошибки перезапуска (не `retryable: false`: `ECONNRESET`, ошибки PVE, ожидание RAM, lock qmeventd) повторяются с паузой 5 s, пока не истечёт продлённый дедлайн.
-- Перезапуск так и не удался: hard stop (best effort), machine → `stopped` (или `failed` при `machine_lost`), sandbox `ready → error` (`resume_failed`, событие с `reason: force_stop_restart`), progress `sourceRestarted: false`, `restartError {code, message}`; fork продолжается, снапшот цел. Пользователь поднимает источник обычным `resume`.
-- Провал до снапшота (например, saved с неподтверждённым стиранием секретов → `snapshot_requires_clean_stop`) компенсируется как обычно, и компенсация запускает источник снова тем же путём (`restartForcedSource`).
-- Saved Windows из остановленной VM по-прежнему требует `secret_files_on_disk = false`: forced save получает его от PrepareStop своего stop. `System/Quiesce` агента для Windows больше не вызывается.
-- **`powered_off` только после чистого выключения (fix-приёмка 2026-11-01).** `machines.clean_stop` = true ставит только stop, чей shutdown завершился сам (`progress.shutdown = clean`, без hard stop в `stop_verify`); триггер сбрасывает флаг при любом состоянии, кроме `stopped` (start, resume, recover, падение VM), а reconcile power drift — при своём hard stop. Шаг `snapshot` для VM, которая не работает и не имеет `clean_stop`: Windows → `snapshot_requires_clean_stop` до создания LVs (сообщение: resume и повтор с `forceStop: true` или повторный stop); Linux → снапшот с `consistency = crash` (честная метка: диски как после потери питания; Linux-fork остановленной sandbox после hard stop не запрещается). Это касается и обычного stop с hard stop после 60/300 s, и machine после неудачного resume/restart. Существующие machine без подтверждения: `clean_stop = false` (fail closed). Worker всегда передаёт S1 `crashConsistent: false`; S1 без явного выбора отказывает в снапшоте работающей Windows (S9 §24.8).
+- API: a Windows source in `ready` without `forceStop: true` → `snapshot_requires_stop` (409), `details {reason: "windows_running", retryWith: {forceStop: true}, cli: "--force-stop"}`. The same code (a message with a hint) is given by the worker's `snapshot` step if it finds a running Windows without the flag.
+- With `forceStop: true` the API writes `request.forceStop = true` (only for a `ready` Windows), the operation deadline = its deadline + the stop deadline (§7.9). The steps of fork / save_snapshot: `stop_prepare` → `stop_shutdown` → `stop_verify` (the stop path §7.5: PrepareStop with secret wiping; the shutdown timeout is the same as for stop (`SHUTDOWN_TIMEOUT_S`: 300 s Windows, 60 s Linux); **without a hard stop**, see below) → `stopped` (machine → `stopped` with `clean_stop`, commands → `lost`; progress `forceStopped`) → `snapshot` (`powered_off`; then `deadline_at = max(deadline_at, now + max(resume deadline, boot_timeout_s + 5 min))`, progress `snapshotTaken: true`) → `restart` (the pre-start check of §8.2 and S1 start with `retryOnVmLock` for the qmeventd lock) → `restart_agent` (a new boot) → `restart_provision` (env, secrets, CA; machine → `running`; progress `sourceRestarted: true`) → finish (fork: handing over to the target). The sandbox all this time is `ready` with an active operation; its machine goes through `running → stopping → stopped → starting → running`. The RAM of the stopped machine stays in `reserved` while an operation with `forceStop` is active (§8.1).
+- The shutdown did not fit the timeout (fix acceptance 2026-11-01: the first shutdown of a fresh Windows clone took 118.4 s with the former 120 s limit) → the operation `failed` with `shutdown_timeout` (`retryable: true`: repeating the request is safe), the snapshot is not taken. Compensation, as for any failure before the snapshot: a hard stop of the machine in `stopping` (a known state), then starting the source (`restartForcedSource`). A snapshot after a hard stop is never marked `powered_off`.
+- After the snapshot (`progress.snapshotTaken`) nothing fails the operation anymore. The deadline no longer applies to it (`deadlinePassed` = false: neither before steps, nor before finish, nor on a job retry); the extended `deadline_at` only bounds the restart waits. Transient restart errors (not `retryable: false`: `ECONNRESET`, PVE errors, waiting for RAM, the qmeventd lock) are retried with a 5 s pause until the extended deadline expires.
+- The restart never succeeded: a hard stop (best effort), machine → `stopped` (or `failed` on `machine_lost`), sandbox `ready → error` (`resume_failed`, an event with `reason: force_stop_restart`), progress `sourceRestarted: false`, `restartError {code, message}`; the fork continues, the snapshot is intact. The user brings the source up with a regular `resume`.
+- A failure before the snapshot (for example, saved with unconfirmed secret wiping → `snapshot_requires_clean_stop`) is compensated as usual, and the compensation starts the source again by the same path (`restartForcedSource`).
+- A saved Windows snapshot from a stopped VM still requires `secret_files_on_disk = false`: a forced save gets it from the PrepareStop of its own stop. The agent's `System/Quiesce` is no longer called for Windows.
+- **`powered_off` only after a clean shutdown (fix acceptance 2026-11-01).** `machines.clean_stop` = true is set only by a stop whose shutdown completed on its own (`progress.shutdown = clean`, without a hard stop in `stop_verify`); a trigger resets the flag in any state other than `stopped` (start, resume, recover, VM crash), and the reconcile power drift resets it at its hard stop. The `snapshot` step for a VM that is not running and has no `clean_stop`: Windows → `snapshot_requires_clean_stop` before the LVs are created (message: resume and repeat with `forceStop: true`, or stop again); Linux → a snapshot with `consistency = crash` (an honest label: disks as after a power loss; a Linux fork of a stopped sandbox after a hard stop is not forbidden). This applies to a regular stop with a hard stop after 60/300 s, and to a machine after a failed resume/restart. Existing machines without confirmation: `clean_stop = false` (fail closed). The worker always passes S1 `crashConsistent: false`; S1 without an explicit choice refuses a snapshot of a running Windows (S9 §24.8).
 
-Snapshot после restart тоже использует `retryOnVmLock` (5 попыток, паузы 10 s), включая `freeze took … (budget …)` после ожидания VM lock. Каждая попытка заново читает источник, проверяет fence и дедлайн, удаляет остатки прежней попытки и создаёт свежие hooks; ошибка thaw не повторяет snapshot. Проверки fence продолжаются во время пауз.
+The snapshot after a restart also uses `retryOnVmLock` (5 attempts, 10 s pauses), including `freeze took … (budget …)` after waiting for the VM lock. Each attempt re-reads the source, checks the fence and deadline, deletes the leftovers of the previous attempt, and creates fresh hooks; a thaw error does not repeat the snapshot. Fence checks continue during the pauses.
 
-**Удаление saved snapshot** (`deleteSavedSnapshot` или замена при save): снапшот сразу → `deleting` (имя освобождается, новые create из него невозможны), задание `snapshot-op delete`. Обработчик удаляет LV только когда нет sandbox в `creating` с `origin_snapshot_id` = этот снапшот, у которых операция ещё не прошла шаг `provision`; до этого ждёт (повтор задания через 30 s). Так create из снапшота, ждущий RAM, не теряет диски.
+**Deleting a saved snapshot** (`deleteSavedSnapshot` or a replacement on save): the snapshot goes at once to `deleting` (the name is released, new creates from it are impossible), a `snapshot-op delete` job. The handler deletes the LVs only when there is no sandbox in `creating` with `origin_snapshot_id` = this snapshot whose operation has not yet passed the `provision` step; until then it waits (a job retry in 30 s). This way a create from a snapshot waiting for RAM does not lose its disks.
 
-**Recover** (`ready` или `error` с machine; не чаще раза в `recoverMinIntervalSeconds` = 600): sandbox → `starting`; шаги `reset` (S1 `stop` + `start`, жёсткий power-cycle), `wait_agent`, `provision`, `finish`. Автоматически не запускается никогда.
+**Recover** (`ready` or `error` with a machine; no more often than every `recoverMinIntervalSeconds` = 600): sandbox → `starting`; the steps `reset` (S1 `stop` + `start`, a hard power cycle), `wait_agent`, `provision`, `finish`. It is never started automatically.
 
-**Reprovision** (внутренняя): новая загрузка требует доставки как в шаге `provision` resume (§7.6). `readiness.changed{phase: secrets, state: pending}` / `secrets_missing` текущей загрузки, `connected` и `agent_restarted` требуют повторной доставки даже при прежнем `boot_id`; команды после restart остаются живы. События увеличивают `secrets_generation`, успешная доставка записывает поколение, прочитанное **до** RPC, в `provisioned_secrets_generation`. Поэтому новый pending во время RPC не теряется. Для `ready` sandbox без активной операции отличие поколений или загрузки ставит reprovision. При активной операции запрос остаётся в машине: проверяется после её завершения и reconcile (восстановление после падения worker). Старый boot и повторная обработка уже обработанного события не создают запроса. Живая доставка PUT/PATCH env тоже учитывает поколения; пустой ответ не снимает флаг файлов при более новом запросе.
+**Reprovision** (internal): a new boot needs delivery as in the `provision` step of resume (§7.6). `readiness.changed{phase: secrets, state: pending}` / `secrets_missing` of the current boot, `connected`, and `agent_restarted` require re-delivery even with the same `boot_id`; commands stay alive after a restart. The events increment `secrets_generation`, a successful delivery writes the generation read **before** the RPC into `provisioned_secrets_generation`. So a new pending during an RPC is not lost. For a `ready` sandbox without an active operation, a difference between the generations or the boot schedules a reprovision. With an active operation the request stays in the machine: it is checked after the operation finishes and by reconcile (recovery after a worker crash). An old boot and a repeated processing of an already processed event do not create a request. The live delivery of PUT/PATCH env also accounts for generations; an empty response does not clear the files flag when there is a newer request.
 
-**Update** (`name`, `labels`, `ttlSeconds`, `idleTimeoutSeconds`) и **extend** (`deadline_at = now + ttl`) — без операции, обычный `UPDATE` с проверкой `version`.
+**Update** (`name`, `labels`, `ttlSeconds`, `idleTimeoutSeconds`) and **extend** (`deadline_at = now + ttl`) — without an operation, a plain `UPDATE` with a `version` check.
 
-### 7.9 Дедлайны операций [решение S6]
+### 7.9 Operation deadlines [S6 decision]
 
-| Операция | Linux | Windows (S9 уточнит) |
+| Operation | Linux | Windows (S9 will refine) |
 |---|---|---|
-| create из пула | 2 min | 5 min |
-| create cold / from snapshot / fork-цель | 6 min | 20 min |
-| fork (снапшот на источнике) | 2 min | 3 min; с `forceStop` + 7 min (stop), после снапшота не меньше now + max(15 min (resume), `boot_timeout_s` + 5 min) и больше не роняет операцию (§7.8) |
-| stop | 3 min | 7 min (shutdown до 300 s + PrepareStop, повторы VM lock, verify; S9 §24.9) |
+| create from the pool | 2 min | 5 min |
+| create cold / from snapshot / fork target | 6 min | 20 min |
+| fork (snapshot on the source) | 2 min | 3 min; with `forceStop` + 7 min (stop), after the snapshot at least now + max(15 min (resume), `boot_timeout_s` + 5 min) and it no longer fails the operation (§7.8) |
+| stop | 3 min | 7 min (shutdown up to 300 s + PrepareStop, VM lock retries, verify; S9 §24.9) |
 | resume, recover | 5 min | 15 min |
-| save_snapshot | 5 min | 5 min; с `forceStop` + 7 min (stop), после снапшота как у fork |
-| delete | без дедлайна: повторы с backoff до 10 min; через 30 min метрика тревоги `umiak_delete_stuck` | то же |
+| save_snapshot | 5 min | 5 min; with `forceStop` + 7 min (stop), after the snapshot as for fork |
+| delete | no deadline: retries with backoff up to 10 min; after 30 min the alert metric `umiak_delete_stuck` | the same |
 
-Время загрузки до готовности агента берётся из `template_builds.boot_timeout_s`.
+The time until agent readiness comes from `template_builds.boot_timeout_s`.
 
-## 8. Ёмкость, размещение, admission
+## 8. Capacity, placement, admission
 
-### 8.1 Учёт RAM
+### 8.1 RAM accounting
 
-RAM machine = `memory_mb` (S1: `balloon=0`, overcommit нет). Лимит — `nodes.ram_cap_mb` (8192 в PoC). На ноде считаются две величины:
+The RAM of a machine = `memory_mb` (S1: `balloon=0`, no overcommit). The limit is `nodes.ram_cap_mb` (8192 in the PoC). Two quantities are computed on a node:
 
-- **`reserved`** — обещанная RAM: сумма по machine в `allocating`, `provisioning`, `booting`, `warm`, `claiming`, `running`, `starting`, `stopping`, плюс machine `stopped`, для которых есть `pending`/`running` операция resume или recover, или fork/save_snapshot с `request.forceStop` (место для их старта уже выдано). Machine в `failed`/`deleting` сюда **не** входят: их место отдано.
-- **`powered`** — RAM VM, которые могут работать прямо сейчас: machine в `booting`, `warm`, `claiming`, `running`, `starting`, `stopping`, а также `failed`/`deleting`/`stopped`, у которых `power_observed` не `stopped`.
+- **`reserved`** — promised RAM: the sum over machines in `allocating`, `provisioning`, `booting`, `warm`, `claiming`, `running`, `starting`, `stopping`, plus `stopped` machines that have a `pending`/`running` resume or recover operation, or a fork/save_snapshot with `request.forceStop` (the place for their start has already been given). Machines in `failed`/`deleting` are **not** included: their place was given up.
+- **`powered`** — the RAM of VMs that may be running right now: machines in `booting`, `warm`, `claiming`, `running`, `starting`, `stopping`, and also `failed`/`deleting`/`stopped` whose `power_observed` is not `stopped`.
 
-Инварианты: `reserved ≤ cap` (обеспечивает admission, §8.2) и `powered ≤ cap` (обеспечивает проверка перед стартом, §8.2). Обе проверки идут под `pg_advisory_xact_lock(hash(node_id))`.
+Invariants: `reserved ≤ cap` (ensured by admission, §8.2) and `powered ≤ cap` (ensured by the check before start, §8.2). Both checks run under `pg_advisory_xact_lock(hash(node_id))`.
 
-### 8.2 Admission и проверка перед стартом
+### 8.2 Admission and the pre-start check
 
-**Admission** — функция `admit(node, needMb, pairKey)` в `packages/core`, в транзакции API (или контроллера пула) под блокировкой ноды:
-1. `reserved + need ≤ cap` → да. Резерв — сама строка machine (`allocating`) или операция resume/recover.
-2. Иначе считается RAM `warm` machine **других** пар на этой ноде (сначала самые старые). Если её хватает, эти machine в той же транзакции → `deleting` (задание `machine-op delete`), `reserved` уменьшается, ответ — да.
-3. Иначе — `out_of_capacity`.
+**Admission** is the function `admit(node, needMb, pairKey)` in `packages/core`, in the API transaction (or the pool controller's) under the node lock:
+1. `reserved + need ≤ cap` → yes. The reservation is the machine row itself (`allocating`) or the resume/recover operation.
+2. Otherwise the RAM of `warm` machines of **other** pairs on this node is computed (the oldest first). If it suffices, these machines go in the same transaction → `deleting` (a `machine-op delete` job), `reserved` decreases, the answer is yes.
+3. Otherwise — `out_of_capacity`.
 
-Пул пополняется только из свободной RAM (без вытеснения).
+The pool is refilled only from free RAM (without eviction).
 
-**Блокировки нод и повторы.** Отказ admission отдаёт блокировку своей ноды: `admit` берёт её в savepoint и при отказе откатывает его (ничего не записано). Поэтому транзакция сервиса держит не больше одной блокировки ноды: create перебирает кандидатов (§8.4) по одному, fork, resume, recover и create из снапшота работают на одной ноде. Транзакции create, fork, resume и recover при `40P01` (deadlock) или `40001` (serialization failure) целиком повторяются до 3 раз с короткой случайной паузой (10–50 ms × номер повтора); после этого — `out_of_capacity` (retryable), в лог — только SQLSTATE.
+**Node locks and retries.** An admission refusal releases the lock of its node: `admit` takes it in a savepoint and on refusal rolls it back (nothing was written). So a service transaction holds no more than one node lock: create tries the candidates (§8.4) one by one, fork, resume, recover, and create from a snapshot work on one node. The transactions of create, fork, resume, and recover on `40P01` (deadlock) or `40001` (serialization failure) are repeated entirely up to 3 times with a short random pause (10–50 ms × the retry number); after that — `out_of_capacity` (retryable), only the SQLSTATE goes to the log.
 
-**Проверка перед стартом** — в шаге, который запускает VM (§7.4 шаг 6, `start` в resume и recover), под той же блокировкой: `powered + need ≤ cap`. Если да — в той же транзакции machine переходит в `booting`/`starting` (теперь она входит в `powered`), затем вызывается S1 `start`. Если нет — ждать с опросом 1 s (проверяя `superseded`, §7.1): вытесненные machine ещё останавливаются. Delete пишет `power_observed = stopped` сразу после S1 stop, поэтому ожидание — секунды.
+**The pre-start check** is in the step that starts the VM (§7.4 step 6, `start` in resume and recover), under the same lock: `powered + need ≤ cap`. If yes — in the same transaction the machine goes to `booting`/`starting` (it is now in `powered`), then S1 `start` is called. If no — wait with 1 s polling (checking `superseded`, §7.1): evicted machines are still stopping. Delete writes `power_observed = stopped` right after S1 stop, so the wait is seconds.
 
-### 8.3 Слоты клонирования
+### 8.3 Clone slots
 
-S1 ограничивает параллельные клоны на ноде (`clone_concurrency`, дефолт 4). Клоны идут из разных очередей (пул, create, fork), поэтому лимит — общий семафор в БД [решение S6]:
+S1 limits parallel clones on a node (`clone_concurrency`, default 4). Clones come from different queues (pool, create, fork), so the limit is a shared semaphore in the DB [S6 decision]:
 
 ```
 node_clone_slots(node_id, slot int, holder text null, expires_at null, primary key(node_id, slot))
 ```
 
-Захват — `UPDATE … SET holder, expires_at = now() + 2 min WHERE node_id = $1 AND (holder IS NULL OR expires_at < now()) … LIMIT 1 FOR UPDATE SKIP LOCKED`. Освобождение в `finally`; потерянный слот истекает сам.
+Acquisition is `UPDATE … SET holder, expires_at = now() + 2 min WHERE node_id = $1 AND (holder IS NULL OR expires_at < now()) … LIMIT 1 FOR UPDATE SKIP LOCKED`. Release in `finally`; a lost slot expires itself.
 
-### 8.4 Размещение (multi-node готовность)
+### 8.4 Placement (multi-node readiness)
 
-`place(templateSlug, sizeMb)`: ноды провайдеров `active`, нода `active`, есть `active`-сборка шаблона на этой ноде, хранилище ниже порогов (S1: data 80%, metadata 70%), admission проходит. Из подходящих — с наибольшей свободной RAM [решение S6]. Fork, resume и create из saved snapshot привязаны к ноде своих дисков. В PoC нода одна.
+`place(templateSlug, sizeMb)`: the provider's nodes `active`, the node `active`, an `active` build of the template exists on this node, storage is below thresholds (S1: data 80%, metadata 70%), admission passes. Of the suitable ones — the one with the most free RAM [S6 decision]. Fork, resume, and create from a saved snapshot are bound to the node of their disks. In the PoC there is one node.
 
-Каждая нода получает свой экземпляр клиентов `packages/pve` (PVE API провайдера и `umiak-node` ноды) из реестра в worker по `providers`/`nodes` и файлам Secret.
+Each node gets its own instance of the `packages/pve` clients (the provider's PVE API and the node's `umiak-node`) from the registry in the worker by `providers`/`nodes` and the Secret files.
 
-### 8.5 Квоты
+### 8.5 Quotas
 
-Проверяются для create, fork (цель) и resume в той же транзакции, что и admission, под `pg_advisory_xact_lock(hash(team_id))`. Порядок блокировок всегда: команда, затем нода. Число sandbox команды в `creating`, `ready`, `starting`, `stopping` ≤ `maxActiveSandboxes`; их суммарная RAM ≤ `maxRamMb`; saved snapshots ≤ `maxSavedSnapshots` (при save). Ошибка `quota_exceeded`. Значения задаёт S8.
+Checked for create, fork (the target), and resume in the same transaction as admission, under `pg_advisory_xact_lock(hash(team_id))`. The lock order is always: team, then node. The number of the team's sandboxes in `creating`, `ready`, `starting`, `stopping` ≤ `maxActiveSandboxes`; their total RAM ≤ `maxRamMb`; saved snapshots ≤ `maxSavedSnapshots` (on save). The error is `quota_exceeded`. The values are set by S8.
 
 ## 9. Warm pool
 
-### 9.1 Цели
+### 9.1 Targets
 
-`poolTargets` из `ConfigReader`: `(templateSlug, sizeSlug, target)`. PoC: `linux/2GB = 1` (2 GB из 8, остальные 6 GB — под 3 sandbox).
+`poolTargets` from `ConfigReader`: `(templateSlug, sizeSlug, target)`. PoC: `linux/2GB = 1` (2 GB of 8, the other 6 GB are for 3 sandboxes).
 
-### 9.2 Контроллер `pool` (раз в 10 s)
+### 9.2 The `pool` controller (every 10 s)
 
-Для каждой цели и каждой ноды с `active`-сборкой шаблона (в PoC нода одна, цель целиком на ней):
-1. `supply` = machine с этим `pool_key` и активной сборкой в состояниях `allocating`, `provisioning`, `booting`, `warm`.
-2. `supply < target`: на каждую недостающую — admission без вытеснения; если да, machine `allocating` с `pool_key` и задание `machine-op provision`. Если RAM нет — ничего (пул ждёт).
-3. `supply > target`: самые старые `warm` лишние → `deleting`.
-4. Старое поколение (§9.4) и устаревшие (`warm_at` старше `maxAgeHours`, дефолт 24 h [решение S6]) — заменить: сначала заказать новую (если RAM позволяет), затем удалить старую; если RAM не хватает на обе — удалить старую первой.
-5. `warm` machine, у которой агент отключён дольше 60 s, → `deleting` (её дешевле заменить, чем чинить).
+For each target and each node with an `active` template build (in the PoC there is one node, the whole target on it):
+1. `supply` = machines with this `pool_key` and the active build in the states `allocating`, `provisioning`, `booting`, `warm`.
+2. `supply < target`: for each missing one — admission without eviction; if yes, a machine `allocating` with `pool_key` and a `machine-op provision` job. If there is no RAM — nothing (the pool waits).
+3. `supply > target`: the oldest surplus `warm` → `deleting`.
+4. The old generation (§9.4) and stale ones (`warm_at` older than `maxAgeHours`, default 24 h [S6 decision]) — replace: first order a new one (if RAM allows), then delete the old; if there is not enough RAM for both — delete the old one first.
+5. A `warm` machine whose agent has been disconnected for more than 60 s → `deleting` (cheaper to replace than to repair).
 
-### 9.3 Подготовка machine пула (`machine-op provision`)
+### 9.3 Pool machine preparation (`machine-op provision`)
 
-§7.4 (включая проверку RAM и start), затем ожидание подключения агента и события фазы `pool_ready` (или ответа `System/Info` с готовностью, если S3 так решит), не дольше `boot_timeout_s`. Затем machine → `warm`, `warm_at`. При ошибке или тайм-ауте — `failed → deleting`.
+§7.4 (including the RAM check and start), then waiting for the agent to connect and the `pool_ready` phase event (or a `System/Info` response with readiness, if S3 so decides), no longer than `boot_timeout_s`. Then machine → `warm`, `warm_at`. On an error or timeout — `failed → deleting`.
 
-### 9.4 Версии шаблона
+### 9.4 Template versions
 
-Поколение пула — `template_build_id`. Claim берёт только machine с текущей `active`-сборкой пары. Когда S5 переводит новую сборку в `active`, старые `warm` этой пары заменяются по шагу 4. Sandbox на старой сборке не трогаются.
+The pool generation is `template_build_id`. Claim takes only machines with the pair's current `active` build. When S5 moves a new build to `active`, the old `warm` machines of the pair are replaced per step 4. Sandboxes on the old build are not touched.
 
 ### 9.5 Claim
 
-Атомарен в транзакции API (§7.3):
+Atomic in the API transaction (§7.3):
 
 ```sql
 UPDATE runtime.machines SET state = 'claiming', sandbox_id = $sandbox, pool_key = NULL, claimed_at = now()
@@ -717,115 +717,115 @@ WHERE id = (SELECT id FROM runtime.machines
 RETURNING *;
 ```
 
-Дальше worker: `rotate_token` (новый MT при claim, S2), `System/Claim`. Идентичность (`machineId`, BS в `smbios1`) у machine уже есть с момента подготовки, при claim она не меняется: machine одна на всю жизнь sandbox.
+Then the worker: `rotate_token` (a new MT at claim, S2), `System/Claim`. The identity (`machineId`, BS in `smbios1`) is already in the machine from the preparation, it does not change at claim: one machine for the whole life of the sandbox.
 
-## 10. События агента
+## 10. Agent events
 
-### 10.1 Приём
+### 10.1 Intake
 
-`POST /internal/v1/agent-events` (S2 §9.6) живёт в `apps/api` и вызывает `core.events.ingest(batch)`:
-1. В одной транзакции: `INSERT … ON CONFLICT DO NOTHING` в `agent_events` или `agent_synthetic_events`; задание `machine-events {machineId}` (очередь с политикой `stately` и `singletonKey = machineId`: не больше одного ждущего и одного активного на machine).
-2. Ответ `{ackedSeq}` = наибольший `seq` пачки (все строки пачки уже записаны).
+`POST /internal/v1/agent-events` (S2 §9.6) lives in `apps/api` and calls `core.events.ingest(batch)`:
+1. In one transaction: `INSERT … ON CONFLICT DO NOTHING` into `agent_events` or `agent_synthetic_events`; a `machine-events {machineId}` job (a queue with the `stately` policy and `singletonKey = machineId`: no more than one waiting and one active per machine).
+2. The response `{ackedSeq}` = the largest `seq` of the batch (all rows of the batch are already written).
 
-### 10.2 Обработка (`machine-events`)
+### 10.2 Handling (`machine-events`)
 
-Обработчик читает все необработанные события machine (агентские по `seq`, синтетические по `time`) и применяет их идемпотентно, затем ставит `processed_at`. Текущее состояние подключения берётся из `tunnel_sessions`, а не из порядка событий (S2).
+The handler reads all unprocessed events of the machine (agent ones by `seq`, synthetic by `time`) and applies them idempotently, then sets `processed_at`. The current connection state is taken from `tunnel_sessions`, not from the order of events (S2).
 
-| Событие | Реакция S6 |
+| Event | S6 reaction |
 |---|---|
-| `connected` (синт.) | если `health=degraded` → `ok`, `sandbox_events: recovered`; повторная доставка секретов текущей загрузки (§7.8) |
-| `disconnected` (синт.) | ничего сразу; правило degraded — контроллер `health` (§11.1) |
-| `agent_restarted` (синт.) | запись в журнал; команды живы (S2); повторная доставка секретов даже без смены `boot_id` |
-| `rebooted` (синт.) | `last_reboot_at`; команды этой machine с прошлым `boot_id` → `lost`; если sandbox `ready`, нет активной операции и новый `boot_id` (из `tunnel_sessions`) ≠ `provisioned_boot_id` → `reprovision` |
-| `identity_changed` (синт.) | ожидается только при первом подключении fork-цели или VM из снапшота; иначе метрика тревоги `umiak_unexpected_identity_change` |
-| `phase{pool_ready \| ready \| secrets_missing}` | `pool_ready` → machine `warm` (если ждёт); `secrets_missing` текущего boot сохраняет запрос повторной доставки, даже если boot уже provisioned (§7.8) |
-| `command.exited{commandId, status, code, signal, stdoutEnd, stderrEnd}` | терминальный статус команды, если ещё не терминальный |
-| `pty.closed{commandId}` | статус команды PTY |
-| `activity{runningCommands, openPtys, tcpStreams}` | счётчики, `activity`, `last_activity_at` (§12) |
-| `ports.changed{listening[]}` | пока только сохраняется (для S7 `/ports`) |
-| `quiesce.watchdog_thawed` | метрика тревоги; у снапшота в `creating` этой machine `quiesce_broken = true` (саму операцию не трогает: она проверит флаг после thaw, §7.7) |
+| `connected` (synth.) | if `health=degraded` → `ok`, `sandbox_events: recovered`; re-delivery of secrets of the current boot (§7.8) |
+| `disconnected` (synth.) | nothing at once; the degraded rule is the `health` controller (§11.1) |
+| `agent_restarted` (synth.) | a journal entry; commands are alive (S2); re-delivery of secrets even without a `boot_id` change |
+| `rebooted` (synth.) | `last_reboot_at`; this machine's commands with the previous `boot_id` → `lost`; if the sandbox is `ready`, there is no active operation, and the new `boot_id` (from `tunnel_sessions`) ≠ `provisioned_boot_id` → `reprovision` |
+| `identity_changed` (synth.) | expected only at the first connection of a fork target or a VM from a snapshot; otherwise the alert metric `umiak_unexpected_identity_change` |
+| `phase{pool_ready \| ready \| secrets_missing}` | `pool_ready` → machine `warm` (if waiting); `secrets_missing` of the current boot keeps the re-delivery request even if the boot is already provisioned (§7.8) |
+| `command.exited{commandId, status, code, signal, stdoutEnd, stderrEnd}` | the command's terminal status, if not yet terminal |
+| `pty.closed{commandId}` | the status of the PTY command |
+| `activity{runningCommands, openPtys, tcpStreams}` | counters, `activity`, `last_activity_at` (§12) |
+| `ports.changed{listening[]}` | only stored for now (for S7 `/ports`) |
+| `quiesce.watchdog_thawed` | an alert metric; for a snapshot in `creating` of this machine `quiesce_broken = true` (the operation itself is not touched: it will check the flag after thaw, §7.7) |
 
-Точные имена и payload событий агента задаёт S3; S6 требует набор выше (§16).
+The exact names and payloads of agent events are set by S3; S6 requires the set above (§16).
 
-## 11. Здоровье и восстановление
+## 11. Health and recovery
 
-### 11.1 Контроллер `health` (раз в 10 s)
+### 11.1 The `health` controller (every 10 s)
 
-Для `ready` sandbox, у machine которой `tunnel_sessions.state = disconnected` и `disconnected_at < now − 60 s` (или сессии нет, а у владельца-gateway протух heartbeat — S2 §7): `health = degraded`, `degraded_since`, `sandbox_events: degraded`. Дальше по шагам [решение S6]:
-1. Проба QGA через PVE (`agent/ping`) и статус VM.
-2. VM работает, QGA отвечает → `health_reason = agent_unreachable`; через 2 min в `degraded` — один раз перезапустить службу агента через QGA (`guest-exec`), не чаще раза в 10 min.
-3. VM работает, QGA молчит → `vm_unresponsive`. Ничего не делаем сами: пользователь вызывает `recover`.
-4. VM выключена → `health_reason = vm_stopped`, больше ничего: выключение обрабатывает только reconcile (§11.3), чтобы одно событие не посчиталось дважды.
+For a `ready` sandbox whose machine has `tunnel_sessions.state = disconnected` and `disconnected_at < now − 60 s` (or there is no session and the owner gateway's heartbeat is stale — S2 §7): `health = degraded`, `degraded_since`, `sandbox_events: degraded`. Then step by step [S6 decision]:
+1. A QGA probe via PVE (`agent/ping`) and the VM status.
+2. The VM is running, QGA answers → `health_reason = agent_unreachable`; after 2 min in `degraded` — restart the agent service once through QGA (`guest-exec`), no more often than every 10 min.
+3. The VM is running, QGA is silent → `vm_unresponsive`. We do nothing ourselves: the user calls `recover`.
+4. The VM is off → `health_reason = vm_stopped`, nothing more: a shutdown is handled only by reconcile (§11.3), so that one event is not counted twice.
 
-`degraded` sandbox не останавливается и не перезагружается автоматически.
+A `degraded` sandbox is not stopped or rebooted automatically.
 
-### 11.2 Контроллер `reconcile` (раз в 60 s на провайдера)
+### 11.2 The `reconcile` controller (every 60 s per provider)
 
-Читает: VM из `/cluster/resources` в pool `umiak`, `umiak-node lv.list` (теги `umiak`), `vmid_leases`, `machines`, `disks`, `snapshots`. Ничего, что не в pool `umiak`, без тега `umiak` или вне диапазона VMID, не трогает (защиты S1 дублируются в коде). Grace для «свежих» объектов — 10 min (дольше любого шага подготовки).
+Reads: VMs from `/cluster/resources` in the pool `umiak`, `umiak-node lv.list` (tags `umiak`), `vmid_leases`, `machines`, `disks`, `snapshots`. It touches nothing that is not in the pool `umiak`, has no tag `umiak`, or is outside the VMID range (the S1 protections are duplicated in code). The grace for "fresh" objects is 10 min (longer than any preparation step).
 
-| Расхождение | Действие |
+| Discrepancy | Action |
 |---|---|
-| VM в pool без строки machine (или machine `deleted`), старше grace | S1 `delete(vmid)`, метрика `orphan_vm` |
-| LV `umiak-vm-N` без VM и без machine/disk; LV `umiak-snap-<id>` без снапшота в `creating`/`ready`, старше grace | `lv.remove`, метрика `orphan_lv` |
-| machine не в `allocating`/`provisioning`/`deleting`/`deleted`, а VM нет, активной операции нет | machine `failed` (`lost`); sandbox этой machine → `error` (`machine_lost`) (§6.1) |
-| machine `running`, VM выключена, активной операции нет | §11.3 |
-| machine `stopped`, а VM работает (запустили руками) | S1 `shutdown`, метрика `power_drift` |
-| `vmid_leases.releasing` | повтор проверки S1 delete, затем освобождение |
-| machine `deleted`, а `tunnel_sessions` `connected` | выставить `retired_at` ещё раз, метрика |
-| операция `running`/`pending` дольше дедлайна + 5 min без задания pg-boss в работе | заново поставить задание (обработчик сам выполнит компенсацию по дедлайну) |
-| `pending`-операция старше 1 min без задания, без активного родителя (`parent_operation_id`) | заново поставить задание (если родитель активен, обработчик всё равно выйдет, §7.1) |
+| A VM in the pool without a machine row (or the machine is `deleted`), older than grace | S1 `delete(vmid)`, metric `orphan_vm` |
+| An LV `umiak-vm-N` without a VM and without a machine/disk; an LV `umiak-snap-<id>` without a snapshot in `creating`/`ready`, older than grace | `lv.remove`, metric `orphan_lv` |
+| A machine not in `allocating`/`provisioning`/`deleting`/`deleted`, but no VM, no active operation | machine `failed` (`lost`); this machine's sandbox → `error` (`machine_lost`) (§6.1) |
+| A machine `running`, the VM is off, no active operation | §11.3 |
+| A machine `stopped`, but the VM is running (started by hand) | S1 `shutdown`, metric `power_drift` |
+| `vmid_leases.releasing` | repeat the S1 delete check, then release |
+| A machine `deleted`, but `tunnel_sessions` is `connected` | set `retired_at` again, a metric |
+| An operation `running`/`pending` for longer than the deadline + 5 min with no pg-boss job in progress | enqueue the job again (the handler itself will perform compensation by deadline) |
+| A `pending` operation older than 1 min without a job, with no active parent (`parent_operation_id`) | enqueue the job again (if the parent is active, the handler exits anyway, §7.1) |
 
-Режим `UMIAK_RECONCILE_DRY_RUN=1` только пишет, что сделал бы. В PoC первый запуск — в этом режиме.
+The mode `UMIAK_RECONCILE_DRY_RUN=1` only writes what it would do. In the PoC the first run is in this mode.
 
-### 11.3 Неожиданное выключение
+### 11.3 Unexpected shutdown
 
-VM machine в `running` выключена без нашей операции (пользователь сделал `shutdown`, гость упал). Обнаруживает только reconcile. В одной транзакции (блокировки команды и ноды): machine `running → stopped` (условный `UPDATE`, поэтому одно выключение обрабатывается один раз), `power_observed = stopped`, время добавляется в `unexpected_stops`. Затем:
-- первый раз за час — системная операция `resume` (`requested_by = null`, квота не проверяется, admission как обычно), sandbox `ready → starting`. Если admission отказал — как во втором случае;
-- второй раз за час — sandbox → `stopped` (`stop_reason = unexpected_shutdown`). Пользователь сам решает, делать ли resume.
+The VM of a machine in `running` is off without our operation (the user did `shutdown`, the guest crashed). Detected only by reconcile. In one transaction (team and node locks): machine `running → stopped` (a conditional `UPDATE`, so one shutdown is handled once), `power_observed = stopped`, the time is appended to `unexpected_stops`. Then:
+- the first time within an hour — a system `resume` operation (`requested_by = null`, quota not checked, admission as usual), sandbox `ready → starting`. If admission refused — as in the second case;
+- the second time within an hour — sandbox → `stopped` (`stop_reason = unexpected_shutdown`). The user decides whether to resume.
 
-## 12. Auto-stop: TTL и простой
+## 12. Auto-stop: TTL and idle
 
-Контроллер `autostop` (раз в 15 s):
-- **TTL.** `deadline_at = (create или resume) + ttl_seconds`. При `deadline_at ≤ now` у `ready` sandbox → операция `stop` (`stop_reason = ttl`). Если TTL задан явно, он жёсткий: активность его не продлевает, продлевает только `extend` или `PATCH ttlSeconds`. **Дефолт — `null` (жёсткого TTL нет)**: главная защита от расходов — idle-stop, который считает активностью команды, PTY и TCP-потоки, поэтому долгие задачи агентов не убивает таймер по умолчанию. Boat продлевает дедлайн, пока работает prompt агента; у нас тот же эффект даёт отсутствие TTL по умолчанию.
-- **Простой.** Sandbox — кандидат на остановку, если одновременно:
-  - агент на связи, а последнее событие `activity` свежее (не старше 150 s, то есть пропущено не больше одного heartbeat) и показывает `runningCommands = 0`, `openPtys = 0`, `tcpStreams = 0`;
-  - с момента, когда счётчики стали нулевыми, прошло `idle_timeout_seconds`;
-  - с `last_api_call_at` прошло `idle_timeout_seconds`.
+The `autostop` controller (every 15 s):
+- **TTL.** `deadline_at = (create or resume) + ttl_seconds`. At `deadline_at ≤ now` a `ready` sandbox → a `stop` operation (`stop_reason = ttl`). If a TTL is set explicitly, it is hard: activity does not extend it, only `extend` or `PATCH ttlSeconds` does. **The default is `null` (no hard TTL)**: the main protection against costs is idle-stop, which counts commands, PTYs, and TCP streams as activity, so long agent tasks are not killed by a timer by default. Boat extends the deadline while the agent's prompt is running; for us the same effect is given by the absence of a TTL by default.
+- **Idle.** A sandbox is a stop candidate if all of the following hold:
+  - the agent is connected, and the last `activity` event is fresh (not older than 150 s, i.e. no more than one heartbeat missed) and shows `runningCommands = 0`, `openPtys = 0`, `tcpStreams = 0`;
+  - `idle_timeout_seconds` has passed since the counters became zero;
+  - `idle_timeout_seconds` has passed since `last_api_call_at`.
 
-  Перед остановкой контроллер **проверяет живьём**: вызывает у агента `System/Activity` (без побочных эффектов, S3) и требует нули прямо сейчас. Только тогда — операция `stop` (`stop_reason = idle`). Так отставание конвейера событий не приводит к остановке занятой sandbox. Дефолт 900, `null` — без idle-stop.
-- `runningCommands` включает detached-команды и любые процессы под shim (S2 §9.1), `openPtys` — PTY, живые с клиентом или без. Значит, долгая работа агента (coding-агент, сборка, `sleep` под shim) никогда не считается простоем.
-- Агент недоступен (`activity = unknown`), событие `activity` устарело или живая проверка не удалась → idle-stop не срабатывает; TTL работает.
-- `last_api_call_at` обновляет `api` на любом вызове по sandbox (не чаще раза в 30 s на sandbox, `UPDATE … WHERE last_api_call_at < now() − 30 s`).
-- Агент шлёт `activity` при переходе любого счётчика между 0 и не-0 и раз в 60 s как heartbeat (S3, §16).
+  Before stopping, the controller **checks live**: it calls the agent's `System/Activity` (no side effects, S3) and requires zeros right now. Only then a `stop` operation (`stop_reason = idle`). This way the lag of the event pipeline does not lead to stopping a busy sandbox. The default is 900, `null` — no idle-stop.
+- `runningCommands` includes detached commands and any processes under a shim (S2 §9.1), `openPtys` — PTYs, alive with or without a client. So long agent work (a coding agent, a build, a `sleep` under a shim) is never considered idle.
+- The agent is unavailable (`activity = unknown`), the `activity` event is stale, or the live check failed → idle-stop does not fire; the TTL works.
+- `last_api_call_at` is updated by `api` on any call on the sandbox (no more often than once per 30 s per sandbox, `UPDATE … WHERE last_api_call_at < now() − 30 s`).
+- The agent sends `activity` when any counter moves between 0 and non-0 and every 60 s as a heartbeat (S3, §16).
 
-## 13. Безопасность
+## 13. Security
 
-### 13.1 Env и секреты (решение Q7, согласовано master-сессией; Илья информирован и может пересмотреть)
+### 13.1 Env and secrets (decision Q7, agreed by the master session; Ilia is informed and may revisit)
 
-- **Где хранятся.** Env, секреты и secret-файлы sandbox (из create, fork, resume и `PUT`/`PATCH /env`, S7 §8.3) хранятся в `sandbox_secrets` в виде одного зашифрованного блоба `{env, secrets, secretFiles}`.
-- **Шифрование.** AES-256-GCM через `node:crypto`, случайный 96-битный nonce на запись, AAD = `sandbox:<sandboxId>:v<keyVersion>`.
-- **Ключи.** Кольцо из Kubernetes Secret, файл `UMIAK_DATA_KEYS_FILE`: `{"current": 2, "keys": {"1": "<base64>", "2": "<base64>"}}`. Ротация: новый ключ сначала раздаётся всем репликам `api` и `worker` как не-`current` (каждая уже может им расшифровать и проверить hash), затем становится `current`; контроллер `cleanup` перешифровывает строки со старой версией; старый ключ убирается, когда строк с ним ноль (метрика) **и** с ротации прошло не меньше 24 h (срок идемпотентности, см. ниже).
-- **Hash тела запроса.** Тела create, fork и resume содержат значения env и секретов, поэтому `idempotency_keys.request_hash` и `operations.request.bodyHash` — не голый sha256, а `версия ключа (uint32 BE) || HMAC-SHA256(подключ, scope "\n" каноническое тело)`; подключ — HKDF-SHA256 от ключа данных этой версии (`info = umiak-request-hash/v1`). Сравнение пересчитывает HMAC на версии из сохранённого hash, поэтому ротация в пределах 24 h не ломает повтор с тем же `Idempotency-Key`. Отсюда правило удаления ключа выше (ноль строк и не раньше 24 h после ротации): hash, чей ключ уже убран, не совпадает ни с чем (`idempotency_key_reused`, дубля нет).
-- **Доставка.** Секреты передаются агенту при каждом claim, resume, recover и reprovision (`System/Claim`). В госте они живут только в tmpfs (Linux) или в каталоге с ACL SYSTEM (Windows) и стираются при stop (S3).
-- **Fork.** Наследует env и секреты источника: расшифровка, наложение значений из запроса (§7.7) и шифрование с AAD цели. Saved snapshot секретов не несёт.
-- **Delete.** Строка `sandbox_secrets` удаляется (crypto-erase для этой sandbox).
-- **Утечки.** Значения не попадают в логи, `operations.request`, `idempotency_keys.response`, данные заданий pg-boss (там только id), метрики и `commands` (там только имена переменных). Логгер редактирует поля `env`, `secrets`, `secretFiles`, `bs`, `token`. Hash тела для `Idempotency-Key` считается от канонического тела вместе с секретами, но сам секрет не хранится.
+- **Where they are stored.** A sandbox's env, secrets, and secret files (from create, fork, resume, and `PUT`/`PATCH /env`, S7 §8.3) are stored in `sandbox_secrets` as one encrypted blob `{env, secrets, secretFiles}`.
+- **Encryption.** AES-256-GCM via `node:crypto`, a random 96-bit nonce per write, AAD = `sandbox:<sandboxId>:v<keyVersion>`.
+- **Keys.** A ring from a Kubernetes Secret, the file `UMIAK_DATA_KEYS_FILE`: `{"current": 2, "keys": {"1": "<base64>", "2": "<base64>"}}`. Rotation: a new key is first distributed to all replicas of `api` and `worker` as non-`current` (each can already decrypt and check the hash with it), then becomes `current`; the `cleanup` controller re-encrypts rows with the old version; the old key is removed when there are zero rows with it (a metric) **and** at least 24 h have passed since the rotation (the idempotency period, see below).
+- **Request body hash.** The bodies of create, fork, and resume contain env and secret values, so `idempotency_keys.request_hash` and `operations.request.bodyHash` are not a bare sha256 but `key version (uint32 BE) || HMAC-SHA256(subkey, scope "\n" canonical body)`; the subkey is HKDF-SHA256 of the data key of that version (`info = umiak-request-hash/v1`). The comparison recomputes the HMAC with the version from the stored hash, so a rotation within 24 h does not break a repeat with the same `Idempotency-Key`. Hence the key deletion rule above (zero rows and not earlier than 24 h after rotation): a hash whose key has been removed matches nothing (`idempotency_key_reused`, no duplicate).
+- **Delivery.** Secrets are passed to the agent at every claim, resume, recover, and reprovision (`System/Claim`). In the guest they live only in tmpfs (Linux) or in a directory with an ACL for SYSTEM (Windows) and are wiped at stop (S3).
+- **Fork.** Inherits the source's env and secrets: decryption, overlaying the request's values (§7.7), and encryption with the target's AAD. A saved snapshot carries no secrets.
+- **Delete.** The `sandbox_secrets` row is deleted (crypto-erase for this sandbox).
+- **Leaks.** The values do not get into logs, `operations.request`, `idempotency_keys.response`, pg-boss job data (ids only), metrics, and `commands` (variable names only). The logger redacts the fields `env`, `secrets`, `secretFiles`, `bs`, `token`. The body hash for `Idempotency-Key` is computed from the canonical body together with the secrets, but the secret itself is not stored.
 
-### 13.2 Учётные данные machine
+### 13.2 Machine credentials
 
-- BS генерируется в шаге подготовки (§7.4), в БД только `sha256` (S2). После первого старта VM не меняется.
-- `retired_at` ставится первым шагом delete, до остановки VM: gateway закрывает туннель и отвечает `403`.
-- MT ротируется при claim (`rotate-token`). При resume ротация не нужна: MT жил только в памяти агента, после загрузки агент снова предъявляет BS.
+- The BS is generated in the preparation step (§7.4), only the `sha256` is in the DB (S2). It does not change after the VM's first start.
+- `retired_at` is set by the first step of delete, before the VM stops: the gateway closes the tunnel and answers `403`.
+- The MT is rotated at claim (`rotate-token`). At resume no rotation is needed: the MT lived only in agent memory, after boot the agent presents the BS again.
 
-### 13.3 Прочее
+### 13.3 Other
 
-- Worker — единственный компонент с токеном PVE и SSH-ключом `umiak-node` (Kubernetes Secret, S1 §6.1). `api` их не получает.
-- Внутренние ручки `api` (`/internal/v1/*`) — только с service token (S2 §5.5) и только из сети кластера (NetworkPolicy, S12).
-- Reconciler и cleanup удаляют только помеченное нами (§11.2).
+- The worker is the only component with the PVE token and the `umiak-node` SSH key (a Kubernetes Secret, S1 §6.1). `api` does not get them.
+- The internal `api` endpoints (`/internal/v1/*`) — only with a service token (S2 §5.5) and only from the cluster network (NetworkPolicy, S12).
+- The reconciler and cleanup delete only what is marked as ours (§11.2).
 
-## 14. Интерфейсы, которые S6 даёт другим областям
+## 14. Interfaces S6 gives to other areas
 
-### 14.1 S7 (публичное API): `SandboxService` в `packages/core`
+### 14.1 S7 (public API): `SandboxService` in `packages/core`
 
 ```ts
 interface SandboxService {
@@ -855,165 +855,165 @@ interface SandboxService {
 }
 ```
 
-Доменные ошибки (`UmiakError{code, retryable, details}`), которые S7 отображает в HTTP: `not_found`, `invalid_state` (с текущим `state`), `operation_in_progress` (retryable, `operationId`), `out_of_capacity` (retryable, `retryAfterSeconds`), `pool_exhausted` (retryable, `retryAfterSeconds`; create с `failFast`, §7.3), `quota_exceeded`, `idempotency_key_reused` (тот же ключ, другое тело), `template_unavailable`, `snapshot_not_found`, `sandbox_not_ready`, `recover_rate_limited`, `validation`.
+Domain errors (`UmiakError{code, retryable, details}`) that S7 maps to HTTP: `not_found`, `invalid_state` (with the current `state`), `operation_in_progress` (retryable, `operationId`), `out_of_capacity` (retryable, `retryAfterSeconds`), `pool_exhausted` (retryable, `retryAfterSeconds`; create with `failFast`, §7.3), `quota_exceeded`, `idempotency_key_reused` (the same key, a different body), `template_unavailable`, `snapshot_not_found`, `sandbox_not_ready`, `recover_rate_limited`, `validation`.
 
-Идемпотентность: тот же `(principal, scope, key)` с тем же hash тела → сохранённый ответ (та же sandbox и операция); с другим hash → `idempotency_key_reused`; параллельный дубль ждёт коммита первого (уникальный ключ в транзакции). Срок 24 h. Повтор без ключа создаёт новую sandbox.
+Idempotency: the same `(principal, scope, key)` with the same body hash → the saved response (the same sandbox and operation); with a different hash → `idempotency_key_reused`; a parallel duplicate waits for the first one's commit (a unique key in the transaction). Lifetime 24 h. A repeat without a key creates a new sandbox.
 
-`NOTIFY umiak_sandboxes '<sandboxId>'` шлёт триггер при смене `state` или `health`, для long-poll в S7 и дашборда S8.
+`NOTIFY umiak_sandboxes '<sandboxId>'` is sent by a trigger on a change of `state` or `health`, for the S7 long-poll and the S8 dashboard.
 
-### 14.2 S4 (gateway): маршруты и SSH
+### 14.2 S4 (gateway): routes and SSH
 
-- `core.routes.lookup(label)` и ручка `GET /internal/v1/routes/{label}` в `api` → `{sandboxId, machineId, port, mode, tokenHash, authEpoch, state}`. `state` — состояние sandbox: gateway сам решает, что показать для не-`ready` (страница «остановлена» и т.п.). Метка — `<slug>-<port>`; slug по грамматике S4 §4.2 не заканчивается на `-<цифры>`, поэтому номер порта — всё после последнего `-`.
-- `NOTIFY umiak_routes '<label>'` при изменении `hosted_ports`; при смене `state` или `machine_id` sandbox — по одному уведомлению на каждую её метку (триггеры).
-- `POST /internal/v1/ssh/authorize {sandbox, user, publicKeyFingerprint}` → `{allowed, machineId, state}`. S6 даёт разрешение sandbox и её состояние; проверка ключа против ключей пользователя и прав на sandbox — S7/S8 (ключи и доступы в Payload).
-- Обмен SSO-кода для режима `sso` — S7/S8, не S6.
+- `core.routes.lookup(label)` and the endpoint `GET /internal/v1/routes/{label}` in `api` → `{sandboxId, machineId, port, mode, tokenHash, authEpoch, state}`. `state` is the sandbox state: the gateway itself decides what to show for non-`ready` (a "stopped" page, etc.). The label is `<slug>-<port>`; per the S4 §4.2 grammar the slug does not end with `-<digits>`, so the port number is everything after the last `-`.
+- `NOTIFY umiak_routes '<label>'` on a change of `hosted_ports`; on a change of the sandbox's `state` or `machine_id` — one notification for each of its labels (triggers).
+- `POST /internal/v1/ssh/authorize {sandbox, user, publicKeyFingerprint}` → `{allowed, machineId, state}`. S6 gives the permission for the sandbox and its state; checking the key against the user's keys and rights on the sandbox is S7/S8 (keys and access in Payload).
+- The exchange of the SSO code for the `sso` mode is S7/S8, not S6.
 
-Автоматический resume при обращении к URL остановленной sandbox в фазе 1 не делается.
+An automatic resume on a request to the URL of a stopped sandbox is not done in phase 1.
 
-### 14.3 S5: регистрация сборок
+### 14.3 S5: registering builds
 
-S5 пишет `template_builds` (через `umiak-admin template register|promote` или прямую вставку в миграции): `template_slug`, `version`, `node`, `pve_vmid`, `disk_layout`, `hw`, `agent_version`, `boot_timeout_s`; затем `promote` (старая `active` → `deprecated`). Пул обновится сам (§9.4).
+S5 writes `template_builds` (via `umiak-admin template register|promote` or a direct insert in migrations): `template_slug`, `version`, `node`, `pve_vmid`, `disk_layout`, `hw`, `agent_version`, `boot_timeout_s`; then `promote` (the old `active` → `deprecated`). The pool updates itself (§9.4).
 
-### 14.4 S8: что S6 ждёт от Payload
+### 14.4 S8: what S6 expects from Payload
 
-См. §16.
+See §16.
 
 ## 15. Worker
 
-### 15.1 Очереди pg-boss [решение S6 по параметрам]
+### 15.1 pg-boss queues [S6 decision on the parameters]
 
-| Очередь | Политика | Ключ | Данные | Параметры |
+| Queue | Policy | Key | Data | Parameters |
 |---|---|---|---|---|
 | `sandbox-op` | `singleton` | `sandboxId` | `{operationId}` | `heartbeatSeconds 30`, `expireInSeconds 3600`, `retryLimit 20`, `retryBackoff`, `retryDelay 2`, `retryDelayMax 120`, dead letter `sandbox-op-dlq` |
-| `machine-op` | `singleton` | `machineId` | `{machineId, action: provision \| delete}` | как выше |
-| `snapshot-op` | `singleton` | `snapshotId` | `{snapshotId, action: delete}` | как выше |
-| `machine-events` | `stately` | `machineId` | `{machineId}` | `heartbeatSeconds 30`, `expireInSeconds 300`, `retryLimit 10`, `retryBackoff` (без heartbeat задание умершего пода держало бы события machine до истечения, 15 min) |
-| `ctl-pool`, `ctl-health`, `ctl-autostop`, `ctl-reconcile`, `ctl-cleanup` | `exclusive` | — | `{}` | `heartbeatSeconds 30`, `expireInSeconds 900`; см. ниже |
+| `machine-op` | `singleton` | `machineId` | `{machineId, action: provision \| delete}` | as above |
+| `snapshot-op` | `singleton` | `snapshotId` | `{snapshotId, action: delete}` | as above |
+| `machine-events` | `stately` | `machineId` | `{machineId}` | `heartbeatSeconds 30`, `expireInSeconds 300`, `retryLimit 10`, `retryBackoff` (without a heartbeat the job of a dead pod would hold the machine's events until expiry, 15 min) |
+| `ctl-pool`, `ctl-health`, `ctl-autostop`, `ctl-reconcile`, `ctl-cleanup` | `exclusive` | — | `{}` | `heartbeatSeconds 30`, `expireInSeconds 900`; see below |
 
-- Задание операции — только триггер; источник правды — строка `operations`. Повторная доставка безопасна (§7.1).
-- **Fencing.** Singleton и heartbeat pg-boss не защищают от зависшего пода, который потерял связь с БД, но ещё ходит в Proxmox: задание вернётся, и исполнителей станет два. Поэтому каждый обработчик при старте увеличивает счётчик (`operations.attempt`, `machines.exec_attempt` для `machine-op`) и пишет каждый шаг условно по своему значению (§7.1). Старый исполнитель на первой же записи получает ноль строк и выходит. Его вызов Proxmox в полёте безвреден: шаги идемпотентны, аллокатор выдаёт одной machine один lease (§5.3), а частичная подготовка выбрасывается при повторе (§7.4).
-- **Блокировка питания ноды** (2026-10-30). Proxmox start, stop, запрос shutdown, delete и откат create/fork в S1 (`MachinesOptions.powerLock`) на одной ноде идут по одному: сначала очередь в процессе (не больше одного ожидающего клиента пула на ноду), затем `pg_advisory_lock` по ключу `power:<nodeId>` на отдельном соединении. Причина — гонка записи `ethers` и IPAM при параллельных start/delete (S1 §12). Блокировка никогда не берётся внутри транзакции БД. Под ней, после ожидания и прямо перед вызовом Proxmox, идут проверка владельца S1 (§16) и колбэк вызывающего: у start — повторная проверка fence (исполнитель, вытесненный за время ожидания, VM не запускает), у reconcile (§11.2, расхождение питания) — повторная проверка, что machine не изменилась. Ожидание завершения shutdown гостем идёт уже вне блокировки. Клоны (create, fork) под неё не попадают и идут параллельно в пределах слотов (§8.3).
-- Задание в dead letter означает исчерпанные повторы: операция → `failed` с `error_code = retries_exhausted` и компенсацией, метрика тревоги. Для delete dead letter не используется: `retryLimit` без предела, alert по `umiak_delete_stuck`.
-- **Контроллеры.** Каждый контроллер — очередь `exclusive` (не больше одного ждущего или активного задания во всём кластере). Задание в конце ставит себя снова с `startAfter` (10 s пул и health, 15 s autostop, 60 s reconcile, 10 min cleanup). Страховка — cron pg-boss раз в минуту на каждую очередь (`exclusive` отбрасывает дубль). Выбор лидера не нужен.
-- **Heartbeat.** Долгие шаги (ожидание загрузки, shutdown) идут в заданиях с `heartbeatSeconds 30`. Если под умер, задание вернётся через ~30 s, и шаги продолжатся с последнего записанного.
+- An operation job is only a trigger; the source of truth is the `operations` row. A redelivery is safe (§7.1).
+- **Fencing.** pg-boss singleton and heartbeat do not protect against a stuck pod that lost its connection to the DB but still goes to Proxmox: the job will return, and there will be two executors. Therefore each handler at startup increments a counter (`operations.attempt`, `machines.exec_attempt` for `machine-op`) and writes every step conditionally on its own value (§7.1). The old executor gets zero rows on its very first write and exits. Its in-flight Proxmox call is harmless: the steps are idempotent, the allocator gives one lease to one machine (§5.3), and the partial preparation is thrown away on a repeat (§7.4).
+- **The node power lock** (2026-10-30). Proxmox start, stop, shutdown requests, delete, and the create/fork rollback in S1 (`MachinesOptions.powerLock`) on one node go one at a time: first an in-process queue (no more than one waiting pool client per node), then `pg_advisory_lock` by the key `power:<nodeId>` on a separate connection. The reason is a race in writing `ethers` and IPAM on parallel start/delete (S1 §12). The lock is never taken inside a DB transaction. Under it, after waiting and right before the Proxmox call, come the S1 owner check (§16) and the caller's callback: for start — a repeated fence check (an executor preempted during the wait does not start the VM), for reconcile (§11.2, power discrepancy) — a repeated check that the machine has not changed. Waiting for the guest to finish shutdown is already outside the lock. Clones (create, fork) are not under it and run in parallel within the slots (§8.3).
+- A job in the dead letter means exhausted retries: the operation → `failed` with `error_code = retries_exhausted` and compensation, an alert metric. Dead letter is not used for delete: `retryLimit` without a bound, an alert on `umiak_delete_stuck`.
+- **Controllers.** Each controller is an `exclusive` queue (no more than one waiting or active job in the whole cluster). At the end the job enqueues itself again with `startAfter` (10 s pool and health, 15 s autostop, 60 s reconcile, 10 min cleanup). A safety net is the pg-boss cron once a minute on each queue (`exclusive` drops a duplicate). Leader election is not needed.
+- **Heartbeat.** Long steps (waiting for boot, shutdown) run in jobs with `heartbeatSeconds 30`. If a pod died, the job returns in ~30 s, and the steps continue from the last written one.
 
-### 15.2 Масштабирование и завершение
+### 15.2 Scaling and shutdown
 
-- Deployment `worker`, 2 реплики в production, 1 в PoC. pg-boss работает в multi-master режиме.
-- `localConcurrency` на под: `sandbox-op` 16, `machine-op` 8, `snapshot-op` 4, `machine-events` 8, контроллеры 1. Общая нагрузка на Proxmox ограничена слотами клонирования (§8.3), а не числом подов.
-- SIGTERM: `boss.stop({ graceful: true, timeout: 60_000 })`, `terminationGracePeriodSeconds: 90`. Незавершённые задания вернутся по heartbeat; шаги идемпотентны.
-- Readiness: pg-boss запущен и Postgres отвечает. Liveness: цикл событий не завис.
-- Пул соединений: `pg` Pool на под, 30 соединений по умолчанию (`UMIAK_DB_POOL_MAX`; было 20 до блокировки питания) (pg-boss и Drizzle делят один пул через адаптер) [решение S6]. Блокировка питания (§15.1) держит по одному соединению на ноду и ещё одно берёт под ней (проверки владельца и fence), поэтому размер пула (`UMIAK_DB_POOL_MAX`) должен заметно превышать число нод.
+- The Deployment `worker`, 2 replicas in production, 1 in the PoC. pg-boss works in multi-master mode.
+- `localConcurrency` per pod: `sandbox-op` 16, `machine-op` 8, `snapshot-op` 4, `machine-events` 8, controllers 1. The overall load on Proxmox is limited by the clone slots (§8.3), not by the number of pods.
+- SIGTERM: `boss.stop({ graceful: true, timeout: 60_000 })`, `terminationGracePeriodSeconds: 90`. Unfinished jobs return by heartbeat; the steps are idempotent.
+- Readiness: pg-boss is started and Postgres answers. Liveness: the event loop is not hung.
+- Connection pool: a `pg` Pool per pod, 30 connections by default (`UMIAK_DB_POOL_MAX`; it was 20 before the power lock) (pg-boss and Drizzle share one pool through the adapter) [S6 decision]. The power lock (§15.1) holds one connection per node and takes one more under it (owner and fence checks), so the pool size (`UMIAK_DB_POOL_MAX`) must noticeably exceed the number of nodes.
 
 ### 15.3 `umiak-admin`
 
-CLI в `apps/worker` (тот же образ): `providers add`, `nodes add|cordon|uncordon`, `template register|promote`, `pool status`, `reconcile --dry-run`, `op retry <id>`, `machine delete <id>`. Нужен в PoC до S8.
+A CLI in `apps/worker` (the same image): `providers add`, `nodes add|cordon|uncordon`, `template register|promote`, `pool status`, `reconcile --dry-run`, `op retry <id>`, `machine delete <id>`. Needed in the PoC before S8.
 
-### 15.4 Cleanup (раз в 10 min)
+### 15.4 Cleanup (every 10 min)
 
-- `idempotency_keys` старше `expires_at`; `agent_events` и синтетические старше 7 дней; `commands` старше 90 дней; надгробия `deleted` sandbox старше 30 дней; `sandbox_events` старше 90 дней.
-- Страховка для `fork_source` (основной путь — §7.7): снапшоты в `ready`/`failed`, чья цель в `error`/`deleted`, и любые `fork_source` старше 1 h → удалить.
-- Sandbox `error` без machine и без дисков старше `errorRetentionDays` (7) → delete.
-- Если задан `stoppedRetentionDays` — sandbox в `stopped` дольше этого срока → delete (`stop_reason` сохраняется в событиях как `retention`). По умолчанию выключено.
-- Перешифровка `sandbox_secrets` со старой версией ключа.
-- Задания pg-boss чистит сам pg-boss (`deleteAfterSeconds` 7 дней).
+- `idempotency_keys` past `expires_at`; `agent_events` and synthetic ones older than 7 days; `commands` older than 90 days; tombstones of `deleted` sandboxes older than 30 days; `sandbox_events` older than 90 days.
+- A safety net for `fork_source` (the main path is §7.7): snapshots in `ready`/`failed` whose target is in `error`/`deleted`, and any `fork_source` older than 1 h → delete.
+- A sandbox `error` without a machine and without disks older than `errorRetentionDays` (7) → delete.
+- If `stoppedRetentionDays` is set — a sandbox in `stopped` longer than this period → delete (`stop_reason` is kept in the events as `retention`). Off by default.
+- Re-encryption of `sandbox_secrets` with an old key version.
+- pg-boss jobs are cleaned by pg-boss itself (`deleteAfterSeconds` 7 days).
 
-## 16. Допущения о других областях
+## 16. Assumptions about other areas
 
-- **S1.** `packages/pve` как в спеке S1: `create`/`fork` принимают `smbios1`, `snapshot` принимает `QuiesceHook`, `delete` с проверкой и освобождением lease, `AllocatorStore` подменяемый, `usage()`, `start`/`shutdown`/`stop`, QGA `ping`. Небольшие дополнения, которые S6 добавляет в `packages/pve` сам, согласовав с `s1-impl`:
-  - `AllocatorStore.allocate` получает `ownerId` (= `machineId`), чтобы реализация S6 была идемпотентной по machine (§5.3);
-  - `configure(vmid, {cores, memory})` для resize выключенной VM (§7.6);
-  - чтение статуса одной VM и пакетное чтение всех VM pool (`/cluster/resources`) для reconcile;
-  - `lv.list` по тегам наружу (для reconcile);
-  - QGA `exec` через PVE API (перезапуск агента, §11.1);
-  - фабрика клиентов на (провайдер, нода) вместо глобальной конфигурации из env (§8.4); env S1 остаётся для `apps/bench`.
-  - проверка владельца у `start`/`stop`/`shutdown`/`delete` (2026-10-30): необязательный `expectedOwner` (`machineId`; у `delete` ещё `null` — VM-сирота без lease). Прямо перед действием S1 читает lease VMID (`checkLeaseOwner`) и при чужом или пропавшем lease бросает `OwnerMismatchError` (постоянная, код `owner_mismatch`), не трогая Proxmox; delete, у которого нет ни lease владельца, ни VM, ничего не делает;
-  - `Allocator.reserveForDelete(vmid)`: delete VMID без lease сначала занимает его lease-ом `releasing` без владельца, чтобы create не выдал этот VMID до конца delete; финальное освобождение снимает только строку `releasing` своего владельца (`null` для резерва), чужой lease не трогает;
-  - `MachinesOptions.powerLock`: обёртка, под которой S1 выполняет откат create/fork (delete), — та же блокировка питания ноды, что у worker (§15.1);
-  - `allocate(ownerId)` в гонке двух вызовов одного владельца возвращает уже вставленный lease этого владельца (`reused`), а не перебирает диапазон.
-- **S2.** Таблицы `tunnel.*`, `POST /v1/machines/{id}/rotate-token` на внутреннем listener-е gateway, синтетические события, `agent-client` с повторами и ожиданием до 30 s.
-- **S3.** RPC (имена — S3):
-  - `System/Claim{reason: claim | resume | recover, sandboxId, hostname, env, secrets, secretFiles, authorizedKeys}` — идемпотентен по `requestId`, отвечает после применения (или стримит фазы, итог `ready`); после загрузки (resume, recover, reprovision) наборы доставляются `System/UpdateEnv`, `System/UpdateSecrets` и `System/UpdateSshCa` (S3 §8.1; шаг `provision`, §7.6);
+- **S1.** `packages/pve` as in the S1 spec: `create`/`fork` accept `smbios1`, `snapshot` accepts `QuiesceHook`, `delete` with verification and lease release, a replaceable `AllocatorStore`, `usage()`, `start`/`shutdown`/`stop`, QGA `ping`. Small additions that S6 itself makes in `packages/pve`, agreed with `s1-impl`:
+  - `AllocatorStore.allocate` gets `ownerId` (= `machineId`) so that the S6 implementation is idempotent by machine (§5.3);
+  - `configure(vmid, {cores, memory})` for resizing a stopped VM (§7.6);
+  - reading the status of one VM and a batch read of all pool VMs (`/cluster/resources`) for reconcile;
+  - `lv.list` by tags exposed outward (for reconcile);
+  - QGA `exec` through the PVE API (agent restart, §11.1);
+  - a client factory per (provider, node) instead of a global configuration from env (§8.4); the S1 env stays for `apps/bench`.
+  - an owner check for `start`/`stop`/`shutdown`/`delete` (2026-10-30): an optional `expectedOwner` (`machineId`; `delete` also accepts `null` — an orphan VM without a lease). Right before the action S1 reads the VMID lease (`checkLeaseOwner`) and on a foreign or missing lease throws `OwnerMismatchError` (permanent, code `owner_mismatch`) without touching Proxmox; a delete that has neither the owner's lease nor a VM does nothing;
+  - `Allocator.reserveForDelete(vmid)`: a delete of a VMID without a lease first occupies it with a `releasing` lease without an owner so that create does not issue this VMID before the delete ends; the final release removes only the `releasing` row of its owner (`null` for a reservation), and does not touch a foreign lease;
+  - `MachinesOptions.powerLock`: a wrapper under which S1 performs the create/fork rollback (delete) — the same node power lock as the worker's (§15.1);
+  - `allocate(ownerId)` in a race of two calls of one owner returns the already inserted lease of this owner (`reused`) instead of iterating over the range.
+- **S2.** The `tunnel.*` tables, `POST /v1/machines/{id}/rotate-token` on the gateway's internal listener, synthetic events, `agent-client` with retries and a wait of up to 30 s.
+- **S3.** RPC (names are S3's):
+  - `System/Claim{reason: claim | resume | recover, sandboxId, hostname, env, secrets, secretFiles, authorizedKeys}` — idempotent by `requestId`, answers after applying (or streams phases, the result `ready`); after boot (resume, recover, reprovision) the sets are delivered by `System/UpdateEnv`, `System/UpdateSecrets`, and `System/UpdateSshCa` (S3 §8.1; the `provision` step, §7.6);
   - `System/PrepareStop` — best effort;
-  - `System/Quiesce` с lease и watchdog и `Thaw` — реализация `QuiesceHook`;
-  - `System/Info` — версия, capabilities, фаза готовности;
-  - `System/Activity` — текущие `{runningCommands, openPtys, tcpStreams}`, `NO_SIDE_EFFECTS` (живая проверка перед idle-stop, §12);
-  - события: `phase{pool_ready | ready | secrets_missing}`, `command.exited`, `pty.closed`, `activity{runningCommands, openPtys, tcpStreams}` (на переходах 0 ↔ не-0 и раз в 60 s), `ports.changed`, `quiesce.watchdog_thawed`;
-  - смена идентичности при новом `machineId` (fork, VM из снапшота).
-- **S4.** Использует §14.2. Счётчик `tcpStreams` даёт агент (он сервер CONNECT), gateway ничего для activity не шлёт.
-- **S5.** Регистрирует сборки (§14.3). Шаблон содержит агента и qemu-guest-agent.
-- **S7.** Строит HTTP поверх `SandboxService`; создаёт `commands` до `Process/Start`; вызывает `touchApiActivity`; выставляет внутренние ручки §10.1 и §14.2; формат id и ошибок.
-- **S8.** Коллекции: Templates (`slug`, `os`, `enabled`, `defaultSize`, `allowedSizes`), Sizes (`slug`, `vcpu`, `memoryMb`), PoolTargets, Quotas (на команду), PlatformDefaults (глобальная настройка); `afterChange`-хуки шлют `NOTIFY umiak_config`; Payload-конфиг экспортируется пакетом без Next, чтобы `api` и `worker` вызывали `getPayload`. Публичные SSH-ключи пользователя для `authorizedKeys`.
-- **S9.** Дедлайны Windows (§7.9), `boot_timeout_s`, snapshot Windows только из остановленной VM с `forceStop` (§7.8, S9 §24.8) и защита secret-файлов saved snapshot (§7.8).
-- **S12.** Deployment `worker` (2 реплики, grace 90 s), Secret с ключами данных (`UMIAK_DATA_KEYS_FILE`), Secret PVE и `umiak-node`, NetworkPolicy для `/internal/v1/*`, Postgres 18.
+  - `System/Quiesce` with a lease and watchdog and `Thaw` — the implementation of `QuiesceHook`;
+  - `System/Info` — version, capabilities, readiness phase;
+  - `System/Activity` — the current `{runningCommands, openPtys, tcpStreams}`, `NO_SIDE_EFFECTS` (the live check before idle-stop, §12);
+  - events: `phase{pool_ready | ready | secrets_missing}`, `command.exited`, `pty.closed`, `activity{runningCommands, openPtys, tcpStreams}` (on 0 ↔ non-0 transitions and every 60 s), `ports.changed`, `quiesce.watchdog_thawed`;
+  - identity change on a new `machineId` (fork, a VM from a snapshot).
+- **S4.** Uses §14.2. The `tcpStreams` counter is provided by the agent (it is the CONNECT server), the gateway sends nothing for activity.
+- **S5.** Registers builds (§14.3). The template contains the agent and qemu-guest-agent.
+- **S7.** Builds HTTP on top of `SandboxService`; creates `commands` before `Process/Start`; calls `touchApiActivity`; exposes the internal endpoints of §10.1 and §14.2; the id and error format.
+- **S8.** Collections: Templates (`slug`, `os`, `enabled`, `defaultSize`, `allowedSizes`), Sizes (`slug`, `vcpu`, `memoryMb`), PoolTargets, Quotas (per team), PlatformDefaults (a global setting); the `afterChange` hooks send `NOTIFY umiak_config`; the Payload config is exported by a package without Next so that `api` and `worker` can call `getPayload`. The user's public SSH keys for `authorizedKeys`.
+- **S9.** Windows deadlines (§7.9), `boot_timeout_s`, a Windows snapshot only from a stopped VM with `forceStop` (§7.8, S9 §24.8) and protection of the secret files of a saved snapshot (§7.8).
+- **S12.** The Deployment `worker` (2 replicas, grace 90 s), a Secret with the data keys (`UMIAK_DATA_KEYS_FILE`), the PVE and `umiak-node` Secret, a NetworkPolicy for `/internal/v1/*`, Postgres 18.
 
-## 17. Библиотеки
+## 17. Libraries
 
-Версии проверены 2026-10-29 (`npm view`); при реализации перепроверить и взять последние стабильные.
+Versions checked on 2026-10-29 (`npm view`); re-check during implementation and take the latest stable.
 
-| Назначение | Библиотека | Версия |
+| Purpose | Library | Version |
 |---|---|---|
-| Очередь заданий | `pg-boss` | 12.38.0 |
-| ORM (типы и запросы) | `drizzle-orm` | 0.45.4 (та же линия, что у `@payloadcms/db-postgres` 3.92.1); `drizzle-kit` 0.31.11 — по желанию исполнителя только как помощник для генерации SQL, источник правды — файлы в `db/migrations/` |
-| Драйвер Postgres | `pg` | 8.23.1 (общий для pg-boss и Drizzle) |
+| Job queue | `pg-boss` | 12.38.0 |
+| ORM (types and queries) | `drizzle-orm` | 0.45.4 (the same line as `@payloadcms/db-postgres` 3.92.1); `drizzle-kit` 0.31.11 — at the implementer's option only as a helper for generating SQL, the source of truth is the files in `db/migrations/` |
+| Postgres driver | `pg` | 8.23.1 (shared by pg-boss and Drizzle) |
 | Payload Local API | `payload` | 3.92.1 |
-| Валидация | `zod` | 4.6.7 |
-| Postgres | — | 18.6 (19 ещё RC, GA планируется 2026-11-19) |
-| ULID для `commandId` | `ulid` | 3.0.2 |
+| Validation | `zod` | 4.6.7 |
+| Postgres | — | 18.6 (19 is still RC, GA planned 2026-11-19) |
+| ULID for `commandId` | `ulid` | 3.0.2 |
 
-Отвергнуто: `graphile-worker` 0.18.0. Он хорош, но в нём нет глобального лимита параллельности по группе, нет политик `singleton`/`stately`/`exclusive` из коробки и транзакционной отправки через Drizzle-адаптер, а архитектура уже предполагает pg-boss. Kysely (0.29.7) не берём, чтобы не держать второй слой запросов рядом с Drizzle Payload.
+Rejected: `graphile-worker` 0.18.0. It is good, but it has no global concurrency limit per group, no `singleton`/`stately`/`exclusive` policies out of the box, and no transactional send through a Drizzle adapter, while the architecture already assumes pg-boss. Kysely (0.29.7) is not taken so as not to keep a second query layer next to Payload's Drizzle.
 
-## 18. Тесты и приёмка
+## 18. Tests and acceptance
 
 **Unit (vitest):**
-- таблицы переходов Sandbox, Machine, Operation: каждый недопустимый переход отклоняется; инварианты §6.4 проверяются property-тестами на случайных последовательностях событий;
-- admission и вытеснение, слоты клонирования, идемпотентность (тот же и другой hash), шифрование (AAD, ротация ключей), разбор метки маршрута.
+- tables of Sandbox, Machine, Operation transitions: every invalid transition is rejected; the invariants of §6.4 are checked by property tests on random sequences of events;
+- admission and eviction, clone slots, idempotency (the same and a different hash), encryption (AAD, key rotation), parsing the route label.
 
-**Интеграционные** (реальный Postgres 18 в контейнере, pg-boss, фейки S1 `packages/pve` и `agent-client`/gateway):
-- **Матрица падений.** Для каждой операции и каждого шага: падение после побочного эффекта, до записи `step`. Повтор доводит до конца, в фейке Proxmox нет лишних VM и LV, нет висящих lease.
-- **Конкурентность.** Два процесса worker, 30 параллельных create при лимите RAM на 3 machine: не больше 3 приняты, остальные `out_of_capacity`; `reserved` и `powered` (§8.1) ни разу не превысили лимит (проверка после каждой транзакции). То же с вытеснением warm. Параллельные create одной команды не превышают квоту. Delete во время create, cold create, fork (в том числе пока цель ждёт снапшот). Двойной `Idempotency-Key`.
-- **Fencing.** Два исполнителя одной операции (второй стартует по истечении heartbeat первого): первый выходит на первой записи шага, в фейке Proxmox одна VM и один lease.
-- **Пул.** Заполнение до цели, замена при новой сборке, вытеснение warm другой пары под create, удаление warm при отключённом агенте.
-- **События.** Дубли и перестановки событий, `rebooted` переводит команды в `lost`, degraded через 60 s и обратно.
-- **Auto-stop.** Idle не срабатывает при `runningCommands > 0`, при открытом PTY, при `tcpStreams > 0`, при свежем вызове API и при недоступном агенте; TTL срабатывает всегда.
-- **Reconcile.** Внедрённые сироты (VM, LV, lease `releasing`) убираются; чужие объекты (VM вне pool, LV без тега) не трогаются.
+**Integration** (a real Postgres 18 in a container, pg-boss, fakes of the S1 `packages/pve` and `agent-client`/gateway):
+- **The failure matrix.** For each operation and each step: a crash after the side effect, before the `step` write. A repeat brings it to the end, the Proxmox fake has no extra VMs and LVs, no dangling leases.
+- **Concurrency.** Two worker processes, 30 parallel creates with a RAM limit for 3 machines: no more than 3 accepted, the rest `out_of_capacity`; `reserved` and `powered` (§8.1) never exceeded the limit (checked after every transaction). The same with eviction of warm machines. Parallel creates of one team do not exceed the quota. Delete during create, cold create, fork (including while the target waits for the snapshot). A double `Idempotency-Key`.
+- **Fencing.** Two executors of one operation (the second starts when the first's heartbeat expires): the first exits on its first step write, the Proxmox fake has one VM and one lease.
+- **Pool.** Filling to the target, replacement on a new build, eviction of warm machines of another pair for a create, deleting a warm machine when the agent is disconnected.
+- **Events.** Duplicates and reordering of events, `rebooted` moves commands to `lost`, degraded after 60 s and back.
+- **Auto-stop.** Idle does not fire with `runningCommands > 0`, with an open PTY, with `tcpStreams > 0`, with a fresh API call, and with an unavailable agent; the TTL always fires.
+- **Reconcile.** Injected orphans (VMs, LVs, `releasing` leases) are cleaned up; foreign objects (VMs outside the pool, LVs without a tag) are not touched.
 
-**E2E на `pve`** (после S3, S4, S5): сценарий `umiak-bench s6` в `apps/bench`:
-- пул заполняется;
-- create из пула → exec → stop → resume → exec;
-- fork работающей sandbox: маркер-файл на месте, идентичность новая;
-- save snapshot → create из него;
-- cold create при пустом пуле;
-- delete всего;
-- внедрённая сирота убирается reconcile;
-- «мир до» и «мир после» совпадают (S1 `inventory`).
+**E2E on `pve`** (after S3, S4, S5): the scenario `umiak-bench s6` in `apps/bench`:
+- the pool fills;
+- create from the pool → exec → stop → resume → exec;
+- fork of a running sandbox: the marker file is in place, the identity is new;
+- save snapshot → create from it;
+- cold create with an empty pool;
+- delete everything;
+- an injected orphan is cleaned by reconcile;
+- the "world before" and "world after" match (S1 `inventory`).
 
-Замеры: claim-to-ready, cold create, stop, resume, fork, save snapshot (median и p95).
+Measurements: claim-to-ready, cold create, stop, resume, fork, save snapshot (median and p95).
 
-**Критерий готовности S6:** проходят unit и интеграционные тесты; сценарий E2E на `pve` проходит в пределах 8 GB, после него не остаётся следов.
+**S6 readiness criterion:** the unit and integration tests pass; the E2E scenario on `pve` passes within 8 GB and leaves no traces.
 
-## 19. Этапы реализации
+## 19. Implementation stages
 
-План пишется отдельно (`docs/plans/s6-*.md`). Рекомендуемый порядок:
-1. **PoC:** `packages/db`, `packages/core` (состояния, admission, идемпотентность, шифрование), `packages/config` (static), worker с `sandbox-op`/`machine-op`, create (claim + cold), delete, пул, приём событий, health, reconcile (dry-run, потом включить).
-2. **MVP:** stop/resume, fork, saved snapshots, recover, auto-stop, cleanup, `PayloadConfigReader` (после S8), ручки для S4.
+The plan is written separately (`docs/plans/s6-*.md`). Recommended order:
+1. **PoC:** `packages/db`, `packages/core` (states, admission, idempotency, encryption), `packages/config` (static), the worker with `sandbox-op`/`machine-op`, create (claim + cold), delete, the pool, event intake, health, reconcile (dry-run, then enable).
+2. **MVP:** stop/resume, fork, saved snapshots, recover, auto-stop, cleanup, `PayloadConfigReader` (after S8), endpoints for S4.
 
-## 20. Оставлено исполнителю
+## 20. Left to the implementer
 
-- Раскладка файлов внутри пакетов, генерация id (`uuidv7()` в БД или в коде), формат канонического тела для hash идемпотентности.
-- Тестовая инфраструктура Postgres (testcontainers, сервис CI или PGlite для unit, если pg-boss и Drizzle работают с ней одинаково).
-- Библиотеки логов и метрик (`pino`, `prom-client` или OTel SDK) — последние стабильные; список метрик: размер пула по паре и состоянию, длительность и исход операций по виду, причины ошибок, занятая RAM и лимит по ноде, действия reconcile, число `degraded`, глубина очередей pg-boss, отставание обработки событий, `umiak_delete_stuck`.
+- The file layout inside packages, id generation (`uuidv7()` in the DB or in code), the format of the canonical body for the idempotency hash.
+- The Postgres test infrastructure (testcontainers, a CI service, or PGlite for unit tests if pg-boss and Drizzle work with it identically).
+- Log and metrics libraries (`pino`, `prom-client`, or the OTel SDK) — the latest stable; the list of metrics: pool size by pair and state, operation duration and outcome by kind, error causes, used RAM and the limit per node, reconcile actions, the number of `degraded`, pg-boss queue depth, event processing lag, `umiak_delete_stuck`.
 
-## 21. Ответы на открытые вопросы (master-сессия, 2026-10-29)
+## 21. Answers to the open questions (master session, 2026-10-29)
 
-1. **TTL.** Явно заданный TTL остаётся жёстким, но дефолт — `ttlSeconds = null`. Основная защита от расходов — idle-stop 900 s (§12).
-2. **Хранение остановленных sandbox.** В PoC лимита по умолчанию нет (`stoppedRetentionDays` выключен).
-3. **Запуск остановленной sandbox при обращении к её URL** — фаза 2.
+1. **TTL.** An explicitly set TTL stays hard, but the default is `ttlSeconds = null`. The main protection against costs is idle-stop at 900 s (§12).
+2. **Retention of stopped sandboxes.** In the PoC there is no default limit (`stoppedRetentionDays` is off).
+3. **Starting a stopped sandbox on a request to its URL** — phase 2.
 
-Остаётся на фазу 2: перенос sandbox между нодами и архив остановленных в PBS потребуют новой machine у той же sandbox; модель 1:N это уже допускает.
+Left for phase 2: moving a sandbox between nodes and archiving stopped ones to PBS will need a new machine for the same sandbox; the 1:N model already allows this.
 
 
-**Дополнение проверки lock (S9 follow-ups).** Stop внутри удаления VM и rollback
-не обходят `retryOnVmLock`: вся попытка удаления повторяется с новой проверкой
-владельца lease, общий node power lock освобождается между попытками.
-Fake-PVE regression удерживает lock до 30 s, затем подтверждает удаление.
+**An addendum to the lock check (S9 follow-ups).** Stop inside a VM deletion and the rollback
+do not bypass `retryOnVmLock`: the whole deletion attempt is repeated with a new check of the
+lease owner, the shared node power lock is released between attempts.
+The fake-PVE regression holds the lock for up to 30 s, then confirms the deletion.
