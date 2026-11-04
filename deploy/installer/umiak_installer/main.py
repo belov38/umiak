@@ -112,10 +112,10 @@ class Ui:
                 return options[int(value) - 1]
 
     def typed(self, prompt: str, word: str) -> bool:
-        """A destructive confirmation: the exact word, or --yes."""
-        if self.yes:
-            return True
+        """A destructive confirmation: the exact word; --yes stands in only in non-interactive mode."""
         if not self.interactive:
+            if self.yes:
+                return True
             raise UsageError("This action needs confirmation: rerun with --yes")
         return self.input(f"{prompt}: ").strip() == word
 

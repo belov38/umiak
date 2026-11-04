@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from fake_ct import AGENT, CtFake
+from fake_ct import AGENT, TS_STATUS, CtFake
 from test_menu import FLAGS
 from test_stack import make_bundle
 from umiak_installer import day2, main, prepare_host, state
@@ -36,6 +36,32 @@ class FakeUi:
 
 
 class Day2Fake(CtFake):
+    def __init__(self, root, **kwargs):
+        super().__init__(root, **kwargs)
+        self.lvs = []  # rows like `lvs --reportformat json` prints
+        self.ct_net0 = "name=eth0,bridge=vmbr0,ip=192.168.68.50/22,gw=192.168.68.1"
+
+    def run(self, argv, input=None):
+        argv = list(argv)
+        if argv[0] == "lvs":
+            self.commands.append(argv)
+            return json.dumps({"report": [{"lv": [row for row in self.lvs if row["vg_name"] == argv[-1]]}]})
+        if argv[0] == "lvremove":
+            self.commands.append(argv)
+            vg, name = argv[-1].split("/")
+            self.lvs = [row for row in self.lvs if (row["vg_name"], row["lv_name"]) != (vg, name)]
+            return ""
+        if argv[:2] == ["pct", "config"]:
+            self.commands.append(argv)
+            return f"arch: amd64\nhostname: umiak-cp\nnet0: {self.ct_net0}\nostype: debian\n"
+        out = super().run(argv, input)
+        if argv[:2] == ["pvesh", "delete"] and argv[2].startswith("/nodes/"):
+            vmid = int(argv[2].rsplit("/", 1)[1])
+            resources = self.objects["/cluster/resources"]
+            resources[:] = [row for row in resources if int(row["vmid"]) != vmid]
+            self.lvs = [row for row in self.lvs if not row["lv_name"].startswith(f"vm-{vmid}-disk-")]
+        return out
+
     def _in_ct(self, argv, input):
         if argv[:2] == ["docker", "compose"] and "exec" in argv:
             if "umiak-signin" in argv:
@@ -181,8 +207,14 @@ def add_pool_members(runner, *members):
         {"vmid": vmid, "type": kind, "node": "pve", "status": status, "id": f"{kind}/{vmid}"}
         for vmid, kind, status in members
     ]
-    for vmid, kind, _ in members:
+    for vmid, kind, status in members:
         runner.objects[f"/nodes/pve/{kind}/{vmid}"] = {}
+        runner.objects[f"/nodes/pve/{kind}/{vmid}/status/current"] = {"status": status}
+        runner.objects["/cluster/resources"].append({"vmid": vmid, "type": kind, "node": "pve", "pool": "umiak"})
+
+
+def lv(name, tags="umiak", vg="pve", pool="data"):
+    return {"lv_name": name, "vg_name": vg, "pool_lv": pool, "lv_tags": tags}
 
 
 def test_uninstall_without_pve_objects_never_calls_pveum_or_pvesh_delete(installed):
@@ -331,3 +363,80 @@ def test_menu_reset_owner_interactive_requires_reset(installed):
                      input_fn=lambda prompt="": next(answers))
     assert code == 1
     assert not any(any(p.endswith("recover.mjs") for p in a) for a in runner.ct_commands())
+
+
+def test_uninstall_with_guests_removes_umiak_snapshot_lvs_by_full_name_only(installed):
+    runner, current, _ = installed
+    add_pool_members(runner, (510, "qemu", "stopped"))
+    runner.lvs = [
+        lv("vm-510-disk-0", "umiak,umiak-vm-510"),
+        lv("umiak-snap-abc123-root", "umiak,umiak-snap-abc123,umiak-src-510"),
+        lv("vm-520-disk-0", "umiak,umiak-vm-520"),  # orphan disk of a gone Umiak guest
+        lv("umiak-snap-mine-root", "home"),  # similar name, no umiak tag
+        lv("vm-103-disk-0", "umiak"),  # tagged but outside the Umiak ranges
+        lv("umiak-snap-other-root", "umiak", pool="other"),  # another thin pool
+        lv("root", ""),
+        lv("data", ""),
+    ]
+    ui = FakeUi(answers=["DELETE"])
+    day2.uninstall(runner, current, remove_pve_objects=False, remove_guests=True, ui=ui)
+    removed = [a[-1] for a in runner.commands if a[0] == "lvremove"]
+    assert removed == ["pve/umiak-snap-abc123-root", "pve/vm-520-disk-0"]
+    assert all(a[:2] == ["lvremove", "-y"] and "@" not in a[-1] for a in runner.commands if a[0] == "lvremove")
+    assert sorted(row["lv_name"] for row in runner.lvs) == ["data", "root", "umiak-snap-mine-root",
+                                                            "umiak-snap-other-root", "vm-103-disk-0"]
+    listing = "\n".join(ui.said)
+    assert "pve/umiak-snap-abc123-root" in listing and "pve/vm-520-disk-0" in listing
+    assert "umiak-snap-mine-root" not in listing
+
+
+def test_uninstall_stops_a_guest_that_started_after_the_plan(installed):
+    runner, current, _ = installed
+    add_pool_members(runner, (510, "qemu", "stopped"))
+    runner.objects["/nodes/pve/qemu/510/status/current"] = {"status": "running"}
+    day2.uninstall(runner, current, remove_pve_objects=False, remove_guests=True, ui=FakeUi(answers=["DELETE"]))
+    stop = runner.commands.index(["pvesh", "create", "/nodes/pve/qemu/510/status/stop"])
+    delete = next(n for n, a in enumerate(runner.commands) if a[:3] == ["pvesh", "delete", "/nodes/pve/qemu/510"])
+    assert stop < delete
+
+
+def test_update_waits_for_tailscaled_after_starting_the_ct(installed):
+    runner, current, tmp_path = installed
+    starting = {"BackendState": "Starting"}
+    runner.ts_states = [starting, starting, TS_STATUS]
+    sleeps = []
+    day2.update(runner, current, new_bundle(tmp_path), ui=FakeUi(), sleep=sleeps.append)
+    assert ["pct", "start", "591"] in runner.commands
+    assert sleeps[:2] == [2, 2]
+
+
+def test_update_fails_clearly_when_tailscaled_never_runs(installed):
+    runner, current, tmp_path = installed
+    runner.ts_states = [{"BackendState": "Stopped"}]
+    with pytest.raises(InstallerError, match="not running"):
+        day2.update(runner, current, new_bundle(tmp_path), ui=FakeUi(), sleep=lambda _: None)
+    assert not any(a[:2] == ["docker", "compose"] for a in runner.ct_commands())
+
+
+def test_update_refuses_when_the_ct_address_changed(installed):
+    runner, current, tmp_path = installed
+    runner.ct_net0 = "name=eth0,bridge=vmbr0,ip=192.168.68.60/22,gw=192.168.68.1"
+    with pytest.raises(InstallerError, match="192.168.68.60.*192.168.68.50"):
+        day2.update(runner, current, new_bundle(tmp_path), ui=FakeUi(), sleep=lambda _: None)
+    assert runner.mutations() == [] and not runner.ct_commands()
+    runner.ct_net0 = "name=eth0,bridge=vmbr0,ip=dhcp"
+    with pytest.raises(InstallerError, match="installed with 192.168.68.50"):
+        day2.update(runner, current, new_bundle(tmp_path), ui=FakeUi(), sleep=lambda _: None)
+
+
+@pytest.mark.parametrize("interactive,answer,expected", [(True, "y", False), (True, "DELETE", True), (False, None, True)])
+def test_yes_skips_typed_words_only_non_interactive(interactive, answer, expected):
+    prompts = []
+
+    def ask(prompt=""):
+        prompts.append(prompt)
+        return answer
+
+    ui = main.Ui(interactive=interactive, yes=True, input_fn=ask, out=lambda _: None)
+    assert ui.typed("Type DELETE to continue", "DELETE") is expected
+    assert bool(prompts) is interactive

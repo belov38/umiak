@@ -14,6 +14,7 @@ objects only by the names host preparation creates.
 import dataclasses
 import hashlib
 import ipaddress
+import json
 import re
 import shutil
 import time
@@ -29,6 +30,11 @@ IPSET = "/cluster/firewall/ipset/umiak-gateway"
 EGRESS_GROUP = "/cluster/firewall/groups/umiak-egress"
 QUICKSTART_DIR = "/app/deploy/compose/quickstart"
 SIGNIN_LINK = re.compile(r"^/signin#([A-Z2-7-]+)$", re.M)
+# Thin LVs Umiak creates (packages/pve/src/storage/lvmthin.ts): snapshots and VM disks,
+# all tagged `umiak`. Removal is by full name only, never by tag alone.
+SNAPSHOT_LV = re.compile(r"umiak-snap-[A-Za-z0-9_-]+")
+VM_DISK_LV = re.compile(r"vm-(\d+)-disk-\d+")
+NET_IP = re.compile(r"(?:^|,)ip=([^,/\s]+)")
 # Printed by deploy/compose/quickstart/recover.mjs.
 RECOVERED_CODE = re.compile(r"New one-time owner setup code: (\S+)")
 
@@ -139,6 +145,34 @@ def sync_gateway_ipset(runner: Runner, ct_ip: str) -> None:
             runner.run(["pvesh", "delete", f"{IPSET}/{row['cidr']}"])
 
 
+def _require_ct_ip(runner: Runner, ct_id: int, ct_ip: str) -> None:
+    """The CT's configured net0 address must still be the recorded one (IPSet, tunnel URL, install facts use it)."""
+    config = runner.run(["pct", "config", str(ct_id)])
+    net0 = next((line.split(":", 1)[1].strip() for line in config.splitlines() if line.startswith("net0:")), "")
+    match = NET_IP.search(net0)
+    actual = match.group(1) if match else None
+    if actual != ct_ip:
+        raise InstallerError(f"Control-plane container {ct_id} has address {actual or 'none (net0 has no static ip)'}, "
+                             f"but Umiak was installed with {ct_ip}. Restore {ct_ip} in the container's network "
+                             "settings (pct set ... --net0) and rerun Update; nothing was changed.")
+
+
+def _wait_tailscale(runner: Runner, ct_id: int, sleep, attempts: int = 30) -> dict:
+    """tailscaled needs a moment after a CT (re)start; wait up to ~60s for its backend to run."""
+    info = {}
+    for attempt in range(attempts):
+        try:
+            info = tailnet.status(runner, ct_id)
+        except (CommandError, ValueError):
+            info = {}
+        if info.get("BackendState") == "Running":
+            return info
+        if attempt + 1 < attempts:
+            sleep(2)
+    raise InstallerError("Tailscale in the control-plane container is not running "
+                         f"(state {info.get('BackendState', 'unknown')}); check: pct exec {ct_id} -- tailscale status")
+
+
 def update(runner: Runner, current: state.InstallState, bundle, *, ui, sleep=time.sleep, progress=None,
            state_path: Path | None = None) -> state.InstallState:
     """Move the stack to `bundle` (a verified release). Volumes, owner state and setup are kept."""
@@ -149,10 +183,11 @@ def update(runner: Runner, current: state.InstallState, bundle, *, ui, sleep=tim
     progress(f"Checking control-plane container {ct_id}")
     if _umiak_ct(runner, ct_id) is None:
         raise InstallerError(f"Control-plane container {ct_id} is gone; uninstall and install again")
+    _require_ct_ip(runner, ct_id, a["ct_ip"])
     if not _running(runner, ct_id):
         runner.run(["pct", "start", str(ct_id)])
     progress("Checking the tailnet")
-    info = tailnet.status(runner, ct_id)
+    info = _wait_tailscale(runner, ct_id, sleep)
     tailnet.require_https(info)
     identity = tailnet.parse(info)
     progress("Checking the guest gateway IPSet")
@@ -268,6 +303,36 @@ def _pve_steps(runner: Runner) -> list[tuple[str, list]]:
     return steps
 
 
+def _thin_pool(runner: Runner, storage: str) -> tuple[str, str]:
+    row = get(runner, "/storage/" + storage)
+    vg, pool = str(row.get("vgname", "")), str(row.get("thinpool", ""))
+    if row.get("type") != "lvmthin" or not prepare_host.NAME.fullmatch(vg) or not prepare_host.NAME.fullmatch(pool):
+        raise InstallerError(f"Storage {storage} is not the LVM-thin storage Umiak was installed on")
+    return vg, pool
+
+
+def _guest_ids(runner: Runner) -> set[int]:
+    return {int(row["vmid"]) for row in get(runner, "/cluster/resources", "--type", "vm")}
+
+
+def umiak_lvs(runner: Runner, vg: str, pool: str, ranges: list[tuple[int, int]], keep: set[int]) -> list[str]:
+    """Umiak thin LVs in vg/pool: tagged `umiak` and either a snapshot (`umiak-snap-*`) or a VM disk
+    (`vm-<id>-disk-*`) of a VMID inside the Umiak ranges that is not in `keep` (existing guests)."""
+    report = json.loads(runner.run(["lvs", "--reportformat", "json", "-o", "lv_name,vg_name,pool_lv,lv_tags", vg]))
+    found = []
+    for row in (report.get("report") or [{}])[0].get("lv", []):
+        name = row.get("lv_name", "")
+        tags = str(row.get("lv_tags", "")).split(",")
+        if row.get("vg_name") != vg or row.get("pool_lv") != pool or "umiak" not in tags:
+            continue
+        disk = VM_DISK_LV.fullmatch(name)
+        if SNAPSHOT_LV.fullmatch(name) or (
+            disk and int(disk.group(1)) not in keep and any(low <= int(disk.group(1)) <= high for low, high in ranges)
+        ):
+            found.append(name)
+    return sorted(found)
+
+
 def _sdn_removed(steps) -> bool:
     return any(description.startswith("SDN ") for description, _ in steps)
 
@@ -303,6 +368,15 @@ def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: b
         ids = ", ".join(str(row["vmid"]) for row in guests)
         raise InstallerError(f"The pool umiak still has guests ({ids}); also remove the Umiak sandboxes and "
                              "templates, or keep the Proxmox objects. Nothing was changed.")
+    lv_target = None
+    lv_names: list[str] = []
+    if remove_guests:
+        if "storage" not in current.answers or not ranges:
+            raise InstallerError("The installer state has no storage or VMID ranges; cannot identify Umiak disks")
+        lv_target = _thin_pool(runner, current.answers["storage"])
+        # Disks of the guests about to be destroyed count too: PVE normally removes them.
+        doomed = {int(row["vmid"]) for row in guests}
+        lv_names = umiak_lvs(runner, *lv_target, ranges, _guest_ids(runner) - doomed)
     pve_steps = []
     if remove_pve_objects:
         if pending_sdn(runner):
@@ -317,6 +391,7 @@ def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: b
     if remove_guests:
         plan += [f"destroy {row['type']} {row['vmid']} ({row.get('name', 'unnamed')}) on {row.get('node')}"
                  for row in guests]
+        plan += [f"remove LV {lv_target[0]}/{name} if PVE leaves it (Umiak snapshot or guest disk)" for name in lv_names]
     if remove_pve_objects:
         plan += [f"remove {description}" for description, _ in pve_steps]
         if _sdn_removed(pve_steps):
@@ -348,9 +423,16 @@ def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: b
         for row in guests:
             path = f"/nodes/{row['node']}/{row['type']}/{int(row['vmid'])}"
             progress(f"Destroying {row['type']} {row['vmid']}")
-            if row.get("status") == "running":
+            # Re-read: the guest may have started since the plan was shown.
+            if get(runner, path + "/status/current").get("status") != "stopped":
                 runner.run(["pvesh", "create", path + "/status/stop"])
             runner.run(["pvesh", "delete", path, "--purge", "1", "--destroy-unreferenced-disks", "1"])
+        # Snapshots belong to no VM; disks of destroyed guests may survive a failed purge.
+        vg = lv_target[0]
+        # Only LVs listed in the plan that still exist and still qualify.
+        for name in sorted(set(lv_names) & set(umiak_lvs(runner, *lv_target, ranges, _guest_ids(runner)))):
+            progress(f"Removing LV {vg}/{name}")
+            runner.run(["lvremove", "-y", f"{vg}/{name}"])
     if ct_row is not None:
         progress(f"Destroying control-plane container {ct_id}")
         runner.run(["pct", "destroy", str(ct_id), "--purge", "1"])
