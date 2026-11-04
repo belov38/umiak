@@ -20,6 +20,15 @@ import {
 /** Cap for the memory of running pool VMs (build VM included). */
 export const RAM_CAP_MB = 8192;
 
+export function templateRamCapMb(
+	env: Record<string, string | undefined> = process.env,
+): number {
+	const cap = Number(env.UMIAK_TEMPLATE_RAM_CAP_MB ?? RAM_CAP_MB);
+	if (!Number.isSafeInteger(cap) || cap < 2048 || cap > RAM_CAP_MB)
+		throw new Error("Template build RAM cap must be 2048-8192 MiB");
+	return cap;
+}
+
 type Env = Record<string, string | undefined>;
 
 export function registryDir(

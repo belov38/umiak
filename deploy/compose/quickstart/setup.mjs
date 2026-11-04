@@ -2,6 +2,7 @@ import { canonicalFetch } from "../canonical-fetch.mjs";
 import { gatewayCertificates } from "./certificates.mjs";
 import { windowsDesktop } from "./setup-desktop.mjs";
 import { prepareWindowsMedia, validateWindowsMedia } from "./setup-iso.mjs";
+import { nodeService } from "./setup-nodes.mjs";
 // Owner-only setup orchestration. PVE adoption never writes to the host API.
 
 import { randomBytes, X509Certificate } from "node:crypto";
@@ -314,6 +315,7 @@ export function createSetupHandler({
 	makePve = pinnedPve,
 	nodeCheck = checkNode,
 	fetcher = publicApiFetch(),
+	nodes = nodeService(pool),
 } = {}) {
 	const connectionOf = (state) => state.steps.connection.data;
 	const pveOf = async (state) =>
@@ -323,7 +325,7 @@ export function createSetupHandler({
 		);
 	const query = (sql, args) => pool.query(sql, args);
 	const steps = {
-		async limits(input, state) {
+		async limits(input, state, context = {}) {
 			const limits = validateLimits({ ...templateRange(state), ...input });
 			Object.assign(
 				limits,
@@ -358,18 +360,19 @@ export function createSetupHandler({
 					],
 				)
 			).rows[0].id;
-			const node = (
-				await query(
-					`INSERT INTO runtime.nodes(provider_id,name,ram_cap_mb,clone_concurrency,node_agent_ref) VALUES($1,$2,$3,1,$4) ON CONFLICT(provider_id,name) DO UPDATE SET ram_cap_mb=$3,node_agent_ref=$4,clone_concurrency=1,updated_at=now() RETURNING id`,
-					[provider, connection.node, limits.ramCapMb, connection.sshHost],
-				)
-			).rows[0].id;
-			const storageId = (
-				await query(
-					`INSERT INTO runtime.storages(provider_id,node_id,name,driver) VALUES($1,$2,$3,'lvmthin') ON CONFLICT(provider_id,node_id,name) DO UPDATE SET driver='lvmthin' RETURNING id`,
-					[provider, node, limits.storage],
-				)
-			).rows[0].id;
+			const registered = await nodes.register(
+				{
+					providerId: provider,
+					name: connection.node,
+					sshHost: connection.sshHost,
+					ramCapMb: limits.ramCapMb,
+					storage: limits.storage,
+					mediaStorage: input.mediaStorage || state.mediaStorage || "local",
+				},
+				{ preserveState: context.bootstrap === true },
+			);
+			const node = registered.nodeId;
+			const storageId = registered.storageId;
 			return { ...limits, providerId: provider, nodeId: node, storageId };
 		},
 		async network(input, state) {
@@ -393,19 +396,24 @@ export function createSetupHandler({
 			}
 			return network;
 		},
-		async templates(input, state) {
+		async templates(input, state, context = {}) {
 			const api = await pveOf(state);
-			const connection = connectionOf(state);
-			const limits = state.steps.limits.data;
 			requireValue(
 				Array.isArray(input.builds) &&
-					input.builds.some((x) => x.templateSlug === "linux"),
+					[
+						...input.builds,
+						...(state.steps.templates?.data?.builds || []),
+					].some((x) => x.templateSlug === "linux"),
 				"Register at least one Linux build",
 			);
 			const builds = [];
 			for (const inputBuild of input.builds) {
+				const selected = await nodes.select(state, inputBuild.nodeId);
+				const connection = connectionOf(selected);
+				const limits = selected.steps.limits.data;
 				const build = {
 					...inputBuild,
+					nodeId: limits.nodeId,
 					templateSlug:
 						inputBuild.templateSlug === "windows-desktop"
 							? "windows"
@@ -469,6 +477,8 @@ export function createSetupHandler({
 				if (existing.rows[0]) {
 					builds.push({
 						templateSlug: build.templateSlug,
+						nodeId: limits.nodeId,
+						node: connection.node,
 						pveVmid: build.pveVmid,
 						mediaVerification: build.mediaVerification,
 						isoSha256: build.isoSha256,
@@ -514,26 +524,27 @@ export function createSetupHandler({
 					"rng0",
 				])
 					if (config[key] !== undefined) hw[key] = config[key];
-				const row = (
-					await query(
-						`WITH deprecated AS (UPDATE runtime.template_builds SET status='deprecated' WHERE node_id=$5 AND template_slug=$1 AND status='active' RETURNING id) INSERT INTO runtime.template_builds(template_slug,version,os,provider_id,node_id,storage_id,pve_vmid,disk_layout,hw,agent_version,boot_timeout_s,status,promoted_at) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active',now() FROM (SELECT count(*) FROM deprecated) AS previous RETURNING id`,
-						[
-							build.templateSlug,
-							build.version || `adopted-${build.pveVmid}`,
-							build.templateSlug.startsWith("windows") ? "windows" : "linux",
-							limits.providerId,
-							limits.nodeId,
-							limits.storageId,
-							build.pveVmid,
-							JSON.stringify(diskLayout),
-							JSON.stringify(hw),
-							build.agentVersion || null,
-							build.templateSlug.startsWith("windows") ? 1200 : 300,
-						],
-					)
-				).rows[0];
+				const row = await nodes.registerTemplate(
+					{
+						templateSlug: build.templateSlug,
+						version: build.version || `adopted-${build.pveVmid}`,
+						os: build.templateSlug.startsWith("windows") ? "windows" : "linux",
+						providerId: limits.providerId,
+						nodeId: limits.nodeId,
+						storageId: limits.storageId,
+						pveVmid: build.pveVmid,
+						diskLayout,
+						hw,
+						agentVersion: build.agentVersion || null,
+						bootTimeoutS: build.templateSlug.startsWith("windows") ? 1200 : 300,
+					},
+					context.job?.id,
+				);
+
 				builds.push({
 					templateSlug: build.templateSlug,
+					nodeId: limits.nodeId,
+					node: connection.node,
 					pveVmid: build.pveVmid,
 					mediaVerification: build.mediaVerification,
 					isoSha256: build.isoSha256,
@@ -541,9 +552,21 @@ export function createSetupHandler({
 					id: row.id,
 				});
 			}
-			return { builds };
+			const keys = new Set(builds.map((b) => `${b.nodeId}:${b.templateSlug}`));
+			return {
+				builds: [
+					...(state.steps.templates?.data?.builds || []).filter(
+						(b) =>
+							!keys.has(
+								`${b.nodeId || state.steps.limits.data.nodeId}:${b.templateSlug}`,
+							),
+					),
+					...builds,
+				],
+			};
 		},
-		async smoke(_input, state, context) {
+		async smoke(input, state, context) {
+			if (input.nodeId) state = await nodes.select(state, input.nodeId);
 			const connection = connectionOf(state);
 			const pve = await pveOf(state);
 			const vms = await pve.get(`/nodes/${connection.node}/qemu`);
@@ -555,14 +578,17 @@ export function createSetupHandler({
 				"Not enough free sandbox RAM for the sequential 2 GiB smoke",
 			);
 			const call = async (path, options = {}) => {
-				const response = await fetcher(apiUrl + path, {
-					...options,
-					headers: {
-						"Content-Type": "application/json",
-						"X-Forwarded-For": context.clientIp || "127.0.0.1",
-						...options.headers,
+				const response = await fetcher(
+					(path === "/v1/setup/smoke" ? "http://api:8081" : apiUrl) + path,
+					{
+						...options,
+						headers: {
+							"Content-Type": "application/json",
+							"X-Forwarded-For": context.clientIp || "127.0.0.1",
+							...options.headers,
+						},
 					},
-				});
+				);
 				const text = await response.text();
 				let data;
 				try {
@@ -578,15 +604,22 @@ export function createSetupHandler({
 					);
 				return data;
 			};
-			const created = await call("/v1/sandboxes", {
-				method: "POST",
-				headers: { "Idempotency-Key": randomBytes(16).toString("hex") },
-				body: JSON.stringify({
-					template: "linux",
-					size: "2gb",
-					labels: { quickstart: "smoke" },
-				}),
-			});
+			const created = await call(
+				input.nodeId ? "/v1/setup/smoke" : "/v1/sandboxes",
+				{
+					method: "POST",
+					headers: { "Idempotency-Key": randomBytes(16).toString("hex") },
+					body: JSON.stringify(
+						input.nodeId
+							? { nodeId: input.nodeId }
+							: {
+									template: "linux",
+									size: "2gb",
+									labels: { quickstart: "smoke" },
+								},
+					),
+				},
+			);
 			const id = created.sandbox?.id || created.id;
 			requireValue(id, "Smoke create returned no sandbox ID");
 			try {
@@ -644,6 +677,11 @@ export function createSetupHandler({
 	const jobs = new TemplateBuildJobs({
 		store,
 		validate: async (slug, state, input) => {
+			state = await nodes.select(state, input.nodeId);
+			input.nodeId = state.steps.limits.data.nodeId;
+			if (input.mediaStorage && input.mediaStorage !== state.mediaStorage)
+				throw Error("Use the selected node configured media storage");
+			input.mediaStorage = state.mediaStorage;
 			for (const step of [...BOOTSTRAP, "limits", "network"])
 				requireValue(
 					state.steps[step]?.status === "ready",
@@ -664,7 +702,9 @@ export function createSetupHandler({
 			}
 			const api = await pveOf(state);
 			const existing = state.steps.templates?.data?.builds?.find(
-				(build) => build.templateSlug === slug,
+				(build) =>
+					build.templateSlug === slug &&
+					(build.nodeId || state.steps.limits.data.nodeId) === input.nodeId,
 			);
 			requireValue(
 				!existing || input.confirmRebuild === slug,
@@ -708,7 +748,32 @@ export function createSetupHandler({
 				"Stop running sandbox VMs before a sequential template build",
 			);
 		},
+		reserve: (job) => nodes.reserve(job),
+		interrupt: (job, state) => nodes.interrupt(job, state),
+		finish: async (job, state) => {
+			const selected = await nodes.select(state, job.nodeId);
+			const vms = await (await pveOf(state)).get(
+				`/nodes/${connectionOf(selected).node}/qemu`,
+			);
+			requireValue(
+				!vms.some(
+					(vm) => vm.vmid >= 500 && vm.vmid <= 589 && vm.status !== "stopped",
+				),
+				"Build verification VMs are not confirmed stopped; reservation retained",
+			);
+			await nodes.finish(job);
+		},
 		run: async (slug, state, job, input, context, onProgress) => {
+			state = await nodes.select(state, job.nodeId);
+			const vms = await (await pveOf(state)).get(
+				`/nodes/${connectionOf(state).node}/qemu`,
+			);
+			requireValue(
+				!vms.some(
+					(vm) => vm.vmid >= 500 && vm.vmid <= 589 && vm.status !== "stopped",
+				),
+				"Stop sandbox VMs before a template build",
+			);
 			let prepared = input;
 			if (slug.startsWith("windows"))
 				prepared = await prepareWindowsMedia(
@@ -749,16 +814,9 @@ export function createSetupHandler({
 			};
 		},
 		register: async (manifest, context) => {
-			const state = await store.read();
-			const existing = state.steps.templates?.data?.builds || [];
 			await wizard.run(
 				"templates",
-				{
-					builds: [
-						...existing.filter((x) => x.templateSlug !== manifest.templateSlug),
-						manifest,
-					],
-				},
+				{ builds: [{ ...manifest, nodeId: context.job.nodeId }] },
 				{ ...context, dashboardBuild: true },
 			);
 		},
@@ -804,74 +862,86 @@ export function createSetupHandler({
 		}
 		if (req.method === "GET" && path === "/setup") {
 			const state = await store.read();
+			state.sandboxNodes = await nodes.list(
+				state.steps.limits?.data?.providerId,
+				state,
+			);
 			state.detectedTemplates = [];
 			if (state.steps.connection?.status === "ready") {
-				try {
-					const api = await pveOf(state);
-					const vms = await api.get(`/nodes/${connectionOf(state).node}/qemu`);
-					for (const vm of vms) {
-						if (
-							Number(vm.template) !== 1 ||
-							vm.vmid < 500 ||
-							vm.vmid === 590 ||
-							vm.vmid === 599 ||
-							vm.vmid === 9000 ||
-							vm.vmid === 9001 ||
-							!String(vm.tags || "")
-								.split(";")
-								.includes("umiak-tpl")
-						)
-							continue;
-						const config = await api.get(
-							`/nodes/${connectionOf(state).node}/qemu/${vm.vmid}/config`,
+				for (const target of state.sandboxNodes) {
+					if (target.state !== "active") continue;
+					try {
+						const scoped = await nodes.select(state, target.nodeId);
+						const api = await pveOf(state);
+						const vms = await api.get(
+							`/nodes/${connectionOf(scoped).node}/qemu`,
 						);
-						let slug =
-							String(config.tags || "")
-								.split(";")
-								.map((tag) => tag.replace(/^umiak-template-/, ""))
-								.find((tag) =>
-									[
-										"linux",
-										"linux-desktop",
-										"windows",
-										"windows-desktop",
-									].includes(tag),
-								) ||
-							(String(vm.name || "").includes("windows-desktop")
-								? "windows-desktop"
-								: String(vm.name || "").includes("windows")
-									? "windows"
-									: String(vm.name || "").includes("desktop")
-										? "linux-desktop"
-										: "linux");
-						if (slug === "windows-desktop") slug = "windows";
-						if (
-							slug === "windows" &&
-							!(await windowsDesktop(
-								config,
-								connectionOf(state).node,
-								vm.vmid,
-								join(secretsDir, "template-registry"),
-							))
-						)
-							continue;
-						const registered = await query(
-							"SELECT status,(template_slug='windows' AND headless IS DISTINCT FROM false) AS headless FROM runtime.template_builds WHERE node_id=$1 AND pve_vmid=$2 ORDER BY (status='active') DESC,created_at DESC LIMIT 1",
-							[state.steps.limits?.data?.nodeId, Number(vm.vmid)],
-						);
-						if (
-							registered.rows[0]?.status === "retired" ||
-							registered.rows[0]?.headless
-						)
-							continue;
-						state.detectedTemplates.push({
-							templateSlug: slug,
-							pveVmid: Number(vm.vmid),
-							name: vm.name,
-						});
+						for (const vm of vms) {
+							if (
+								Number(vm.template) !== 1 ||
+								vm.vmid < 500 ||
+								vm.vmid === 590 ||
+								vm.vmid === 599 ||
+								vm.vmid === 9000 ||
+								vm.vmid === 9001 ||
+								!String(vm.tags || "")
+									.split(";")
+									.includes("umiak-tpl")
+							)
+								continue;
+							const config = await api.get(
+								`/nodes/${connectionOf(scoped).node}/qemu/${vm.vmid}/config`,
+							);
+							let slug =
+								String(config.tags || "")
+									.split(";")
+									.map((tag) => tag.replace(/^umiak-template-/, ""))
+									.find((tag) =>
+										[
+											"linux",
+											"linux-desktop",
+											"windows",
+											"windows-desktop",
+										].includes(tag),
+									) ||
+								(String(vm.name || "").includes("windows-desktop")
+									? "windows-desktop"
+									: String(vm.name || "").includes("windows")
+										? "windows"
+										: String(vm.name || "").includes("desktop")
+											? "linux-desktop"
+											: "linux");
+							if (slug === "windows-desktop") slug = "windows";
+							if (
+								slug === "windows" &&
+								!(await windowsDesktop(
+									config,
+									connectionOf(scoped).node,
+									vm.vmid,
+									join(secretsDir, "template-registry"),
+								))
+							)
+								continue;
+							const registered = await query(
+								"SELECT status,(template_slug='windows' AND headless IS DISTINCT FROM false) AS headless FROM runtime.template_builds WHERE node_id=$1 AND pve_vmid=$2 ORDER BY (status='active') DESC,created_at DESC LIMIT 1",
+								[scoped.steps.limits.data.nodeId, Number(vm.vmid)],
+							);
+							if (
+								registered.rows[0]?.status === "retired" ||
+								registered.rows[0]?.headless
+							)
+								continue;
+							state.detectedTemplates.push({
+								nodeId: target.nodeId,
+								node: target.name,
+								templateSlug: slug,
+								pveVmid: Number(vm.vmid),
+								name: vm.name,
+							});
+						}
+					} catch (error) {
+						state.templateDetectionError = error.message;
 					}
-				} catch (error) {
-					state.templateDetectionError = error.message;
 				}
 			}
 			html(res, renderSetup(state));
@@ -882,7 +952,7 @@ export function createSetupHandler({
 				const state = await store.read();
 				const api = await pveOf(state);
 				const items = await api.get(
-					`/nodes/${connectionOf(state).node}/storage`,
+					`/nodes/${connectionOf(await nodes.select(state, new URL(req.url, context.origin).searchParams.get("nodeId"))).node}/storage`,
 				);
 				json(res, 200, {
 					storages: items.filter((x) =>
@@ -968,6 +1038,7 @@ export function createSetupHandler({
 		await store.init?.();
 		await jobs.init();
 	};
+	handler.nodes = nodes;
 	handler.wizard = wizard;
 	handler.jobs = jobs;
 	handler.deniedPeer = async (address) => {

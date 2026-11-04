@@ -551,6 +551,8 @@ async function main() {
 		await safeBootstrap({
 			store: setupHandler.wizard.store,
 			steps: setupHandler.wizard.steps,
+			installerNodeRetired: (state) =>
+				setupHandler.nodes.installerNodeRetired(state),
 			secretsDir: process.env.UMIAK_SECRETS_DIR || "/pve-secrets",
 		});
 	}

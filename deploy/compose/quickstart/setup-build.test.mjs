@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildInvocation, TemplateBuildJobs } from "./setup-build.mjs";
+import { testNodes } from "./test-nodes.mjs";
 
 const state = {
 	mediaStorage: "images",
@@ -154,6 +155,7 @@ test("completed ISO source provenance remains visible after another template job
 		},
 	];
 	const handler = createSetupHandler({
+		nodes: testNodes,
 		pool: {},
 		store: {
 			read: async () => ({

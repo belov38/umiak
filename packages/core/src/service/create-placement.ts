@@ -111,6 +111,7 @@ export async function admitCold(
 	templateSlug: string,
 	pairKey: string,
 	needMb: number,
+	selectedNodeId?: string,
 ): Promise<Placement> {
 	const candidates = await place(tx, {
 		templateSlug,
@@ -119,6 +120,7 @@ export async function admitCold(
 		pairKey,
 	});
 	for (const c of candidates) {
+		if (selectedNodeId && c.nodeId !== selectedNodeId) continue;
 		const res = await admit(tx, {
 			nodeId: c.nodeId,
 			storageId: c.storageId,

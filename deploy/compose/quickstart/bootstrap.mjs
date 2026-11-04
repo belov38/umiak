@@ -58,6 +58,7 @@ export async function bootstrapFromInstall({
 	makePve = pinnedPve,
 	nodeCheck = checkNode,
 	lookup = dnsLookup,
+	installerNodeRetired = async () => false,
 }) {
 	const rawInstall = await readOptional(secretsDir, "install.json");
 	if (!rawInstall) return "absent";
@@ -89,12 +90,16 @@ export async function bootstrapFromInstall({
 		const api = makePve(connection, token);
 		await api.get("/version");
 		await api.get("/pools/umiak");
-		const node = await nodeCheck(connection, secretsDir);
+		const retired = await installerNodeRetired(state);
+		const node = retired
+			? { version: "retired" }
+			: await nodeCheck(connection, secretsDir);
 		if (
-			!node?.version ||
-			node.config?.vmidMin !== 500 ||
-			node.config?.vmidMax !== 589 ||
-			node.config?.vnet !== "umiak0"
+			!retired &&
+			(!node?.version ||
+				node.config?.vmidMin !== 500 ||
+				node.config?.vmidMax !== 589 ||
+				node.config?.vnet !== "umiak0")
 		)
 			fail("Restricted node-agent configuration mismatch");
 		// Work on a copy so any failure leaves persisted state untouched.
@@ -114,7 +119,9 @@ export async function bootstrapFromInstall({
 		// The limits step upserts the installer node's SQL rows before the state
 		// write. That is safe: the upsert is idempotent, touches only the installer
 		// node, and a failure leaves the digest unsaved so the next start retries.
-		next.steps.limits = ready(await steps.limits(install.limits ?? {}, next));
+		next.steps.limits = ready(
+			await steps.limits(install.limits ?? {}, next, { bootstrap: true }),
+		);
 		next.steps.network = ready(await steps.network(network, next));
 		// Compare installer facts only: step outputs include live PVE inventory
 		// (occupied template VMIDs) that changes after every template build.

@@ -19,9 +19,9 @@ import {
 	imageCacheDir,
 	machinesFor,
 	makeContext,
-	RAM_CAP_MB,
 	RamGuard,
 	registryDir,
+	templateRamCapMb,
 } from "./context.ts";
 import { devCpRegistrar } from "./devcp.ts";
 import {
@@ -288,7 +288,7 @@ async function cmdBuild(
 			api,
 			node: cfg.node,
 			pool: cfg.pool,
-			capMb: RAM_CAP_MB,
+			capMb: templateRamCapMb(),
 		});
 		const opt = (flag: string, key: keyof BuildOptions) =>
 			str(flag) !== undefined ? { [key]: str(flag) } : {};
@@ -478,7 +478,7 @@ async function main(argv: string[]): Promise<number> {
 					api: ctx.api,
 					node: ctx.cfg.node,
 					pool: ctx.cfg.pool,
-					capMb: RAM_CAP_MB,
+					capMb: templateRamCapMb(),
 				});
 				// The checks are printed as they run; the template stays either way.
 				const v = await runVerify(ctx, ramGuard, m, {

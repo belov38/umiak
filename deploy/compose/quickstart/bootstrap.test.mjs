@@ -6,6 +6,7 @@ import test from "node:test";
 import { bootstrapFromInstall, safeBootstrap } from "./bootstrap.mjs";
 import { createSetupHandler } from "./setup.mjs";
 import { testTls } from "./test-helpers/tls.mjs";
+import { testNodes } from "./test-nodes.mjs";
 
 const install = {
 	version: 1,
@@ -118,6 +119,14 @@ async function setup(overrides = {}) {
 	});
 	const networkFile = join(dir, "quickstart-network.json");
 	const handler = createSetupHandler({
+		nodes: {
+			...testNodes,
+			register: async (cfg) => {
+				nodeUpserts.push([cfg.providerId, cfg.name, cfg.ramCapMb, cfg.sshHost]);
+				nodes.set(cfg.name, { id: 2, node_agent_ref: cfg.sshHost });
+				return { nodeId: 2, storageId: 3 };
+			},
+		},
 		store,
 		pool,
 		secretsDir,
@@ -278,4 +287,16 @@ test("token id file must match, and node-agent config is strict", async () => {
 		nodeCheck: async () => ({ version: "1.0" }),
 	};
 	await assert.rejects(bootstrapFromInstall(options), /node-agent/);
+});
+
+test("retired installer node can bootstrap without reinstalling its node-agent", async () => {
+	const t = await setup();
+	const result = await bootstrapFromInstall({
+		...t.options(),
+		installerNodeRetired: async () => true,
+		nodeCheck: async () => {
+			throw Error("retired node must not be probed");
+		},
+	});
+	assert.equal(result, "imported");
 });

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { windowsDesktop } from "./setup-desktop.mjs";
+import { testNodes } from "./test-nodes.mjs";
 
 test("fresh DB artifact detection fails closed and accepts positive desktop tags", async () => {
 	assert.equal(
@@ -96,6 +97,7 @@ test("fresh DB wizard offers only desktop and refuses legacy registration", asyn
 		},
 	];
 	const handler = createSetupHandler({
+		nodes: testNodes,
 		store: { read: async () => state, write: async () => {} },
 		pool: { query: async () => ({ rows: [] }) },
 		makePve: () => ({

@@ -83,3 +83,14 @@ describe("paths", () => {
 		expect(imageCacheDir({ UMIAK_IMAGE_CACHE: "/c" }, "/h")).toBe("/c");
 	});
 });
+
+describe("node build RAM cap", () => {
+	it("accepts configured node cap and refuses invalid values", async () => {
+		const { templateRamCapMb } = await import("../src/context.ts");
+		expect(templateRamCapMb({})).toBe(8192);
+		expect(templateRamCapMb({ UMIAK_TEMPLATE_RAM_CAP_MB: "4096" })).toBe(4096);
+		expect(() =>
+			templateRamCapMb({ UMIAK_TEMPLATE_RAM_CAP_MB: "nope" }),
+		).toThrow(/RAM/);
+	});
+});

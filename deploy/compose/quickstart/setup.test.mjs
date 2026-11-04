@@ -10,6 +10,7 @@ import {
 	validateNetwork,
 	verifyAdoption,
 } from "./setup.mjs";
+import { testNodes } from "./test-nodes.mjs";
 
 const denySets = {
 	"umiak-deny": [
@@ -194,6 +195,7 @@ test("browser steps wait for the installer-recorded connection and host", async 
 	assert.equal(state.steps.limits, undefined);
 	const { Readable } = await import("node:stream");
 	const handler = createSetupHandler({
+		nodes: testNodes,
 		pool: {},
 		store: {
 			read: async () => structuredClone(state),
@@ -313,7 +315,7 @@ test("legacy browser Connect, Prepare and callback routes are gone; PVE addresse
 			state = structuredClone(s);
 		},
 	};
-	const handler = createSetupHandler({ pool: {}, store });
+	const handler = createSetupHandler({ nodes: testNodes, pool: {}, store });
 	async function request(path, input) {
 		const req = Readable.from(
 			input === undefined ? [] : [JSON.stringify(input)],
@@ -589,6 +591,7 @@ test("smoke calls the API with the public API host, not api:8080", async () => {
 	process.env.UMIAK_API_URL = "https://umiak.tail0000.ts.net";
 	try {
 		const handler = createSetupHandler({
+			nodes: testNodes,
 			pool: {},
 			store: { read: async () => ({ steps: {} }), write: async () => {} },
 			secretsDir: await mkdtemp(join(tmpdir(), "umiak-smoke-")),

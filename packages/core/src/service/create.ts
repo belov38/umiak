@@ -56,6 +56,8 @@ export const CREATE_SCOPE = "sandboxes.create";
 
 /** How the api drives a create (S7 §20.2 item 11, environments of S8 §10.1). */
 export interface CreateOptions {
+	/** Private operator smoke path only; never copied from public create JSON. */
+	placementNodeId?: string;
 	/**
 	 * Hashed for the Idempotency-Key instead of `input`: the client's own
 	 * request body, so server-side additions (an environment) do not change
@@ -170,7 +172,9 @@ export async function createSandbox(
 				size.memoryMb,
 			);
 		} else {
-			const claimed = await claimWarm(tx, sandboxId, template.slug, pairKey);
+			const claimed = opts.placementNodeId
+				? null
+				: await claimWarm(tx, sandboxId, template.slug, pairKey);
 			if (claimed !== null) placement = claimed;
 			// failFast/pool_exhausted: internal only, not in the public MVP
 			// contract (no pool controller until phase 2); S7 must not expose it.
@@ -183,6 +187,7 @@ export async function createSandbox(
 					template.slug,
 					pairKey,
 					size.memoryMb,
+					opts.placementNodeId,
 				);
 			}
 		}

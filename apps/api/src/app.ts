@@ -5,6 +5,7 @@
 //   ops      :9090  /healthz, /readyz, /metrics -> createOpsApp
 // Public and proxied serve the same `/v1` resources (`mountV1`); they differ
 // only in authentication.
+
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { MiddlewareHandler } from "hono";
 import { serviceAuth } from "./auth/internal.ts";
@@ -42,6 +43,7 @@ import { registerOperationRoutes } from "./routes/operations.ts";
 import { registerPortRoutes } from "./routes/ports.ts";
 import { registerPtyRoutes } from "./routes/ptys.ts";
 import { registerSandboxRoutes } from "./routes/sandboxes.ts";
+import { registerSetupSmoke } from "./routes/setup-smoke.ts";
 import { registerSnapshotRoutes } from "./routes/snapshots.ts";
 import { registerSshRoutes } from "./routes/ssh.ts";
 import { registerSshKeyRoutes } from "./routes/ssh-keys.ts";
@@ -123,6 +125,7 @@ export function createProxiedApp(deps: ApiDeps): ApiApp {
 	// No /v1/docs: a third-party script must not run on the cookie origin.
 	mountV1(app, deps, { docs: false });
 	registerUmiakAuthRoutes(app, deps);
+	registerSetupSmoke(app, deps);
 	return app;
 }
 

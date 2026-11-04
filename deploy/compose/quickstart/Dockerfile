@@ -67,7 +67,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl openssh
 RUN npm install -g pnpm@12.16.1
 WORKDIR /app
 COPY . .
-RUN pnpm install --frozen-lockfile --prod --filter-prod "@umiak/template-builder..." --filter-prod "@umiak/db..."
+RUN pnpm install --frozen-lockfile --prod --filter-prod "@umiak/template-builder..." --filter-prod "@umiak/db..." --filter-prod "@umiak/core..."
 RUN mkdir -p /app/quickstart-assets && cp deploy/compose/quickstart/install.sh /app/quickstart-assets/install.sh && ln -s /app/packages/db/node_modules/pg /app/node_modules/pg
 COPY --from=cli-build /app/apps/cli/dist/ /app/quickstart-assets/
 COPY --from=ui-fonts /fonts/node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2 /app/quickstart-assets/inter.woff2

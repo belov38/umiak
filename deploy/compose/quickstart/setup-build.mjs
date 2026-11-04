@@ -58,6 +58,7 @@ export function buildInvocation(
 		UMIAK_TEMPLATE_VMID: "599",
 		UMIAK_CLUSTER_ID: "1",
 		UMIAK_PVE_STORAGE: limits.storage,
+		UMIAK_TEMPLATE_RAM_CAP_MB: String(limits.ramCapMb ?? 8192),
 		UMIAK_PVE_MEDIA_STORAGE:
 			input.mediaStorage || state.mediaStorage || "local",
 		UMIAK_PVE_VNET: "umiak0",
@@ -232,6 +233,7 @@ export async function runTemplateBuild(
 		if (!file.endsWith(".json")) continue;
 		const manifest = JSON.parse(await readFile(join(registry, file), "utf8"));
 		if (
+			manifest.node === invocation.env.UMIAK_PVE_NODE &&
 			manifest.templateSlug === invocation.slug &&
 			Number(manifest.pveVmid) === invocation.slot &&
 			manifest.status === "ready" &&
@@ -247,11 +249,17 @@ export class TemplateBuildJobs {
 		run,
 		validate = async () => {},
 		register = async () => {},
+		reserve = async () => {},
+		interrupt = async () => {},
+		finish = async () => {},
 	}) {
 		this.store = store;
 		this.run = run;
 		this.validate = validate;
 		this.register = register;
+		this.reserve = reserve;
+		this.interrupt = interrupt;
+		this.finish = finish;
 		this.pending = Promise.resolve();
 	}
 	async update(fn) {
@@ -264,14 +272,16 @@ export class TemplateBuildJobs {
 		else await action();
 	}
 	async init() {
-		await this.update((state) => {
-			if (state.buildJob?.status === "running")
+		await this.update(async (state) => {
+			if (state.buildJob?.status === "running") {
+				await this.interrupt(state.buildJob, state);
 				state.buildJob = {
 					...state.buildJob,
 					status: "error",
 					error:
 						"Build interrupted by restart. Inspect its S5 registry and outstanding build VM before retrying; no broad cleanup is performed.",
 				};
+			}
 		});
 	}
 	async start(slug, input = {}, context = {}) {
@@ -286,13 +296,15 @@ export class TemplateBuildJobs {
 			return { status: "dry-run", slug, templateVmid: input.templateVmid };
 		const job = {
 			id: randomBytes(12).toString("hex"),
+			nodeId: input.nodeId,
 			slug,
 			status: "running",
 			startedAt: new Date().toISOString(),
 		};
-		await this.update((current) => {
+		await this.update(async (current) => {
 			if (current.buildJob?.status === "running")
 				throw new Error("A template build is already running");
+			await this.reserve(job, state, input);
 			current.buildJob = job;
 		});
 		this.pending = (async () => {
@@ -318,7 +330,8 @@ export class TemplateBuildJobs {
 					onProgress,
 				);
 				await progressWrites;
-				await this.register(manifest, context);
+				await this.register(manifest, { ...context, job });
+				await this.finish(job, state, input, manifest);
 				await this.update((current) => {
 					current.buildJob = {
 						...current.buildJob,
@@ -338,12 +351,18 @@ export class TemplateBuildJobs {
 					};
 				});
 			} catch (error) {
+				let message = error.message;
+				try {
+					await this.interrupt(job, state);
+				} catch (reservationError) {
+					message = `${error.message}; reservation: ${reservationError.message}`;
+				}
 				await this.update((current) => {
 					current.buildJob = {
 						...current.buildJob,
 						status: "error",
 						finishedAt: new Date().toISOString(),
-						error: error.message,
+						error: message,
 					};
 				});
 			}

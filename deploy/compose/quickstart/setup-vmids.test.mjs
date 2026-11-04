@@ -6,6 +6,7 @@ import {
 	validateTemplateInventory,
 	validateTemplateRange,
 } from "./setup-vmids.mjs";
+import { testNodes } from "./test-nodes.mjs";
 
 const limits = {
 	vmidMin: 500,
@@ -106,6 +107,7 @@ test("adoption registers existing VMIDs unchanged even after configuring a new b
 	};
 	const reads = [];
 	const handler = createSetupHandler({
+		nodes: testNodes,
 		store: {
 			read: async () => structuredClone(state),
 			write: async (value) => {
@@ -167,6 +169,7 @@ test("rebuild dry-run allocates a fresh free slot without starting a VM or chang
 	};
 	const writes = [];
 	const handler = createSetupHandler({
+		nodes: testNodes,
 		store: {
 			read: async () => structuredClone(state),
 			write: async (value) => writes.push(value),
@@ -204,6 +207,7 @@ test("detected templates omit a deprecated custom headless Windows build", async
 		},
 	};
 	const handler = createSetupHandler({
+		nodes: testNodes,
 		store: { read: async () => structuredClone(state) },
 		pool: {
 			query: async (_sql, args) => ({
