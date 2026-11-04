@@ -80,6 +80,8 @@ COPY --from=node-build /out/umiak-node-linux-amd64 /app/quickstart-assets/umiak-
 COPY --from=guest-build /out/umiak-agent-linux-amd64 /app/quickstart-assets/umiak-agent-linux-amd64
 COPY --from=guest-build /out/umiak-agent-windows-amd64.exe /app/quickstart-assets/umiak-agent-windows-amd64.exe
 COPY --from=guest-build /out/umiak-release /umiak-release
+ARG UMIAK_SOURCE_COMMIT=
+ENV UMIAK_SOURCE_COMMIT=$UMIAK_SOURCE_COMMIT
 ENV NODE_ENV=production UMIAK_QUICKSTART_PORT=4180 UMIAK_QUICKSTART_ASSETS=/app/quickstart-assets
 COPY --chmod=755 deploy/compose/quickstart/umiak-signin /usr/local/bin/umiak-signin
 USER node
