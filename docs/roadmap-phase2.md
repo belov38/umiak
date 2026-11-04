@@ -1,751 +1,751 @@
-# Roadmap фазы 2: паритет с boat.dev и сверх него
+# Phase 2 roadmap: parity with boat.dev and beyond
 
-Статус: черновик v0.1, 2026-10-29. Для master-сессии: инвентарь возможностей boat, сверка с планом S1–S13, области S14+ для brainstorm, рекомендации к MVP. Реализации и brainstorm с Ильёй здесь нет.
+Status: draft v0.1, 2026-10-29. For the master session: an inventory of boat's capabilities, reconciliation with the S1–S13 plan, the areas S14+ for brainstorm, MVP recommendations. There is no implementation and no brainstorm with Ilia here.
 
-Источники (локальные, не в git):
-- `docs:` — `research/boat-docs/pages/` (213 страниц, индекс `llms.txt`);
-- `cli:` — `research/boat-cli-help/` (help 120 команд) и `docs:cli-reference.md`;
-- `sdk:` — `sdks/` (OpenAPI `boat-v1.yaml`, 121 операция; SDK TS/Python, хелперы `boat_helpers.py`, `boat-helpers.ts`);
-- `vr:` — `vendor-repos/` (skills, kimi-плагин, optibox, boat-convex, harbor-box, eve-box, battleships, agent-server-release).
+Sources (local, not in git):
+- `docs:` — `research/boat-docs/pages/` (213 pages, index `llms.txt`);
+- `cli:` — `research/boat-cli-help/` (help of 120 commands) and `docs:cli-reference.md`;
+- `sdk:` — `sdks/` (OpenAPI `boat-v1.yaml`, 121 operations; TS/Python SDKs, helpers `boat_helpers.py`, `boat-helpers.ts`);
+- `vr:` — `vendor-repos/` (skills, the kimi plugin, optibox, boat-convex, harbor-box, eve-box, battleships, agent-server-release).
 
-Наш план: `docs/architecture.md`, `docs/roadmap.md`, спецификации S1, S2, S3, S4, S6. S5 и S7 пишутся в других тредах, их объём взят из roadmap; где пишу «S7», это ожидание, а не факт из спецификации.
+Our plan: `docs/architecture.md`, `docs/roadmap.md`, the specifications S1, S2, S3, S4, S6. S5 and S7 are being written in other threads, their scope is taken from the roadmap; where I write "S7", it is an expectation, not a fact from a specification.
 
-Известный долг для тёплого пула (S30): при двух и более нодах `retryClaim` (`apps/worker/src/ops/claim.ts`) держит блокировку ноды отклонённой machine и вызывает `admitCold`, поэтому возможен deadlock `40P01` (приёмка S6, раунд 2). Исправить до включения `ctl-pool`.
+A known debt for the warm pool (S30): with two or more nodes `retryClaim` (`apps/worker/src/ops/claim.ts`) holds the node lock of the rejected machine and calls `admitCold`, so a `40P01` deadlock is possible (S6 acceptance, round 2). Fix before enabling `ctl-pool`.
 
-Обновление 2026-10-29: рекомендации R1–R11 внесены в спецификации MVP. Аутентификация MVP теперь на Keycloak: `umiak login` через device flow, люди без долгих ключей, командные ключи `umiak_`, SSH-сертификаты (S7 §7, §11.3; S4 §9; S8 §20.1). Поэтому K6, K8, SH1 и S24 частично закрыты в MVP, а правило S24 «дочерний ключ не шире родителя» теряет смысл. Остаток уточняется при brainstorm S24.
+Update 2026-10-29: the recommendations R1–R11 were incorporated into the MVP specifications. MVP authentication is now on Keycloak: `umiak login` through the device flow, people without long-lived keys, team keys `umiak_`, SSH certificates (S7 §7, §11.3; S4 §9; S8 §20.1). So K6, K8, SH1, and S24 are partly closed in the MVP, and the S24 rule "a child key is no wider than the parent" loses its meaning. The remainder is clarified at the S24 brainstorm.
 
-## 0. Кратко
+## 0. In brief
 
-- У boat около 200 отдельных возможностей. MVP (S1–S13) закрывает ядро: жизненный цикл, fork, saved snapshots, exec/files/ports, SSH, рабочий стол, ключи, MCP. Во многих местах ядро уже сильнее boat (§3).
-- Главные пробелы — **слой поверх VM**: встроенные coding-агенты (prompt/steer/events), credentials proxy, environments с версиями, skills и плагины для агентов, webhooks/OTel, история команд вне VM, CI-раннеры, адаптеры eval-фреймворков.
-- Предлагаю 17 областей **S14–S30** (§4). Первая волна (P1): S21 skills/плагины, S24 ключи v2, S22 CLI/SDK v2, S14 environments, S16 credentials proxy, S15 coding-агенты.
-- 11 рекомендаций к MVP (§6). Самые важные: контракт JSON/JSONL у CLI и заголовок подтверждения удаления (S7), минимальная сущность environment (нужна S13), env на fork и resume (S6), модель scope ключей «действие × ресурс» (S8), coding-агенты и инструменты в шаблоне (S5), единый формат slug (S4/S6).
+- Boat has about 200 separate capabilities. The MVP (S1–S13) covers the core: lifecycle, fork, saved snapshots, exec/files/ports, SSH, the desktop, keys, MCP. In many places the core is already stronger than boat (§3).
+- The main gaps are the **layer on top of the VM**: built-in coding agents (prompt/steer/events), a credentials proxy, environments with versions, skills and plugins for agents, webhooks/OTel, command history outside the VM, CI runners, adapters for eval frameworks.
+- I propose 17 areas **S14–S30** (§4). The first wave (P1): S21 skills/plugins, S24 keys v2, S22 CLI/SDK v2, S14 environments, S16 credentials proxy, S15 coding agents.
+- 11 recommendations for the MVP (§6). The most important: the JSON/JSONL contract of the CLI and the delete confirmation header (S7), a minimal environment entity (needed by S13), env on fork and resume (S6), the key scope model "action × resource" (S8), coding agents and tools in the template (S5), a single slug format (S4/S6).
 
-## 1. Обозначения
+## 1. Notation
 
-| Знак | Значение |
+| Mark | Meaning |
 |---|---|
-| ✅ | Покрыто планом (указана область и раздел) |
-| ✅* | Входит в объём области, у которой ещё нет спецификации (S5, S7, S8, S9, S10, S11): ожидание по roadmap или `docs/architecture.md` |
-| ◐ | Частично: есть примитив или часть, нужна доработка |
-| ✗ | Нет в плане |
-| ⊘ | Пропускаем: коммерция, наследие boat или неприменимо к нашей архитектуре (причина в строке) |
+| ✅ | Covered by the plan (the area and section are given) |
+| ✅* | Within the scope of an area that has no specification yet (S5, S7, S8, S9, S10, S11): an expectation from the roadmap or `docs/architecture.md` |
+| ◐ | Partly: a primitive or part exists, more work is needed |
+| ✗ | Not in the plan |
+| ⊘ | Skipped: commerce, boat legacy, or inapplicable to our architecture (the reason is in the row) |
 
-Колонка «Решение»: куда идёт пункт (S14+ или «MVP-рек.» — см. §6) и нужен ли он внутренней платформе. Приоритеты: P1 — первая волна после MVP, P2 — вторая, P3 — по запросу.
+The "Decision" column: where the item goes (S14+ or "MVP rec." — see §6) and whether an internal platform needs it. Priorities: P1 — the first wave after the MVP, P2 — the second, P3 — on request.
 
-## 2. Инвентарь возможностей boat и покрытие
+## 2. Inventory of boat's capabilities and coverage
 
-### 2.1 Жизненный цикл, размеры, ОС
+### 2.1 Lifecycle, sizes, OS
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
 | L1 | Create: `type`, `name`, `labels`, `env`, `ttlSeconds`, `from` (saved snapshot) | `docs:concepts.md`, `docs:api/reference/sandboxes/create-sandbox.md` | S6 §7.3, S7 | ✅ | — |
-| L2 | Состояния `provisioning…ready/idle/running…archived/error`; `idle/running` = работает ли prompt агента | `docs:concepts.md` | S6 §6.1; `activity busy/idle` — отдельное поле | ◐ | Состояние «агент работает» — S15 |
-| L3 | Stop с финальным снапшотом; отказ stop при неудачном снапшоте, `force`, авто-force через 3 дня | `docs:snapshots/stop.md`, `docs:api/reference/sandboxes/stop-and-archive-sandbox.md` | S6 §7.5: shutdown ОС, диски остаются на ноде; жёсткий stop при таймауте | ✅ | Механизм другой: финальный снапшот не нужен |
-| L4 | Хук `~/.boat/pre-stop` (60 s), Docker-контейнеры останавливаются по 30 s | `docs:snapshots/stop.md` | S6 §7.5 `PrepareStop`; graceful shutdown ОС сам гасит systemd-юниты и Docker | ◐ | Пользовательский хук — S30 (дёшево) |
-| L5 | Resume тем же id на новой machine | `docs:snapshots/resume-and-fork.md` | S6 §7.6 (та же VM на той же ноде) | ✅ | — |
-| L6 | Resume во время `stopping` забирает ту же machine; machine держится 10 min после stop | `docs:readiness.md`, `docs:snapshots/stop.md` | Не нужно: диски и VM остаются на ноде | ⊘ | Следствие удалённых снапшотов boat |
-| L7 | Fork, в том числе работающей sandbox (из минутного снапшота, теряет до 1 min записей) | `docs:snapshots/resume-and-fork.md` | S6 §7.7: снапшот с quiesce, точная копия | ✅ | Лучше boat |
-| L8 | Смена размера: `resume --type`, `fork --type`, `type_too_small` | `docs:machines/change-size.md` | S6 §7.6 шаг `resize` (CPU/RAM); рост диска нет | ◐ | Диск по размеру — S30 |
-| L9 | `recover`: power-cycle, не чаще раза в 10 min; boat отказывает здоровой sandbox (`409 sandbox_is_reachable`) | `docs:troubleshooting.md`, `docs:api/reference/sandboxes/recover-sandbox.md` | S6 §7.8 (разрешён и на здоровой `ready`) | ✅ | Отказ здоровой — по желанию, S7 |
-| L10 | Авто-пересборка `error` sandbox на новой machine из последнего снапшота | `docs:troubleshooting.md` | Нет: диски локальные | ✗ | С PBS-архивом — S18/S12, P3 |
-| L11 | Асинхронный delete с операцией `bdop_…`, стадии `waiting_for_uploads`, `retrying` | `docs:data-retention/delete.md`, `docs:api/reference/account/get-deletion-operation.md` | S6 операция `delete`; публичный статус — S7 | ◐ | S7 (статус операции) |
-| L12 | `Idempotency-Key` на create и fork, 24 h, `idempotency_in_progress`, `idempotency_key_reused` | `docs:limits.md`, `docs:recipes/parallel-agents.md` | S6 §5.7, §14.1 | ✅ | Добавить resume — S30, P3 |
-| L13 | `failFast`: только из тёплого пула, ответ ≈1.5 s или `503 no_ready_machine`, ничего не создаётся; работает и с `from`, fork, resume | `docs:machines/fail-fast.md`, `sdk:openapi/boat-v1.yaml` | Нет; create из snapshot у нас всегда холодный (S6 §7.3) | ✗ | MVP-рек. R2 (для шаблонов); тёплый пул под saved snapshot — S30 |
-| L14 | `count` 1–1000 при create из snapshot, всё или ничего | `docs:api/reference/sandboxes/create-sandbox.md`, `cli:new.txt` | Нет | ✗ | S30 (evals), P2 |
-| L15 | Фильтры list: `state`, `namePrefix`, `label=k=v`, `stoppedBefore`, `dataExpired`, cursor | `docs:api/reference/sandboxes/list-sandboxes.md` | S6 labels, `ListFilter`; форма — S7 | ◐ | S7 |
-| L16 | Переименование поддомена (`PATCH subdomain`, 3–40 символов, не на `-desktop` и `-<число>`) | `docs:hosting.md`, `docs:api/reference/sandboxes/update-sandbox.md` | S4 §4.2: грамматика slug та же, генерация и rename — S7; S6 §5.6 описывает slug иначе (10 символов `[a-z0-9]`) | ◐ | S7; формат slug — MVP-рек. R10 |
-| L17 | Размеры `small…xlarge`, `GET /limits.machineTypes` с причиной недоступности | `docs:machines.md` | Sizes в Payload (S8), квоты S6 §8.5 | ◐ | `/limits` — MVP-рек. R9 |
-| L18 | Резерв 512 MiB под сервисы платформы, OOM → exit 137, `oomKilled` | `docs:troubleshooting.md`, `vr:agent-server-release/install.sh` (`MemoryMin=512M`) | S3 §9.1 `reason: OOM`; §17.2 `MemoryMin=64M` только агенту | ◐ | Размер резерва (агент + раннер S15 + стример S10) — S5/S15 |
-| L19 | `--setup-file` на sandbox: один раз после ready, `setupStatus`/`setupError` | `docs:setup.md` | Нет | ✗ | S14, P1 |
-| L20 | Setup-скрипт репозитория на каждый create/resume/fork, `setupBlocking`, логи в `/tmp/routine-logs/` | `docs:setup.md` | S13 (клон при claim), скрипт не описан | ◐ | S13/S14 |
-| L21 | Команда во время старта ждёт до 60 s, затем `409 sandbox_starting`; `sandbox_restoring` retryable | `docs:readiness.md` | Архитектура §4: ожидание агента до 30 s, `503 agent_unavailable retryable` | ◐ | S7 |
-| L22 | Ленивое восстановление диска, `hydrated`, прогресс, `playbook.json` префетч | `docs:readiness.md` | Не нужно: LVM-thin локально | ⊘ | Вернуться при PBS live-restore (S18) |
-| L23 | Дедупликация с базовым образом: хранится только разница | `docs:readiness.md` | Thin-снимки делят блоки с шаблоном (архитектура §5) | ✅ | — |
-| L24 | `/dev/kvm` во всех sandbox (QEMU, Firecracker, Android-эмулятор) | `docs:machines/virtualization.md` | S1 §4.6: `cpu host`; гарантии нет | ◐ | MVP-рек. R6 |
-| L25 | Предустановленный набор: Node/bun/deno/pnpm, Python+uv, Go, Rust, JVM, Ruby, PHP, .NET, R, GCC/Clang, Docker+Compose, gh, rg, jq, Chrome, ffmpeg, xdotool | `docs:machines/tools.md` | S5 (brainstorm идёт) | ◐ | MVP-рек. R5 |
-| L26 | Предустановленные coding-агенты (`claude`, `codex`, `opencode`, `pi`, `kimi`, `vibe`, …), обновляются при подготовке machine | `docs:machines/tools.md` | Нет | ✗ | MVP-рек. R5, S15 |
-| L27 | Пользователь `user` с sudo, systemd, Docker без sudo | `docs:machines.md` | S3 §4, S5 | ✅ | — |
-| L28 | Always-on сервисы: systemd-юнит + без auto-stop | `docs:long-running-tasks/always-on-services.md` | S6 §12: TTL `null` по умолчанию, idle-stop отключаем `null` | ✅ | — |
-| L29 | Один образ Ubuntu 24.04, своих образов нет | `docs:machines.md`, `docs:faq.md` | 4 шаблона, включая Windows | ✅ | Лучше boat; свои образы — S28 |
-| L30 | `degraded` при потере связи, письмо при зависании; после 3 дней без ответа boat сам останавливает sandbox | `docs:faq.md`, `docs:troubleshooting.md` | S6 §11.1 health; `degraded` никогда не останавливается автоматически; уведомлений нет | ◐ | Уведомления — S20; авто-stop зависшей — решить в S30 |
-| L32 | `GET /me`: текущий пользователь и способ входа | `docs:api/reference/account/get-current-boat-user.md` | Архитектура §9 `/me` | ✅* | S7 |
-| L31 | Hetzner-резерв при нехватке ёмкости, общие vCPU | `docs:machines/virtualization.md` | Ёмкость и admission S6 §8 | ⊘ | Специфика их флота |
+| L2 | States `provisioning…ready/idle/running…archived/error`; `idle/running` = whether the agent's prompt is running | `docs:concepts.md` | S6 §6.1; `activity busy/idle` is a separate field | ◐ | The "agent is working" state — S15 |
+| L3 | Stop with a final snapshot; stop refused if the snapshot fails, `force`, auto-force after 3 days | `docs:snapshots/stop.md`, `docs:api/reference/sandboxes/stop-and-archive-sandbox.md` | S6 §7.5: OS shutdown, disks stay on the node; a hard stop on timeout | ✅ | A different mechanism: no final snapshot is needed |
+| L4 | The hook `~/.boat/pre-stop` (60 s), Docker containers are stopped for 30 s each | `docs:snapshots/stop.md` | S6 §7.5 `PrepareStop`; a graceful OS shutdown itself stops systemd units and Docker | ◐ | A user hook — S30 (cheap) |
+| L5 | Resume with the same id on a new machine | `docs:snapshots/resume-and-fork.md` | S6 §7.6 (the same VM on the same node) | ✅ | — |
+| L6 | A resume during `stopping` takes the same machine; the machine is held for 10 min after stop | `docs:readiness.md`, `docs:snapshots/stop.md` | Not needed: disks and the VM stay on the node | ⊘ | A consequence of boat's remote snapshots |
+| L7 | Fork, including of a running sandbox (from a one-minute snapshot, loses up to 1 min of writes) | `docs:snapshots/resume-and-fork.md` | S6 §7.7: a snapshot with quiesce, an exact copy | ✅ | Better than boat |
+| L8 | Size change: `resume --type`, `fork --type`, `type_too_small` | `docs:machines/change-size.md` | S6 §7.6 step `resize` (CPU/RAM); no disk growth | ◐ | Disk by size — S30 |
+| L9 | `recover`: a power cycle, no more often than every 10 min; boat refuses a healthy sandbox (`409 sandbox_is_reachable`) | `docs:troubleshooting.md`, `docs:api/reference/sandboxes/recover-sandbox.md` | S6 §7.8 (allowed on a healthy `ready` too) | ✅ | Refusing a healthy one — optional, S7 |
+| L10 | Auto-rebuild of an `error` sandbox on a new machine from the latest snapshot | `docs:troubleshooting.md` | No: disks are local | ✗ | With a PBS archive — S18/S12, P3 |
+| L11 | Asynchronous delete with an operation `bdop_…`, stages `waiting_for_uploads`, `retrying` | `docs:data-retention/delete.md`, `docs:api/reference/account/get-deletion-operation.md` | The S6 `delete` operation; the public status — S7 | ◐ | S7 (operation status) |
+| L12 | `Idempotency-Key` on create and fork, 24 h, `idempotency_in_progress`, `idempotency_key_reused` | `docs:limits.md`, `docs:recipes/parallel-agents.md` | S6 §5.7, §14.1 | ✅ | Add resume — S30, P3 |
+| L13 | `failFast`: only from the warm pool, a response in ≈1.5 s or `503 no_ready_machine`, nothing is created; works with `from`, fork, resume too | `docs:machines/fail-fast.md`, `sdk:openapi/boat-v1.yaml` | No; a create from a snapshot is always cold for us (S6 §7.3) | ✗ | MVP rec. R2 (for templates); a warm pool for a saved snapshot — S30 |
+| L14 | `count` 1–1000 on create from a snapshot, all or nothing | `docs:api/reference/sandboxes/create-sandbox.md`, `cli:new.txt` | No | ✗ | S30 (evals), P2 |
+| L15 | List filters: `state`, `namePrefix`, `label=k=v`, `stoppedBefore`, `dataExpired`, cursor | `docs:api/reference/sandboxes/list-sandboxes.md` | S6 labels, `ListFilter`; the form — S7 | ◐ | S7 |
+| L16 | Renaming the subdomain (`PATCH subdomain`, 3–40 characters, not ending in `-desktop` and `-<number>`) | `docs:hosting.md`, `docs:api/reference/sandboxes/update-sandbox.md` | S4 §4.2: the slug grammar is the same, generation and rename — S7; S6 §5.6 describes the slug differently (10 characters `[a-z0-9]`) | ◐ | S7; the slug format — MVP rec. R10 |
+| L17 | Sizes `small…xlarge`, `GET /limits.machineTypes` with the reason for unavailability | `docs:machines.md` | Sizes in Payload (S8), S6 quotas §8.5 | ◐ | `/limits` — MVP rec. R9 |
+| L18 | A 512 MiB reserve for platform services, OOM → exit 137, `oomKilled` | `docs:troubleshooting.md`, `vr:agent-server-release/install.sh` (`MemoryMin=512M`) | S3 §9.1 `reason: OOM`; §17.2 `MemoryMin=64M` only for the agent | ◐ | The size of the reserve (agent + S15 runner + S10 streamer) — S5/S15 |
+| L19 | `--setup-file` on a sandbox: once after ready, `setupStatus`/`setupError` | `docs:setup.md` | No | ✗ | S14, P1 |
+| L20 | A repository setup script on every create/resume/fork, `setupBlocking`, logs in `/tmp/routine-logs/` | `docs:setup.md` | S13 (clone at claim), the script is not described | ◐ | S13/S14 |
+| L21 | A command during start waits up to 60 s, then `409 sandbox_starting`; `sandbox_restoring` is retryable | `docs:readiness.md` | Architecture §4: waiting for the agent up to 30 s, `503 agent_unavailable retryable` | ◐ | S7 |
+| L22 | Lazy disk restore, `hydrated`, progress, `playbook.json` prefetch | `docs:readiness.md` | Not needed: LVM-thin is local | ⊘ | Return to it with PBS live-restore (S18) |
+| L23 | Deduplication against the base image: only the difference is stored | `docs:readiness.md` | Thin snapshots share blocks with the template (architecture §5) | ✅ | — |
+| L24 | `/dev/kvm` in all sandboxes (QEMU, Firecracker, the Android emulator) | `docs:machines/virtualization.md` | S1 §4.6: `cpu host`; no guarantee | ◐ | MVP rec. R6 |
+| L25 | A preinstalled set: Node/bun/deno/pnpm, Python+uv, Go, Rust, JVM, Ruby, PHP, .NET, R, GCC/Clang, Docker+Compose, gh, rg, jq, Chrome, ffmpeg, xdotool | `docs:machines/tools.md` | S5 (brainstorm in progress) | ◐ | MVP rec. R5 |
+| L26 | Preinstalled coding agents (`claude`, `codex`, `opencode`, `pi`, `kimi`, `vibe`, …), updated when the machine is prepared | `docs:machines/tools.md` | No | ✗ | MVP rec. R5, S15 |
+| L27 | The user `user` with sudo, systemd, Docker without sudo | `docs:machines.md` | S3 §4, S5 | ✅ | — |
+| L28 | Always-on services: a systemd unit + no auto-stop | `docs:long-running-tasks/always-on-services.md` | S6 §12: TTL `null` by default, idle-stop is turned off with `null` | ✅ | — |
+| L29 | One Ubuntu 24.04 image, no custom images | `docs:machines.md`, `docs:faq.md` | 4 templates, including Windows | ✅ | Better than boat; custom images — S28 |
+| L30 | `degraded` on loss of connectivity, an email on a hang; after 3 days without an answer boat itself stops the sandbox | `docs:faq.md`, `docs:troubleshooting.md` | S6 §11.1 health; `degraded` is never stopped automatically; no notifications | ◐ | Notifications — S20; auto-stop of a hung one — decide in S30 |
+| L32 | `GET /me`: the current user and the login method | `docs:api/reference/account/get-current-boat-user.md` | Architecture §9 `/me` | ✅* | S7 |
+| L31 | A Hetzner reserve when capacity is short, shared vCPUs | `docs:machines/virtualization.md` | Capacity and admission S6 §8 | ⊘ | Specifics of their fleet |
 
-### 2.2 Auto-stop и TTL
+### 2.2 Auto-stop and TTL
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| T1 | TTL: по умолчанию 1 h, максимум 30 d, `null` = выключен, поле `archiveAfter` | `docs:long-running-tasks/auto-stop.md` | S6 §12: TTL по умолчанию `null`, idle-stop 900 s | ✅ | — |
-| T2 | `extend`: дедлайн = now + TTL | `cli:extend.txt` | S6 §7.8 | ✅ | — |
-| T3 | Работающий prompt агента продлевает TTL | `docs:long-running-tasks/auto-stop.md` | Idle-stop учитывает команды и PTY | ◐ | Prompt как активность — S15 |
-| T4 | Fork не наследует «без auto-stop» | `docs:long-running-tasks/auto-stop.md` | S6 §7.7: TTL не наследуется | ✅ | — |
-| T5 | Таймера простоя нет (платформы строят свой) | `docs:faq.md`, `vr:optibox/docs/redesign.md` | S6 §12 idle-stop по реальной активности | ✅ | Лучше boat |
-| T6 | Пробуждение по запросу (у boat нет) | `vr:battleships/research/cards/boat.json` | S4 §17, S6 §21: фаза 2 | ✗ | S30, P2 |
+| T1 | TTL: 1 h by default, maximum 30 d, `null` = off, the field `archiveAfter` | `docs:long-running-tasks/auto-stop.md` | S6 §12: TTL `null` by default, idle-stop 900 s | ✅ | — |
+| T2 | `extend`: deadline = now + TTL | `cli:extend.txt` | S6 §7.8 | ✅ | — |
+| T3 | A running agent prompt extends the TTL | `docs:long-running-tasks/auto-stop.md` | Idle-stop accounts for commands and PTYs | ◐ | A prompt as activity — S15 |
+| T4 | A fork does not inherit "no auto-stop" | `docs:long-running-tasks/auto-stop.md` | S6 §7.7: the TTL is not inherited | ✅ | — |
+| T5 | There is no idle timer (platforms build their own) | `docs:faq.md`, `vr:optibox/docs/redesign.md` | S6 §12 idle-stop by real activity | ✅ | Better than boat |
+| T6 | Wake-up on request (boat has none) | `vr:battleships/research/cards/boat.json` | S4 §17, S6 §21: phase 2 | ✗ | S30, P2 |
 
-### 2.3 Снапшоты
+### 2.3 Snapshots
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| SN1 | Авто-снапшот раз в минуту и при stop, инкрементальный | `docs:snapshots.md` | S6 §5.5: `kind auto` зарезервирован | ✗ | S18, P2 (защита от потери диска, откат) |
-| SN2 | Хранение остановленных 14 d, письмо на 11-й день, `snapshot_data_expired` | `docs:snapshots/stop.md`, `docs:data-retention.md` | S6 §15.4 `stoppedRetentionDays` (выключен) | ◐ | S25 |
-| SN3 | Saved snapshot: save, `new --from`, замена по имени, бессрочно | `docs:snapshots/templates.md`, `docs:api/reference/snapshots/save-saved-snapshot.md` | S6 §7.8 | ✅ | — |
-| SN4 | Командные образы: владелец — org, при деплое коллегой вычищаются логины, SSH-ключи, secret-файлы | `docs:snapshots/templates.md` | S6 §5.5 `team_id` ✅; вычистки нет (секреты в tmpfs, но логины в `~` попадут) | ◐ | S23 |
-| SN5 | Share-коды `bsh_…` между аккаунтами (256 бит, хранится хеш, счётчик, отзыв) | `docs:snapshots/templates.md`, `docs:api/reference/snapshots/create-snapshot-share.md` | Нет | ✗ | S23, P3 (между командами) |
-| SN6 | Список, `latest`, дерево файлов, чтение файла или tar каталога из снапшота без VM; `snapshot pull` | `docs:snapshots/download-and-delete.md`, `docs:api/reference/snapshots/get-snapshot-tree.md`, `cli:snapshot.pull.txt` | Нет | ✗ | S18, P2 (полезно и для stopped sandbox) |
-| SN7 | Полная выгрузка снапшота (подписанные чанки) | `docs:api/reference/snapshots/get-snapshot-download.md` | Нет | ✗ | S18, P3 (экспорт qcow2/raw) |
-| SN8 | Удаление одного, всех авто-снапшотов, saved | `docs:data-retention/delete.md` | Saved ✅ (S6 §7.8); авто нет | ◐ | S18 |
-| SN9 | Откат к моменту времени (у boat нет: только последний снапшот) | `docs:snapshots/resume-and-fork.md` | Нет | ✗ | S18 (лучше boat) |
-| SN10 | Что сохраняется: `/home`, изменения системных каталогов, Docker-тома и образы | `docs:snapshots/whats-saved.md` | Блочный снимок всего диска | ✅ | Лучше boat |
-| SN11 | `.boatignore` | `docs:snapshots/whats-saved.md` | Неприменимо: блочные снимки | ⊘ | — |
-| SN12 | Письма при диске 85% и 95%, авто-чистка кэшей | `docs:troubleshooting.md` | S3 §13 `Metrics` даёт заполнение дисков; `disk.low` (S3 §10) — только для retention логов агента | ✗ | Уведомления — S20, метрики — S19 |
-| SN13 | Снимок памяти, гибернация (у boat нет) | `vr:battleships/research/cards/boat.json` | Нет | ✗ | S30, P3 |
+| SN1 | An auto-snapshot every minute and at stop, incremental | `docs:snapshots.md` | S6 §5.5: `kind auto` is reserved | ✗ | S18, P2 (protection from disk loss, rollback) |
+| SN2 | Stopped ones kept 14 d, an email on day 11, `snapshot_data_expired` | `docs:snapshots/stop.md`, `docs:data-retention.md` | S6 §15.4 `stoppedRetentionDays` (off) | ◐ | S25 |
+| SN3 | A saved snapshot: save, `new --from`, replacement by name, indefinite | `docs:snapshots/templates.md`, `docs:api/reference/snapshots/save-saved-snapshot.md` | S6 §7.8 | ✅ | — |
+| SN4 | Team images: the owner is the org, on deploy by a colleague logins, SSH keys, and secret files are scrubbed | `docs:snapshots/templates.md` | S6 §5.5 `team_id` ✅; no scrubbing (secrets are in tmpfs, but logins in `~` will get in) | ◐ | S23 |
+| SN5 | Share codes `bsh_…` between accounts (256 bits, the hash is stored, a counter, revocation) | `docs:snapshots/templates.md`, `docs:api/reference/snapshots/create-snapshot-share.md` | No | ✗ | S23, P3 (between teams) |
+| SN6 | List, `latest`, a file tree, reading a file or a directory tar from a snapshot without a VM; `snapshot pull` | `docs:snapshots/download-and-delete.md`, `docs:api/reference/snapshots/get-snapshot-tree.md`, `cli:snapshot.pull.txt` | No | ✗ | S18, P2 (useful for a stopped sandbox too) |
+| SN7 | A full snapshot export (signed chunks) | `docs:api/reference/snapshots/get-snapshot-download.md` | No | ✗ | S18, P3 (qcow2/raw export) |
+| SN8 | Deleting one, all auto-snapshots, saved | `docs:data-retention/delete.md` | Saved ✅ (S6 §7.8); no auto | ◐ | S18 |
+| SN9 | Rollback to a point in time (boat has none: only the latest snapshot) | `docs:snapshots/resume-and-fork.md` | No | ✗ | S18 (better than boat) |
+| SN10 | What is saved: `/home`, changes to system directories, Docker volumes and images | `docs:snapshots/whats-saved.md` | A block snapshot of the whole disk | ✅ | Better than boat |
+| SN11 | `.boatignore` | `docs:snapshots/whats-saved.md` | Inapplicable: block snapshots | ⊘ | — |
+| SN12 | Emails at disk 85% and 95%, automatic cache cleanup | `docs:troubleshooting.md` | S3 §13 `Metrics` gives disk fill; `disk.low` (S3 §10) is only for the agent's log retention | ✗ | Notifications — S20, metrics — S19 |
+| SN13 | A memory snapshot, hibernation (boat has none) | `vr:battleships/research/cards/boat.json` | No | ✗ | S30, P3 |
 
-### 2.4 Environments, секреты, репозитории
+### 2.4 Environments, secrets, repositories
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| E1 | Именованные environments, `base`, default, soft delete | `docs:environments.md`, `docs:environments/manage.md` | `research/07` (коллекция Payload «environments и секреты»), S13 «репозитории в environment»; спецификации нет | ◐ | MVP-рек. R3; S14 |
-| E2 | Неизменяемые версии, sandbox закреплена за версией, `upgrade` (горячая доставка, стирание отозванных секретов) | `docs:environments/versions.md` | Примитивы S3 `UpdateEnv`/`UpdateSecrets` | ◐ | S14, P1 |
-| E3 | Переменные и secret-файлы environment; env на sandbox (≤100, 64 KB, зарезервированные имена) | `docs:environments/secrets.md` | S6 §13.1 (env и secretFiles на sandbox, AES-GCM) | ◐ | Уровень environment — S14 |
-| E4 | Переключатели `passGithub`, `passSecrets`, `passSandboxCredentials`, `passAgentsCredentials` | `docs:environments/access.md` | Нет | ✗ | S14 |
-| E5 | `safeForThirdParties` и `--no-env` с вычисткой снапшота (`sandbox_securing`), поле `effective` | `docs:environments/access.md`, `docs:security.md` | Нет | ✗ | S14 (недоверенный код, подрядчики) |
-| E6 | Репозитории: клон в `/home/user/<repo>`, ветка, список установок GitHub App | `docs:environments/repositories.md` | S13 | ◐ | S13 |
-| E7 | Приватные registry: npm, pip, uv, Docker через var + secret-файл | `docs:environments/private-registries.md` | S13 | ◐ | S13 |
-| E8 | Environments организации, ограничение доступа участникам | `docs:environments/manage.md`, `cli:env.access.txt` | Нет | ✗ | S14/S23 |
-| E9 | `credentialProfileId`, `proxyAiCredentials` на environment | `docs:environments/access.md` | Нет | ✗ | S16 |
-| E11 | Переопределение при fork и resume: `env` (заменяет унаследованный), `environment` (перепривязка к версии), `noEnv`, `type`, `ttlSeconds` | `sdk:openapi/boat-v1.yaml` (`ResumeRequest`, тело fork), `cli:fork.txt`, `cli:resume.txt`, `docs:environments/secrets.md` | S6 §7.7: fork принимает `name, labels, ttlSeconds, size`, env наследует; §7.6: resume — `size` и TTL | ◐ | MVP-рек. R11 (env и secretFiles); `environment` — S14 |
-| E10 | Legacy `/secrets`, `/repos` (заменяют всё сразу) | `docs:api/reference/account/update-boat-secrets-setup.md` | — | ⊘ | Наследие boat |
+| E1 | Named environments, `base`, default, soft delete | `docs:environments.md`, `docs:environments/manage.md` | `research/07` (a Payload collection "environments and secrets"), S13 "repositories in an environment"; no specification | ◐ | MVP rec. R3; S14 |
+| E2 | Immutable versions, a sandbox is pinned to a version, `upgrade` (hot delivery, wiping revoked secrets) | `docs:environments/versions.md` | The S3 primitives `UpdateEnv`/`UpdateSecrets` | ◐ | S14, P1 |
+| E3 | Environment variables and secret files; env per sandbox (≤100, 64 KB, reserved names) | `docs:environments/secrets.md` | S6 §13.1 (env and secretFiles per sandbox, AES-GCM) | ◐ | The environment level — S14 |
+| E4 | The switches `passGithub`, `passSecrets`, `passSandboxCredentials`, `passAgentsCredentials` | `docs:environments/access.md` | No | ✗ | S14 |
+| E5 | `safeForThirdParties` and `--no-env` with snapshot scrubbing (`sandbox_securing`), the field `effective` | `docs:environments/access.md`, `docs:security.md` | No | ✗ | S14 (untrusted code, contractors) |
+| E6 | Repositories: a clone into `/home/user/<repo>`, a branch, a list of GitHub App installations | `docs:environments/repositories.md` | S13 | ◐ | S13 |
+| E7 | Private registries: npm, pip, uv, Docker via a var + a secret file | `docs:environments/private-registries.md` | S13 | ◐ | S13 |
+| E8 | Organization environments, restricting access for members | `docs:environments/manage.md`, `cli:env.access.txt` | No | ✗ | S14/S23 |
+| E9 | `credentialProfileId`, `proxyAiCredentials` on an environment | `docs:environments/access.md` | No | ✗ | S16 |
+| E11 | Overrides on fork and resume: `env` (replaces the inherited one), `environment` (rebinding to a version), `noEnv`, `type`, `ttlSeconds` | `sdk:openapi/boat-v1.yaml` (`ResumeRequest`, the fork body), `cli:fork.txt`, `cli:resume.txt`, `docs:environments/secrets.md` | S6 §7.7: fork accepts `name, labels, ttlSeconds, size`, env is inherited; §7.6: resume — `size` and TTL | ◐ | MVP rec. R11 (env and secretFiles); `environment` — S14 |
+| E10 | Legacy `/secrets`, `/repos` (replace everything at once) | `docs:api/reference/account/update-boat-secrets-setup.md` | — | ⊘ | Boat legacy |
 
-### 2.5 Команды, процессы, история
+### 2.5 Commands, processes, history
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| C1 | Sync exec: timeout 1–600 s (30 по умолчанию), до 8 MiB на поток, `timedOut`, `oomKilled` | `docs:long-running-tasks/background-commands.md`, `docs:api/reference/agent/execute-sandbox-command.md` | S3 §9.1 (`timeout_ms`, `reason: TIMEOUT/OOM`); лимиты и форма sync-ответа — S7 | ◐ | S7 |
-| C2 | Stream NDJSON `started/stdout/stderr/exit/error` | там же | S2 §9.1, S3 §9.1 `Run` | ✅ | — |
-| C3 | Detached + статус по offset + attach NDJSON (heartbeat 15 s, `reconnect` через 10 min) | `docs:api/reference/agent/attach-command.md` | S2 §9, S3 §10 | ✅ | — |
-| C4 | Kill: SIGTERM группе, через 5 s SIGKILL | `docs:api/reference/agent/stop-command.md` | S3 §9.5 `Kill(grace_ms)` | ✅ | — |
-| C5 | Env и пользователь на команду (у boat нет) | `vr:harbor-box/sdks/harbor_box_environment.py` | S3 §9.1 `CommandSpec.env`, `user` | ✅ | Лучше boat |
-| C6 | История команд 90 d, чтение вывода по offset при остановленной sandbox | `docs:long-running-tasks/command-history.md`, `docs:api/reference/agent/read-command-logs.md` | S6 §5.8 метаданные 90 d; вывод только в VM (S3 §10, 7 d) | ◐ | S19, P2 (архитектура §12: фаза 2) |
-| C7 | Захват вывода всех процессов (tty, pipe, journal), 64 KiB/s, 72 h | `docs:long-running-tasks/command-history.md` | Нет | ✗ | S19, P3 |
-| C8 | `ps`: топ-12 процессов раз в 30 s, хранится 7 d, доступно у остановленной | `docs:api/reference/agent/list-sandbox-processes.md`, `cli:ps.txt` | S3 §13 `Metrics` (только число процессов) | ◐ | S19 |
-| C9 | Процессы переживают рестарт агента, статус `lost`, `409 agent_outdated` | `docs:long-running-tasks/background-commands.md` | S3 §9.3 shim, вывод сохраняется | ✅ | Лучше boat |
-| C10 | Лимит вывода 10 MiB/ч на аккаунт | `docs:limits.md` | S3 §10 retention по объёму | ✅ | Механизм другой |
-| C11 | Веб-терминал (PTY) в API (у boat только SSH) | — | S3 §9.4, архитектура §2 (xterm.js в дашборде) | ✅ | Лучше boat |
+| C1 | Sync exec: timeout 1–600 s (30 by default), up to 8 MiB per stream, `timedOut`, `oomKilled` | `docs:long-running-tasks/background-commands.md`, `docs:api/reference/agent/execute-sandbox-command.md` | S3 §9.1 (`timeout_ms`, `reason: TIMEOUT/OOM`); the limits and the form of the sync response — S7 | ◐ | S7 |
+| C2 | Stream NDJSON `started/stdout/stderr/exit/error` | the same | S2 §9.1, S3 §9.1 `Run` | ✅ | — |
+| C3 | Detached + status by offset + attach NDJSON (heartbeat 15 s, `reconnect` after 10 min) | `docs:api/reference/agent/attach-command.md` | S2 §9, S3 §10 | ✅ | — |
+| C4 | Kill: SIGTERM to the group, SIGKILL after 5 s | `docs:api/reference/agent/stop-command.md` | S3 §9.5 `Kill(grace_ms)` | ✅ | — |
+| C5 | Env and user per command (boat has none) | `vr:harbor-box/sdks/harbor_box_environment.py` | S3 §9.1 `CommandSpec.env`, `user` | ✅ | Better than boat |
+| C6 | Command history 90 d, reading output by offset while the sandbox is stopped | `docs:long-running-tasks/command-history.md`, `docs:api/reference/agent/read-command-logs.md` | S6 §5.8 metadata 90 d; output only in the VM (S3 §10, 7 d) | ◐ | S19, P2 (architecture §12: phase 2) |
+| C7 | Capturing the output of all processes (tty, pipe, journal), 64 KiB/s, 72 h | `docs:long-running-tasks/command-history.md` | No | ✗ | S19, P3 |
+| C8 | `ps`: the top 12 processes every 30 s, kept 7 d, available while stopped | `docs:api/reference/agent/list-sandbox-processes.md`, `cli:ps.txt` | S3 §13 `Metrics` (only the process count) | ◐ | S19 |
+| C9 | Processes survive an agent restart, status `lost`, `409 agent_outdated` | `docs:long-running-tasks/background-commands.md` | S3 §9.3 shim, output is kept | ✅ | Better than boat |
+| C10 | An output limit of 10 MiB/h per account | `docs:limits.md` | S3 §10 retention by volume | ✅ | A different mechanism |
+| C11 | A web terminal (PTY) in the API (boat has SSH only) | — | S3 §9.4, architecture §2 (xterm.js in the dashboard) | ✅ | Better than boat |
 
-### 2.6 Файлы
+### 2.6 Files
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| F1 | Read/write JSON до 5 MiB, utf8/base64 | `docs:api/reference/agent/read-sandbox-file.md` | S3 §11.2 потоковые `/files` любого размера, `Range`, докачка | ✅ | Лучше boat |
+| F1 | Read/write JSON up to 5 MiB, utf8/base64 | `docs:api/reference/agent/read-sandbox-file.md` | S3 §11.2 streamed `/files` of any size, `Range`, resumption | ✅ | Better than boat |
 | F2 | delete, list, info, mkdir, move, chmod | `docs:api/reference/agent/*-sandbox-file*.md` | S3 §11.4 | ✅ | — |
-| F3 | Поиск по glob, grep, замена по нескольким файлам | `docs:api/reference/agent/search-sandbox-files.md`, `find-in-sandbox-files.md`, `replace-in-sandbox-files.md` | Нет (делается через exec) | ✗ | S22, P3 |
-| F4 | Подписанные URL загрузки и скачивания (отдаёт сама sandbox, без авторизации, 15 min–1 h) | `docs:ssh-access.md`, `docs:api/reference/agent/create-upload-url.md` | Нет | ✗ | S22, P2 (браузер, сторонние системы) |
-| F5 | Artifacts: сырые байты до 50 MiB | `docs:api/reference/agent/download-sandbox-artifact.md` | S3 `/files` | ✅ | — |
-| F6 | Пути только под `/home/user` и `/tmp` | `docs:ssh-access.md` | S3 §11.1: любые абсолютные пути | ✅ | Лучше boat (evals) |
-| F7 | Загрузка и выгрузка каталога одним tar (у boat только в CLI `push`/`pull`) | `cli:push.txt`, `vr:harbor-box/README.md` | S3 §11.4: «позже» | ✗ | MVP-рек. R7 |
-| F8 | Наблюдение за каталогом | — | S3 §11.4: «позже» | ✗ | S22, P3 |
+| F3 | Search by glob, grep, replacement across several files | `docs:api/reference/agent/search-sandbox-files.md`, `find-in-sandbox-files.md`, `replace-in-sandbox-files.md` | No (done via exec) | ✗ | S22, P3 |
+| F4 | Signed upload and download URLs (served by the sandbox itself, without authorization, 15 min–1 h) | `docs:ssh-access.md`, `docs:api/reference/agent/create-upload-url.md` | No | ✗ | S22, P2 (browser, third-party systems) |
+| F5 | Artifacts: raw bytes up to 50 MiB | `docs:api/reference/agent/download-sandbox-artifact.md` | S3 `/files` | ✅ | — |
+| F6 | Paths only under `/home/user` and `/tmp` | `docs:ssh-access.md` | S3 §11.1: any absolute paths | ✅ | Better than boat (evals) |
+| F7 | Uploading and downloading a directory as one tar (boat only in the CLI `push`/`pull`) | `cli:push.txt`, `vr:harbor-box/README.md` | S3 §11.4: "later" | ✗ | MVP rec. R7 |
+| F8 | Directory watching | — | S3 §11.4: "later" | ✗ | S22, P3 |
 
-### 2.7 Публичные URL, порты, сеть
+### 2.7 Public URLs, ports, network
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| N1 | `host <port>` → `https://<sub>-<port>.on.boat.dev`, токен по умолчанию, `public`, идемпотентно, до 50 портов | `docs:hosting.md`, `docs:api/reference/agent/expose-a-port.md` | S4 §8, S6 §5.8 (`token`/`sso`/`public`) | ✅ | Режим `sso` лучше boat |
-| N2 | `--localhost` relay для сервисов на 127.0.0.1/::1 | `docs:hosting/how-it-works.md` | S3 §12: CONNECT сам перебирает loopback и адреса | ✅ | Без флага |
-| N3 | `host` внутри VM: `host url` ждёт маршрут, `list`, `hide`; токен `ASCII_TOKEN` только на свои порты | `docs:hosting/host-cli.md` | Нет | ✗ | S22 (in-VM CLI) + S24 (токен sandbox), P1 |
-| N4 | `?_token=` → redirect + cookie; `Cookie: _port_auth` для API-клиентов | `docs:hosting.md` | S4 §8.2–8.3 | ✅ | — |
-| N5 | Ротация токена порта (у boat только через public→private) | `docs:hosting.md` | S6 §14.1 `rotatePortToken` | ✅ | Лучше boat |
-| N6 | URL переживает stop/resume | `docs:hosting.md` | S6 §5.8 `hosted_ports` | ✅ | — |
-| N7 | Свои домены (у boat тоже нет) | `docs:hosting.md` | S4 §17 «позже» | ✗ | S17, P3 |
-| N8 | Сырые TCP/UDP-порты через публичный IP и `ufw` | `docs:hosting/firewall.md` | Нет публичных IP (решение 5 в `research/07`) | ✗ | S17: TCP через gateway, P3 |
-| N9 | Firewall внутри VM; блокировка туннеля → `degraded` + webhook | `docs:hosting/firewall.md` | Туннель исходящий (S2), health S6 §11 | ◐ | Webhook — S20 |
-| N10 | Egress allowlist, сетевые политики (у boat нет, API нет) | `docs:faq.md`, `vr:battleships` | S1 §4.4: статичный запрет LAN; политики на sandbox нет | ◐ | S17 (лучше boat), P2 |
-| N11 | Статический egress IP, приватная сеть между sandbox (у boat нет) | `vr:battleships/research/cards/boat.json` | Нет | ✗ | S17, P3 |
-| N12 | Подсказка Vite `allowedHosts` | `docs:hosting/how-it-works.md` | S4 §7.5 | ✅ | — |
-| N13 | Публичный IPv6 у каждой sandbox | `docs:machines.md` | Решение 5: публичных IP нет | ⊘ | Сознательно |
+| N1 | `host <port>` → `https://<sub>-<port>.on.boat.dev`, a token by default, `public`, idempotent, up to 50 ports | `docs:hosting.md`, `docs:api/reference/agent/expose-a-port.md` | S4 §8, S6 §5.8 (`token`/`sso`/`public`) | ✅ | The `sso` mode is better than boat |
+| N2 | The `--localhost` relay for services on 127.0.0.1/::1 | `docs:hosting/how-it-works.md` | S3 §12: CONNECT itself tries loopback and addresses | ✅ | Without a flag |
+| N3 | `host` inside the VM: `host url` waits for a route, `list`, `hide`; the token `ASCII_TOKEN` only for own ports | `docs:hosting/host-cli.md` | No | ✗ | S22 (in-VM CLI) + S24 (sandbox token), P1 |
+| N4 | `?_token=` → redirect + cookie; `Cookie: _port_auth` for API clients | `docs:hosting.md` | S4 §8.2–8.3 | ✅ | — |
+| N5 | Port token rotation (in boat only via public→private) | `docs:hosting.md` | S6 §14.1 `rotatePortToken` | ✅ | Better than boat |
+| N6 | The URL survives stop/resume | `docs:hosting.md` | S6 §5.8 `hosted_ports` | ✅ | — |
+| N7 | Custom domains (boat has none either) | `docs:hosting.md` | S4 §17 "later" | ✗ | S17, P3 |
+| N8 | Raw TCP/UDP ports through a public IP and `ufw` | `docs:hosting/firewall.md` | No public IPs (decision 5 in `research/07`) | ✗ | S17: TCP through the gateway, P3 |
+| N9 | A firewall inside the VM; blocking the tunnel → `degraded` + webhook | `docs:hosting/firewall.md` | The tunnel is outbound (S2), health S6 §11 | ◐ | Webhook — S20 |
+| N10 | An egress allowlist, network policies (boat has none, no API) | `docs:faq.md`, `vr:battleships` | S1 §4.4: a static LAN ban; there are no per-sandbox policies | ◐ | S17 (better than boat), P2 |
+| N11 | A static egress IP, a private network between sandboxes (boat has none) | `vr:battleships/research/cards/boat.json` | No | ✗ | S17, P3 |
+| N12 | The Vite `allowedHosts` hint | `docs:hosting/how-it-works.md` | S4 §7.5 | ✅ | — |
+| N13 | A public IPv6 for each sandbox | `docs:machines.md` | Decision 5: no public IPs | ⊘ | Deliberate |
 
-### 2.8 SSH, редакторы, копирование
+### 2.8 SSH, editors, copying
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| SH1 | `ssh` с ключом от CLI, host key через API без TOFU; host key меняется на каждом resume | `docs:ssh-access.md`, `docs:api/reference/agent/configure-sandbox-ssh-key.md` | S4 §9: SSH gateway, постоянный host key gateway, ключи пользователя из S8 | ✅ | Лучше boat |
-| SH2 | `POST /sshkey` добавляет ключ в `authorized_keys` | там же | Ключи в профиле пользователя (S8), сертификаты CA (S4) | ✅ | Механизм другой |
-| SH3 | `forward` локальный и обратный, переподключение | `cli:forward.txt` | S4 §9.4 (`-L`, `-R`) | ◐ | Обёртка CLI — S22 |
-| SH4 | `scp` (tar-over-SSH), `push` (git-aware) | `cli:scp.txt`, `cli:push.txt` | S4 SSH (scp/sftp работают) | ◐ | S22 |
-| SH5 | VS Code / Cursor: скрипт пишет `~/.ssh/boat/<id>.conf` | `docs:ssh-access/editors.md` | Работает через S4 | ◐ | `umiak ssh-config` — S22 |
-| SH6 | Обратный туннель к локальному MCP или Ollama | `docs:integrated-agents/customize.md` | S4 §9.4 `-R` | ✅ | — |
+| SH1 | `ssh` with a key from the CLI, the host key via the API without TOFU; the host key changes on every resume | `docs:ssh-access.md`, `docs:api/reference/agent/configure-sandbox-ssh-key.md` | S4 §9: the SSH gateway, a permanent gateway host key, user keys from S8 | ✅ | Better than boat |
+| SH2 | `POST /sshkey` adds a key to `authorized_keys` | the same | Keys in the user profile (S8), CA certificates (S4) | ✅ | A different mechanism |
+| SH3 | `forward` local and reverse, reconnecting | `cli:forward.txt` | S4 §9.4 (`-L`, `-R`) | ◐ | A CLI wrapper — S22 |
+| SH4 | `scp` (tar-over-SSH), `push` (git-aware) | `cli:scp.txt`, `cli:push.txt` | S4 SSH (scp/sftp work) | ◐ | S22 |
+| SH5 | VS Code / Cursor: a script writes `~/.ssh/boat/<id>.conf` | `docs:ssh-access/editors.md` | Works through S4 | ◐ | `umiak ssh-config` — S22 |
+| SH6 | A reverse tunnel to a local MCP or Ollama | `docs:integrated-agents/customize.md` | S4 §9.4 `-R` | ✅ | — |
 
-### 2.9 Рабочий стол, браузер, запись, computer use
+### 2.9 Desktop, browser, recording, computer use
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| D1 | Moonlight WebRTC 1080p60, URL с токеном во fragment, открыть за 10 min, iframe, `overlay=0`, `theme` | `docs:desktop-streaming.md`, `docs:desktop-streaming/urls-and-security.md` | S10; архитектура §8 (URL с коротким токеном, iframe) | ✅* | Токен во fragment и окно 10 min — взять в S10 |
-| D2 | noVNC (`vnc=1`, `publicAccess`) | `docs:api/reference/agent/get-desktop-streaming-url.md` | Нет | ✗ | S29, P3 (запасной путь без WebRTC) |
-| D3 | Только браузер: Chrome без рамки, профили Chrome | `docs:desktop-streaming/browser-only.md`, `cli:browser.txt` | Нет | ✗ | S29, P2 |
-| D4 | Запись рабочего стола в mp4 | `docs:desktop-streaming/drive-and-record.md` | Нет | ✗ | S29, P2 (демо, разбор работы агента) |
-| D5 | MCP `computer` (cua-driver) зарегистрирован во всех harness | `docs:integrated-agents/computer-use.md` | S10 cua-driver; регистрация в harness нет | ◐ | S15 |
-| D6 | Computer-use через HTTP API (у boat только через harness) | — | S10 §13 (MVP) | ✓ | — |
-| D7 | Обои, буфер обмена | `docs:desktop-streaming/background.md` | S10 (буфер — по возможностям moonlight-web) | ◐ | S29, P3 |
-| D8 | `lux` (автоматизация рабочего стола с записью демо) | `vr:cloud-sandbox-vm-skills/skills/computer-use-browser-desktop/SKILL.md` | — | ⊘ | Проприетарный инструмент; наш путь — S15 + cua |
-| D9 | Anti-bot Chromium (обход CAPTCHA и детекта) | `vr:battleships/research/cards/boat.json` | — | ⊘ | Не нужно внутренней платформе |
-| D10 | Рабочий стол Windows (у boat нет) | — | S9, S10 | ✅* | Лучше boat |
+| D1 | Moonlight WebRTC 1080p60, a URL with the token in the fragment, open within 10 min, iframe, `overlay=0`, `theme` | `docs:desktop-streaming.md`, `docs:desktop-streaming/urls-and-security.md` | S10; architecture §8 (a URL with a short token, iframe) | ✅* | The token in the fragment and the 10 min window — take into S10 |
+| D2 | noVNC (`vnc=1`, `publicAccess`) | `docs:api/reference/agent/get-desktop-streaming-url.md` | No | ✗ | S29, P3 (a fallback without WebRTC) |
+| D3 | Browser only: Chrome without a frame, Chrome profiles | `docs:desktop-streaming/browser-only.md`, `cli:browser.txt` | No | ✗ | S29, P2 |
+| D4 | Recording the desktop to mp4 | `docs:desktop-streaming/drive-and-record.md` | No | ✗ | S29, P2 (demos, reviewing an agent's work) |
+| D5 | The MCP `computer` (cua-driver) registered in all harnesses | `docs:integrated-agents/computer-use.md` | S10 cua-driver; registration in harnesses is absent | ◐ | S15 |
+| D6 | Computer-use via the HTTP API (boat only through a harness) | — | S10 §13 (MVP) | ✓ | — |
+| D7 | Wallpapers, clipboard | `docs:desktop-streaming/background.md` | S10 (clipboard — per moonlight-web's capabilities) | ◐ | S29, P3 |
+| D8 | `lux` (desktop automation with demo recording) | `vr:cloud-sandbox-vm-skills/skills/computer-use-browser-desktop/SKILL.md` | — | ⊘ | A proprietary tool; our way is S15 + cua |
+| D9 | An anti-bot Chromium (bypassing CAPTCHA and detection) | `vr:battleships/research/cards/boat.json` | — | ⊘ | Not needed by an internal platform |
+| D10 | A Windows desktop (boat has none) | — | S9, S10 | ✅* | Better than boat |
 
-### 2.10 Windows-приложения
+### 2.10 Windows applications
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| W1 | Wine staging, winetricks, рецепты установщиков, 25 проверенных приложений | `docs:windows-apps.md`, `docs:windows-apps/*` | Настоящие Windows-гости (S9) | ⊘ | Не нужно: есть шаблон `windows` |
-| W2 | Агент ставит приложения, saved snapshot, fork | `docs:windows-apps/agents-and-forks.md` | S9 + saved snapshot (S6) | ✅* | Skill `windows-sandbox` — S21 |
+| W1 | Wine staging, winetricks, installer recipes, 25 verified applications | `docs:windows-apps.md`, `docs:windows-apps/*` | Real Windows guests (S9) | ⊘ | Not needed: there is a `windows` template |
+| W2 | An agent installs applications, saved snapshot, fork | `docs:windows-apps/agents-and-forks.md` | S9 + saved snapshot (S6) | ✅* | The skill `windows-sandbox` — S21 |
 
-### 2.11 Встроенные coding-агенты
+### 2.11 Built-in coding agents
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| A1 | 7 harness: Claude Code, Codex, pi, OpenCode, Prime, Kimi, Mistral Vibe; обычные бинарники на PATH | `docs:integrated-agents/harnesses-and-models.md` | Архитектура §1: не входит в фазу 1 | ✗ | S15, P1 |
-| A2 | `POST /prompt`: `provider`, `model`, `reasoningEffort`, `fast`, `new`/`conversationId`, вложения в `~/attachments` (до 12 файлов, 25 MB каждый, 64 MB всего) | `docs:api/reference/agent/prompt-sandbox-agent.md`, `docs:limits.md` | — | ✗ | S15 |
-| A3 | Статус prompt run: `queued → running → finished/interrupted/failed` | `docs:integrated-agents/conversations.md` | — | ✗ | S15 |
-| A4 | События: cursor-poll, ETag/304, типы `prompt`, `response` (`is_streaming`, `tools`), `steer`, `usage_limit`, `compaction_complete` | `docs:api/reference/agent/list-sandbox-events.md`, `sdk:openapi/boat-v1.yaml` (последние два типа) | — | ✗ | S15 (лучше: стрим и настоящие дельты) |
-| A5 | Параллельные conversations, «текущая» на shell, лимит от RAM, очередь, переживают stop и fork | `docs:integrated-agents/conversations.md` | — | ✗ | S15 |
-| A6 | Steer с гарантией доставки: `native`, `native-continued`, `fallback`, `late`; `409 no_running_turn` | `docs:integrated-agents/steering.md` | — | ✗ | S15 |
-| A7 | Interrupt одной или всех conversations | `docs:api/reference/agent/interrupt-running-agent-work.md` | — | ✗ | S15 |
-| A8 | Смена harness посреди разговора (замороженный транскрипт) | `docs:integrated-agents/conversations.md` | — | ✗ | S15, P3 |
-| A9 | Каталог моделей `GET /provider-models` (уровни reasoning, `fastMode`) | `docs:integrated-agents/harnesses-and-models.md` | — | ✗ | S15 |
-| A10 | Настройка: файлы правил, MCP, skills, hooks по каждому harness | `docs:integrated-agents/customize.md` | — | ✗ | S15 + S14 (запечь через environment) |
-| A11 | Короткий системный prompt и skill `boat` в sandbox | `docs:integrated-agents.md`, `docs:ai-tools.md` | — | ✗ | S15/S21 |
-| A12 | Подписки (Claude Pro/Max, ChatGPT, Kimi, Mistral, Grok) с обновлением токена на сервере | `docs:integrated-agents/keys.md` | — | ✗ | S16 |
+| A1 | 7 harnesses: Claude Code, Codex, pi, OpenCode, Prime, Kimi, Mistral Vibe; regular binaries on PATH | `docs:integrated-agents/harnesses-and-models.md` | Architecture §1: not in phase 1 | ✗ | S15, P1 |
+| A2 | `POST /prompt`: `provider`, `model`, `reasoningEffort`, `fast`, `new`/`conversationId`, attachments in `~/attachments` (up to 12 files, 25 MB each, 64 MB total) | `docs:api/reference/agent/prompt-sandbox-agent.md`, `docs:limits.md` | — | ✗ | S15 |
+| A3 | Prompt run status: `queued → running → finished/interrupted/failed` | `docs:integrated-agents/conversations.md` | — | ✗ | S15 |
+| A4 | Events: cursor poll, ETag/304, types `prompt`, `response` (`is_streaming`, `tools`), `steer`, `usage_limit`, `compaction_complete` | `docs:api/reference/agent/list-sandbox-events.md`, `sdk:openapi/boat-v1.yaml` (the last two types) | — | ✗ | S15 (better: a stream and real deltas) |
+| A5 | Parallel conversations, a "current" one per shell, a RAM-based limit, a queue, they survive stop and fork | `docs:integrated-agents/conversations.md` | — | ✗ | S15 |
+| A6 | Steer with a delivery guarantee: `native`, `native-continued`, `fallback`, `late`; `409 no_running_turn` | `docs:integrated-agents/steering.md` | — | ✗ | S15 |
+| A7 | Interrupt one or all conversations | `docs:api/reference/agent/interrupt-running-agent-work.md` | — | ✗ | S15 |
+| A8 | Switching the harness mid-conversation (a frozen transcript) | `docs:integrated-agents/conversations.md` | — | ✗ | S15, P3 |
+| A9 | A model catalog `GET /provider-models` (reasoning levels, `fastMode`) | `docs:integrated-agents/harnesses-and-models.md` | — | ✗ | S15 |
+| A10 | Configuration: rule files, MCP, skills, hooks for each harness | `docs:integrated-agents/customize.md` | — | ✗ | S15 + S14 (bake in via an environment) |
+| A11 | A short system prompt and the `boat` skill in the sandbox | `docs:integrated-agents.md`, `docs:ai-tools.md` | — | ✗ | S15/S21 |
+| A12 | Subscriptions (Claude Pro/Max, ChatGPT, Kimi, Mistral, Grok) with server-side token refresh | `docs:integrated-agents/keys.md` | — | ✗ | S16 |
 
-### 2.12 AI credentials и прокси
+### 2.12 AI credentials and proxy
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| AI1 | Профили credentials: именованные, default, `copyFrom`, профиль organization, `access` | `docs:ai-credentials.md`, `docs:api/reference/ai-credentials/*` | Архитектура §1: не входит в фазу 1 | ✗ | S16, P1 |
-| AI2 | Ключи провайдеров (Anthropic, OpenAI, OpenRouter, DeepSeek, Moonshot, Mistral, xAI, …), Bedrock | `docs:integrated-agents/keys.md` | — | ✗ | S16 |
-| AI3 | Несколько аккаунтов на credential, переключение на лету | `docs:api/reference/ai-credentials/switch-credential-account.md` | — | ✗ | S16, P3 |
-| AI4 | Custom API: любой HTTPS-секрет, в sandbox `NAME` и `NAME_BASE_URL` (плейсхолдер при прокси) | `docs:api/reference/ai-credentials/set-custom-api.md` | — | ✗ | S16 (внутренние API компании) |
-| AI5 | Прокси: плейсхолдеры на каждый старт, ключ только в заголовок, привязка к хосту провайдера, refresh на сервере | `docs:ai-credentials.md` | — | ✗ | S16 |
-| AI6 | Учёт: запросы, ошибки, токены по дню, credential, модели, sandbox | `docs:api/reference/ai-credentials/get-ai-usage.md` | — | ✗ | S16 |
-| AI7 | Блокировка AI-доступа sandbox | `docs:api/reference/ai-credentials/block-or-unblock-sandbox-ai-access.md` | — | ✗ | S16 |
-| AI8 | Организация может обязать прокси («никаких настоящих ключей») | `docs:ai-credentials.md` | — | ✗ | S16 |
-| AI9 | Лимит трат «сделай сам» (опрос usage + block) | `docs:ai-credentials.md` | — | ✗ | S16: встроенный бюджет (лучше boat) |
-| AI10 | Цена прокси $1/день + $1/1000 запросов | `docs:ai-credentials.md` | — | ⊘ | Коммерция |
+| AI1 | Credential profiles: named, default, `copyFrom`, an organization profile, `access` | `docs:ai-credentials.md`, `docs:api/reference/ai-credentials/*` | Architecture §1: not in phase 1 | ✗ | S16, P1 |
+| AI2 | Provider keys (Anthropic, OpenAI, OpenRouter, DeepSeek, Moonshot, Mistral, xAI, …), Bedrock | `docs:integrated-agents/keys.md` | — | ✗ | S16 |
+| AI3 | Several accounts per credential, switching on the fly | `docs:api/reference/ai-credentials/switch-credential-account.md` | — | ✗ | S16, P3 |
+| AI4 | Custom API: any HTTPS secret, in the sandbox `NAME` and `NAME_BASE_URL` (a placeholder when proxied) | `docs:api/reference/ai-credentials/set-custom-api.md` | — | ✗ | S16 (the company's internal APIs) |
+| AI5 | Proxy: placeholders on every start, the key goes only into a header, binding to the provider's host, server-side refresh | `docs:ai-credentials.md` | — | ✗ | S16 |
+| AI6 | Accounting: requests, errors, tokens by day, credential, models, sandbox | `docs:api/reference/ai-credentials/get-ai-usage.md` | — | ✗ | S16 |
+| AI7 | Blocking a sandbox's AI access | `docs:api/reference/ai-credentials/block-or-unblock-sandbox-ai-access.md` | — | ✗ | S16 |
+| AI8 | An organization may mandate the proxy ("no real keys") | `docs:ai-credentials.md` | — | ✗ | S16 |
+| AI9 | A "do it yourself" spend limit (poll usage + block) | `docs:ai-credentials.md` | — | ✗ | S16: a built-in budget (better than boat) |
+| AI10 | Proxy price $1/day + $1/1000 requests | `docs:ai-credentials.md` | — | ⊘ | Commerce |
 
-### 2.13 Организации и совместный доступ
+### 2.13 Organizations and shared access
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| O1 | Org: создать, пригласить, роли owner/admin/member, transfer, delete | `docs:organizations.md`, `cli:org.*.txt` | S8: команды и роли из групп IdP | ◐ | Приглашения не нужны: участников даёт IdP |
-| O2 | Активная org, `--org`, заголовок `X-Boat-Org` | `docs:organizations/active-wallet.md` | S8 (пользователь в нескольких командах) | ◐ | S23 |
-| O3 | Shared/private sandbox, доступ `owner/use/view`, авто-private при логинах создателя | `docs:organizations/shared-sandboxes.md` | Нет | ✗ | S23, P2 |
-| O4 | `share`/`unshare` с необратимой вычисткой логинов | `docs:api/reference/sandboxes/share-sandbox.md` | Нет | ✗ | S23 |
-| O5 | Видимость по умолчанию для новых sandbox | `docs:api/reference/account/update-organization.md` | Нет | ✗ | S23 |
-| O6 | Лимиты на участника (конкурентность, время) | `docs:organizations/seats-and-limits.md` | S6 §8.5 квоты на команду | ◐ | S23 (на пользователя) |
-| O7 | Места (seats), перенос личного плана в org (`org migrate`), `org status` (активный кошелёк) | `docs:organizations/move-personal-plan.md`, `cli:org.migrate.txt`, `cli:org.status.txt` | — | ⊘ | Коммерция |
+| O1 | Org: create, invite, roles owner/admin/member, transfer, delete | `docs:organizations.md`, `cli:org.*.txt` | S8: teams and roles from IdP groups | ◐ | Invitations are not needed: members come from the IdP |
+| O2 | The active org, `--org`, the header `X-Boat-Org` | `docs:organizations/active-wallet.md` | S8 (a user in several teams) | ◐ | S23 |
+| O3 | Shared/private sandbox, access `owner/use/view`, auto-private on the creator's logins | `docs:organizations/shared-sandboxes.md` | No | ✗ | S23, P2 |
+| O4 | `share`/`unshare` with irreversible scrubbing of logins | `docs:api/reference/sandboxes/share-sandbox.md` | No | ✗ | S23 |
+| O5 | Default visibility for new sandboxes | `docs:api/reference/account/update-organization.md` | No | ✗ | S23 |
+| O6 | Per-member limits (concurrency, time) | `docs:organizations/seats-and-limits.md` | S6 §8.5 per-team quotas | ◐ | S23 (per user) |
+| O7 | Seats, moving a personal plan into an org (`org migrate`), `org status` (the active wallet) | `docs:organizations/move-personal-plan.md`, `cli:org.migrate.txt`, `cli:org.status.txt` | — | ⊘ | Commerce |
 
-### 2.14 API-ключи и вход
+### 2.14 API keys and login
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| K1 | Bearer-ключ с префиксом | `docs:api-keys.md` | S8, архитектура §10–11 | ✅* | — |
-| K2 | Действия (`sandbox.create/read/update/stop/resume/fork/delete/delete-own`, `exec`, `file.read/write`, `ssh`, `desktop`, `host`, `agent.prompt`, `snapshot.*`, `environment.*`, `account.*`) и пресеты `read-only`, `full-sandbox`, `ci`, `admin` | `docs:api-keys/scopes.md` | Архитектура §11 «ключи со scope», список не задан | ◐ | MVP-рек. R4 |
-| K3 | Ограничение ключа списком sandbox и environments; ключ на одну sandbox для конечного пользователя | `docs:api-keys/scopes.md`, `docs:security.md` | Нет | ✗ | MVP-рек. R4 (модель), S24 |
-| K4 | Срок жизни: по умолчанию 90 d, максимум 365 d, `never`; дочерний ключ не шире родителя | `docs:api-keys/create-and-list.md` | Не задано | ◐ | MVP-рек. R4 |
-| K5 | Rotate, revoke, usage (запросы за 30 d, созданные ресурсы) | `docs:api-keys/store-rotate-revoke.md`, `cli:api-key.usage.txt` | Revoke — S8 | ◐ | S24 |
-| K6 | Чувствительное только из браузерной сессии (rotate, revoke, ZDR) | `docs:account.md` | Нет | ✗ | S24 |
-| K7 | Ключ sandbox внутри VM (только своя sandbox) + токен только на свои порты | `docs:api-keys/create-and-list.md`, `docs:environments/access.md` | Нет | ✗ | MVP-рек. R4 (тип ключа), S24 |
-| K8 | `login --key-stdin`, браузерный вход, `logout` (отзыв сессии устройства) | `cli:login.txt`, `cli:logout.txt` | S8 `umiak login` | ◐ | `--key-stdin`, `logout` — S22 |
-| K9 | Самостоятельная регистрация агента (`auth.md`, RFC 9728/8414, claim-код человеком), `WWW-Authenticate resource_metadata` | `docs:agent-auth.md` | Нет | ✗ | S24: device flow с подтверждением в SSO, P3 |
-| K10 | Входы GitHub/Google/email/AgentID, связывание, закрытие аккаунта | `docs:account.md` | IdP через oauth2-proxy | ⊘ | Учётками управляет IdP |
+| K1 | A bearer key with a prefix | `docs:api-keys.md` | S8, architecture §10–11 | ✅* | — |
+| K2 | Actions (`sandbox.create/read/update/stop/resume/fork/delete/delete-own`, `exec`, `file.read/write`, `ssh`, `desktop`, `host`, `agent.prompt`, `snapshot.*`, `environment.*`, `account.*`) and the presets `read-only`, `full-sandbox`, `ci`, `admin` | `docs:api-keys/scopes.md` | Architecture §11 "keys with scopes", the list is not set | ◐ | MVP rec. R4 |
+| K3 | Restricting a key to a list of sandboxes and environments; a one-sandbox key for an end user | `docs:api-keys/scopes.md`, `docs:security.md` | No | ✗ | MVP rec. R4 (the model), S24 |
+| K4 | Lifetime: 90 d by default, maximum 365 d, `never`; a child key is no wider than its parent | `docs:api-keys/create-and-list.md` | Not set | ◐ | MVP rec. R4 |
+| K5 | Rotate, revoke, usage (requests over 30 d, created resources) | `docs:api-keys/store-rotate-revoke.md`, `cli:api-key.usage.txt` | Revoke — S8 | ◐ | S24 |
+| K6 | Sensitive operations only from a browser session (rotate, revoke, ZDR) | `docs:account.md` | No | ✗ | S24 |
+| K7 | A sandbox key inside the VM (only its own sandbox) + a token only for its own ports | `docs:api-keys/create-and-list.md`, `docs:environments/access.md` | No | ✗ | MVP rec. R4 (the key type), S24 |
+| K8 | `login --key-stdin`, browser login, `logout` (revoking the device session) | `cli:login.txt`, `cli:logout.txt` | S8 `umiak login` | ◐ | `--key-stdin`, `logout` — S22 |
+| K9 | Agent self-registration (`auth.md`, RFC 9728/8414, a claim code by a human), `WWW-Authenticate resource_metadata` | `docs:agent-auth.md` | No | ✗ | S24: a device flow with SSO confirmation, P3 |
+| K10 | GitHub/Google/email/AgentID logins, linking, closing the account | `docs:account.md` | The IdP through oauth2-proxy | ⊘ | Accounts are managed by the IdP |
 
-### 2.15 События наружу и наблюдаемость
+### 2.15 Outbound events and observability
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| EV1 | Webhooks: 6 событий, HMAC `v1=` над `delivery.timestamp.body`, 8 попыток, outbox в той же транзакции, rotate, журнал доставок, до 10 endpoint на аккаунт | `docs:webhooks.md`, `docs:api/reference/account/create-webhook.md` | S6 §5.6 `sandbox_events` (outbox), webhooks — фаза 2 | ◐ | S20, P2 |
-| EV2 | Экспорт OTLP: метрики sandbox (CPU, RAM, диск, PSI) раз в 60 s и события жизненного цикла как логи; тест при сохранении, защита от SSRF | `docs:opentelemetry.md` | S12 — свои метрики платформы, экспорта на команду нет | ✗ | S20 |
-| EV3 | Usage по sandbox: секунды с весом размера, `include=cost` | `docs:api/reference/sandboxes/get-sandbox-usage.md` | Нет | ✗ | S20 (showback без денег) |
-| EV4 | Письма: диск, отказ stop, истечение хранения | `docs:troubleshooting.md` | Нет | ✗ | S20 (email/Slack) |
-| EV5 | Журнал аудита (у boat нет) | `vr:battleships/research/cards/boat.json` | S6 `sandbox_events` 90 d | ◐ | S20 (лучше boat) |
-| EV6 | `GET /limits`: остаток стартов, квоты, допустимые размеры с причиной | `docs:api/reference/account/get-boat-limits.md` | S6 §8.5 квоты | ◐ | MVP-рек. R9 |
-| EV7 | Заголовки `RateLimit-Policy`, `RateLimit`; лимит стартов в минуту/час/день | `docs:limits.md` | S4 §11 лимиты gateway | ◐ | S7/S12, P3 |
-| EV8 | Страница статуса, измеренный uptime 99.95% (не SLA) | `docs:compliance.md` | — | ⊘ | Операционка S12 |
+| EV1 | Webhooks: 6 events, HMAC `v1=` over `delivery.timestamp.body`, 8 attempts, an outbox in the same transaction, rotate, a delivery log, up to 10 endpoints per account | `docs:webhooks.md`, `docs:api/reference/account/create-webhook.md` | S6 §5.6 `sandbox_events` (outbox), webhooks — phase 2 | ◐ | S20, P2 |
+| EV2 | OTLP export: sandbox metrics (CPU, RAM, disk, PSI) every 60 s and lifecycle events as logs; a test on save, SSRF protection | `docs:opentelemetry.md` | S12 — the platform's own metrics, no per-team export | ✗ | S20 |
+| EV3 | Usage per sandbox: seconds weighted by size, `include=cost` | `docs:api/reference/sandboxes/get-sandbox-usage.md` | No | ✗ | S20 (showback without money) |
+| EV4 | Emails: disk, stop failure, retention expiry | `docs:troubleshooting.md` | No | ✗ | S20 (email/Slack) |
+| EV5 | An audit log (boat has none) | `vr:battleships/research/cards/boat.json` | S6 `sandbox_events` 90 d | ◐ | S20 (better than boat) |
+| EV6 | `GET /limits`: remaining starts, quotas, allowed sizes with a reason | `docs:api/reference/account/get-boat-limits.md` | S6 §8.5 quotas | ◐ | MVP rec. R9 |
+| EV7 | The headers `RateLimit-Policy`, `RateLimit`; a limit of starts per minute/hour/day | `docs:limits.md` | S4 §11 gateway limits | ◐ | S7/S12, P3 |
+| EV8 | A status page, measured uptime 99.95% (not an SLA) | `docs:compliance.md` | — | ⊘ | S12 operations |
 
-### 2.16 Хранение данных и удаление
+### 2.16 Data retention and deletion
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| DR1 | Сроки: остановленные 14 d, история 90 d / 72 h, закрытый аккаунт 30 d | `docs:data-retention.md` | S6 §15.4 (commands 90 d, events 90 d, надгробия 30 d) | ◐ | S25 |
-| DR2 | ZDR: удаление данных при каждом stop, только из браузера, фраза-подтверждение | `docs:data-retention/zero-data-retention.md` | Нет | ✗ | S25, P3 |
-| DR3 | `snapshots:false` (stop = удаление), `monitoring:false` | `docs:data-retention/snapshots-and-monitoring-off.md` | Нет | ✗ | S25 (эфемерные sandbox для CI и evals — P2) |
-| DR4 | Заголовок `X-Ascii-Confirm-Delete: <id>` на удалениях | `docs:data-retention/delete.md` | Нет | ✗ | MVP-рек. R1 |
-| DR5 | Закрытие аккаунта, GDPR | `docs:data-retention/close-account.md` | — | ⊘ | Увольнение — через IdP и S8 |
+| DR1 | Periods: stopped 14 d, history 90 d / 72 h, a closed account 30 d | `docs:data-retention.md` | S6 §15.4 (commands 90 d, events 90 d, tombstones 30 d) | ◐ | S25 |
+| DR2 | ZDR: deleting data on every stop, only from the browser, a confirmation phrase | `docs:data-retention/zero-data-retention.md` | No | ✗ | S25, P3 |
+| DR3 | `snapshots:false` (stop = delete), `monitoring:false` | `docs:data-retention/snapshots-and-monitoring-off.md` | No | ✗ | S25 (ephemeral sandboxes for CI and evals — P2) |
+| DR4 | The header `X-Ascii-Confirm-Delete: <id>` on deletes | `docs:data-retention/delete.md` | No | ✗ | MVP rec. R1 |
+| DR5 | Closing an account, GDPR | `docs:data-retention/close-account.md` | — | ⊘ | Offboarding — through the IdP and S8 |
 
 ### 2.17 CI
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| CI1 | GitHub Actions `runs-on: boat`, метки по размеру, `/from=<snapshot>`, `/debug` (30 min после падения), отказ публичных репо, до 6 h, swap 4 GB | `docs:ci.md` | Нет | ✗ | S26, P2/P3 |
-| CI2 | API и CLI: обзор, репозитории, задание, логи `--follow` | `docs:ci.md`, `cli:ci.*.txt` | Нет | ✗ | S26 |
-| CI3 | CLI в любом CI: статический бинарник, `--key-stdin`, `new --json`, `exec --timeout 0`, `run --push` | `docs:ci.md` | CLI — S7 | ◐ | S22 |
-| CI4 | Аннотация «Out of memory» в run | `docs:ci.md` | Нет | ✗ | S26 |
+| CI1 | GitHub Actions `runs-on: boat`, labels by size, `/from=<snapshot>`, `/debug` (30 min after a failure), refusing public repos, up to 6 h, 4 GB swap | `docs:ci.md` | No | ✗ | S26, P2/P3 |
+| CI2 | API and CLI: overview, repositories, a job, logs `--follow` | `docs:ci.md`, `cli:ci.*.txt` | No | ✗ | S26 |
+| CI3 | The CLI in any CI: a static binary, `--key-stdin`, `new --json`, `exec --timeout 0`, `run --push` | `docs:ci.md` | The CLI — S7 | ◐ | S22 |
+| CI4 | The "Out of memory" annotation in a run | `docs:ci.md` | No | ✗ | S26 |
 
-### 2.18 Evals, RL, интеграции
+### 2.18 Evals, RL, integrations
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| I1 | Паттерн evals: snapshot на задачу, идемпотентный create, backoff на 429/503, fork для ветвления | `docs:evals.md` | Примитивы есть (S6) | ◐ | Гайд и skill — S21/S27 |
-| I2 | Harbor-адаптер `BaseEnvironment` (refuse Docker-образов, сетевых политик, GPU) | `docs:integrations/harbor.md`, `vr:harbor-box` | Нет | ✗ | S27, P3 |
-| I3 | Eve-адаптер (`spawn` эмулирован через файлы) | `docs:integrations/eve.md`, `vr:eve-box` | Нет | ✗ | S27, P3 |
-| I4 | Компонент Convex | `vr:boat-convex` | — | ⊘ | Convex в компании не используется (уточнить) |
-| I5 | optibox: потребительский чат с быстрым общим ответом, пока VM стартует | `vr:optibox`, `docs:platform-guide/patterns.md` | — | ⊘ | Потребительский продукт; уроки взяты в S15 |
-| I6 | Гайд «платформа для своих пользователей»: `--no-env`, тег арендатора, демон в VM + `host --private`, оценка числа sandbox | `docs:platform-guide.md`, `docs:platform-guide/*`, `docs:security.md` | — | ✗ | Skill `umiak-platform` — S21 |
-| I7 | battleships: сравнение 366 провайдеров, 78 признаков | `vr:battleships` | — | ⊘ | Источник признаков для §3 |
-| I8 | Агент-сервер в VM: systemd, `CPUWeight/IOWeight/MemoryMin=512M`, `/health`, порт 8911 входящий | `vr:agent-server-release/install.sh` | S3 §17.2 (`CPUWeight/IOWeight` те же, `MemoryMin=64M`), туннель исходящий | ✅ | Резерв памяти — см. L18 |
+| I1 | The evals pattern: a snapshot per task, an idempotent create, backoff on 429/503, fork for branching | `docs:evals.md` | The primitives exist (S6) | ◐ | A guide and a skill — S21/S27 |
+| I2 | A Harbor adapter `BaseEnvironment` (refuses Docker images, network policies, GPU) | `docs:integrations/harbor.md`, `vr:harbor-box` | No | ✗ | S27, P3 |
+| I3 | An Eve adapter (`spawn` emulated via files) | `docs:integrations/eve.md`, `vr:eve-box` | No | ✗ | S27, P3 |
+| I4 | A Convex component | `vr:boat-convex` | — | ⊘ | Convex is not used in the company (to be clarified) |
+| I5 | optibox: a consumer chat with a fast shared answer while the VM starts | `vr:optibox`, `docs:platform-guide/patterns.md` | — | ⊘ | A consumer product; lessons taken into S15 |
+| I6 | The guide "a platform for your own users": `--no-env`, a tenant tag, a daemon in the VM + `host --private`, estimating the number of sandboxes | `docs:platform-guide.md`, `docs:platform-guide/*`, `docs:security.md` | — | ✗ | The skill `umiak-platform` — S21 |
+| I7 | battleships: a comparison of 366 providers, 78 attributes | `vr:battleships` | — | ⊘ | A source of attributes for §3 |
+| I8 | The agent server in the VM: systemd, `CPUWeight/IOWeight/MemoryMin=512M`, `/health`, inbound port 8911 | `vr:agent-server-release/install.sh` | S3 §17.2 (`CPUWeight/IOWeight` the same, `MemoryMin=64M`), the tunnel is outbound | ✅ | Memory reserve — see L18 |
 
 ### 2.19 SDK
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| SDK1 | Генерация TS и Python из OpenAPI | `docs:sdks/overview.md` | S7 (roadmap), архитектура §2 | ✅* | — |
-| SDK2 | 14 хелперов: `waitUntilReady/Idle`, `waitForDesktop`, `waitForPrompt(Done)`, `streamEvents`, `streamPrompt`, `stopAndRemove`, `readText`, `writeText`, `execCommand` (повтор только при `retryable`), `streamCommand`, `followCommand` (без пропусков по offset), `runCommand` | `sdk:python/src/.../boat_helpers.py`, `sdk:typescript/src/package/src/boat-helpers.ts` | Нет | ✗ | S22 (часть — MVP-рек. R1) |
-| SDK3 | HTTP/2 fetch в TS (одна сессия на origin) | `sdk:typescript/src/package/src/http2-fetch.ts` | Нет | ✗ | S22, P3 |
-| SDK4 | Плоские параметры в TS, `AbortSignal` | `sdk:typescript/src/package/src/runtime.ts` | — | ✗ | S7/S22 |
-| SDK5 | Python только синхронный | `docs:sdks/python.md` | — | ✗ | S22: async-клиент (лучше boat) |
-| SDK6 | Хелперы загрузки и выгрузки бинарных файлов (у boat нет) | — | — | ✗ | S22 |
+| SDK1 | TS and Python generation from OpenAPI | `docs:sdks/overview.md` | S7 (roadmap), architecture §2 | ✅* | — |
+| SDK2 | 14 helpers: `waitUntilReady/Idle`, `waitForDesktop`, `waitForPrompt(Done)`, `streamEvents`, `streamPrompt`, `stopAndRemove`, `readText`, `writeText`, `execCommand` (retry only when `retryable`), `streamCommand`, `followCommand` (no gaps by offset), `runCommand` | `sdk:python/src/.../boat_helpers.py`, `sdk:typescript/src/package/src/boat-helpers.ts` | No | ✗ | S22 (part — MVP rec. R1) |
+| SDK3 | HTTP/2 fetch in TS (one session per origin) | `sdk:typescript/src/package/src/http2-fetch.ts` | No | ✗ | S22, P3 |
+| SDK4 | Flat parameters in TS, `AbortSignal` | `sdk:typescript/src/package/src/runtime.ts` | — | ✗ | S7/S22 |
+| SDK5 | Python is synchronous only | `docs:sdks/python.md` | — | ✗ | S22: an async client (better than boat) |
+| SDK6 | Helpers for uploading and downloading binary files (boat has none) | — | — | ✗ | S22 |
 
 ### 2.20 CLI
 
-Все команды boat (`cli:*.txt`). Базовый CLI — S7. Подкоманды доменных областей идут вместе с ними.
+All boat commands (`cli:*.txt`). The base CLI is S7. Subcommands of domain areas go together with them.
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| CL1 | Глобальные флаги `--api-url`, `--org`, `--json`, `--no-update`; env `BOAT_API_URL`, `BOAT_ORG` | `cli:boat.txt`, `docs:cli-reference.md` | S7 | ◐ | S7 |
-| CL2 | JSON автоматически, когда stdout не TTY; JSONL у `new`, `prompt`, `events`, `conversations` (и `fork --wait`); ошибка — последняя строка `{"event":"error",…}`; exit code команды, 124 при таймауте | `docs:cli-reference.md` | Не задано | ✗ | MVP-рек. R1 |
-| CL3 | `current` (последняя sandbox в этом shell), `self` (внутри VM), текущая conversation на shell | `docs:cli-reference.md` | Нет | ✗ | MVP-рек. R1 (`current`), S22 |
-| CL4 | `new`: `--file PATH=LOCAL`, `--host PORT[:public]`, `--setup-file`, `--count`, `--fail-fast`, `--visibility` | `cli:new.txt` | S7 частично | ◐ | S14/S22/S30 |
-| CL5 | `list --filter rspte`, `info`, `rename`, `extend`, `stop --status`, `resume` с проверкой no-op exec, `fork --wait`, `delete` с отслеживанием операции | `cli:list.txt` и др. | S7 | ◐ | S7/S22 |
-| CL6 | `exec`: `--timeout 0` = detach + attach с переподключением, `--stream`, `--detach/--status/--kill/--attach`, Ctrl-C убивает | `cli:exec.txt` | S7 | ◐ | S7/S22 |
-| CL7 | `run`: create → push → exec → итог времени → delete; `--keep`; sandbox сам остановится через 15 min, если CLI умер | `cli:run.txt` | Нет | ✗ | S22, P1 |
+| CL1 | Global flags `--api-url`, `--org`, `--json`, `--no-update`; env `BOAT_API_URL`, `BOAT_ORG` | `cli:boat.txt`, `docs:cli-reference.md` | S7 | ◐ | S7 |
+| CL2 | JSON automatically when stdout is not a TTY; JSONL for `new`, `prompt`, `events`, `conversations` (and `fork --wait`); an error is the last line `{"event":"error",…}`; the command's exit code, 124 on timeout | `docs:cli-reference.md` | Not set | ✗ | MVP rec. R1 |
+| CL3 | `current` (the last sandbox in this shell), `self` (inside the VM), the current conversation per shell | `docs:cli-reference.md` | No | ✗ | MVP rec. R1 (`current`), S22 |
+| CL4 | `new`: `--file PATH=LOCAL`, `--host PORT[:public]`, `--setup-file`, `--count`, `--fail-fast`, `--visibility` | `cli:new.txt` | S7 partly | ◐ | S14/S22/S30 |
+| CL5 | `list --filter rspte`, `info`, `rename`, `extend`, `stop --status`, `resume` with a no-op exec check, `fork --wait`, `delete` with operation tracking | `cli:list.txt` etc. | S7 | ◐ | S7/S22 |
+| CL6 | `exec`: `--timeout 0` = detach + attach with reconnecting, `--stream`, `--detach/--status/--kill/--attach`, Ctrl-C kills | `cli:exec.txt` | S7 | ◐ | S7/S22 |
+| CL7 | `run`: create → push → exec → the time summary → delete; `--keep`; the sandbox stops itself after 15 min if the CLI died | `cli:run.txt` | No | ✗ | S22, P1 |
 | CL8 | `push` (git-aware tar), `scp` (tar-over-SSH), `forward`, `ssh -t` | `cli:push.txt`, `cli:scp.txt`, `cli:forward.txt`, `cli:ssh.txt` | SSH-gateway S4 | ◐ | S22 |
 | CL9 | `host`, `desktop`, `browser` | `cli:host.txt`, `cli:desktop.txt`, `cli:browser.txt` | S7/S10 | ◐ | S7, S29 |
-| CL10 | `history`, `ps`, `events --follow` | `cli:history.txt`, `cli:ps.txt`, `cli:events.txt` | Нет | ✗ | S19, S15 |
-| CL11 | `prompt`, `steer`, `interrupt`, `conversations` | `cli:prompt.txt` и др. | Нет | ✗ | S15 |
+| CL10 | `history`, `ps`, `events --follow` | `cli:history.txt`, `cli:ps.txt`, `cli:events.txt` | No | ✗ | S19, S15 |
+| CL11 | `prompt`, `steer`, `interrupt`, `conversations` | `cli:prompt.txt` etc. | No | ✗ | S15 |
 | CL12 | `snapshot`, `snapshots`, `snapshot latest/tree/pull/delete/rm/share/shares/unshare` | `cli:snapshot.*.txt` | Save/rm — S7 | ◐ | S18, S23 |
-| CL13 | `env *` (15 подкоманд), `ai *` (11), `api-key *` (5), `org *` (10), `webhook *` (4), `telemetry *` (3), `ci *` (4), `data-retention *`, `deletion status` | `cli:env.*.txt`, `cli:ai.*.txt`, … | Ключи — S8 | ◐ | S14, S16, S24, S23, S20, S26, S25 |
-| CL14 | `completions` с живыми id (кэш 15 s), `self-update` по каналам, авто-обновление раз в 6 h | `cli:completions.txt`, `cli:self-update.txt` | Нет | ✗ | S22 |
-| CL15 | `status --check`, `limits`, `usage`, `dashboard` (одноразовый код входа) | `cli:status.txt`, `cli:dashboard.txt` | Нет | ✗ | S22, S20 |
-| CL16 | `onboard` (вопрос «для себя или для третьих лиц»), `feedback` | `cli:onboard.txt`, `cli:feedback.txt` | — | ⊘ | Onboard не нужен при SSO; feedback — ссылка на канал поддержки |
-| CL17 | `billing *`, `wallet *` | `cli:billing.*.txt`, `cli:wallet.*.txt` | — | ⊘ | Коммерция |
+| CL13 | `env *` (15 subcommands), `ai *` (11), `api-key *` (5), `org *` (10), `webhook *` (4), `telemetry *` (3), `ci *` (4), `data-retention *`, `deletion status` | `cli:env.*.txt`, `cli:ai.*.txt`, … | Keys — S8 | ◐ | S14, S16, S24, S23, S20, S26, S25 |
+| CL14 | `completions` with live ids (cache 15 s), `self-update` by channels, auto-update every 6 h | `cli:completions.txt`, `cli:self-update.txt` | No | ✗ | S22 |
+| CL15 | `status --check`, `limits`, `usage`, `dashboard` (a one-time login code) | `cli:status.txt`, `cli:dashboard.txt` | No | ✗ | S22, S20 |
+| CL16 | `onboard` (the question "for yourself or for third parties"), `feedback` | `cli:onboard.txt`, `cli:feedback.txt` | — | ⊘ | Onboard is not needed with SSO; feedback is a link to the support channel |
+| CL17 | `billing *`, `wallet *` | `cli:billing.*.txt`, `cli:wallet.*.txt` | — | ⊘ | Commerce |
 
-### 2.21 Для агентов: документация, skills, плагины, MCP
+### 2.21 For agents: documentation, skills, plugins, MCP
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| AG1 | MCP-сервер документации `docs.boat.dev/mcp` (поиск и чтение страниц) | `docs:ai-tools.md` | Нет | ✗ | S21, P1 |
-| AG2 | `llms.txt` с блоком «ключевые факты» и шпаргалкой CLI; `llms-full.txt`; любая страница как `.md` | `docs:ai-tools.md`, `llms.txt` | Нет | ✗ | S21 |
-| AG3 | Фрагмент для `AGENTS.md`/`CLAUDE.md` проекта: когда брать sandbox, всегда передавать id, stop против delete | `docs:ai-tools.md` | Нет | ✗ | S21 |
-| AG4 | Пакет из 13 сценарных skills (`npx skills add …`) | `vr:cloud-sandbox-vm-skills` | Нет | ✗ | S21 |
-| AG5 | Плагин Kimi: `/box:setup`, `/box:new <task>`, справочные skills (CLI, API, SDK TS/Py, platform) | `vr:kimi-box-plugin` | Нет | ✗ | S21 |
-| AG6 | Skill `boat` предустановлен для всех harness в sandbox | `docs:ai-tools.md` | Нет | ✗ | S15/S21 |
-| AG7 | MCP-сервер управления sandbox (у boat нет) | `vr:battleships/research/cards/boat.json` | S11 | ✅* | Лучше boat; список инструментов — §5.2 |
-| AG8 | Правило «не называй цены по памяти, вызови `limits`» | `docs:ai-tools.md` | — | ✗ | Аналог: «узнай шаблоны и квоты через `umiak limits`» — S21 |
-| AG9 | Кнопки «открыть в Claude/ChatGPT/Cursor» на страницах документации | `docs:ai-tools.md` | — | ✗ | S21, P3 |
+| AG1 | The documentation MCP server `docs.boat.dev/mcp` (searching and reading pages) | `docs:ai-tools.md` | No | ✗ | S21, P1 |
+| AG2 | `llms.txt` with a "key facts" block and a CLI cheat sheet; `llms-full.txt`; any page as `.md` | `docs:ai-tools.md`, `llms.txt` | No | ✗ | S21 |
+| AG3 | A snippet for the project's `AGENTS.md`/`CLAUDE.md`: when to take a sandbox, always pass the id, stop vs delete | `docs:ai-tools.md` | No | ✗ | S21 |
+| AG4 | A package of 13 scenario skills (`npx skills add …`) | `vr:cloud-sandbox-vm-skills` | No | ✗ | S21 |
+| AG5 | The Kimi plugin: `/box:setup`, `/box:new <task>`, reference skills (CLI, API, SDK TS/Py, platform) | `vr:kimi-box-plugin` | No | ✗ | S21 |
+| AG6 | The `boat` skill preinstalled for all harnesses in the sandbox | `docs:ai-tools.md` | No | ✗ | S15/S21 |
+| AG7 | A sandbox management MCP server (boat has none) | `vr:battleships/research/cards/boat.json` | S11 | ✅* | Better than boat; the tool list is in §5.2 |
+| AG8 | The rule "do not quote prices from memory, call `limits`" | `docs:ai-tools.md` | — | ✗ | An analog: "learn templates and quotas via `umiak limits`" — S21 |
+| AG9 | "Open in Claude/ChatGPT/Cursor" buttons on documentation pages | `docs:ai-tools.md` | — | ✗ | S21, P3 |
 
-### 2.22 Соглашения API
+### 2.22 API conventions
 
-| # | Возможность boat | Источник | Наш план | Статус | Решение |
+| # | Boat capability | Source | Our plan | Status | Decision |
 |---|---|---|---|---|---|
-| API1 | Конверт `{ok, type}`, ошибки `{code, message, details.retryable}`, `requestId` | `docs:api/v1.md` | S6 §14.1 `UmiakError{code, retryable}`; формат — S7 | ◐ | MVP-рек. R1 |
-| API2 | Cursor-пагинация `limit/cursor/sort`, `pageInfo` | `docs:api/v1.md` | S7 | ◐ | S7 |
-| API3 | Асинхронные операции с 202 и опросом | `docs:api/v1.md` | S6 операции | ✅ | — |
-| API4 | Префиксы id: `bx_`, `wh_`, `evt_`, `bdop_`, `bsh_` | `docs:api/v1.md` | S7 | ◐ | S7 |
-| API5 | Переименование Box → boat: алиасы путей, ключей, заголовков, `Deprecation`/`Sunset` | `docs:migrating-from-box.md`, `docs:migrating-from-box/*` | — | ⊘ | Нам нечего мигрировать; политику `Deprecation` взять в S7 позже |
-| API6 | Long-poll с ETag/304 для событий | `docs:api/reference/agent/list-sandbox-events.md` | S6 `waitForState` (LISTEN) | ◐ | S15 |
+| API1 | The envelope `{ok, type}`, errors `{code, message, details.retryable}`, `requestId` | `docs:api/v1.md` | S6 §14.1 `UmiakError{code, retryable}`; the format — S7 | ◐ | MVP rec. R1 |
+| API2 | Cursor pagination `limit/cursor/sort`, `pageInfo` | `docs:api/v1.md` | S7 | ◐ | S7 |
+| API3 | Asynchronous operations with 202 and polling | `docs:api/v1.md` | S6 operations | ✅ | — |
+| API4 | Id prefixes: `bx_`, `wh_`, `evt_`, `bdop_`, `bsh_` | `docs:api/v1.md` | S7 | ◐ | S7 |
+| API5 | The rename Box → boat: aliases of paths, keys, headers, `Deprecation`/`Sunset` | `docs:migrating-from-box.md`, `docs:migrating-from-box/*` | — | ⊘ | We have nothing to migrate; take the `Deprecation` policy into S7 later |
+| API6 | Long-poll with ETag/304 for events | `docs:api/reference/agent/list-sandbox-events.md` | S6 `waitForState` (LISTEN) | ◐ | S15 |
 
-### 2.23 Пропускаем: коммерция и прочее
+### 2.23 Skipped: commerce and other
 
-| Что | Источник | Почему пропускаем |
+| What | Source | Why skipped |
 |---|---|---|
-| Планы $20–$2000, пробный период, кредитная карта | `docs:pricing.md`, `docs:free-trial.md`, `docs:billing.md` | Внутренняя платформа без биллинга |
-| Кошелёк, автопополнение, бонусы, Stripe-портал, НДС | `docs:billing.md`, `docs:billing/plan-changes.md`, `cli:wallet.*.txt` | То же |
-| Платные старты сверх лимита (×1.5–3) | `docs:limits.md` | Лимиты задаёт оператор (квоты S6/S8) |
-| Места в организации, умножение лимитов | `docs:organizations/seats-and-limits.md` | Команды приходят из IdP |
-| Цены по размерам, поле `dollars`, `deletedCost` | `docs:pricing.md`, `docs:api/reference/sandboxes/get-sandbox-usage.md` | Заменяем учётом ресурсо-секунд (S20) |
-| Платный CI, checkout пробного периода агентом | `docs:ci.md`, `docs:agent-auth.md` | Коммерция |
-| Ограничения пробного периода (`trial_*`) | `docs:free-trial.md` | Коммерция |
-| Поддержка по email/Discord, `feedback` | `docs:support.md` | Внутренний канал поддержки |
-| SOC 2, резидентность данных ЕС | `docs:compliance.md` | Данные и так внутри компании |
-| Таблицы цен конкурентов, движок цен battleships | `docs:pricing.md`, `vr:battleships/site` | Нерелевантно |
+| Plans $20–$2000, a trial, a credit card | `docs:pricing.md`, `docs:free-trial.md`, `docs:billing.md` | An internal platform without billing |
+| Wallet, auto-top-up, bonuses, the Stripe portal, VAT | `docs:billing.md`, `docs:billing/plan-changes.md`, `cli:wallet.*.txt` | The same |
+| Paid starts above the limit (×1.5–3) | `docs:limits.md` | Limits are set by the operator (S6/S8 quotas) |
+| Seats in an organization, multiplying limits | `docs:organizations/seats-and-limits.md` | Teams come from the IdP |
+| Prices by size, the field `dollars`, `deletedCost` | `docs:pricing.md`, `docs:api/reference/sandboxes/get-sandbox-usage.md` | Replaced by resource-second accounting (S20) |
+| Paid CI, trial checkout by an agent | `docs:ci.md`, `docs:agent-auth.md` | Commerce |
+| Trial restrictions (`trial_*`) | `docs:free-trial.md` | Commerce |
+| Support by email/Discord, `feedback` | `docs:support.md` | An internal support channel |
+| SOC 2, EU data residency | `docs:compliance.md` | The data is inside the company anyway |
+| Competitors' price tables, the battleships pricing engine | `docs:pricing.md`, `vr:battleships/site` | Irrelevant |
 
-## 3. Где мы можем быть лучше boat
+## 3. Where we can be better than boat
 
-Слабые места boat взяты из его же документации и карточки в `vr:battleships/research/cards/boat.json`.
+Boat's weak spots are taken from its own documentation and the card in `vr:battleships/research/cards/boat.json`.
 
-| Тема | У boat | У нас | Где |
+| Topic | Boat | Us | Where |
 |---|---|---|---|
-| Windows | Нет гостей, только Wine | Windows 11 и Server Core, рабочий стол, PowerShell, ConPTY, VSS | S9, S10 |
-| MCP для управления sandbox | Нет (только MCP документации) | MCP-сервер поверх API, инструменты в §5.2 | S11, S21 |
-| Токены git в VM | Долгоживущий GitHub-токен в `~/.git-credentials` и `hosts.yml` | MVP: короткоживущий токен установки с минимальными правами через credential helper агента (S13). Фаза 2: git-прокси без токена в VM | S13, S16 |
-| Прокси секретов | AI-ключи и custom API | Тот же механизм для git, внутренних API и registry; встроенный бюджет на AI | S16 |
-| Auto-stop | TTL от старта; продлевает только работающий prompt агента | Idle-stop по реальной активности (команды, PTY, TCP); пробуждение по HTTP/SSH | S6 §12, S30 |
-| Готовность | `ready` не ждёт Docker и systemd-сервисы | `ready` ждёт фазу `docker` | S3 §8.5 |
-| Resume | Новая machine: меняются IP, hostname, SSH host keys | Та же VM на той же ноде, идентичность не меняется | S6 §7.6 |
-| Fork работающей | Из минутного снапшота, теряет до 1 min | Снапшот с quiesce, точная копия | S6 §7.7 |
-| Откат во времени | Только последний снапшот | Авто-снапшоты с выбором точки | S18 |
-| Exec | Нет env и user на команду; файлы ≤5 MiB; пути только `/home/user` и `/tmp` | Env и user на команду; файлы любого размера с докачкой; любые пути | S3 |
-| Терминал | Только SSH | PTY через API и xterm.js в дашборде | S3, S8 |
-| SSH host key | Меняется на каждом resume | Постоянный ключ gateway | S4 |
-| Доступ к портам | Только токен или публично | Ещё `sso` через корпоративный IdP | S4 §8.4 |
-| Сеть | Нет egress-политик, приватной сети, статического IP | Политики на sandbox через Proxmox firewall/SDN | S17 |
-| Свои образы | Нет (только saved snapshot) | Dockerfile/OCI → шаблон | S28 |
-| Тома | Нет volumes | Общие тома команды (наше расширение, у boat аналога нет) | S18 |
-| Гибернация | Память не сохраняется | Снапшот памяти QEMU | S30 |
-| Аудит и SSO | Нет | Журнал аудита; SSO через oauth2-proxy | S8, S20 |
-| События агента | Опрос раз в секунду, частичный и финальный ответ с разными id (боль optibox) | Стрим и настоящие дельты | S15 |
-| Вывод команд | `/commands` обрезает до 512 KB с конца (боль optibox) | Чтение по offset, до 128 MiB на поток с вытеснением начала (`truncated`) | S3 §10 |
-| GPU | Нет | Проброс GPU, если в компании есть железо | Вне плана, идея |
+| Windows | No guests, Wine only | Windows 11 and Server Core, a desktop, PowerShell, ConPTY, VSS | S9, S10 |
+| MCP for managing sandboxes | None (only a documentation MCP) | An MCP server on top of the API, the tools in §5.2 | S11, S21 |
+| Git tokens in the VM | A long-lived GitHub token in `~/.git-credentials` and `hosts.yml` | MVP: a short-lived installation token with minimal rights via the agent's credential helper (S13). Phase 2: a git proxy without a token in the VM | S13, S16 |
+| Secret proxy | AI keys and custom API | The same mechanism for git, internal APIs, and registries; a built-in budget for AI | S16 |
+| Auto-stop | TTL from start; extended only by a running agent prompt | Idle-stop by real activity (commands, PTY, TCP); wake-up on HTTP/SSH | S6 §12, S30 |
+| Readiness | `ready` does not wait for Docker and systemd services | `ready` waits for the `docker` phase | S3 §8.5 |
+| Resume | A new machine: IP, hostname, SSH host keys change | The same VM on the same node, identity does not change | S6 §7.6 |
+| Fork of a running one | From a one-minute snapshot, loses up to 1 min | A snapshot with quiesce, an exact copy | S6 §7.7 |
+| Time rollback | Only the latest snapshot | Auto-snapshots with a choice of point | S18 |
+| Exec | No env and user per command; files ≤5 MiB; paths only `/home/user` and `/tmp` | Env and user per command; files of any size with resumption; any paths | S3 |
+| Terminal | SSH only | PTY through the API and xterm.js in the dashboard | S3, S8 |
+| SSH host key | Changes on every resume | A permanent gateway key | S4 |
+| Port access | Only a token or public | Also `sso` through a corporate IdP | S4 §8.4 |
+| Network | No egress policies, private network, static IP | Per-sandbox policies via the Proxmox firewall/SDN | S17 |
+| Custom images | None (only a saved snapshot) | Dockerfile/OCI → a template | S28 |
+| Volumes | No volumes | Shared team volumes (our extension, boat has no analog) | S18 |
+| Hibernation | Memory is not saved | A QEMU memory snapshot | S30 |
+| Audit and SSO | None | An audit log; SSO via oauth2-proxy | S8, S20 |
+| Agent events | Polling once a second, partial and final responses with different ids (optibox's pain) | A stream and real deltas | S15 |
+| Command output | `/commands` truncates to 512 KB from the end (optibox's pain) | Reading by offset, up to 128 MiB per stream with eviction of the start (`truncated`) | S3 §10 |
+| GPU | None | GPU passthrough if the company has the hardware | Outside the plan, an idea |
 
-## 4. План фазы 2: области S14–S30
+## 4. Phase 2 plan: areas S14–S30
 
-| # | Область | Что решаем | Зависит от | Размер | Приоритет |
+| # | Area | What we decide | Depends on | Size | Priority |
 |---|---|---|---|---|---|
-| S14 | Environments v2 и setup | Именованные environments с версиями и `upgrade`; переменные, secret-файлы, репозитории, переключатели передачи (git, секреты, ключ sandbox, AI); `noEnv` и «без секретов владельца» с вычисткой диска; setup-скрипт репозитория и `--setup-file` со статусом; доступ к environment по участникам | S6, S7, S8, S13 | M | P1 |
-| S15 | Встроенные coding-агенты | Harness в шаблоне (Claude Code, Codex, OpenCode, позже pi и другие); раннер в VM; `prompt`, `promptRun`, события (стрим + cursor), conversations, `steer` с режимами доставки, `interrupt`, каталог моделей, вложения, смена harness в разговоре (P3); регистрация MCP `computer` и skill `umiak` в конфигах harness; prompt как активность для idle-stop | S3, S5, S7, S10, S14, S16 | L | P1 |
-| S16 | Credentials proxy | Профили credentials (личные и командные), ключи и подписки, несколько аккаунтов; привязка профиля к environment; прокси с плейсхолдерами на старт, подстановка в заголовок, привязка к хосту; custom API для внутренних сервисов; **git-прокси без токена в VM** (отложенная часть S13 переходит сюда); учёт токенов, блокировка sandbox, бюджеты; обязательный прокси для команды | S4, S8, S13, S14 | L | P1 |
-| S17 | Сеть v2 | Egress-политики на sandbox или шаблон (deny-all, allowlist доменов и CIDR); приватная сеть sandbox одной команды; статический egress IP; TCP-порты наружу через gateway; свои домены | S1, S4, S12 | M | P2 |
-| S18 | Снапшоты v2 | Авто-снапшоты по расписанию с откатом к точке; snapshot-now; fork из снапшота по id; дерево и чтение файлов снапшота без VM (thin-снимок read-only на ноде); `snapshot pull` и экспорт; архив остановленных в PBS и восстановление на другую ноду (вместе с S12); общие тома (volumes, наше расширение) | S1, S6, S12 | L | P2 |
-| S19 | История и наблюдаемость в sandbox | Копия вывода команд вне VM (90 d) и чтение у остановленной; `history`; захват вывода всех процессов (journal, tty); `ps` с хранимыми сэмплами; ряды CPU/RAM/диска (заполнение диска — для уведомлений S20); дашборд History | S3, S6, S7 | M | P2 |
-| S20 | События наружу | Webhooks (события жизненного цикла, HMAC, повторы, журнал доставок) из outbox S6; экспорт OTLP метрик и событий на команду; usage в ресурсо-секундах для showback; журнал аудита; уведомления email/Slack (диск, ошибки, хранение) | S6, S7, S8 | M | P2 |
-| S21 | Агентам: skills, плагины, документация | Пакет skills (справочные + сценарные, §5.1; часть сценарных выходит вместе с S14, S15, S16, S22); плагин Claude Code со slash-командами и `.mcp.json`; манифесты для Codex, OpenCode, Cursor, Kimi; skill `umiak` внутри sandbox; `llms.txt`, `.md` для страниц, MCP-сервер документации; фрагмент для `AGENTS.md`; гайды evals и «sandbox на задачу» | S7, S11; S14, S15, S16, S22 для части skills | M | P1 |
-| S22 | CLI и SDK v2 | `run`, `push`, `scp`, `forward`, `ssh-config`, `ssh -t`; `current`/`self`; `login --key-stdin`, `logout`, `status --check`, `dashboard`; completions с живыми id, self-update; in-VM `umiak` и `host` (на ключе sandbox из S24); хелперы SDK (ожидания, `runCommand`, `followCommand`, стримы, загрузка файлов), плоские параметры и HTTP/2 в TS, async-клиент Python; подписанные URL файлов; поиск, замена и наблюдение за каталогом в файлах | S7, S4, S24 | M | P1 |
-| S23 | Команды и совместный доступ | Shared/private, доступ `owner/use/view`, авто-private при логинах создателя; `share`/`unshare` с вычисткой; вычистка логинов при деплое командного образа; share-коды между командами; лимиты на пользователя; выбор активной команды | S8, S14, S16 | M | P2 |
-| S24 | API-ключи v2 и вход агентов | Ключи с ресурсами (sandbox, environments), сроки, дочерний не шире родителя; rotate, usage; операции только из браузерной сессии; ключ sandbox и токен портов внутри VM; device flow для агента с подтверждением в SSO; `WWW-Authenticate` с `resource_metadata` | S8 | S | P1 |
-| S25 | Хранение данных и удаление | Сроки хранения остановленных и истории с предупреждениями; эфемерные sandbox (stop = delete); выключение мониторинга; ZDR на команду. Публичный статус удаления — в S7 | S6, S18, S19 | S | P3 |
-| S26 | CI-раннеры | Эфемерные раннеры GitHub Actions (или GitLab — по ответу S13): метки размеров, `from=<saved snapshot>`, `debug`, отказ публичных репо, лимит времени; API и CLI заданий и логов; аннотация OOM | S13, S22; S28 по желанию | M | P2/P3 |
-| S27 | Evals и адаптеры | Harbor `BaseEnvironment`, Eve backend, по запросу E2B-совместимая обёртка; гайд RL/evals; использует пакетный create и тёплый пул под snapshot из S30 | S7, S22, S28, S17, S30 | M | P3 |
-| S28 | Свои образы и шаблоны v2 | Шаблон из Dockerfile/OCI или скрипта (сборка на ноде, кэш); пользовательские шаблоны команды; версии и откат; каталог шаблонов в админке | S5, S9 | L | P2 |
-| S29 | Рабочий стол v2 | Computer-use API уже в MVP (S10); здесь: браузер-только с профилями Chrome; запись рабочего стола; noVNC; буфер обмена, обои | S10, S9 | M | P2 |
-| S30 | Жизненный цикл v2 | Пробуждение остановленной sandbox по HTTP/SSH (gateway держит запрос); гибернация через снапшот памяти QEMU; пакетный create (`count`); тёплый пул под saved snapshot (для `failFast` с `from`); идемпотентность resume; рост диска при смене размера; пользовательский pre-stop хук; политика для зависших `degraded` | S1, S4, S6 | L | P2 |
+| S14 | Environments v2 and setup | Named environments with versions and `upgrade`; variables, secret files, repositories, pass-through switches (git, secrets, sandbox key, AI); `noEnv` and "without the owner's secrets" with disk scrubbing; a repository setup script and `--setup-file` with a status; access to an environment by members | S6, S7, S8, S13 | M | P1 |
+| S15 | Built-in coding agents | Harnesses in the template (Claude Code, Codex, OpenCode, later pi and others); a runner in the VM; `prompt`, `promptRun`, events (stream + cursor), conversations, `steer` with delivery modes, `interrupt`, a model catalog, attachments, switching the harness in a conversation (P3); registration of the MCP `computer` and the skill `umiak` in the harness configs; a prompt as activity for idle-stop | S3, S5, S7, S10, S14, S16 | L | P1 |
+| S16 | Credentials proxy | Credential profiles (personal and team), keys and subscriptions, several accounts; binding a profile to an environment; a proxy with placeholders on start, substitution into a header, host binding; custom API for internal services; **a git proxy without a token in the VM** (the deferred part of S13 moves here); token accounting, sandbox blocking, budgets; a mandatory proxy for a team | S4, S8, S13, S14 | L | P1 |
+| S17 | Network v2 | Egress policies per sandbox or template (deny-all, a domain and CIDR allowlist); a private network of sandboxes of one team; a static egress IP; TCP ports outward through the gateway; custom domains | S1, S4, S12 | M | P2 |
+| S18 | Snapshots v2 | Scheduled auto-snapshots with rollback to a point; snapshot-now; fork from a snapshot by id; a tree and reading snapshot files without a VM (a read-only thin snapshot on the node); `snapshot pull` and export; archiving stopped ones to PBS and restoring on another node (together with S12); shared volumes (our extension) | S1, S6, S12 | L | P2 |
+| S19 | History and observability in the sandbox | A copy of command output outside the VM (90 d) and reading it while stopped; `history`; capturing the output of all processes (journal, tty); `ps` with stored samples; CPU/RAM/disk series (disk fill — for the S20 notifications); a History dashboard | S3, S6, S7 | M | P2 |
+| S20 | Outbound events | Webhooks (lifecycle events, HMAC, retries, a delivery log) from the S6 outbox; OTLP export of metrics and events per team; usage in resource-seconds for showback; an audit log; email/Slack notifications (disk, errors, retention) | S6, S7, S8 | M | P2 |
+| S21 | For agents: skills, plugins, documentation | A skills package (reference + scenario, §5.1; part of the scenario ones ship with S14, S15, S16, S22); a Claude Code plugin with slash commands and `.mcp.json`; manifests for Codex, OpenCode, Cursor, Kimi; the skill `umiak` inside the sandbox; `llms.txt`, `.md` for pages, a documentation MCP server; a snippet for `AGENTS.md`; evals and "a sandbox per task" guides | S7, S11; S14, S15, S16, S22 for some skills | M | P1 |
+| S22 | CLI and SDK v2 | `run`, `push`, `scp`, `forward`, `ssh-config`, `ssh -t`; `current`/`self`; `login --key-stdin`, `logout`, `status --check`, `dashboard`; completions with live ids, self-update; the in-VM `umiak` and `host` (on a sandbox key from S24); SDK helpers (waits, `runCommand`, `followCommand`, streams, file upload), flat parameters and HTTP/2 in TS, a Python async client; signed file URLs; search, replace, and directory watching in files | S7, S4, S24 | M | P1 |
+| S23 | Teams and shared access | Shared/private, access `owner/use/view`, auto-private on the creator's logins; `share`/`unshare` with scrubbing; scrubbing logins when deploying a team image; share codes between teams; per-user limits; choosing the active team | S8, S14, S16 | M | P2 |
+| S24 | API keys v2 and agent login | Keys with resources (sandboxes, environments), lifetimes, a child no wider than its parent; rotate, usage; operations only from a browser session; a sandbox key and a port token inside the VM; a device flow for an agent with SSO confirmation; `WWW-Authenticate` with `resource_metadata` | S8 | S | P1 |
+| S25 | Data retention and deletion | Retention periods of stopped ones and of history with warnings; ephemeral sandboxes (stop = delete); turning off monitoring; ZDR per team. The public deletion status is in S7 | S6, S18, S19 | S | P3 |
+| S26 | CI runners | Ephemeral GitHub Actions runners (or GitLab — per the S13 answer): size labels, `from=<saved snapshot>`, `debug`, refusing public repos, a time limit; an API and CLI for jobs and logs; an OOM annotation | S13, S22; S28 optionally | M | P2/P3 |
+| S27 | Evals and adapters | Harbor `BaseEnvironment`, an Eve backend, on request an E2B-compatible wrapper; an RL/evals guide; uses batch create and the warm pool for a snapshot from S30 | S7, S22, S28, S17, S30 | M | P3 |
+| S28 | Custom images and templates v2 | A template from a Dockerfile/OCI or a script (built on the node, cached); user templates of a team; versions and rollback; a template catalog in the admin | S5, S9 | L | P2 |
+| S29 | Desktop v2 | The computer-use API is already in the MVP (S10); here: browser-only with Chrome profiles; desktop recording; noVNC; clipboard, wallpapers | S10, S9 | M | P2 |
+| S30 | Lifecycle v2 | Waking a stopped sandbox on HTTP/SSH (the gateway holds the request); hibernation via a QEMU memory snapshot; batch create (`count`); a warm pool for a saved snapshot (for `failFast` with `from`); resume idempotency; disk growth on a size change; a user pre-stop hook; a policy for hung `degraded` ones | S1, S4, S6 | L | P2 |
 
-Порядок волн:
-1. **P1** сразу после MVP: S21 (справочные skills и плагин дёшевы и сразу полезны агентам с MVP) и S24 → S22 (S22 строит in-VM CLI на ключе sandbox из S24), затем S14 → S16 → S15 (S15 зависит от двух предыдущих).
+Order of waves:
+1. **P1** right after the MVP: S21 (reference skills and the plugin are cheap and immediately useful to agents from the MVP) and S24 → S22 (S22 builds the in-VM CLI on a sandbox key from S24), then S14 → S16 → S15 (S15 depends on the previous two).
 2. **P2**: S20, S17, S29, S30, S28, S19, S23, S18.
-3. **P3**: S26, S27, S25. S26 поднять в P2, если Илья подтвердит спрос на CI-раннеры.
+3. **P3**: S26, S27, S25. Raise S26 to P2 if Ilia confirms demand for CI runners.
 
-### 4.1 Подробности областей
+### 4.1 Area details
 
-**S14. Environments v2 и setup.**
-- Цель: настройки, которые sandbox получает при старте, задаются один раз и обновляются контролируемо.
-- Содержание:
-  - environment: переменные, secret-файлы (пути от home), репозитории (из S13), credential-профиль (S16), переключатели передачи;
-  - неизменяемые версии; sandbox закреплена за версией; `upgrade` горячо через S3 `UpdateEnv`/`UpdateSecrets`, у остановленной — при resume;
-  - `noEnv` и «без секретов владельца»: перед первым доступом вычистить с диска логины, `~/.git-credentials`, `~/.claude`, `~/.codex`, ключ sandbox (у boat: `sandbox_securing`);
-  - setup-скрипт репозитория на каждом старте и одноразовый `--setup-file`; статус `setupStatus`/`setupError`;
-  - лимиты env (100 переменных, 64 KB, зарезервированные имена);
-  - доступ к environment команды по участникам.
-- Опора: `docs:environments/*`, `docs:setup.md`.
+**S14. Environments v2 and setup.**
+- Goal: the settings a sandbox receives at start are set once and updated in a controlled way.
+- Contents:
+  - an environment: variables, secret files (paths from home), repositories (from S13), a credential profile (S16), pass-through switches;
+  - immutable versions; a sandbox is pinned to a version; `upgrade` hot via S3 `UpdateEnv`/`UpdateSecrets`, for a stopped one — at resume;
+  - `noEnv` and "without the owner's secrets": before the first access scrub from disk the logins, `~/.git-credentials`, `~/.claude`, `~/.codex`, the sandbox key (boat: `sandbox_securing`);
+  - a repository setup script on every start and a one-time `--setup-file`; the status `setupStatus`/`setupError`;
+  - env limits (100 variables, 64 KB, reserved names);
+  - access to a team's environment by members.
+- Basis: `docs:environments/*`, `docs:setup.md`.
 
-**S15. Встроенные coding-агенты.**
-- Цель: `POST /prompt` запускает harness в sandbox, клиент получает поток событий, может направить (steer) или прервать агента.
-- Содержание:
-  - раннер в VM — отдельный сервис или модуль guest agent (решить в brainstorm), процесс на conversation под shim S3;
-  - нормализованный формат событий (`prompt`, `response` дельтами, `tool_use`, `tool_result`, `steer`, `usage_limit`, `compaction`); стрим (NDJSON/SSE) и cursor-опрос;
-  - conversations переживают stop и fork, потому что история лежит на диске;
-  - steer: нативно (Claude Code, Codex) или interrupt + продолжение; режим доставки в событии;
-  - каталог моделей; вложения; лимит параллельных conversations по RAM;
-  - конфиги harness при старте: MCP `computer` (S10), skill `umiak` (S21), файлы правил; слияние с пользовательскими;
-  - prompt и ожидание агента считаются активностью для idle-stop.
-- Уроки optibox: настоящие дельты, без двойного ответа; `cwd` всегда явный; идемпотентность `prompt` по ключу.
-- Опора: `docs:integrated-agents/*`, `vr:optibox/docs/*`.
+**S15. Built-in coding agents.**
+- Goal: `POST /prompt` starts a harness in the sandbox, the client gets an event stream and can steer or interrupt the agent.
+- Contents:
+  - the runner in the VM is a separate service or a module of the guest agent (decide in brainstorm), a process per conversation under the S3 shim;
+  - a normalized event format (`prompt`, `response` in deltas, `tool_use`, `tool_result`, `steer`, `usage_limit`, `compaction`); a stream (NDJSON/SSE) and cursor polling;
+  - conversations survive stop and fork because the history lies on disk;
+  - steer: natively (Claude Code, Codex) or interrupt + continue; the delivery mode in the event;
+  - a model catalog; attachments; a limit of parallel conversations by RAM;
+  - harness configs at start: the MCP `computer` (S10), the skill `umiak` (S21), rule files; merging with the user's;
+  - a prompt and waiting for the agent count as activity for idle-stop.
+- Lessons from optibox: real deltas, without a double answer; `cwd` always explicit; `prompt` idempotency by key.
+- Basis: `docs:integrated-agents/*`, `vr:optibox/docs/*`.
 
 **S16. Credentials proxy.**
-- Цель: в sandbox не попадают настоящие ключи к AI, git и внутренним API.
-- Содержание:
-  - профили credentials (личные и командные), ключи и подписки; OAuth/device flow для подписок; refresh только на сервере;
-  - прокси (сервис рядом с gateway или в нём): плейсхолдер на каждый старт, проверка, подстановка в `Authorization`/`x-api-key`, привязка к хосту, учёт токенов из ответа провайдера;
-  - custom API: `NAME` и `NAME_BASE_URL`;
-  - git-прокси без токена в VM на том же механизме (в S13 MVP — короткоживущий токен через credential helper, прокси отложен; владелец — S16);
-  - привязка профиля к environment (`credentialProfileId`, S14);
-  - блокировка sandbox; бюджеты на sandbox, пользователя, команду с авто-блоком;
-  - команда может обязать прокси.
-- Вопросы к brainstorm: куда направлять трафик (`*_BASE_URL` или прозрачный MITM с CA в шаблоне); как быть с Bedrock SigV4.
-- Опора: `docs:ai-credentials.md`, `docs:integrated-agents/keys.md`.
+- Goal: real keys to AI, git, and internal APIs do not get into the sandbox.
+- Contents:
+  - credential profiles (personal and team), keys and subscriptions; OAuth/device flow for subscriptions; refresh only on the server;
+  - a proxy (a service next to the gateway or in it): a placeholder on every start, verification, substitution into `Authorization`/`x-api-key`, host binding, token accounting from the provider's response;
+  - custom API: `NAME` and `NAME_BASE_URL`;
+  - a git proxy without a token in the VM on the same mechanism (in the S13 MVP — a short-lived token via a credential helper, the proxy is deferred; the owner is S16);
+  - binding a profile to an environment (`credentialProfileId`, S14);
+  - sandbox blocking; budgets per sandbox, user, and team with an auto-block;
+  - a team can mandate the proxy.
+- Questions for brainstorm: where to direct traffic (`*_BASE_URL` or a transparent MITM with a CA in the template); what to do about Bedrock SigV4.
+- Basis: `docs:ai-credentials.md`, `docs:integrated-agents/keys.md`.
 
-**S17. Сеть v2.**
-- Содержание:
-  - политики egress на уровне PVE firewall (IPSet на VM) или SDN; домены через DNS-прокси с allowlist;
-  - API политики на sandbox и шаблон, наследование при fork;
-  - приватная VNet команды;
-  - egress через выделенный NAT IP;
-  - TCP-порты наружу через gateway (L4 по SNI или по порту);
-  - свои домены (ACME HTTP-01/DNS-01). Переименование slug — S7 (S4 §4.2).
-- Опора: `docs:hosting/firewall.md`, `vr:battleships`, S1 §4.4, S4 §17.
+**S17. Network v2.**
+- Contents:
+  - egress policies at the PVE firewall level (an IPSet per VM) or SDN; domains via a DNS proxy with an allowlist;
+  - a policy API per sandbox and template, inheritance on fork;
+  - a team's private VNet;
+  - egress through a dedicated NAT IP;
+  - TCP ports outward through the gateway (L4 by SNI or by port);
+  - custom domains (ACME HTTP-01/DNS-01). Slug rename is S7 (S4 §4.2).
+- Basis: `docs:hosting/firewall.md`, `vr:battleships`, S1 §4.4, S4 §17.
 
-**S18. Снапшоты v2.**
-- Содержание:
-  - контроллер авто-снапшотов (`kind auto`): интервал, хранение N последних, при stop;
-  - откат sandbox к снапшоту и fork из снапшота по id;
-  - чтение снапшота без VM: node-agent активирует thin-снимок read-only, монтирует и отдаёт дерево и файлы через API;
-  - экспорт;
-  - архив остановленных в PBS и восстановление на другую ноду (стык с S12);
-  - тома (volumes): отдельный LV, подключаемый к sandbox команды (у boat нет, наше расширение; одновременное подключение к нескольким VM требует общей ФС — решить в brainstorm).
-- Риски: блокировки LVM при частых снимках, место в thin pool (метрика, лимит).
-- Опора: `docs:snapshots/*`, `vr:optibox/docs/scenario-timetravel-design.md` (точки отката нужны и boat-пользователям).
+**S18. Snapshots v2.**
+- Contents:
+  - an auto-snapshot controller (`kind auto`): interval, keeping the last N, at stop;
+  - rolling a sandbox back to a snapshot and forking from a snapshot by id;
+  - reading a snapshot without a VM: node-agent activates a read-only thin snapshot, mounts it, and serves the tree and files via the API;
+  - export;
+  - archiving stopped ones to PBS and restoring on another node (the junction with S12);
+  - volumes: a separate LV attachable to a team's sandbox (boat has none, our extension; simultaneous attachment to several VMs needs a shared FS — decide in brainstorm).
+- Risks: LVM locks with frequent snapshots, thin pool space (a metric, a limit).
+- Basis: `docs:snapshots/*`, `vr:optibox/docs/scenario-timetravel-design.md` (rollback points are needed by boat users too).
 
-**S19. История и наблюдаемость в sandbox.**
-- Содержание:
-  - агент отправляет вывод команд в хранилище (S3 offset-ы позволяют догружать) — объектное хранилище или Postgres с компрессией;
-  - чтение истории у остановленной sandbox;
-  - захват вывода прочих процессов через journald и tty с лимитами;
-  - сэмплы `ps` и метрик раз в 30 s, хранение 7 d;
-  - вид History в дашборде.
-- Опора: `docs:long-running-tasks/command-history.md`.
+**S19. History and observability in the sandbox.**
+- Contents:
+  - the agent sends command output to storage (the S3 offsets allow topping up) — object storage or Postgres with compression;
+  - reading history from a stopped sandbox;
+  - capturing the output of other processes via journald and tty with limits;
+  - samples of `ps` and metrics every 30 s, kept 7 d;
+  - a History view in the dashboard.
+- Basis: `docs:long-running-tasks/command-history.md`.
 
-**S20. События наружу.**
-- Содержание:
-  - webhooks из `sandbox_events` (S6 §5.6): подпись HMAC, повторы, журнал доставок, ротация секрета;
-  - события `ready`, `stopped`, `error`, `degraded`, `recovered` и новые (`agent.turn_finished` из S15);
-  - OTLP-экспорт метрик и событий на команду с тестом при сохранении;
-  - usage в ресурсо-секундах по sandbox, пользователю, команде;
-  - журнал аудита (кто, что, когда, с какого ключа);
-  - уведомления email/Slack.
-- Опора: `docs:webhooks.md`, `docs:opentelemetry.md`.
+**S20. Outbound events.**
+- Contents:
+  - webhooks from `sandbox_events` (S6 §5.6): HMAC signature, retries, a delivery log, secret rotation;
+  - the events `ready`, `stopped`, `error`, `degraded`, `recovered` and new ones (`agent.turn_finished` from S15);
+  - OTLP export of metrics and events per team with a test on save;
+  - usage in resource-seconds by sandbox, user, team;
+  - an audit log (who, what, when, with which key);
+  - email/Slack notifications.
+- Basis: `docs:webhooks.md`, `docs:opentelemetry.md`.
 
-**S21. Агентам: skills, плагины, документация.** Подробно в §5.
+**S21. For agents: skills, plugins, documentation.** In detail in §5.
 
-**S22. CLI и SDK v2.**
-- Содержание:
-  - `run` (create → push → exec → итог → delete, авто-stop через 15 min, если CLI умер);
-  - `push` (git-aware tar через `/files/archive` или SSH), `scp`, `forward`, `ssh-config` для VS Code/Cursor;
-  - `current` и `self`; completions; self-update;
-  - in-VM CLI: `umiak` и `host` внутри sandbox на ключе sandbox из S24 (`host url` ждёт маршрут);
-  - `login --key-stdin`, `logout`, `status --check`, `dashboard` (одноразовый вход), `ssh -t`;
-  - SDK-хелперы как у boat плюс загрузка файлов, плоские параметры и HTTP/2 в TS, async-клиент Python;
-  - подписанные URL файлов через gateway; поиск, замена, наблюдение за каталогом.
-- Опора: `docs:cli-reference.md`, `sdk:*/boat_helpers*`.
+**S22. CLI and SDK v2.**
+- Contents:
+  - `run` (create → push → exec → summary → delete, auto-stop after 15 min if the CLI died);
+  - `push` (a git-aware tar via `/files/archive` or SSH), `scp`, `forward`, `ssh-config` for VS Code/Cursor;
+  - `current` and `self`; completions; self-update;
+  - the in-VM CLI: `umiak` and `host` inside the sandbox on the sandbox key from S24 (`host url` waits for the route);
+  - `login --key-stdin`, `logout`, `status --check`, `dashboard` (one-time login), `ssh -t`;
+  - SDK helpers as in boat plus file upload, flat parameters and HTTP/2 in TS, a Python async client;
+  - signed file URLs through the gateway; search, replace, directory watching.
+- Basis: `docs:cli-reference.md`, `sdk:*/boat_helpers*`.
 
-**S23. Команды и совместный доступ.**
-- Содержание:
-  - видимость sandbox, уровни доступа, авто-private при логинах создателя;
-  - `share` с вычисткой логинов;
-  - командные образы с вычисткой при деплое коллегой;
-  - share-коды образов между командами;
-  - лимиты на пользователя;
-  - активная команда для CLI и заголовок команды.
-- Опора: `docs:organizations/shared-sandboxes.md`, `docs:snapshots/templates.md`.
+**S23. Teams and shared access.**
+- Contents:
+  - sandbox visibility, access levels, auto-private on the creator's logins;
+  - `share` with login scrubbing;
+  - team images with scrubbing on deploy by a colleague;
+  - image share codes between teams;
+  - per-user limits;
+  - the active team for the CLI and a team header.
+- Basis: `docs:organizations/shared-sandboxes.md`, `docs:snapshots/templates.md`.
 
-**S24. API-ключи v2 и вход агентов.**
-- Содержание:
-  - ключи, ограниченные набором sandbox и environments;
-  - rotate и usage; операции только из браузерной сессии;
-  - ключ sandbox (видит только себя) и токен портов в VM;
-  - device flow для агента: агент получает код, человек подтверждает в дашборде под SSO;
-  - `WWW-Authenticate` с `resource_metadata` (RFC 9728) — заодно OAuth для MCP (S11).
-- Опора: `docs:api-keys/*`, `docs:agent-auth.md`.
+**S24. API keys v2 and agent login.**
+- Contents:
+  - keys restricted to a set of sandboxes and environments;
+  - rotate and usage; operations only from a browser session;
+  - a sandbox key (sees only itself) and a port token in the VM;
+  - a device flow for an agent: the agent receives a code, a human confirms it in the dashboard under SSO;
+  - `WWW-Authenticate` with `resource_metadata` (RFC 9728) — OAuth for MCP (S11) at the same time.
+- Basis: `docs:api-keys/*`, `docs:agent-auth.md`.
 
-**S25. Хранение данных и удаление.**
-- Содержание:
-  - политики хранения остановленных sandbox и истории (с предупреждением за N дней);
-  - эфемерные sandbox (stop = delete, без снапшотов) для CI и evals;
-  - выключение мониторинга;
-  - ZDR для команды.
-- Публичный статус операций удаления — в S7 (L11).
-- Опора: `docs:data-retention/*`.
+**S25. Data retention and deletion.**
+- Contents:
+  - retention policies for stopped sandboxes and history (with a warning N days ahead);
+  - ephemeral sandboxes (stop = delete, without snapshots) for CI and evals;
+  - turning off monitoring;
+  - ZDR for a team.
+- The public status of delete operations is in S7 (L11).
+- Basis: `docs:data-retention/*`.
 
-**S26. CI-раннеры.**
-- Содержание:
-  - GitHub App (или webhook GitLab), очередь заданий, JIT-раннер в эфемерной sandbox;
-  - метки `umiak`, `umiak-large`, `umiak/from=<snapshot>/debug`;
-  - отказ публичных репозиториев; лимит 6 h;
-  - логи и статус в API/CLI; аннотация OOM;
-  - Windows-раннеры на шаблоне `windows-core` (у boat нет).
-- Опора: `docs:ci.md`.
+**S26. CI runners.**
+- Contents:
+  - a GitHub App (or a GitLab webhook), a job queue, a JIT runner in an ephemeral sandbox;
+  - labels `umiak`, `umiak-large`, `umiak/from=<snapshot>/debug`;
+  - refusing public repositories; a 6 h limit;
+  - logs and status in the API/CLI; an OOM annotation;
+  - Windows runners on the `windows-core` template (boat has none).
+- Basis: `docs:ci.md`.
 
-**S27. Evals и адаптеры.**
-- Содержание:
-  - Harbor `BaseEnvironment`: использует per-command env/user, абсолютные пути, tar каталогов, сетевые политики S17, образы из S28 — то, что harbor-box вынужден отклонять;
-  - Eve backend с нативным `spawn` через detached + attach;
-  - E2B-совместимая обёртка, если её попросят фреймворки компании;
-  - гайд RL/evals; пакетный create и тёплый пул под snapshot берутся из S30.
-- Опора: `docs:evals.md`, `vr:harbor-box`, `vr:eve-box`.
+**S27. Evals and adapters.**
+- Contents:
+  - Harbor `BaseEnvironment`: uses per-command env/user, absolute paths, directory tars, the S17 network policies, images from S28 — what harbor-box is forced to refuse;
+  - an Eve backend with a native `spawn` via detached + attach;
+  - an E2B-compatible wrapper if the company's frameworks ask for it;
+  - an RL/evals guide; batch create and the warm pool for a snapshot come from S30.
+- Basis: `docs:evals.md`, `vr:harbor-box`, `vr:eve-box`.
 
-**S28. Свои образы и шаблоны v2.**
-- Содержание:
-  - сборка шаблона из Dockerfile или скрипта поверх базового шаблона (RUN-шаги в VM, затем seal и регистрация сборки S5);
-  - кэш по hash Dockerfile;
-  - пользовательские шаблоны команды с квотой;
-  - версии и откат;
-  - Windows: тот же пайплайн поверх S9.
-- Опора: `vr:harbor-box/README.md` (Terminal-Bench требует образы), `vr:battleships` (custom image).
+**S28. Custom images and templates v2.**
+- Contents:
+  - building a template from a Dockerfile or a script on top of a base template (RUN steps in the VM, then seal and registering the S5 build);
+  - a cache by Dockerfile hash;
+  - user templates of a team with a quota;
+  - versions and rollback;
+  - Windows: the same pipeline on top of S9.
+- Basis: `vr:harbor-box/README.md` (Terminal-Bench requires images), `vr:battleships` (custom image).
 
-**S29. Рабочий стол v2 и computer-use API.**
-- Содержание:
-  - API и MCP-инструменты computer-use через cua-driver для Linux и Windows;
-  - браузер-только поток с профилями Chrome;
-  - запись mp4 с выгрузкой;
-  - noVNC как запасной путь;
-  - буфер обмена, обои, `overlay=0`.
-- Опора: `docs:desktop-streaming/*`, `docs:integrated-agents/computer-use.md`.
+**S29. Desktop v2 and the computer-use API.**
+- Contents:
+  - the computer-use API and MCP tools through cua-driver for Linux and Windows;
+  - a browser-only stream with Chrome profiles;
+  - mp4 recording with upload;
+  - noVNC as a fallback;
+  - clipboard, wallpapers, `overlay=0`.
+- Basis: `docs:desktop-streaming/*`, `docs:integrated-agents/computer-use.md`.
 
-**S30. Жизненный цикл v2.**
-- Содержание:
-  - пробуждение по запросу: gateway (S4) держит HTTP-запрос или SSH-соединение и вызывает resume;
-  - гибернация: `qm suspend --todisk` или снапшот с vmstate (проверить время и размер на LVM-thin);
-  - пакетный create с `count`;
-  - тёплый пул под saved snapshot, чтобы `failFast` и массовый старт работали и с `from` (сейчас create из snapshot всегда холодный, S6 §7.3);
-  - `Idempotency-Key` на resume;
-  - рост диска при смене размера;
-  - пользовательский хук `~/.umiak/pre-stop` (сохранить состояние приложения перед stop);
-  - что делать с долго `degraded` sandbox (boat останавливает через 3 дня, S6 §11.1 не трогает).
+**S30. Lifecycle v2.**
+- Contents:
+  - wake-up on request: the gateway (S4) holds an HTTP request or an SSH connection and calls resume;
+  - hibernation: `qm suspend --todisk` or a snapshot with vmstate (check the time and size on LVM-thin);
+  - batch create with `count`;
+  - a warm pool for a saved snapshot so that `failFast` and mass start work with `from` too (currently a create from a snapshot is always cold, S6 §7.3);
+  - `Idempotency-Key` on resume;
+  - disk growth on a size change;
+  - a user hook `~/.umiak/pre-stop` (save application state before stop);
+  - what to do with a long-`degraded` sandbox (boat stops it after 3 days, S6 §11.1 does not touch it).
 
-## 5. Интеграции для агентов (подробно)
+## 5. Integrations for agents (in detail)
 
-### 5.1 Skills и плагины
+### 5.1 Skills and plugins
 
-Что есть у boat:
-- `vr:cloud-sandbox-vm-skills` — 13 сценарных skills, ставятся через `npx skills add` в Claude Code, Codex, OpenCode, Cursor. Каждый: когда использовать → почему → предпосылки → рецепт на bash → ограничения. Наш пакет примерно такой же: в нём 14 сценарных skills, набор и рецепты под `umiak` и наши шаблоны.
-- `vr:kimi-box-plugin` — плагин Kimi Code (`kimi.plugin.json`) с командами `/box:setup`, `/box:new` и 18 skills: те же 13 сценарных (с правками) и 5 справочных (CLI, API, SDK TS, SDK Python, platform).
-- В sandbox для всех harness предустановлен skill `boat`.
-- Манифеста для Claude Code и `.mcp.json` у boat нет.
+What boat has:
+- `vr:cloud-sandbox-vm-skills` — 13 scenario skills, installed via `npx skills add` into Claude Code, Codex, OpenCode, Cursor. Each: when to use → why → prerequisites → a bash recipe → limitations. Our package is roughly the same: it holds 14 scenario skills, the set and recipes for `umiak` and our templates.
+- `vr:kimi-box-plugin` — a Kimi Code plugin (`kimi.plugin.json`) with the commands `/box:setup`, `/box:new` and 18 skills: the same 13 scenario ones (with edits) and 5 reference ones (CLI, API, SDK TS, SDK Python, platform).
+- In the sandbox the `boat` skill is preinstalled for all harnesses.
+- Boat has no manifest for Claude Code and no `.mcp.json`.
 
-Наш пакет (репозиторий `umiak-agent-kit` или каталог `integrations/agent-kit` в монорепо; строится вместе с CLI, версии совпадают).
+Our package (the repository `umiak-agent-kit` or the directory `integrations/agent-kit` in the monorepo; built together with the CLI, versions match).
 
-**Справочные skills:**
+**Reference skills:**
 
-| Skill | Содержание |
+| Skill | Contents |
 |---|---|
-| `umiak-cli` | Установка и вход (`umiak login`, ключ из env, `--key-stdin`); глобальные флаги; `current`/`self`; жизненный цикл; exec/ssh/push/forward/desktop; снапшоты; **контракт JSON/JSONL**: `jq 'select(.event=="ready")'`, строка ошибки, коды выхода; особенность stdin в PowerShell |
-| `umiak-api` | Base URL, авторизация, конверт, таблица кодов ошибок с `retryable` и действием; машина состояний; таблица эндпоинтов; цикл на curl; 502 = «могло выполниться» |
-| `umiak-sdk-ts`, `umiak-sdk-py` | Конфигурация, поток create → ждать → работа → очистка в `finally`; хелперы и их фреймы |
-| `umiak-mcp` | Список инструментов, когда MCP, а когда CLI, длинные задачи через detached + опрос |
-| `umiak-platform` | Sandbox на задачу или на пользователя, шаблон → fork, демон в VM + порт с токеном, квоты, что переживает stop/resume/fork |
+| `umiak-cli` | Installation and login (`umiak login`, a key from env, `--key-stdin`); global flags; `current`/`self`; lifecycle; exec/ssh/push/forward/desktop; snapshots; **the JSON/JSONL contract**: `jq 'select(.event=="ready")'`, the error line, exit codes; the quirk of stdin in PowerShell |
+| `umiak-api` | Base URL, authorization, the envelope, the table of error codes with `retryable` and the action; the state machine; the endpoint table; a curl loop; 502 = "may have executed" |
+| `umiak-sdk-ts`, `umiak-sdk-py` | Configuration, the flow create → wait → work → cleanup in `finally`; helpers and their frames |
+| `umiak-mcp` | The tool list, when MCP and when CLI, long tasks via detached + polling |
+| `umiak-platform` | A sandbox per task or per user, template → fork, a daemon in the VM + a port with a token, quotas, what survives stop/resume/fork |
 
-**Сценарные skills** (триггер в `description` решает, сработает ли skill):
+**Scenario skills** (the trigger in `description` decides whether the skill fires):
 
-| Skill | Сценарий | Основа у boat | Когда |
+| Skill | Scenario | Boat's basis | When |
 |---|---|---|---|
-| `run-untrusted-code` | Недоверенный или сгенерированный код: `timeout`, удаление в `trap`, без секретов | есть | MVP (флаг из R3); полностью — S14 |
-| `code-execution` | Интерпретатор кода на настоящей машине | есть | MVP |
-| `offload-build-test` | Сборки и тесты вне хоста; до S22 — create + exec + delete, после — `umiak run --push .` | `cloud-sandbox` | MVP, упрощается в S22 |
-| `docker-sandbox` | Docker/Compose + порт наружу | есть | MVP |
-| `ephemeral-ci` | Чистое окружение CI, артефакты обратно | есть | MVP |
-| `delegate-to-agent` | Отдать задачу coding-агенту в sandbox (`umiak prompt`, события, steer) | `agent-sandbox` | S15 |
-| `parallel-agents` | Подготовить базу, stop, fork N (свой env на копию — R11), собрать через git | есть | MVP |
-| `long-running-service` | systemd, без TTL, idle-stop, что переживает stop | `background-worker` | MVP |
-| `expose-port` | Публичный URL: `token`/`sso`/`public`, bind на 0.0.0.0 не нужен | `expose-localhost-tunnel`, `public-url-hosting` | MVP |
-| `dev-box-ssh` | Удалённая машина разработчика, VS Code Remote | `cloud-vm`, `linux-server-ssh` | MVP |
-| `computer-use-desktop` | GUI и браузер: рабочий стол, computer-use (Linux и Windows) | есть | S10; API — S29 |
-| `windows-sandbox` | PowerShell, Windows-приложения, GUI на Windows-шаблоне | нет у boat | S9 |
-| `private-repo-work` | Приватные репо: в MVP короткоживущий токен (S13), без токена — S16 | нет у boat | S13 |
-| `evals-per-task` | Snapshot на задачу, идемпотентный create, backoff | `docs:evals.md` | MVP |
+| `run-untrusted-code` | Untrusted or generated code: `timeout`, deletion in `trap`, no secrets | exists | MVP (the flag from R3); fully — S14 |
+| `code-execution` | A code interpreter on a real machine | exists | MVP |
+| `offload-build-test` | Builds and tests off the host; before S22 — create + exec + delete, after — `umiak run --push .` | `cloud-sandbox` | MVP, simplified in S22 |
+| `docker-sandbox` | Docker/Compose + a port outward | exists | MVP |
+| `ephemeral-ci` | A clean CI environment, artifacts back | exists | MVP |
+| `delegate-to-agent` | Hand a task to a coding agent in the sandbox (`umiak prompt`, events, steer) | `agent-sandbox` | S15 |
+| `parallel-agents` | Prepare a base, stop, fork N (own env per copy — R11), collect via git | exists | MVP |
+| `long-running-service` | systemd, no TTL, idle-stop, what survives stop | `background-worker` | MVP |
+| `expose-port` | A public URL: `token`/`sso`/`public`, binding to 0.0.0.0 not needed | `expose-localhost-tunnel`, `public-url-hosting` | MVP |
+| `dev-box-ssh` | A remote developer machine, VS Code Remote | `cloud-vm`, `linux-server-ssh` | MVP |
+| `computer-use-desktop` | GUI and browser: the desktop, computer-use (Linux and Windows) | exists | S10; the API — S29 |
+| `windows-sandbox` | PowerShell, Windows applications, GUI on the Windows template | none in boat | S9 |
+| `private-repo-work` | Private repos: in the MVP a short-lived token (S13), without a token — S16 | none in boat | S13 |
+| `evals-per-task` | A snapshot per task, an idempotent create, backoff | `docs:evals.md` | MVP |
 
-**Правила во всех skills** (из boat, адаптировано):
-- ждать `ready` перед exec;
-- очистка в `trap`/`finally`; по умолчанию stop, а не delete;
-- повторять только при `retryable: true`;
-- не передавать секреты в prompt, URL и аргументах;
-- URL с токеном, ключи и ссылки рабочего стола — секреты, в логах редактировать;
-- всегда передавать id (в скриптах `current` не работает);
-- квоты и шаблоны узнавать через `umiak limits`, не по памяти.
+**Rules in all skills** (from boat, adapted):
+- wait for `ready` before exec;
+- cleanup in `trap`/`finally`; stop by default, not delete;
+- retry only on `retryable: true`;
+- do not pass secrets in prompts, URLs, and arguments;
+- URLs with a token, keys, and desktop links are secrets, redact them in logs;
+- always pass the id (`current` does not work in scripts);
+- learn quotas and templates through `umiak limits`, not from memory.
 
-**Slash-команды** (плагин):
+**Slash commands** (the plugin):
 
-| Команда | Что делает |
+| Command | What it does |
 |---|---|
-| `/umiak:setup` | Ставит CLI, входит (ключ из env или браузер), проверяет `umiak limits --json` |
-| `/umiak:new <задача>` | Создаёт sandbox, копирует входные данные, выполняет, возвращает результат или URL, по умолчанию stop |
-| `/umiak:list` | Список sandbox пользователя с состоянием |
-| `/umiak:cleanup` | Stop или delete sandbox, созданных в этой сессии (по метке) |
-| `/umiak:desktop [id]` | Ссылка на рабочий стол |
-| `/umiak:fork <n> <задача>` | Fork N копий и параллельный запуск (после S15 — через `prompt`) |
+| `/umiak:setup` | Installs the CLI, logs in (a key from env or the browser), checks `umiak limits --json` |
+| `/umiak:new <task>` | Creates a sandbox, copies the inputs, executes, returns the result or a URL, stop by default |
+| `/umiak:list` | The user's sandboxes with their state |
+| `/umiak:cleanup` | Stop or delete the sandboxes created in this session (by label) |
+| `/umiak:desktop [id]` | A desktop link |
+| `/umiak:fork <n> <task>` | Fork N copies and run in parallel (after S15 — via `prompt`) |
 
-**Упаковка:**
-- `skills/*/SKILL.md` в формате agentskills: установка `npx skills add <внутренний репозиторий>` для Claude Code, Codex, OpenCode, Cursor;
-- плагин Claude Code: `.claude-plugin/plugin.json`, `marketplace.json` во внутреннем marketplace, `commands/`, `.mcp.json` с нашим MCP (Streamable HTTP, ключ из env или OAuth);
-- Codex, OpenCode, Cursor, Kimi: каталоги skills + регистрация MCP их командами (`codex mcp add`, `opencode.json`, `mcp.json`, `kimi.plugin.json`). Форматы манифестов проверить на момент S21: они быстро меняются;
-- skill `umiak` в шаблонах для всех harness (S15): как sandbox управляет собой через in-VM CLI.
+**Packaging:**
+- `skills/*/SKILL.md` in the agentskills format: installed with `npx skills add <internal repository>` for Claude Code, Codex, OpenCode, Cursor;
+- the Claude Code plugin: `.claude-plugin/plugin.json`, `marketplace.json` in an internal marketplace, `commands/`, `.mcp.json` with our MCP (Streamable HTTP, a key from env or OAuth);
+- Codex, OpenCode, Cursor, Kimi: skill directories + MCP registration with their commands (`codex mcp add`, `opencode.json`, `mcp.json`, `kimi.plugin.json`). Check the manifest formats at the time of S21: they change quickly;
+- the skill `umiak` in the templates for all harnesses (S15): how a sandbox manages itself through the in-VM CLI.
 
-**Документация для агентов:**
-- `llms.txt` с блоком ключевых фактов (шаблоны, размеры, квоты, сроки, таймауты, события) и шпаргалкой CLI;
-- `llms-full.txt`; каждая страница доступна как `.md`;
-- MCP документации (`search_docs`, `read_page`) — можно как инструменты нашего же MCP-сервера;
-- фрагмент `AGENTS.md`/`CLAUDE.md` для проектов.
+**Documentation for agents:**
+- `llms.txt` with a key facts block (templates, sizes, quotas, periods, timeouts, events) and a CLI cheat sheet;
+- `llms-full.txt`; every page is available as `.md`;
+- a documentation MCP (`search_docs`, `read_page`) — can be tools of our own MCP server;
+- an `AGENTS.md`/`CLAUDE.md` snippet for projects.
 
-### 5.2 Список инструментов MCP-сервера (S11 и фаза 2)
+### 5.2 The MCP server tool list (S11 and phase 2)
 
-Обновление 2026-10-29: итоговый список MVP — `docs/specs/s11-mcp.md` (38 инструментов). `computer_*` и `desktop_url` вошли в S11; `files_mkdir`, `files_move`, `sandbox_extend` не вводятся; добавлены `files_edit`, `sandbox_recover`, `computer_move`, `computer_clipboard_*`; `exec_input` и PTY — S22. Таблица ниже — исходный черновик.
+Update 2026-10-29: the final MVP list is `docs/specs/s11-mcp.md` (38 tools). `computer_*` and `desktop_url` went into S11; `files_mkdir`, `files_move`, `sandbox_extend` are not introduced; added `files_edit`, `sandbox_recover`, `computer_move`, `computer_clipboard_*`; `exec_input` and PTY — S22. The table below is the original draft.
 
-Транспорт: Streamable HTTP за `api.<domain>` (Bearer-ключ, позже OAuth по RFC 9728 через S24) и stdio через `umiak mcp`. Аннотации инструментов: `readOnlyHint` и `destructiveHint`. Delete требует повторить id (как заголовок подтверждения).
+Transport: Streamable HTTP behind `api.<domain>` (a Bearer key, later OAuth per RFC 9728 via S24) and stdio via `umiak mcp`. Tool annotations: `readOnlyHint` and `destructiveHint`. Delete requires repeating the id (like the confirmation header).
 
-Длинные операции: `exec_start` + `exec_output` с offset, без удержания одного вызова. Вывод в ответе обрезается с явным `next_offset`.
+Long operations: `exec_start` + `exec_output` with an offset, without holding one call. Output in a response is truncated with an explicit `next_offset`.
 
-| Инструмент | Что делает | Область |
+| Tool | What it does | Area |
 |---|---|---|
-| `templates_list` | Шаблоны и размеры, доступные пользователю | S11 |
-| `limits_get` | Квоты и остаток, допустимые размеры с причиной | S11 (MVP-рек. R9) |
-| `sandbox_create` | template, size, name, labels, env, ttl, idle, from, failFast; ждёт `ready` (опция) | S11 |
-| `sandbox_list`, `sandbox_get` | Фильтры по состоянию и меткам | S11 |
-| `sandbox_stop`, `sandbox_resume`, `sandbox_fork`, `sandbox_extend`, `sandbox_update` | Жизненный цикл | S11 |
-| `sandbox_delete` | С подтверждением id | S11 |
-| `exec_run` | Синхронно с таймаутом: exit, stdout/stderr с обрезкой | S11 |
-| `exec_start`, `exec_output`, `exec_kill`, `exec_list` | Detached, чтение по offset, kill | S11 |
-| `files_read`, `files_write`, `files_list`, `files_stat`, `files_delete`, `files_mkdir`, `files_move` | Файлы (чтение диапазоном) | S11 |
-| `port_expose`, `port_list`, `port_unexpose` | URL порта (`token`/`sso`/`public`) | S11 |
+| `templates_list` | The templates and sizes available to the user | S11 |
+| `limits_get` | Quotas and the remainder, allowed sizes with a reason | S11 (MVP rec. R9) |
+| `sandbox_create` | template, size, name, labels, env, ttl, idle, from, failFast; waits for `ready` (optional) | S11 |
+| `sandbox_list`, `sandbox_get` | Filters by state and labels | S11 |
+| `sandbox_stop`, `sandbox_resume`, `sandbox_fork`, `sandbox_extend`, `sandbox_update` | Lifecycle | S11 |
+| `sandbox_delete` | With id confirmation | S11 |
+| `exec_run` | Synchronously with a timeout: exit, stdout/stderr with truncation | S11 |
+| `exec_start`, `exec_output`, `exec_kill`, `exec_list` | Detached, reading by offset, kill | S11 |
+| `files_read`, `files_write`, `files_list`, `files_stat`, `files_delete`, `files_mkdir`, `files_move` | Files (range reads) | S11 |
+| `port_expose`, `port_list`, `port_unexpose` | The port URL (`token`/`sso`/`public`) | S11 |
 | `snapshot_save`, `snapshot_list`, `snapshot_delete` | Saved snapshots | S11 |
-| `desktop_url` | Ссылка на рабочий стол | S11 (после S10) |
-| `computer_screenshot`, `computer_click`, `computer_type`, `computer_key`, `computer_scroll`, `computer_drag` | Computer-use | S11 (поверх S10 §13) |
-| `agent_prompt`, `agent_events`, `agent_steer`, `agent_interrupt`, `agent_conversations` | Встроенные агенты | S15 |
-| `history_list`, `history_output`, `processes_list` | История и процессы | S19 |
+| `desktop_url` | A desktop link | S11 (after S10) |
+| `computer_screenshot`, `computer_click`, `computer_type`, `computer_key`, `computer_scroll`, `computer_drag` | Computer-use | S11 (on top of S10 §13) |
+| `agent_prompt`, `agent_events`, `agent_steer`, `agent_interrupt`, `agent_conversations` | Built-in agents | S15 |
+| `history_list`, `history_output`, `processes_list` | History and processes | S19 |
 | `env_list`, `env_get`, `env_set_var`, `env_add_repo` | Environments | S14 |
-| `snapshot_tree`, `snapshot_read_file`, `snapshot_restore` | Снапшоты v2 | S18 |
-| `docs_search`, `docs_read` | Документация платформы | S21 |
+| `snapshot_tree`, `snapshot_read_file`, `snapshot_restore` | Snapshots v2 | S18 |
+| `docs_search`, `docs_read` | Platform documentation | S21 |
 
-Ресурсы MCP (по желанию): `umiak://<id>/files/<path>`, `umiak://<id>/commands/<cmd>/output`.
+MCP resources (optional): `umiak://<id>/files/<path>`, `umiak://<id>/commands/<cmd>/output`.
 
-### 5.3 Интеграции с фреймворками и eval-харнессами
+### 5.3 Integrations with frameworks and eval harnesses
 
-| Интеграция | Что делаем | Область |
+| Integration | What we do | Area |
 |---|---|---|
-| Harbor (Terminal-Bench и др.) | `BaseEnvironment` на Python: exec с env/user, абсолютные пути, tar каталогов, сетевые политики, образ задачи из Dockerfile | S27 (+S17, S28) |
-| Eve | `SandboxBackend` с нативным `spawn` | S27 |
-| E2B-совместимый SDK | Обёртка поверх нашего API для фреймворков, которые умеют только E2B (LangChain, OpenAI Agents SDK и др.) — только при спросе | S27, P3 |
-| Claude Agent SDK / свой агент в sandbox | Пример как в `vr:harbor-box/sdks/harbor-box-evals`: агент в VM, траектория JSONL выгружается | S21 (гайд) |
-| CI | GitHub Actions/GitLab раннеры; `umiak run` в любом CI | S26, S22 |
-| Convex, optibox | Не делаем | ⊘ |
+| Harbor (Terminal-Bench etc.) | A Python `BaseEnvironment`: exec with env/user, absolute paths, directory tars, network policies, the task image from a Dockerfile | S27 (+S17, S28) |
+| Eve | A `SandboxBackend` with a native `spawn` | S27 |
+| An E2B-compatible SDK | A wrapper on top of our API for frameworks that only speak E2B (LangChain, OpenAI Agents SDK, etc.) — only on demand | S27, P3 |
+| Claude Agent SDK / one's own agent in a sandbox | An example like `vr:harbor-box/sdks/harbor-box-evals`: the agent in the VM, the JSONL trajectory is exported | S21 (a guide) |
+| CI | GitHub Actions/GitLab runners; `umiak run` in any CI | S26, S22 |
+| Convex, optibox | We do not do them | ⊘ |
 
-## 6. Рекомендации master к MVP (S1–S13)
+## 6. Master's recommendations for the MVP (S1–S13)
 
-Пробелы, которые дешевле закрыть сейчас, чем менять после релиза.
+Gaps that are cheaper to close now than to change after release.
 
-| # | Область | Рекомендация | Почему сейчас |
+| # | Area | Recommendation | Why now |
 |---|---|---|---|
-| R1 | S7 | Зафиксировать **контракт CLI**: JSON автоматически, когда stdout не TTY; JSONL с событием `ready` у `new`/`fork --wait`; ошибка — последняя строка `{"event":"error","code",…}`; код выхода команды и 124 при таймауте; `current`. В API: заголовок подтверждения удаления (`Umiak-Confirm-Delete: <id>`), `retryable` и `requestId` в каждой ошибке. В SDK — хелперы `waitUntilReady`, `runCommand`, `streamCommand` | На этом контракте строятся skills, MCP, CI и скрипты; менять после релиза — ломать всех. Подтверждение удаления защищает от ошибок агентов |
-| R2 | S6, S7 | `failFast` на create из шаблона: только тёплый пул, иначе `503 pool_exhausted`, ничего не создаётся. С `from` create у нас всегда холодный (S6 §7.3), поэтому там `failFast` либо отклоняется, либо ждёт тёплого пула под snapshot (S30) | Пул уже есть (S6 §9), это одна ветка admission; нужно evals и агентам, чувствительным к задержке |
-| R3 | S7/S8, S13 | Минимальная сущность **environment** (переменные, secret-файлы, репозитории, default) и флаг «без секретов пользователя» на create. Решить владельца: коллекция Payload (S8) + применение при claim (S6) | S13 кладёт репозитории в environment, а сущности нет ни в одной спецификации. Версии и upgrade — потом (S14) |
-| R4 | S8 | Модель scope ключей сразу как **действие × ресурс** со сроком жизни: действия как у boat (§2.14 K2), ограничение списком sandbox и environments (по желанию — шаблонов), срок по умолчанию 90 d, дочерний ключ не шире родителя. Зарезервировать тип ключа «sandbox» (видит только свою sandbox) для in-VM CLI | Менять семантику выданных ключей потом — миграция и риск для безопасности; S22/S24 строятся на этом |
-| R5 | S5 | В шаблон `linux` положить CLI coding-агентов (`claude`, `codex`, `opencode`), наш `umiak` CLI и набор инструментов по `docs:machines/tools.md` (Node+pnpm, Python+uv, Go, Rust, Java, Docker+Compose+buildx, gh, rg, jq, Chrome, ffmpeg, xdotool) | Пользователи начнут запускать агентов через exec и SSH задолго до S15; S15 опирается на версии в шаблоне |
-| R6 | S1, S5 | Проверить `/dev/kvm` в госте (вложенная виртуализация на хосте, `cpu host` уже в S1 §4.6) и записать: гарантия платформы или нет | Docker уже есть; Android-эмулятор, Firecracker, QEMU-тесты в CI требуют KVM. `cpu host` мешает живой миграции между разными CPU — решение влияет на S12 |
-| R7 | S3/S7 | Поднять `/files/archive` (tar каталога вверх и вниз потоком) из «позже» в v0 или в S7 | Без него `umiak push`, выгрузка артефактов и адаптеры evals делают по вызову на файл (боль harbor-box) |
-| R8 | S11 | Взять список инструментов §5.2 как вход brainstorm S11, включая шаблон длинных задач (detached + опрос) и аннотации `destructiveHint` | S11 — главный канал для агентов и наше отличие от boat |
-| R9 | S7 | `GET /v1/limits`: квоты команды и остаток, допустимые шаблоны и размеры с причиной | Квоты есть (S6 §8.5); агентам нужно проверять перед массовым стартом, skills ссылаются на `umiak limits` |
-| R10 | S4, S6, S7 | Согласовать формат slug: S6 §5.6 пишет «10 символов `[a-z0-9]`», S4 §4.2 — `[a-z0-9]+(-[a-z0-9]+)*`, 3–40 символов, по умолчанию три слова, rename в S7 | Slug виден в URL портов и SSH; противоречие между спецификациями нужно снять до реализации |
-| R11 | S6, S7 | `env` и `secretFiles` на fork (заменяют унаследованные) и на resume. Сейчас fork принимает только `name, labels, ttlSeconds, size` (S6 §7.7), resume — `size` и TTL (§7.6) | Центральный сценарий parallel-agents и evals: своя задача или секрет на каждую копию. Перешифровка `sandbox_secrets` для цели уже есть в §7.7, доработка мала |
+| R1 | S7 | Fix the **CLI contract**: JSON automatically when stdout is not a TTY; JSONL with the `ready` event for `new`/`fork --wait`; an error is the last line `{"event":"error","code",…}`; the command's exit code and 124 on timeout; `current`. In the API: a delete confirmation header (`Umiak-Confirm-Delete: <id>`), `retryable` and `requestId` in every error. In the SDK — the helpers `waitUntilReady`, `runCommand`, `streamCommand` | Skills, MCP, CI, and scripts are built on this contract; changing it after release breaks everyone. Delete confirmation protects against agents' mistakes |
+| R2 | S6, S7 | `failFast` on create from a template: warm pool only, otherwise `503 pool_exhausted`, nothing is created. With `from` a create is always cold for us (S6 §7.3), so there `failFast` is either rejected or waits for a warm pool for a snapshot (S30) | The pool already exists (S6 §9), this is one admission branch; needed by evals and latency-sensitive agents |
+| R3 | S7/S8, S13 | A minimal **environment** entity (variables, secret files, repositories, default) and a flag "without the user's secrets" on create. Decide the owner: a Payload collection (S8) + applying at claim (S6) | S13 puts repositories into an environment, but the entity is in no specification. Versions and upgrade come later (S14) |
+| R4 | S8 | The key scope model right away as **action × resource** with a lifetime: actions as in boat (§2.14 K2), restriction by a list of sandboxes and environments (optionally templates), a 90 d default lifetime, a child key no wider than its parent. Reserve a "sandbox" key type (sees only its own sandbox) for the in-VM CLI | Changing the semantics of issued keys later is a migration and a security risk; S22/S24 are built on this |
+| R5 | S5 | Put into the `linux` template the coding-agent CLIs (`claude`, `codex`, `opencode`), our `umiak` CLI, and the tool set per `docs:machines/tools.md` (Node+pnpm, Python+uv, Go, Rust, Java, Docker+Compose+buildx, gh, rg, jq, Chrome, ffmpeg, xdotool) | Users will start running agents through exec and SSH long before S15; S15 relies on the versions in the template |
+| R6 | S1, S5 | Check `/dev/kvm` in the guest (nested virtualization on the host, `cpu host` is already in S1 §4.6) and record whether it is a platform guarantee | Docker already exists; the Android emulator, Firecracker, and QEMU tests in CI need KVM. `cpu host` hinders live migration between different CPUs — the decision affects S12 |
+| R7 | S3/S7 | Move `/files/archive` (a directory tar up and down as a stream) from "later" into v0 or S7 | Without it `umiak push`, artifact export, and the evals adapters make one call per file (harbor-box's pain) |
+| R8 | S11 | Take the tool list of §5.2 as input to the S11 brainstorm, including the long-task template (detached + polling) and the `destructiveHint` annotations | S11 is the main channel for agents and our difference from boat |
+| R9 | S7 | `GET /v1/limits`: team quotas and the remainder, allowed templates and sizes with a reason | Quotas exist (S6 §8.5); agents need to check before a mass start, skills refer to `umiak limits` |
+| R10 | S4, S6, S7 | Align the slug format: S6 §5.6 says "10 characters `[a-z0-9]`", S4 §4.2 — `[a-z0-9]+(-[a-z0-9]+)*`, 3–40 characters, three words by default, rename in S7 | The slug is visible in port URLs and SSH; the contradiction between specifications must be removed before implementation |
+| R11 | S6, S7 | `env` and `secretFiles` on fork (replace the inherited ones) and on resume. Currently fork accepts only `name, labels, ttlSeconds, size` (S6 §7.7), resume — `size` and TTL (§7.6) | The central scenario of parallel-agents and evals: its own task or secret per copy. Re-encrypting `sandbox_secrets` for the target already exists in §7.7, the change is small |
 
-Не трогать в MVP (уже решено хорошо или ждёт фазы 2): idle-stop по активности, точный fork, `sso`-порты, постоянный SSH host key, вывод команд через shim — это наши преимущества (§3).
+Do not touch in the MVP (already well decided or waiting for phase 2): idle-stop by activity, exact fork, `sso` ports, a permanent SSH host key, command output via the shim — these are our advantages (§3).
 
-## 7. Открытые вопросы для brainstorm фазы 2
+## 7. Open questions for the phase 2 brainstorm
 
-- S15: раннер агентов — часть guest agent (Go) или отдельный сервис в VM (TS, ближе к SDK harness)?
-- S16: прокси через `*_BASE_URL` или прозрачный MITM с CA в шаблоне; что делать с SigV4 (Bedrock) и OAuth-подписками.
-- S17: домены в allowlist через DNS-прокси или только IP/CIDR в PVE firewall.
-- S18: объектное хранилище для истории и экспорта (S19 тоже) — MinIO/S3 в кластере или Postgres.
-- S26: GitHub или GitLab (ответ Ильи по S13).
-- S27: нужна ли E2B-совместимость — какие фреймворки используют в компании.
-- GPU: есть ли в компании железо для проброса.
+- S15: is the agent runner part of the guest agent (Go) or a separate service in the VM (TS, closer to the SDK harness)?
+- S16: a proxy through `*_BASE_URL` or a transparent MITM with a CA in the template; what to do with SigV4 (Bedrock) and OAuth subscriptions.
+- S17: domains in the allowlist via a DNS proxy or only IP/CIDR in the PVE firewall.
+- S18: object storage for history and export (S19 too) — MinIO/S3 in the cluster or Postgres.
+- S26: GitHub or GitLab (Ilia's answer on S13).
+- S27: is E2B compatibility needed — which frameworks the company uses.
+- GPU: does the company have hardware for passthrough.
 
-## Приложение. Покрытие источников
+## Appendix. Source coverage
 
-- Документация: прочитаны все 213 страниц `docs:` (по разделам: guide и платформа — 35, environments/hosting/ssh/desktop/windows/ci/evals/otel/webhooks/data-retention — 34, agents/AI/orgs/keys/billing/SDK — 29, `cli-reference.md` — 1, API reference — 113 страниц + `api/v1.md`) и `llms.txt`. Все 113 страниц API reference сопоставлены с 121 операцией OpenAPI; 8 операций без страниц (4 CI и 4 скрытых `named-snapshots`). В документации упомянуты эндпоинты, которых нет в OpenAPI: `GET /provider-models`, `POST /sandboxes/{id}/browser`, ручки agent-auth.
-- CLI: прочитаны все 120 файлов `cli:` и `docs:cli-reference.md`.
-- SDK: `sdk:openapi/boat-v1.yaml`, хелперы Python и TS, `http2-fetch.ts`, README.
-- Vendor: `vr:cloud-sandbox-vm-skills` (13 skills), `vr:kimi-box-plugin` (2 команды, 18 skills), `vr:optibox`, `vr:boat-convex`, `vr:harbor-box`, `vr:eve-box`, `vr:battleships` (карточки, сравнение), `vr:agent-server-release` (скрипты установки).
-- Расхождения в источниках boat: лимит запросов с IP 1000/мин против 10 000/60 s (`docs:limits.md`); `provider` у prompt обязателен по схеме, но необязателен по тексту; `boat_starting` против `sandbox_starting`.
+- Documentation: all 213 pages of `docs:` were read (by section: guide and platform — 35, environments/hosting/ssh/desktop/windows/ci/evals/otel/webhooks/data-retention — 34, agents/AI/orgs/keys/billing/SDK — 29, `cli-reference.md` — 1, API reference — 113 pages + `api/v1.md`) and `llms.txt`. All 113 pages of the API reference were matched to the 121 OpenAPI operations; 8 operations have no pages (4 CI and 4 hidden `named-snapshots`). The documentation mentions endpoints that are not in the OpenAPI: `GET /provider-models`, `POST /sandboxes/{id}/browser`, agent-auth endpoints.
+- CLI: all 120 files of `cli:` and `docs:cli-reference.md` were read.
+- SDK: `sdk:openapi/boat-v1.yaml`, the Python and TS helpers, `http2-fetch.ts`, the README.
+- Vendor: `vr:cloud-sandbox-vm-skills` (13 skills), `vr:kimi-box-plugin` (2 commands, 18 skills), `vr:optibox`, `vr:boat-convex`, `vr:harbor-box`, `vr:eve-box`, `vr:battleships` (cards, comparison), `vr:agent-server-release` (install scripts).
+- Discrepancies in boat's sources: the request limit per IP is 1000/min versus 10 000/60 s (`docs:limits.md`); `provider` of prompt is required by the schema but optional by the text; `boat_starting` versus `sandbox_starting`.
