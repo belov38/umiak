@@ -408,6 +408,12 @@ def verify_dnsmasq_unit(runner: Runner) -> None:
     """After an SDN apply the zone's own dnsmasq must run; otherwise guests get no DHCP."""
     if not exists(runner, ZONE) or get(runner, ZONE).get("dhcp") != "dnsmasq":
         return
+    conf_dir = runner.path(DNSMASQ_CONF_DIR)
+    if conf_dir.is_dir() and conf_dir.stat().st_mode & 0o055 != 0o055:
+        raise InstallerError(
+            f"{DNSMASQ_CONF_DIR} is not world-readable (mode {conf_dir.stat().st_mode & 0o777:04o}); "
+            "dnsmasq drops privileges and cannot re-read its DHCP hosts file, so guests would get no DHCP."
+        )
     try:
         state = runner.run(["systemctl", "is-active", DNSMASQ_UNIT])
     except CommandError as error:
@@ -428,9 +434,12 @@ def repair_dnsmasq_modes(runner: Runner) -> bool:
     """Undo configs PVE wrote as 0600 under a leaked umask 077 (messagebus cannot read them)."""
     paths = [runner.path(p) for p in DNSMASQ_PRIVATE_FILES]
     conf_dir = runner.path(DNSMASQ_CONF_DIR)
+    fixed = False
     if conf_dir.is_dir():
         paths += sorted(conf_dir.glob("*.conf"))
-    fixed = False
+        if conf_dir.stat().st_mode & 0o055 != 0o055:
+            conf_dir.chmod(0o755)
+            fixed = True
     for path in paths:
         if path.is_file() and path.stat().st_mode & 0o777 == 0o600:
             path.chmod(0o644)

@@ -653,3 +653,23 @@ def test_private_dir_and_secrets_ignore_the_umask(tmp_path):
         os.umask(old)
     assert d.stat().st_mode & 0o777 == 0o700
     assert (d / "s").stat().st_mode & 0o777 == 0o600
+
+
+def test_repair_dnsmasq_modes_fixes_a_0700_zone_directory(host):
+    runner, _ = host
+    conf_dir = runner.path("/etc/dnsmasq.d/umiak")
+    conf_dir.mkdir(parents=True)
+    conf_dir.chmod(0o700)
+    assert prepare_host.repair_dnsmasq_modes(runner) is True
+    assert conf_dir.stat().st_mode & 0o777 == 0o755
+    assert ["systemctl", "restart", "dnsmasq@umiak"] in runner.commands
+
+
+def test_verify_rejects_a_private_zone_directory(host):
+    runner, out = host
+    prepare_host.prepare(runner, config(), out)
+    conf_dir = runner.path("/etc/dnsmasq.d/umiak")
+    conf_dir.mkdir(parents=True, exist_ok=True)
+    conf_dir.chmod(0o700)
+    with pytest.raises(InstallerError, match="not world-readable"):
+        prepare_host.verify_dnsmasq_unit(runner)
