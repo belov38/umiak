@@ -110,9 +110,10 @@ export async function cleanup(d: CleanupDeps): Promise<string[]> {
 				const upid = await api.post<string>(`${path}/status/stop`);
 				await api.waitTask(cfg.node, upid);
 			}
+			// 0: the unreferenced-disk scan aborts on an inactive storage (vmdata) and leaks the VM.
 			const upid = await api.delete<string>(path, {
 				purge: 1,
-				"destroy-unreferenced-disks": 1,
+				"destroy-unreferenced-disks": 0,
 			});
 			await api.waitTask(cfg.node, upid, { timeoutMs: 10 * 60_000 });
 			present.delete(v.vmid);

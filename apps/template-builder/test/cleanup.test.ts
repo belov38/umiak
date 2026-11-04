@@ -190,7 +190,7 @@ describe("cleanup", () => {
 			{
 				method: "DELETE",
 				path: "/nodes/pve/qemu/598",
-				params: { purge: 1, "destroy-unreferenced-disks": 1 },
+				params: { purge: 1, "destroy-unreferenced-disks": 0 },
 			},
 		]);
 		expect(

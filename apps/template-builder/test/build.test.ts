@@ -599,7 +599,7 @@ describe("buildTemplate: failures", () => {
 			"ram:release 597",
 		]);
 		const del = s.pve.calls.find((c) => c.method === "DELETE" && c.path === vm);
-		expect(del?.params).toEqual({ purge: 1, "destroy-unreferenced-disks": 1 });
+		expect(del?.params).toEqual({ purge: 1, "destroy-unreferenced-disks": 0 });
 		const removed = s.node.calls.find((c) => c.op === "media.remove");
 		expect(removed?.args).toEqual({ names: [seedName(m)] });
 		expect(s.pve.vms.has(597)).toBe(false);

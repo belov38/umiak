@@ -455,9 +455,10 @@ async function rollback(
 					const upid = await deps.api.post<string>(`${vmPath}/status/stop`);
 					await deps.api.waitTask(o.node, upid);
 				}
+				// 0: the unreferenced-disk scan aborts on an inactive storage (vmdata) and leaks the VM.
 				const upid = await deps.api.delete<string>(vmPath, {
 					purge: 1,
-					"destroy-unreferenced-disks": 1,
+					"destroy-unreferenced-disks": 0,
 				});
 				await deps.api.waitTask(o.node, upid, { timeoutMs: TASK_TIMEOUT_MS });
 				deps.log(`rollback: deleted VM ${vmid}`);
