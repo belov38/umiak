@@ -531,3 +531,81 @@ def test_failed_move_undoes_the_rule_at_index_zero(host):
     runner.fail_on = None
     prepare_host.prepare(runner, config(), out)
     assert _order(runner) == _expected()
+
+
+ZONE = "/cluster/sdn/zones/umiak"
+
+
+def seed_old_zone(runner, **extra):
+    runner.objects[ZONE] = {"type": "simple", "ipam": "pve", "dhcp": "dnsmasq", **extra}
+    runner.objects["/cluster/sdn/zones"].append({"zone": "umiak"})
+
+
+def sdn_applies(runner):
+    return [a for a in runner.commands if a == ["pvesh", "set", "/cluster/sdn"]]
+
+
+def test_fresh_install_scopes_zone_to_installer_node(host):
+    runner, out = host
+    prepare_host.prepare(runner, config(), out)
+    create = next(a for a in runner.commands if a[:3] == ["pvesh", "create", "/cluster/sdn/zones"])
+    assert create[create.index("--nodes") + 1] == "pve"
+    assert runner.objects[ZONE]["nodes"] == "pve"
+    assert len(sdn_applies(runner)) == 1
+
+
+def test_upgrade_without_nodes_narrows_zone_and_applies_sdn_once(host):
+    runner, out = host
+    prepare_host.prepare(runner, config(), out)
+    del runner.objects[ZONE]["nodes"]
+    runner.commands.clear()
+    prepare_host.prepare(runner, config(), out)
+    assert ["pvesh", "set", ZONE, "--nodes", "pve"] in runner.commands
+    assert runner.objects[ZONE]["nodes"] == "pve"
+    assert len(sdn_applies(runner)) == 1
+
+
+def test_existing_multi_node_list_is_preserved(host):
+    runner, out = host
+    prepare_host.prepare(runner, config(), out)
+    runner.objects[ZONE]["nodes"] = "pve,pve2"
+    runner.commands.clear()
+    prepare_host.prepare(runner, config(), out)
+    assert runner.objects[ZONE]["nodes"] == "pve,pve2"
+    assert not any(a[:2] == ["pvesh", "set"] for a in runner.commands) and sdn_applies(runner) == []
+
+
+def test_list_without_this_node_gets_it_appended(host):
+    runner, out = host
+    prepare_host.prepare(runner, config(), out)
+    runner.objects[ZONE]["nodes"] = "pve2"
+    prepare_host.prepare(runner, config(), out)
+    assert runner.objects[ZONE]["nodes"] == "pve2,pve"
+
+
+def test_failure_after_narrowing_restores_previous_nodes(host):
+    runner, out = host
+    prepare_host.prepare(runner, config(), out)
+    del runner.objects[ZONE]["nodes"]
+    runner.fail_on = lambda a: a == ["pvesh", "set", "/cluster/sdn"]
+    with pytest.raises(CommandError):
+        prepare_host.prepare(runner, config(), out)
+    assert "nodes" not in runner.objects[ZONE]
+    assert ["pvesh", "set", ZONE, "--delete", "nodes"] in runner.commands
+
+
+def test_failure_restores_previous_non_empty_nodes(host):
+    runner, out = host
+    prepare_host.prepare(runner, config(), out)
+    runner.objects[ZONE]["nodes"] = "pve2"
+    runner.fail_on = lambda a: a == ["pvesh", "set", "/cluster/sdn"]
+    with pytest.raises(CommandError):
+        prepare_host.prepare(runner, config(), out)
+    assert runner.objects[ZONE]["nodes"] == "pve2"
+
+
+def test_zone_differing_only_by_nodes_is_not_a_conflict(host):
+    runner, out = host
+    seed_old_zone(runner)
+    prepare_host.prepare(runner, config(), out)
+    assert runner.objects[ZONE]["nodes"] == "pve"

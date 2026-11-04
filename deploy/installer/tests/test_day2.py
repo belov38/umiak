@@ -440,3 +440,15 @@ def test_yes_skips_typed_words_only_non_interactive(interactive, answer, expecte
     ui = main.Ui(interactive=interactive, yes=True, input_fn=ask, out=lambda _: None)
     assert ui.typed("Type DELETE to continue", "DELETE") is expected
     assert bool(prompts) is interactive
+
+
+def test_update_scopes_an_unscoped_zone_and_leaves_scoped_ones(installed):
+    runner, current, tmp_path = installed
+    zone = runner.objects[prepare_host.ZONE]
+    day2.update(runner, current, new_bundle(tmp_path), ui=FakeUi(), sleep=lambda _: None)
+    assert not any(a[:3] == ["pvesh", "set", prepare_host.ZONE] for a in runner.commands)
+    zone.pop("nodes")
+    runner.commands.clear()
+    day2.update(runner, current, new_bundle(tmp_path), ui=FakeUi(), sleep=lambda _: None)
+    assert zone["nodes"] == "pve"
+    assert runner.commands.count(["pvesh", "set", "/cluster/sdn"]) == 1

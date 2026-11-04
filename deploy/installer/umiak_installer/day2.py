@@ -192,6 +192,8 @@ def update(runner: Runner, current: state.InstallState, bundle, *, ui, sleep=tim
     identity = tailnet.parse(info)
     progress("Checking the guest gateway IPSet")
     sync_gateway_ipset(runner, a["ct_ip"])
+    if prepare_host.ensure_zone_nodes(runner, runner.hostname()):
+        progress("Scoped the SDN zone umiak to this node")
     out_dir = runner.path(SECRETS_DIR)
     public_key = " ".join((out_dir / "umiak-node_ed25519.pub").read_text().split()[:3])
     node_ip = prepare_host.node_address(runner, runner.hostname())

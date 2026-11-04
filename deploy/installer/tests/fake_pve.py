@@ -229,7 +229,13 @@ class FakeRunner(Runner):
                 item["pos"] = pos
         elif head == ["pvesh", "set"]:
             values = dict(zip(argv[3::2], argv[4::2], strict=True))
-            self.objects[argv[2]].update({k.removeprefix("--"): int(v) for k, v in values.items()})
+            target = self.objects[argv[2]]
+            for flag, value in values.items():
+                key = flag.removeprefix("--")
+                if key == "delete":
+                    target.pop(value, None)
+                else:
+                    target[key] = value if key == "nodes" else int(value)
         elif argv[:3] == ["ip", "link", "set"]:
             self.path("/sys/class/net/vmbr0/bridge/mcast_hash_max").write_text(argv[-1])
         elif argv[:3] == ["systemctl", "is-enabled", "dnsmasq"]:

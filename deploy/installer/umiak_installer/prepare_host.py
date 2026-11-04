@@ -59,6 +59,7 @@ TOPOLOGY = [
     ("/cluster/sdn/zones/umiak", {"type": "simple", "ipam": "pve", "dhcp": "dnsmasq"}),
     ("/cluster/sdn/vnets/umiak0", {"zone": "umiak", "isolate-ports": 1}),
 ]
+ZONE = "/cluster/sdn/zones/umiak"
 SUBNET = "/cluster/sdn/vnets/umiak0/subnets/umiak-10.88.0.0-24"
 GATEWAY_COMMENT = "Umiak guest gateway"
 FORCED_COMMAND = f'restrict,command="{NODE_BINARY} --stdio" '
@@ -345,8 +346,18 @@ def _apply(runner: Runner, cfg: PrepareConfig, facts: dict, out_dir: Path, journ
                 journal.mutate(["pveum", "acl", "modify", path, flag, principal, "--roles", role, *extra],
                                ["pveum", "acl", "delete", path, flag, principal, "--roles", role])
 
-    sdn_changed = journal.create("/cluster/sdn/zones", "/cluster/sdn/zones/umiak",
-                   "--zone", "umiak", "--type", "simple", "--ipam", "pve", "--dhcp", "dnsmasq")
+    # The zone is deployed only on the installer node (single-node S18).
+    sdn_changed = journal.create("/cluster/sdn/zones", ZONE,
+                   "--zone", "umiak", "--type", "simple", "--ipam", "pve", "--dhcp", "dnsmasq",
+                   "--nodes", cfg.node)
+    target = zone_nodes_target(runner, cfg.node)
+    if target is not None:
+        # Zone from an older install: scope it now (undo restores the previous value).
+        previous = _zone_nodes(runner)
+        reverse = ["pvesh", "set", ZONE, "--nodes", ",".join(previous)] if previous else \
+            ["pvesh", "set", ZONE, "--delete", "nodes"]
+        journal.mutate(["pvesh", "set", ZONE, "--nodes", target], reverse)
+        sdn_changed = True
     sdn_changed |= journal.create("/cluster/sdn/vnets", "/cluster/sdn/vnets/umiak0",
                    "--vnet", "umiak0", "--zone", "umiak", "--isolate-ports", "1")
     sdn_changed |= journal.create("/cluster/sdn/vnets/umiak0/subnets", SUBNET,
@@ -377,7 +388,43 @@ def _apply(runner: Runner, cfg: PrepareConfig, facts: dict, out_dir: Path, journ
             rollback.restore_bridge(journal.state, runner.run)
 
 
+def _zone_nodes(runner: Runner) -> list[str]:
+    """Nodes the zone is deployed on (PVE returns a comma-separated string; empty means every node)."""
+    return [n.strip() for n in str(get(runner, ZONE).get("nodes") or "").split(",") if n.strip()]
+
+
+def zone_nodes_target(runner: Runner, node: str) -> str | None:
+    """New `nodes` value for an existing zone, or None when it needs no change.
+
+    Missing/empty becomes just this node; a list without this node gets it appended;
+    a list that already has it (maybe extended by a later multi-node setup) is kept.
+    """
+    if not exists(runner, ZONE):
+        return None
+    current = _zone_nodes(runner)
+    if node in current:
+        return None
+    return ",".join([*current, node])
+
+
+def ensure_zone_nodes(runner: Runner, node: str) -> bool:
+    """Day-2 variant of the scoping step in `_apply` (no journal): fix an unscoped zone, apply SDN once."""
+    target = zone_nodes_target(runner, node)
+    if target is None:
+        return False
+    if pending_sdn(runner):
+        raise InstallerError("Pending SDN changes must be applied or reverted by the administrator first")
+    runner.run(["pvesh", "set", ZONE, "--nodes", target])
+    try:
+        runner.run(["pvesh", "set", "/cluster/sdn"])
+    finally:
+        rollback.restore_bridge(runner.path(STATE_DIR), runner.run)
+    return True
+
+
 def _verify(runner: Runner, cfg: PrepareConfig, media_name: str) -> None:
+    if cfg.node not in _zone_nodes(runner):
+        raise InstallerError("Verification failed: SDN zone is not scoped to this node")
     acls = get(runner, "/access/acl")
     for principal in (USER_ID, TOKEN_ID):
         for path, role in _grants(cfg, media_name):
