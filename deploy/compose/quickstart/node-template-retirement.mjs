@@ -116,7 +116,7 @@ export async function retireNodeTemplate({
 					[limits.providerId, build.pve_vmid],
 				)
 			).rows[0];
-			if (!lease || lease.purpose !== "template" || lease.machine_id !== null)
+			if (lease?.purpose !== "template" || lease.machine_id !== null)
 				throw Error(
 					"Template VMID has a different lease owner; inspect before retirement",
 				);

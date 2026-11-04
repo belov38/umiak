@@ -119,8 +119,8 @@ def _pinned(content, node, address, key):
 def _serialized(action):
     @functools.wraps(action)
     def run(runner, *args, **kwargs):
-        path = runner.path("/var/lock/umiak-node-actions.lock")
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path = runner.path(prepare_host.STATE_DIR) / "node-actions.lock"
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         with path.open("a") as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

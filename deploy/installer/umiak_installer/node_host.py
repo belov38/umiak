@@ -98,8 +98,8 @@ def dispatch(runner: Runner, request: dict) -> dict:
     # A disconnected SSH client may leave its helper alive. Serialize on the target too.
     if request.get("op") == "inspect":
         return _dispatch(runner, request)
-    path = runner.path("/var/lock/umiak-node-helper.lock")
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path = runner.path(prepare_host.STATE_DIR) / "node-helper.lock"
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with path.open("a") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
