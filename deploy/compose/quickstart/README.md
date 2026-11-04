@@ -25,6 +25,22 @@ pct exec <ct> -- docker compose --project-directory /opt/umiak logs --tail=100 q
 Update, new-browser sign-in, owner reset and uninstall are installer menu items:
 re-run the installer on the PVE node.
 
+## Releases
+
+`install.sh` resolves the version from GitHub's `/releases/latest` redirect, which
+only ever names a full release. The first published release must therefore be a
+non-prerelease version (for example `0.1.0`); with only pre-releases published, an
+install without a version fails. Pre-releases (`x.y.z-rc.N`, published by the
+release workflow with `--prerelease`) are installed by pinning the version:
+`curl -fsSL https://raw.githubusercontent.com/belov38/umiak/main/install.sh | UMIAK_VERSION=0.1.0-rc.1 sh`.
+
+## Third-party components
+
+The image ships the moonlight-web-stream 3.0.1 frontend (GPL-3.0) for the desktop
+viewer, with its license text and a `SOURCE` note in
+`/app/quickstart-assets/moonlight-web/` (not served). See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Access model
 
 Browsers, the CLI and MCP clients reach the deployment only through Tailscale
@@ -44,7 +60,10 @@ is `localhost`, `127.0.0.1` or `[::1]`. Any other Host receives HTTP 403
 ssh -L 4180:<control-plane-ip>:4180 root@<pve-host>
 ```
 
-then open `http://localhost:4180`. Browsers treat localhost as a secure context. The emergency login relies on the browser accepting the Secure `__Host-` cookie on `http://localhost`: Chrome and Firefox do, so use one of them.
+then open `http://localhost:4180`. The forwarded connection arrives from the PVE
+node's address, which is otherwise denied (`local_network_forbidden`); on port 4180
+with a loopback Host only, the node's own address is exempt from that check. The
+tailnet listener keeps denying it. Browsers treat localhost as a secure context. The emergency login relies on the browser accepting the Secure `__Host-` cookie on `http://localhost`: Chrome and Firefox do, so use one of them.
 
 Owner sessions use one cookie, `__Host-umiak_owner` (`Secure; HttpOnly; Path=/;
 SameSite=Strict`), on both listeners. A plain `umiak_owner` cookie is neither set
@@ -53,10 +72,10 @@ nor accepted. Browser cookies expire after 180 days; CLI sessions after at most
 survive container recreation.
 
 Serve covers the dashboard hostname and cannot cover wildcard sandbox preview
-hostnames. Default previews remain `http://<slug>-<port>.<IP-derived-sslip.io>:8085`,
-served by the guest gateway's separate HTTP listener. Token access remains the
-default; `umiak port 3000 --public` deliberately allows anyone who can reach that
-preview. sslip.io supplies DNS only; use your own wildcard DNS if needed.
+hostnames. Default previews remain `http://<slug>-<port>.umiak.<tailnet-IP-dashed>.sslip.io:8085`,
+served by the guest gateway's separate HTTP listener and reachable only over the
+tailnet. Token access remains the default; `umiak port 3000 --public` deliberately
+allows anyone on the tailnet who has the URL. sslip.io supplies DNS only; use your own wildcard DNS if needed.
 `UMIAK_PREVIEW_PORT` changes port 8085.
 
 ## Desktop viewer

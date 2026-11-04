@@ -151,6 +151,12 @@ export function createQuickstartServer({
 		env,
 	);
 	const appOrigin = env.UMIAK_APP_ORIGIN ?? "http://localhost:4180";
+	// Ruling R8: the emergency `ssh -L 4180:<ct-ip>:4180 root@<pve>` path arrives
+	// from the PVE node address. Only the direct 4180 listener with a loopback Host
+	// exempts the node; the tailnet proxy listener keeps denying it.
+	const nodeDenied = async (req) =>
+		!(!proxyListener && LOOPBACK_HOST.test(req.headers.host ?? "")) &&
+		!!(await setupHandler?.deniedPeer?.(req.umiakClientAddress));
 	const buckets = new Map();
 	function rate(req, authenticated = false) {
 		const key = `${req.umiakClientAddress ?? req.socket.remoteAddress}:${authenticated ? "owner" : "public"}`;
@@ -181,10 +187,7 @@ export function createQuickstartServer({
 				? new URL(env.UMIAK_PUBLIC_URL).origin
 				: origin;
 			if (url.origin !== origin) return fail(res, 400, "invalid_path");
-			if (
-				!clientNotDenied(req.umiakClientAddress) ||
-				(await setupHandler?.deniedPeer?.(req.umiakClientAddress))
-			)
+			if (!clientNotDenied(req.umiakClientAddress) || (await nodeDenied(req)))
 				return fail(res, 403, "local_network_forbidden");
 			const safe = ["GET", "HEAD", "OPTIONS"].includes(req.method);
 			const token = bearer(req);
@@ -495,7 +498,7 @@ export function createQuickstartServer({
 			const token = bearer(req);
 			if (
 				!clientNotDenied(req.umiakClientAddress) ||
-				(await setupHandler?.deniedPeer?.(req.umiakClientAddress)) ||
+				(await nodeDenied(req)) ||
 				!(await store.authenticate(token)) ||
 				(req.headers.origin && req.headers.origin !== origin)
 			)

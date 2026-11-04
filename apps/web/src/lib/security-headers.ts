@@ -1,5 +1,6 @@
 // Response headers of web (S8 §5.6). The CSP keeps everything on the own
-// origin; the only foreign frames are sandbox ports and desktops
+// origin (plus same-origin frames: the owner desktop viewer); the only foreign
+// frames are sandbox ports and desktops
 // (configured preview scheme, domain and port, S10). Next.js and the Payload admin render inline
 // scripts and styles, hence 'unsafe-inline' (README: CSP). The dev server
 // also needs 'unsafe-eval' (React dev tooling and HMR).
@@ -26,7 +27,9 @@ export function contentSecurityPolicy(o: SecurityHeaderOptions): string {
 		["frame-ancestors", ["'self'"]],
 		// Same origin only; 'self' also matches wss:// of the own host.
 		["connect-src", ["'self'"]],
-		["frame-src", [`${scheme}://*.${o.umiakDomain}${suffix}`]],
+		// 'self': the owner-mode desktop viewer is a same-origin iframe
+		// (/desktop/<slug>/ on the owner ingress).
+		["frame-src", ["'self'", `${scheme}://*.${o.umiakDomain}${suffix}`]],
 		["img-src", ["'self'", "data:", "blob:"]],
 		["font-src", ["'self'", "data:"]],
 		["style-src", ["'self'", "'unsafe-inline'"]],

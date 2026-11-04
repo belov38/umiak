@@ -25,6 +25,7 @@ import ipaddress
 import json
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 
 from . import checklist, ct, day2, prepare_host, release, stack, state, tailnet
@@ -420,6 +421,7 @@ def main(argv=None, runner: Runner | None = None, bundle: release.Release | None
         if action not in ("Install", "Resume install"):
             return flow.day2(action, args, download, latest)
         link = flow.run(args)
+        out(tailnet.key_expiry_hint(urllib.parse.urlsplit(link).hostname))
         out("Umiak is ready. The link below is a one-time owner claim; do not share it.")
         out(f"Open {link}")
         return 0

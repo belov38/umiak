@@ -46,8 +46,9 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     command: [node, /meta-proxy.mjs]
+    # Connects to api:8080 but presents the public API host, which owner mode requires.
     environment:
-      UMIAK_API_URL: http://localhost:4180
+      UMIAK_API_URL: ${UMIAK_PUBLIC_URL:-http://localhost:4180}
     volumes:
       - ./deploy/compose/meta-proxy.mjs:/meta-proxy.mjs:ro
       - ./deploy/compose/canonical-fetch.mjs:/canonical-fetch.mjs:ro

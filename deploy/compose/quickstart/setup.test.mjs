@@ -551,3 +551,65 @@ test("dashboard template registration preserves completion and smoke; wizard reg
 		assert.equal(state.steps.smoke.status, dashboardBuild ? "ready" : "stale");
 	}
 });
+test("smoke calls the API with the public API host, not api:8080", async () => {
+	const http = await import("node:http");
+	const { mkdtemp } = await import("node:fs/promises");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const { createSetupHandler } = await import("./setup.mjs");
+	const hosts = new Set();
+	let deleted = false;
+	const api = http.createServer((req, res) => {
+		hosts.add(req.headers.host);
+		res.setHeader("content-type", "application/json");
+		if (req.headers.host !== "umiak.tail0000.ts.net") {
+			res.statusCode = 403;
+			return res.end(JSON.stringify({ error: { code: "host_forbidden" } }));
+		}
+		if (req.method === "POST" && req.url === "/v1/sandboxes")
+			return res.end(JSON.stringify({ sandbox: { id: "sbx_1" } }));
+		if (req.method === "POST" && req.url.endsWith("/commands"))
+			return res.end(
+				JSON.stringify({
+					command: { exitCode: 0 },
+					stdout: "umiak-quickstart-ok",
+				}),
+			);
+		if (req.method === "DELETE") {
+			deleted = true;
+			return res.end("{}");
+		}
+		return res.end(
+			JSON.stringify({ sandbox: { state: deleted ? "deleted" : "ready" } }),
+		);
+	});
+	await new Promise((resolve) => api.listen(0, "127.0.0.1", resolve));
+	const saved = process.env.UMIAK_API_URL;
+	// compose sets UMIAK_API_URL to the public URL; the default fetcher must use it.
+	process.env.UMIAK_API_URL = "https://umiak.tail0000.ts.net";
+	try {
+		const handler = createSetupHandler({
+			pool: {},
+			store: { read: async () => ({ steps: {} }), write: async () => {} },
+			secretsDir: await mkdtemp(join(tmpdir(), "umiak-smoke-")),
+			apiUrl: `http://127.0.0.1:${api.address().port}`,
+			makePve: () => ({ get: async () => [] }),
+		});
+		const result = await handler.wizard.steps.smoke(
+			{},
+			{
+				steps: {
+					connection: { data: { node: "pve" } },
+					limits: { data: { ramCapMb: 8192 } },
+				},
+			},
+			{},
+		);
+		assert.equal(result.exec, "passed");
+		assert.deepEqual([...hosts], ["umiak.tail0000.ts.net"]);
+	} finally {
+		if (saved === undefined) delete process.env.UMIAK_API_URL;
+		else process.env.UMIAK_API_URL = saved;
+		await new Promise((resolve) => api.close(resolve));
+	}
+});

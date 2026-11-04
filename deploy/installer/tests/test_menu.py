@@ -46,6 +46,10 @@ def test_non_interactive_install_end_to_end(env):
     runner, run, printed = env
     assert run(FLAGS) == 0
     assert printed[-1] == f"Open https://umiak.tail0000.ts.net/claim#{CODE}"
+    assert (
+        "Disable key expiry for the machine 'umiak' in the Tailscale admin console (Machines → … → Disable key "
+        "expiry), otherwise it drops off your tailnet after ~180 days. https://login.tailscale.com/admin/machines"
+    ) in printed
     final = saved(runner)
     assert final.phase == "complete" and final.tailnet_host == "umiak.tail0000.ts.net" and final.ct_id == 591
 

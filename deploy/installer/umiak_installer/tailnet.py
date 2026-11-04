@@ -85,6 +85,15 @@ def serve(runner: Runner, ct_id: int) -> None:
     run_in(runner, ct_id, "tailscale", "serve", "--bg", "--https=443", "http://127.0.0.1:4181")
 
 
+def key_expiry_hint(dns_name: str) -> str:
+    """Tailscale node keys expire (~180 days by default); the control plane must not drop off."""
+    machine = dns_name.split(".", 1)[0]
+    return (
+        f"Disable key expiry for the machine '{machine}' in the Tailscale admin console (Machines → … → Disable key "
+        f"expiry), otherwise it drops off your tailnet after ~180 days. {MACHINES_URL}"
+    )
+
+
 def claim_link(dns_name: str, code: str) -> str:
     """Same shape as claimLink in deploy/compose/quickstart/owner.mjs (encodeURIComponent)."""
     return f"https://{dns_name}/claim#" + urllib.parse.quote(code, safe="-_.!~*'()")

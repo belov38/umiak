@@ -32,7 +32,8 @@ describe("Getting started", () => {
 		expect(text).toContain("tailnet HTTPS address");
 		for (const legacy of [
 			"LAN HTTP",
-			"trusted LAN by default",
+			"trusted LAN",
+			"plain HTTP on your",
 			"compose.tailscale.yaml",
 			"TS_AUTHKEY",
 			"chrome://flags",
@@ -55,6 +56,14 @@ describe("Getting started", () => {
 			}
 		}
 	});
+});
+
+it("describes quickstart HTTP previews as tailnet-only", () => {
+	const text = JSON.stringify(
+		guideSections({ ...deployment, previewScheme: "http", previewPort: 8085 }),
+	);
+	expect(text).toContain("tailnet IP");
+	expect(text).toContain("reachable only from your tailnet");
 });
 
 it("uses metadata preview scheme and nondefault port in the published URL", () => {

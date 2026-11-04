@@ -1,5 +1,7 @@
 import json
+import re
 import stat
+from pathlib import Path
 
 import pytest
 
@@ -30,6 +32,22 @@ def make_bundle(root, version="1.2.3"):
 @pytest.fixture
 def runner(tmp_path):
     return CtFake(tmp_path / "host")
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_stack_files_are_exactly_compose_and_its_bind_mounts():
+    compose = (REPO_ROOT / "compose.yaml").read_text()
+    mounts = set(re.findall(r"^\s*- \./([^:\s]+):", compose, re.M))
+    assert set(stack.STACK_FILES) == {"compose.yaml", *mounts}
+
+
+def test_web_meta_presents_the_public_api_host():
+    compose = (REPO_ROOT / "compose.yaml").read_text()
+    block = compose.split("\n  web-meta:\n", 1)[1].split("\n\n", 1)[0]
+    assert "UMIAK_API_URL: ${UMIAK_PUBLIC_URL:-http://localhost:4180}" in block
+    assert not re.search(r"UMIAK_API_URL: http", compose)
 
 
 def test_network_json_is_byte_identical_to_quickstart_network_step():

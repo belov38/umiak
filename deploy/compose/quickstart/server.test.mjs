@@ -303,11 +303,51 @@ test("plain umiak_owner cookie is neither accepted nor set", async () => {
 	}
 });
 
-test("wizard resolved PVE addresses are denied dynamically", async () => {
+test("wizard resolved PVE addresses are denied dynamically on the tailnet proxy listener", async () => {
 	const store = new OwnerStore(new MemoryOwnerRepository());
 	await store.init();
 	const handler = async () => false;
-	handler.deniedPeer = async () => true;
+	const seen = [];
+	handler.deniedPeer = async (address) => {
+		seen.push(address);
+		return true;
+	};
+	const server = createQuickstartServer({
+		store,
+		setupHandler: handler,
+		transport: http,
+		proxyListener: true,
+		env: { UMIAK_PUBLIC_URL: "https://lab.example" },
+	});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	try {
+		const reply = await fetch(
+			`http://127.0.0.1:${server.address().port}/v1/me`,
+			{
+				headers: {
+					"x-forwarded-proto": "https",
+					"x-forwarded-host": "lab.example",
+					"x-forwarded-for": "192.168.68.116",
+				},
+			},
+		);
+		assert.equal(reply.status, 403);
+		assert.match(await reply.text(), /local_network_forbidden/);
+		assert.deepEqual(seen, ["192.168.68.116"]);
+	} finally {
+		await new Promise((resolve) => server.close(resolve));
+	}
+});
+
+test("emergency ssh -L via the PVE node: loopback Host on 4180 exempts the node address (R8)", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	await store.init();
+	const handler = async () => false;
+	let asked = 0;
+	handler.deniedPeer = async () => {
+		asked++;
+		return true;
+	};
 	const server = createQuickstartServer({
 		store,
 		setupHandler: handler,
@@ -315,11 +355,36 @@ test("wizard resolved PVE addresses are denied dynamically", async () => {
 		env: {},
 	});
 	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const port = server.address().port;
 	try {
-		assert.equal(
-			(await fetch(`http://127.0.0.1:${server.address().port}/v1/me`)).status,
-			403,
-		);
+		const reply = await fetch(`http://127.0.0.1:${port}/owner/sessions`, {
+			headers: { accept: "application/json" },
+		});
+		assert.notEqual(reply.status, 403);
+		assert.doesNotMatch(await reply.text(), /local_network_forbidden/);
+		assert.equal(asked, 0);
+		// A non-loopback Host on 4180 is still refused before any exemption applies.
+		const lan = await new Promise((resolve, reject) => {
+			const req = http.request(
+				{
+					host: "127.0.0.1",
+					port,
+					path: "/v1/me",
+					headers: { host: "192.168.68.40:4180", accept: "application/json" },
+				},
+				(res) => {
+					let body = "";
+					res.on("data", (c) => {
+						body += c;
+					});
+					res.on("end", () => resolve({ status: res.statusCode, body }));
+				},
+			);
+			req.on("error", reject);
+			req.end();
+		});
+		assert.equal(lan.status, 403);
+		assert.match(lan.body, /use_tailnet_https/);
 	} finally {
 		await new Promise((resolve) => server.close(resolve));
 	}

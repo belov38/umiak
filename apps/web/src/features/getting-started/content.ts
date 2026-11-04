@@ -128,7 +128,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 				code("Publish a public port", "umiak port 3000 --public"),
 				text(
 					previewScheme === "http"
-						? "Quickstart previews use plain HTTP on your trusted LAN (port 8085 by default), with IP-derived sslip.io DNS. Token access remains the default; --public removes that token requirement. Serve cannot cover wildcard preview hostnames."
+						? "Quickstart previews use HTTP on port 8085 of the control plane's tailnet IP, with IP-derived sslip.io DNS; they are reachable only from your tailnet, and Tailscale encrypts the traffic. Token access remains the default; --public removes that token requirement. Tailscale Serve cannot cover wildcard preview hostnames, so previews are not on the tailnet HTTPS address."
 						: "Preview TLS uses the guest gateway certificate. Ask the operator for its verified CA if your browser does not trust it.",
 				),
 			],

@@ -20,7 +20,7 @@ describe("securityHeaders (S8 §5.6)", () => {
 	it("CSP: own origin, frames of sandbox hosts only", () => {
 		expect(h["Content-Security-Policy"]).toContain("frame-ancestors 'self'");
 		expect(h["Content-Security-Policy"]).toContain(
-			"frame-src https://*.umiak.example.com",
+			"frame-src 'self' https://*.umiak.example.com",
 		);
 		expect(csp.get("default-src")).toEqual(["'self'"]);
 		expect(csp.get("connect-src")).toEqual(["'self'"]);
@@ -45,6 +45,10 @@ describe("securityHeaders (S8 §5.6)", () => {
 		).toContain("'unsafe-eval'");
 	});
 
+	it("frame-src allows the same-origin owner desktop viewer (/desktop/<slug>/)", () => {
+		expect(csp.get("frame-src")?.[0]).toBe("'self'");
+	});
+
 	it("nosniff, same-origin referrer", () => {
 		expect(h["X-Content-Type-Options"]).toBe("nosniff");
 		expect(h["Referrer-Policy"]).toBe("same-origin");
@@ -58,7 +62,10 @@ describe("securityHeaders (S8 §5.6)", () => {
 				previewPort: 8085,
 			}),
 		);
-		expect(csp.get("frame-src")).toEqual(["http://*.umiak.example.com:8085"]);
+		expect(csp.get("frame-src")).toEqual([
+			"'self'",
+			"http://*.umiak.example.com:8085",
+		]);
 		const https = directives(
 			contentSecurityPolicy({
 				umiakDomain: "umiak.example.com",
@@ -67,6 +74,7 @@ describe("securityHeaders (S8 §5.6)", () => {
 			}),
 		);
 		expect(https.get("frame-src")).toEqual([
+			"'self'",
 			"https://*.umiak.example.com:8443",
 		]);
 	});

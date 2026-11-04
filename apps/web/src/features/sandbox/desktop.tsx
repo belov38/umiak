@@ -42,7 +42,8 @@ export function DesktopTab({
 	const status = useQuery({
 		queryKey: ["desktop", sandbox.id],
 		queryFn: ({ signal }) => handle.desktop.status({ signal }),
-		enabled: ready,
+		// Access status drives only the team-mode controls below.
+		enabled: ready && !ownerMode,
 	});
 	// biome-ignore lint/correctness/useExhaustiveDependencies: revision explicitly remints the single-use ticket after access changes or disconnect.
 	useEffect(() => {
@@ -114,46 +115,56 @@ export function DesktopTab({
 				>
 					Full screen
 				</Button>
-				<label className="text-sm">
-					Access{" "}
-					<NativeSelect
-						aria-label="Desktop access"
-						size="xs"
-						value={status.data?.access ?? "token"}
-						disabled={busy || !status.data}
-						onChange={async (event) => {
-							const access = event.target.value as "token" | "sso" | "public";
-							setBusy(true);
-							const result = await attempt(() =>
-								handle.desktop.setAccess(access),
-							);
-							setBusy(false);
-							if (result) {
-								await status.refetch();
-								refresh();
-							}
-						}}
-					>
-						<option value="token">Secret link</option>
-						{!ownerMode && <option value="sso">Team members</option>}
-						<option value="public">Public</option>
-					</NativeSelect>
-				</label>
-				<ConfirmButton
-					variant="outline"
-					title="Disconnect all desktop viewers?"
-					description="Active desktop streams will close."
-					confirmLabel="Disconnect"
-					onConfirm={async () => {
-						const result = await attempt(() =>
-							handle.desktop.endStreams().then(() => true),
-						);
-						if (result) refresh();
-						return result === true;
-					}}
-				>
-					Disconnect all viewers
-				</ConfirmButton>
+				{/* Owner mode: the viewer is /desktop/<slug>/ on the owner ingress, gated by the
+				    owner session with its own gateway credential, so desktop access modes and
+				    stream revocation do not apply to it. */}
+				{!ownerMode && (
+					<>
+						<label className="text-sm">
+							Access{" "}
+							<NativeSelect
+								aria-label="Desktop access"
+								size="xs"
+								value={status.data?.access ?? "token"}
+								disabled={busy || !status.data}
+								onChange={async (event) => {
+									const access = event.target.value as
+										| "token"
+										| "sso"
+										| "public";
+									setBusy(true);
+									const result = await attempt(() =>
+										handle.desktop.setAccess(access),
+									);
+									setBusy(false);
+									if (result) {
+										await status.refetch();
+										refresh();
+									}
+								}}
+							>
+								<option value="token">Secret link</option>
+								<option value="sso">Team members</option>
+								<option value="public">Public</option>
+							</NativeSelect>
+						</label>
+						<ConfirmButton
+							variant="outline"
+							title="Disconnect all desktop viewers?"
+							description="Active desktop streams will close."
+							confirmLabel="Disconnect"
+							onConfirm={async () => {
+								const result = await attempt(() =>
+									handle.desktop.endStreams().then(() => true),
+								);
+								if (result) refresh();
+								return result === true;
+							}}
+						>
+							Disconnect all viewers
+						</ConfirmButton>
+					</>
+				)}
 			</div>
 			{browserGuidance && <p role="status">{browserGuidance}</p>}
 			{status.error && (

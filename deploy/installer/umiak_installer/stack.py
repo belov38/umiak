@@ -24,15 +24,13 @@ DIR = "/opt/umiak"
 PROJECT = "umiak"
 STAGING = "/root/.umiak-staging"
 ENV_KEYS = ("UMIAK_VERSION", "UMIAK_PUBLIC_URL", "UMIAK_PREVIEW_DOMAIN", "UMIAK_SSH_HOST")
-# compose.yaml and every repo-relative file it bind-mounts or builds from.
+# compose.yaml and every repo-relative file it bind-mounts (a test keeps them equal).
 STACK_FILES = (
     "compose.yaml",
     "deploy/compose/meta-proxy.mjs",
     "deploy/compose/canonical-fetch.mjs",
     "deploy/compose/quickstart/run.mjs",
-    "deploy/compose/quickstart/bootstrap.sh",
     "deploy/compose/config/identity.yaml",
-    "deploy/compose/secrets-init/init.sh",
 )
 SECRET_NAMES = ("install.json", "pve-token", "pve-token-id", "pve-root-ca.pem", "umiak-node_ed25519", "known_hosts",
                 "host-report.json")

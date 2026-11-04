@@ -11,7 +11,7 @@ def test_pve_like_host_is_all_ok(tmp_path):
     assert [c.name for c in checks if not c.ok] == []
     assert {c.name for c in checks} == {
         "root", "pve-version", "cluster-quorum", "python", "lvmthin-storage", "media-storage",
-        "dnsmasq", "ip-forward", "cluster-firewall", "sdn-pending", "free-vmids",
+        "dnsmasq", "ip-forward", "cluster-firewall", "sdn-pending", "free-vmids", "pveproxy-cert",
     }
 
 
@@ -65,3 +65,17 @@ def test_enabled_dnsmasq_service_fails_with_disable_fix(tmp_path):
     check = by_name(checklist.inspect(FakeRunner(tmp_path, dnsmasq_enabled=True)))["dnsmasq"]
     assert not check.ok
     assert check.fix.commands == [["systemctl", "disable", "--now", "dnsmasq"]]
+
+
+def test_custom_pveproxy_certificate_is_refused_without_fix(tmp_path):
+    runner = FakeRunner(tmp_path)
+    pem = runner.path(f"/etc/pve/nodes/{runner.hostname()}/pveproxy-ssl.pem")
+    pem.parent.mkdir(parents=True, exist_ok=True)
+    pem.write_text("-----BEGIN CERTIFICATE-----\n")
+    check = by_name(checklist.inspect(runner))["pveproxy-cert"]
+    assert not check.ok
+    assert check.fix is None
+    assert check.detail == (
+        "This node serves a custom certificate (pveproxy-ssl.pem). Umiak 0.1 needs the default Proxmox "
+        "certificate on port 8006; custom/ACME certificates are not supported yet."
+    )

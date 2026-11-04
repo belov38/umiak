@@ -55,6 +55,31 @@ test("Dockerfile pins the same moonlight-web release and SHA256 as the desktop t
 		/releases\/download\/v\$\{MOONLIGHT_WEB_VERSION\}\/moonlight-web-x86_64-unknown-linux-gnu\.tar\.gz/,
 	);
 	assert.match(dockerfile, /\/app\/quickstart-assets\/moonlight-web/);
+	// R10: GPL-3.0 text from the same upstream tag, pinned and verified, plus a SOURCE note.
+	assert.equal(
+		dockerfile.match(/^ARG MOONLIGHT_WEB_LICENSE_SHA256=(\S+)$/m)?.[1],
+		"8b1ba204bb69a0ade2bfcf65ef294a920f6bb361b317dba43c7ef29d96332b9b",
+	);
+	assert.match(
+		dockerfile,
+		/raw\.githubusercontent\.com\/MrCreativ3001\/moonlight-web-stream\/v\$\{MOONLIGHT_WEB_VERSION\}\/LICENSE/,
+	);
+	assert.match(
+		dockerfile,
+		/\$\{MOONLIGHT_WEB_LICENSE_SHA256\} {2}\/moonlight-web\/LICENSE" \| sha256sum -c -/,
+	);
+	assert.match(dockerfile, /> \/moonlight-web\/SOURCE/);
+	const notices = readFileSync(
+		new URL("./THIRD_PARTY_NOTICES.md", import.meta.url),
+		"utf8",
+	);
+	assert.match(notices, /moonlight-web-stream/);
+	assert.match(notices, /GPL-3\.0/);
+	assert.match(
+		notices,
+		/https:\/\/github\.com\/MrCreativ3001\/moonlight-web-stream\/tree\/v3\.0\.1/,
+	);
+	assert.ok(notices.includes(pin[2]), "notices carry the tarball sha256");
 });
 
 const accept = (key) =>

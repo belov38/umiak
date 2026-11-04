@@ -1,3 +1,4 @@
+import { canonicalFetch } from "../canonical-fetch.mjs";
 import { gatewayCertificates } from "./certificates.mjs";
 import { windowsDesktop } from "./setup-desktop.mjs";
 import { prepareWindowsMedia, validateWindowsMedia } from "./setup-iso.mjs";
@@ -287,6 +288,21 @@ function html(res, value) {
 	res.end(value);
 }
 
+// Owner-mode API accepts only the public API authority as Host. Connect to the
+// fixed internal DNS name but present that authority (same as apps/mcp).
+export function publicApiFetch(
+	publicApiUrl = process.env.UMIAK_API_URL,
+	transport = canonicalFetch,
+) {
+	if (!publicApiUrl) return fetch;
+	const host = new URL(publicApiUrl).host;
+	return async (input, init) => {
+		const request = new Request(input, init);
+		request.headers.set("host", host);
+		return transport(request);
+	};
+}
+
 export function createSetupHandler({
 	pool,
 	store = new PgSetupStore(pool),
@@ -297,7 +313,7 @@ export function createSetupHandler({
 	apiUrl = "http://api:8080",
 	makePve = pinnedPve,
 	nodeCheck = checkNode,
-	fetcher = fetch,
+	fetcher = publicApiFetch(),
 } = {}) {
 	const connectionOf = (state) => state.steps.connection.data;
 	const pveOf = async (state) =>

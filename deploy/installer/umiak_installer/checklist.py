@@ -115,6 +115,21 @@ def _pending(runner):
     )
 
 
+CUSTOM_CERT_MESSAGE = (
+    "This node serves a custom certificate (pveproxy-ssl.pem). Umiak 0.1 needs the default Proxmox "
+    "certificate on port 8006; custom/ACME certificates are not supported yet."
+)
+
+
+def _pveproxy_cert(runner, node):
+    # Ruling R9: the worker trusts only pve-root-ca; an own or ACME certificate is refused.
+    custom = runner.path(f"/etc/pve/nodes/{node}/pveproxy-ssl.pem").exists()
+    return _check(
+        "pveproxy-cert", not custom,
+        CUSTOM_CERT_MESSAGE if custom else "default Proxmox certificate on port 8006",
+    )
+
+
 def _is_umiak(guest):
     tags = str(guest.get("tags", "")).replace(",", ";").split(";")
     return str(guest.get("name", "")).startswith("umiak-") or any(tag.startswith("umiak") for tag in tags)
@@ -145,6 +160,7 @@ def inspect(runner: Runner, node: str | None = None, storage: str | None = None,
         _safe("cluster-firewall", lambda: _firewall(runner)),
         _safe("sdn-pending", lambda: _pending(runner)),
         _safe("free-vmids", lambda: _vmids(runner, ranges)),
+        _safe("pveproxy-cert", lambda: _pveproxy_cert(runner, node)),
     ]
 
 
