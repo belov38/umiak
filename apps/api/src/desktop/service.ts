@@ -98,8 +98,22 @@ export async function desktopPolicy(deps: ApiDeps, id: string) {
 	if (!p) throw new ApiError(404, "route_not_found", "no desktop policy");
 	return p;
 }
-export const desktopUrl = (deps: ApiDeps, slug: string) =>
-	`${previewUrl(`${slug}-desktop`, deps.settings)}/`;
+/**
+ * Owner mode (desktopPathPrefix set) serves the viewer at `/desktop/<slug>/` on
+ * the owner origin; the ingress opens it only when the request has a query, so
+ * the path form always carries `dataTransport`. Otherwise the hostname form.
+ */
+export const desktopUrl = (deps: ApiDeps, slug: string) => {
+	const { desktopPathPrefix, appOrigin } = deps.settings;
+	if (desktopPathPrefix === null)
+		return `${previewUrl(`${slug}-desktop`, deps.settings)}/`;
+	const url = new URL(
+		`${desktopPathPrefix}/${encodeURIComponent(slug)}/`,
+		appOrigin,
+	);
+	url.searchParams.set("dataTransport", "websocket");
+	return url.toString();
+};
 export const ticketHash = (ticket: string) =>
 	createHash("sha256").update(ticket).digest();
 export async function issueDesktopLink(
@@ -110,24 +124,30 @@ export async function issueDesktopLink(
 ) {
 	const p = authOf(c).principal;
 	const policy = await desktopPolicy(deps, s.id);
+	const pathMode = deps.settings.desktopPathPrefix !== null;
+	// Path mode needs no ticket: the owner browser session authorizes at the ingress.
 	const ticket = `umiakd_${randomBytes(32).toString("base64url")}`;
-	const result = await poolOf(deps).query<{ expires_at: Date }>(
-		`INSERT INTO runtime.desktop_tickets(ticket_hash,sandbox_id,label,user_id,api_key_id,auth_epoch,expires_at) VALUES($1,$2,$3,$4,$5,$6,now()+interval '10 minutes') RETURNING expires_at`,
-		[
-			ticketHash(ticket),
-			s.id,
-			`${s.slug}-desktop`,
-			p.userId,
-			p.apiKeyId,
-			policy.auth_epoch,
-		],
-	);
+	const result = pathMode
+		? {
+				rows: [{ expires_at: new Date(Date.now() + 10 * 60 * 1000) }],
+			}
+		: await poolOf(deps).query<{ expires_at: Date }>(
+				`INSERT INTO runtime.desktop_tickets(ticket_hash,sandbox_id,label,user_id,api_key_id,auth_epoch,expires_at) VALUES($1,$2,$3,$4,$5,$6,now()+interval '10 minutes') RETURNING expires_at`,
+				[
+					ticketHash(ticket),
+					s.id,
+					`${s.slug}-desktop`,
+					p.userId,
+					p.apiKeyId,
+					policy.auth_epoch,
+				],
+			);
 	// Pairing is eager here; the gateway retries Open when the viewer arrives.
 	void desktopRpc(deps, s.machineId as string, "open").catch(() =>
 		deps.log.debug("desktop pre-open is pending"),
 	);
 	const url = new URL(desktopUrl(deps, s.slug));
-	url.searchParams.set("_ticket", ticket);
+	if (!pathMode) url.searchParams.set("_ticket", ticket);
 	if (options.fps) url.searchParams.set("fps", String(options.fps));
 	if (options.bitrateKbps)
 		url.searchParams.set("bitrate", String(options.bitrateKbps));

@@ -222,6 +222,7 @@ services:
       UMIAK_SSH_HOST_KEYS_FILE: /all-secrets/ssh-host-keys.pub
       UMIAK_API_TRUSTED_PROXY_CIDRS: 172.29.116.10/32,172.29.116.11/32
       UMIAK_SSH_PORT: "2222"
+      UMIAK_DESKTOP_PATH_PREFIX: /desktop
     volumes:
       - network-config:/network-config:ro
       - ./deploy/compose/quickstart/run.mjs:/quickstart/run.mjs:ro

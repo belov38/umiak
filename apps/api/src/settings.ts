@@ -80,6 +80,11 @@ export interface Settings {
 	previewScheme: "http" | "https";
 	previewPort: number;
 	sshHost: string;
+	/**
+	 * Owner mode: desktop links are `<appOrigin><prefix>/<slug>/` on the owner
+	 * origin instead of `<slug>-desktop.<domain>`. Null keeps hostname links.
+	 */
+	desktopPathPrefix: string | null;
 	sshPort: number;
 	sshHostKeysFile: string | null;
 	sshLoginCaKeyFile: string | null;
@@ -238,6 +243,15 @@ const schema = z.object({
 		z.coerce.number().int().min(1).max(65535).optional(),
 	),
 	UMIAK_SSH_HOST: optional,
+	UMIAK_DESKTOP_PATH_PREFIX: z.preprocess(
+		unsetEmpty,
+		z
+			.string()
+			.regex(/^\/[A-Za-z0-9._~-]+(\/[A-Za-z0-9._~-]+)*\/?$/, {
+				message: "must be an absolute path such as /desktop",
+			})
+			.optional(),
+	),
 	UMIAK_SSH_PORT: int(22, 1, 65535),
 	UMIAK_SSH_HOST_KEYS_FILE: optional,
 	UMIAK_SSH_LOGIN_CA_KEY_FILE: optional,
@@ -330,6 +344,7 @@ export function loadSettings(
 		previewScheme: e.UMIAK_PREVIEW_SCHEME,
 		previewPort:
 			e.UMIAK_PREVIEW_PORT ?? (e.UMIAK_PREVIEW_SCHEME === "http" ? 80 : 443),
+		desktopPathPrefix: e.UMIAK_DESKTOP_PATH_PREFIX?.replace(/\/+$/, "") ?? null,
 		sshHost: e.UMIAK_SSH_HOST ?? `ssh.${e.UMIAK_PREVIEW_DOMAIN}`,
 		sshPort: e.UMIAK_SSH_PORT,
 		sshHostKeysFile: e.UMIAK_SSH_HOST_KEYS_FILE ?? null,
