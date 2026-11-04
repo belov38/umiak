@@ -1,5 +1,6 @@
 // Injected node-service double for legacy wizard tests; core uses real PostgreSQL tests.
 export const testNodes = {
+	installerNodeRetired: async () => false,
 	select: async (state, id) => {
 		const local = state.steps.limits?.data?.nodeId;
 		if (id && local && id !== local) throw Error("Unknown sandbox node");

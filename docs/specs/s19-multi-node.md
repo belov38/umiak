@@ -200,12 +200,19 @@ clears blockers. Final removal durably marks retirement under the same lock
 before host cleanup; placement/build start must then refuse this node.
 Recheck local Umiak inventory before deleting only Umiak-owned agent/config
 and narrowing zone membership. Ambiguous/unreadable inventory fails closed.
+Local inventory includes both `umiak` sandbox LVs and `umiak-tpl` template
+LVs, even without a VM configuration. Interrupted-build cleanup retains VMID
+leases until the corresponding local VM/base disks are absent.
 Do not revert global ip_forward or uninstall dnsmasq merely because Umiak
 stops using a node. Keep the control-plane container independent of whether
 its host is a sandbox node. Re-add explicitly revalidates prerequisites and
 preserves historical topology IDs. Physical retirement representation and
 DB migration are builder decisions; cordoned alone must not be mistaken for
 fully removed when listing active installer membership.
+Updating the control plane after its original sandbox host retires preserves
+historical media/storage facts without requiring those sandbox prerequisites
+on that host. Only trusted bootstrap may skip the retired host's storage
+checks; normal setup validation and cluster-wide inventory checks still apply.
 
 Retired nodes must also be excluded from worker reconciliation and client
 refresh before removing local agent access; a cordoned node ordinarily still

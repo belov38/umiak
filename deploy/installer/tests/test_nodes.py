@@ -328,3 +328,19 @@ def test_remote_helper_does_not_pass_a_private_umask_to_pve_sdn(tmp_path):
         text=True, capture_output=True, check=True, umask=0o077,
     )
     assert json.loads(result.stdout)["mode"] == 0o644
+
+
+def test_removal_refuses_orphan_template_disks_without_vm_rows(tmp_path):
+    import json
+
+    from umiak_installer.node_host import _unused
+
+    runner = FakeRunner(tmp_path)
+    runner.objects["/nodes/pve/lxc"] = []
+    original = runner.run
+    runner.run = lambda argv, input=None: (
+        json.dumps({"report": [{"lv": [{"lv_name": "base-601-disk-0", "lv_tags": "umiak-tpl"}]}]})
+        if argv[0] == "lvs" else original(argv, input)
+    )
+    with pytest.raises(InstallerError, match="base-601-disk-0"):
+        _unused(runner, "pve", 590)

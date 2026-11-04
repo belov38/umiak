@@ -284,6 +284,26 @@ export async function nodeCommand(
 				throw Error(
 					"Inspect and remove build/verification VMs before releasing the reservation",
 				);
+			const local = await probe(
+				{
+					...state.steps.connection.data,
+					node: node.name,
+					sshHost: node.sshHost,
+				},
+				secretsDir,
+				{ op: "lv.list", args: {} },
+			);
+			if (
+				!Array.isArray(local.lvs) ||
+				local.lvs.some((lv) =>
+					leases.some((lease) =>
+						new RegExp(`^(?:base|vm)-${lease.vmid}-`).test(lv.name),
+					),
+				)
+			)
+				throw Error(
+					"Build local disks remain or cannot be verified; reservation retained",
+				);
 			await tx.client.query(
 				"DELETE FROM runtime.vmid_leases WHERE build_job_id=$1",
 				[request.jobId],

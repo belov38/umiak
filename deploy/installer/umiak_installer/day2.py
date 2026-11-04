@@ -102,7 +102,12 @@ def apply_stack(runner: Runner, ct_id: int, bundle, a: dict, node_ip: str, publi
         prepare_host.install_node_agent(runner, binary, bundle.node_agent_sha256, public_key)
     if sandbox_host:
         host_report.write(host_report.collect(runner, node, a["vmid_min"], a["vmid_max"]), out_dir)
-    limits = {"mediaStorage": media_storages(runner, node)[0]["storage"],
+        media_storage = media_storages(runner, node)[0]["storage"]
+    else:
+        # Retirement removes sandbox prerequisites, not the control plane. Keep
+        # historical import facts without requiring storage on this node again.
+        media_storage = json.loads((out_dir / "install.json").read_text())["limits"]["mediaStorage"]
+    limits = {"mediaStorage": media_storage,
               "storage": a["storage"], "vmidMin": a["vmid_min"], "vmidMax": a["vmid_max"],
               "ramCapMb": a["ram_cap_mb"], "templateVmidMin": a["tpl_min"], "templateVmidMax": a["tpl_max"]}
     stack.write_install_json(stack.install_json(

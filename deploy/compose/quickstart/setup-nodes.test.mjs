@@ -124,3 +124,52 @@ test("selected smoke forwards the owner Origin required by the proxied API", asy
 	);
 	assert.equal(calls[0][0], "http://api:8081/v1/setup/smoke");
 });
+
+test("trusted bootstrap preserves retired-node facts without checking its old sandbox storage", async () => {
+	const { createSetupHandler } = await import("./setup.mjs");
+	const calls = [];
+	const handler = createSetupHandler({
+		pool: { query: async () => ({ rows: [{ id: "provider" }] }) },
+		nodes: {
+			installerNodeRetired: async () => true,
+			register: async () => ({ nodeId: "retired", storageId: "historic" }),
+		},
+		makePve: () => ({
+			get: async (path) => {
+				calls.push(path);
+				if (path === "/cluster/resources") return [];
+				throw Error("original sandbox storage gone");
+			},
+		}),
+	});
+	const state = {
+		steps: {
+			connection: {
+				data: {
+					node: "pve",
+					apiUrl: "https://pve:8006",
+					tlsName: "pve",
+					sshHost: "192.0.2.1",
+				},
+			},
+			limits: { data: { nodeId: "retired" } },
+		},
+	};
+	const limits = {
+		storage: "old-lvm",
+		vmidMin: 500,
+		vmidMax: 589,
+		templateVmidMin: 600,
+		templateVmidMax: 699,
+		ramCapMb: 4096,
+	};
+	const result = await handler.wizard.steps.limits(limits, state, {
+		bootstrap: true,
+	});
+	assert.equal(result.nodeId, "retired");
+	assert.deepEqual(calls, ["/cluster/resources"]);
+	await assert.rejects(
+		handler.wizard.steps.limits(limits, state, {}),
+		/storage gone/,
+	);
+});

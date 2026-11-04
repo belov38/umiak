@@ -486,3 +486,17 @@ def test_update_fails_when_dnsmasq_unit_is_down(installed):
     runner.dnsmasq_unit_active = False
     with pytest.raises(InstallerError, match="dnsmasq@umiak"):
         day2.update(runner, current, new_bundle(tmp_path), ui=FakeUi(), sleep=lambda _: None)
+
+
+def test_retired_original_host_update_preserves_media_facts_without_local_media(installed, monkeypatch):
+    from umiak_installer import nodes
+
+    runner, current, tmp_path = installed
+    facts = runner.path(day2.SECRETS_DIR) / "install.json"
+    saved = json.loads(facts.read_text())
+    saved["limits"]["mediaStorage"] = "historic-media"
+    facts.write_text(json.dumps(saved))
+    monkeypatch.setattr(nodes.NodeConsole, "call", lambda *_args, **_kwargs: {"nodes": []})
+    monkeypatch.setattr(day2, "media_storages", lambda *_args: [])
+    day2.update(runner, current, new_bundle(tmp_path), ui=FakeUi(), sleep=lambda _: None)
+    assert json.loads(facts.read_text())["limits"]["mediaStorage"] == "historic-media"

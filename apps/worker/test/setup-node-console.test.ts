@@ -481,8 +481,24 @@ it("ordinary interrupted cleanup reads active tasks and frees only absent job le
 	const dir = await mkdtemp(join(tmpdir(), "s19-active-clean-"));
 	await writeFile(join(dir, "pve-token"), "test");
 	let active = true;
+	let disks = [{ name: "base-550-disk-0" }];
 	const options = {
 		secretsDir: dir,
+		probe: async (
+			connection: { node: string; sshHost: string },
+			_dir: string,
+			operation: unknown,
+		) => {
+			const node = (await nodeService(db.pool).list(a.providerId)).find(
+				(n: { nodeId: string }) => n.nodeId === a.nodeId,
+			);
+			expect(connection).toMatchObject({
+				node: node.name,
+				sshHost: node.sshHost,
+			});
+			expect(operation).toEqual({ op: "lv.list", args: {} });
+			return { lvs: disks };
+		},
 		makePve: () => ({
 			get: async (path: string, parameters?: { source: string }) => {
 				if (path.endsWith("/tasks")) {
@@ -510,6 +526,22 @@ it("ordinary interrupted cleanup reads active tasks and frees only absent job le
 			).rowCount,
 		).toBe(1);
 		active = false;
+		await expect(
+			nodeCommand(
+				db.pool,
+				{ op: "cleanup-build", nodeId: a.nodeId, jobId: job },
+				options,
+			),
+		).rejects.toThrow(/local disks remain/);
+		expect(
+			(
+				await db.pool.query(
+					"SELECT 1 FROM runtime.vmid_leases WHERE build_job_id=$1",
+					[job],
+				)
+			).rowCount,
+		).toBe(1);
+		disks = [{ name: "base-5500-disk-0" }];
 		expect(
 			await nodeCommand(
 				db.pool,

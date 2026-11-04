@@ -335,19 +335,25 @@ export function createSetupHandler({
 				),
 			);
 			const connection = connectionOf(state);
-			const api = await pveOf(state);
-			const storage = await api.get(
-				`/nodes/${connection.node}/storage/${limits.storage}/status`,
-			);
-			requireValue(storage.type === "lvmthin", "Storage must be lvmthin");
-			const running = await api.get(`/nodes/${connection.node}/qemu`);
-			const used = running
-				.filter((x) => x.vmid >= 500 && x.vmid <= 589 && x.status === "running")
-				.reduce((sum, x) => sum + Number(x.maxmem || 0) / 1048576, 0);
-			requireValue(
-				used <= limits.ramCapMb,
-				`Running sandbox VMs already reserve ${used} MiB`,
-			);
+			const retiredBootstrap =
+				context.bootstrap === true && (await nodes.installerNodeRetired(state));
+			if (!retiredBootstrap) {
+				const api = await pveOf(state);
+				const storage = await api.get(
+					`/nodes/${connection.node}/storage/${limits.storage}/status`,
+				);
+				requireValue(storage.type === "lvmthin", "Storage must be lvmthin");
+				const running = await api.get(`/nodes/${connection.node}/qemu`);
+				const used = running
+					.filter(
+						(x) => x.vmid >= 500 && x.vmid <= 589 && x.status === "running",
+					)
+					.reduce((sum, x) => sum + Number(x.maxmem || 0) / 1048576, 0);
+				requireValue(
+					used <= limits.ramCapMb,
+					`Running sandbox VMs already reserve ${used} MiB`,
+				);
+			}
 			const provider = (
 				await query(
 					`INSERT INTO runtime.providers(kind,name,cluster_mac_id,vmid_min,vmid_max,api_url,tls_name,secret_ref) VALUES('proxmox',$1,1,$2,$3,$4,$5,'pve') ON CONFLICT(name) DO UPDATE SET vmid_min=$2,vmid_max=$3,api_url=$4,tls_name=$5,updated_at=now() RETURNING id`,

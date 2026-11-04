@@ -59,7 +59,7 @@ def _unused(runner, node, control_plane_id):
     rows = json.loads(runner.run(["lvs", "--reportformat", "json", "-o", "lv_name,lv_tags"]))
     for report in rows.get("report", []):
         for lv in report.get("lv", []):
-            if "umiak" in str(lv.get("lv_tags", "")).split(","):
+            if {"umiak", "umiak-tpl"}.intersection(str(lv.get("lv_tags", "")).split(",")):
                 raise InstallerError("Node still has Umiak local disks: " + lv["lv_name"])
 
 
