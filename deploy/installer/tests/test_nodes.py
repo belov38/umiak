@@ -282,3 +282,18 @@ def test_sdn_config_without_local_snat_rule_refuses_activation(tmp_path):
     runner.run = lambda argv, input=None: "" if argv[0] == "iptables" else original(argv, input)
     with pytest.raises(InstallerError, match="SNAT rule is missing"):
         node_host._verify_local_sdn(runner, config())
+
+
+def test_zone_membership_appends_and_removes_one_comma_separated_node(tmp_path):
+    from umiak_installer.node_host import _zone
+
+    runner = FakeRunner(tmp_path)
+    runner.objects["/cluster/sdn/zones/umiak"] = {"type": "simple", "dhcp": "dnsmasq", "nodes": "pve,pve3"}
+    _zone(runner, ["pve", "pve2"])
+    assert runner.objects["/cluster/sdn/zones/umiak"]["nodes"] == "pve,pve2,pve3"
+    _zone(runner, ["pve"], remove="pve2")
+    assert runner.objects["/cluster/sdn/zones/umiak"]["nodes"] == "pve,pve3"
+    runner.objects["/cluster/sdn/zones/umiak"]["nodes"] = "pve2"
+    _zone(runner, [], remove="pve2")
+    assert runner.objects["/cluster/sdn/zones/umiak"]["nodes"] == "pve2"
+    assert all(a[-1] for a in runner.commands if a[:3] == ["pvesh", "set", "/cluster/sdn/zones/umiak"])

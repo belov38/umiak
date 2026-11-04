@@ -19,7 +19,7 @@ def _identity(runner, node):
         raise InstallerError("Sandbox node identity does not match this host")
 
 
-def _zone(runner, members):
+def _zone(runner, members, *, remove=None):
     if pending_sdn(runner):
         raise InstallerError("Refusing unrelated pending SDN changes")
     zone = get(runner, "/cluster/sdn/zones/umiak", "--pending", "1")
@@ -30,8 +30,15 @@ def _zone(runner, members):
     bridge = runner.path("/sys/class/net/vmbr0/bridge/mcast_hash_max")
     previous = bridge.read_text() if bridge.exists() else None
     try:
-        if members and set(str(zone.get("nodes", "")).split(",")) != set(members):
-            runner.run(["pvesh", "set", "/cluster/sdn/zones/umiak", "--nodes", ",".join(sorted(members))])
+        current = {name.strip() for name in str(zone.get("nodes", "")).split(",") if name.strip()}
+        desired = current | set(members)
+        if remove:
+            desired.discard(remove)
+        # PVE treats an empty list as all cluster nodes, not zero nodes.
+        if not desired:
+            desired = current or {runner.hostname()}
+        if desired != current:
+            runner.run(["pvesh", "set", "/cluster/sdn/zones/umiak", "--nodes", ",".join(sorted(desired))])
         runner.run(["pvesh", "set", "/cluster/sdn"])
     finally:
         if previous is not None and bridge.read_text() != previous:
@@ -113,7 +120,7 @@ def _dispatch(runner: Runner, request: dict) -> dict:
                 raise InstallerError("Refusing to remove a foreign node-agent configuration")
         if not config.exists() and runner.path(prepare_host.NODE_BINARY).exists():
             raise InstallerError("Cannot prove ownership of node-agent without its config")
-        _zone(runner, request["remaining_nodes"])
+        _zone(runner, request["remaining_nodes"], remove=node)
         # The forced-command line is cluster-wide. Never remove it for one node.
         for name in (prepare_host.NODE_BINARY, prepare_host.NODE_CONFIG):
             runner.path(name).unlink(missing_ok=True)

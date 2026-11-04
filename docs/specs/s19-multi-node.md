@@ -128,7 +128,7 @@ Builds remain sequential initially. No replication: Linux, Linux desktop
 and Windows builds produce independent manifests with their actual node,
 storage and unique VMID. Windows ISO discovery/upload refers to the target
 node's media store; never infer that another node has the same ISO.
-Match build completion to its job/node/VMID and verified manifest, and
+Match build completion to its job/node/VMID and verified manifest (including a durable job ID in new manifests), and
 promote only that node's build. A rebuild on pve2 leaves pve's active build
 and all existing sandbox disks unchanged. Failure preserves the previous
 active build. Historical versions need not be identical across nodes.
@@ -168,7 +168,9 @@ Rerun is idempotent.
 SDN Simple zone/VNet/subnet, IPSet and firewall groups are cluster-wide,
 with local NAT/DHCP bridges on selected nodes (architecture §7). Extend
 Umiak's zone membership if scoped to a node list, apply only intended Umiak
-changes, and verify local DHCP/SNAT and guest tunnel reachability. Refuse
+changes, and verify local DHCP/SNAT and guest tunnel reachability. Parse PVE
+zone membership as a comma-separated node list; append existing members on
+add, remove only the target on removal, and never write an empty list. Refuse
 unrelated pending SDN changes. No changes to `vmbr0`, other guests or
 non-Umiak firewall policy. Keep the common forced-command authorization
 while any sandbox node remains; removing one node must not revoke others.

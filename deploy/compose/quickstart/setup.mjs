@@ -462,9 +462,18 @@ export function createSetupHandler({
 						),
 						"This legacy headless Windows build has no verified desktop marker and cannot be adopted",
 					);
+				// A physically retired VMID may hold a different, newly verified artifact.
+				// Only an internal build job may distinguish it by version; manual adoption
+				// must still refuse retired history at this VMID.
+				const artifactVersion = context.job ? build.version : null;
+				requireValue(
+					!context.job ||
+						(typeof artifactVersion === "string" && artifactVersion.length > 0),
+					"Verified build version is required",
+				);
 				const existing = await query(
-					`SELECT id,version,status,(template_slug='windows' AND headless IS DISTINCT FROM false) AS headless FROM runtime.template_builds WHERE node_id=$1 AND template_slug=$2 AND pve_vmid=$3 AND (status IN ('active','retired') OR (template_slug='windows' AND headless IS DISTINCT FROM false)) ORDER BY (status='active') DESC,created_at DESC`,
-					[limits.nodeId, build.templateSlug, build.pveVmid],
+					`SELECT id,version,status,(template_slug='windows' AND headless IS DISTINCT FROM false) AS headless FROM runtime.template_builds WHERE node_id=$1 AND template_slug=$2 AND pve_vmid=$3 AND ($4::text IS NULL OR version=$4) AND (status IN ('active','retired') OR (template_slug='windows' AND headless IS DISTINCT FROM false)) ORDER BY (status='active') DESC,created_at DESC`,
+					[limits.nodeId, build.templateSlug, build.pveVmid, artifactVersion],
 				);
 				requireValue(
 					existing.rows[0]?.status !== "retired",

@@ -293,6 +293,9 @@ async function cmdBuild(
 		const opt = (flag: string, key: keyof BuildOptions) =>
 			str(flag) !== undefined ? { [key]: str(flag) } : {};
 		const opts: BuildOptions = {
+			...(process.env.UMIAK_TEMPLATE_BUILD_JOB_ID
+				? { nodeBuildJobId: process.env.UMIAK_TEMPLATE_BUILD_JOB_ID }
+				: {}),
 			slug,
 			node: cfg.node,
 			storage: cfg.storage,

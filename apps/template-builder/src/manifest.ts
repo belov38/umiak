@@ -87,6 +87,8 @@ export interface LicenseInfo {
 export interface Manifest {
 	/** UUIDv7. */
 	buildId: string;
+	/** Durable control-plane job identity, absent for standalone CLI builds. */
+	nodeBuildJobId?: string;
 	templateSlug: string;
 	/** YYYYMMDD.n */
 	version: string;

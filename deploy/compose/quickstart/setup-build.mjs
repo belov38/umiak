@@ -231,21 +231,34 @@ export async function runTemplateBuild(
 			else resolvePromise();
 		});
 	});
+	return readBuiltManifest(invocation);
+}
+
+export async function readBuiltManifest(invocation) {
+	const jobId = invocation.env.UMIAK_TEMPLATE_BUILD_JOB_ID;
+	if (!jobId) throw Error("Template build job identity is required");
 	const registry = invocation.env.UMIAK_TEMPLATE_REGISTRY;
+	const matches = [];
 	for (const file of await readdir(registry)) {
-		if (!file.endsWith(".json")) continue;
+		if (!file.endsWith(".json") || file.startsWith(".")) continue;
 		const manifest = JSON.parse(await readFile(join(registry, file), "utf8"));
 		if (
+			manifest.nodeBuildJobId === jobId &&
 			manifest.node === invocation.env.UMIAK_PVE_NODE &&
 			manifest.templateSlug === invocation.slug &&
 			Number(manifest.pveVmid) === invocation.slot &&
 			manifest.status === "ready" &&
 			manifest.verify?.ok
 		)
-			return manifest;
+			matches.push(manifest);
 	}
-	throw new Error("Template builder did not produce a verified ready manifest");
+	if (matches.length !== 1)
+		throw Error(
+			"Template builder did not produce exactly one verified ready manifest for this job",
+		);
+	return matches[0];
 }
+
 export class TemplateBuildJobs {
 	constructor({
 		store,

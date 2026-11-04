@@ -199,7 +199,9 @@ const vm = "/nodes/pve/qemu/597";
 describe("buildTemplate: happy path", () => {
 	it("runs the stages in order and records a ready build", async () => {
 		const s = setup({ logDir: join(tmp(), "build-logs") });
+		Object.assign(s.opts, { nodeBuildJobId: "current-node-job" });
 		const m = await buildTemplate(s.deps, s.opts);
+		expect(m.nodeBuildJobId).toBe("current-node-job");
 
 		expect(m.status).toBe("ready");
 		expect(m.version).toBe("20261030.1");

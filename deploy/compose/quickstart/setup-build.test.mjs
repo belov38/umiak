@@ -285,3 +285,55 @@ test("legacy build alias validates canonical rebuild confirmation before any lau
 	assert.deepEqual(validated, { slug: "windows", confirmRebuild: "windows" });
 	assert.equal(result.slug, "windows");
 });
+
+test("completion resolves the current job artifact when an old ready manifest reuses its VMID", async () => {
+	const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const { readBuiltManifest } = await import("./setup-build.mjs");
+	const dir = await mkdtemp(join(tmpdir(), "s19-manifests-"));
+	const common = {
+		node: "pve2",
+		templateSlug: "linux",
+		pveVmid: 600,
+		status: "ready",
+		verify: { ok: true },
+	};
+	try {
+		await writeFile(
+			join(dir, "a-old.json"),
+			JSON.stringify({
+				...common,
+				nodeBuildJobId: "old-job",
+				buildId: "old-build",
+				version: "20261104.1",
+			}),
+		);
+		await writeFile(
+			join(dir, "b-new.json"),
+			JSON.stringify({
+				...common,
+				nodeBuildJobId: "current-job",
+				buildId: "new-build",
+				version: "20261104.2",
+			}),
+		);
+		const invocation = {
+			slot: 600,
+			slug: "linux",
+			env: {
+				UMIAK_PVE_NODE: "pve2",
+				UMIAK_TEMPLATE_BUILD_JOB_ID: "current-job",
+				UMIAK_TEMPLATE_REGISTRY: dir,
+			},
+		};
+		assert.equal((await readBuiltManifest(invocation)).buildId, "new-build");
+		invocation.env.UMIAK_TEMPLATE_BUILD_JOB_ID = "absent-job";
+		await assert.rejects(
+			readBuiltManifest(invocation),
+			/verified ready manifest/,
+		);
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});

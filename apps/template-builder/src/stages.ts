@@ -118,6 +118,8 @@ export interface BuildDeps {
 }
 
 export interface BuildOptions {
+	/** Internal production job scope; never a public placement option. */
+	nodeBuildJobId?: string;
 	/** Explicit fresh build slot, still checked against allocator range and occupied VMs. */
 	templateVmid?: number;
 	slug: string;

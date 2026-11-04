@@ -59,6 +59,7 @@ it("registers distinct node-local storage and endpoints, and reruns preserve oth
 		]),
 	);
 	expect(a.storageId).not.toBe(b.storageId);
+	expect(nodes.every((n) => n.templates.length === 0)).toBe(true);
 	await withTx(db.pool, (tx) => retireNode(tx, b.nodeId));
 	expect(
 		(await sandboxNodeInventory(db.pool, providerId)).map((n) => n.nodeId),
@@ -73,6 +74,9 @@ it("refuses lowering RAM below reservations or changing storage under existing l
 	const a = await createTopology(db.pool);
 	await insertMachine(db.pool, a, { state: "running", memoryMb: 4096 });
 	const n = (await sandboxNodeInventory(db.pool, a.providerId))[0];
+	expect(n?.templates).toEqual([
+		expect.objectContaining({ templateSlug: "linux", pveVmid: 599 }),
+	]);
 	if (!n) throw new Error("missing node");
 	const cfg = {
 		providerId: a.providerId,

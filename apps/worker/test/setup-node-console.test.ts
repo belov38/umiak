@@ -6,6 +6,8 @@ import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, expect, it } from "vitest";
 // @ts-expect-error JavaScript console adapter is tested across the real PostgreSQL boundary.
 import { nodeCommand } from "../../../deploy/compose/quickstart/nodes.mjs";
+// @ts-expect-error JavaScript setup adapter exercises real PostgreSQL registration.
+import { createSetupHandler } from "../../../deploy/compose/quickstart/setup.mjs";
 // @ts-expect-error JavaScript setup adapter.
 import { nodeService } from "../../../deploy/compose/quickstart/setup-nodes.mjs";
 
@@ -218,4 +220,95 @@ it("prevalidates a re-add before host preparation and keeps failed preparation f
 		kind: "build",
 		id: prep.preparationId,
 	});
+});
+
+it("a new verified artifact may reuse the VMID of a physically retired template", async () => {
+	const a = await createTopology(db.pool);
+	const job = "reuse-" + a.nodeId;
+	await db.pool.query(
+		"UPDATE runtime.template_builds SET status='retired',pve_vmid=600,version='retired-old' WHERE id=$1",
+		[a.templateBuildId],
+	);
+	await db.pool.query(
+		"INSERT INTO runtime.node_build_jobs(id,node_id,template_slug) VALUES($1,$2,'linux')",
+		[job, a.nodeId],
+	);
+	const dir = await mkdtemp(join(tmpdir(), "s19-rebuild-"));
+	await writeFile(join(dir, "pve-token"), "test");
+	const state = {
+		steps: {
+			connection: { data: { node: "pve" } },
+			limits: {
+				data: {
+					providerId: a.providerId,
+					nodeId: a.nodeId,
+					vmidMin: 500,
+					vmidMax: 589,
+				},
+			},
+		},
+	};
+	const handler = createSetupHandler({
+		pool: db.pool,
+		secretsDir: dir,
+		makePve: () => ({
+			get: async () => ({
+				template: 1,
+				tags: "umiak-tpl",
+				ostype: "l26",
+				scsi0: "local-lvm:base-600-disk-0,size=4G",
+			}),
+		}),
+	});
+	try {
+		await expect(
+			handler.wizard.steps.templates(
+				{
+					builds: [
+						{
+							nodeId: a.nodeId,
+							templateSlug: "linux",
+							pveVmid: 600,
+							version: "20261104.99",
+						},
+					],
+				},
+				state,
+				{},
+			),
+		).rejects.toThrow(/retired/);
+		const result = await handler.wizard.steps.templates(
+			{
+				builds: [
+					{
+						nodeId: a.nodeId,
+						templateSlug: "linux",
+						pveVmid: 600,
+						version: "20261104.99",
+					},
+				],
+			},
+			state,
+			{ job: { id: job }, dashboardBuild: true },
+		);
+		expect(result.builds[0].id).not.toBe(a.templateBuildId);
+		expect(
+			(
+				await db.pool.query(
+					"SELECT version,status FROM runtime.template_builds WHERE id=$1",
+					[result.builds[0].id],
+				)
+			).rows[0],
+		).toEqual({ version: "20261104.99", status: "active" });
+		expect(
+			(
+				await db.pool.query(
+					"SELECT status FROM runtime.template_builds WHERE id=$1",
+					[a.templateBuildId],
+				)
+			).rows[0].status,
+		).toBe("retired");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
 });

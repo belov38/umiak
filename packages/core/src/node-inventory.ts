@@ -25,6 +25,7 @@ export interface SandboxNodeInventory {
 	storage: string;
 	mediaStorage: string;
 	buildJobId: string | null;
+	templates: { templateSlug: string; version: string; pveVmid: number }[];
 }
 
 /** Operator/installer inventory. Never expose SSH endpoints on member catalog routes. */
@@ -35,7 +36,8 @@ export async function sandboxNodeInventory(
 	const r = await q.query<SandboxNodeInventory>(
 		`SELECT n.id AS "nodeId",n.provider_id AS "providerId",n.name,n.state,
  n.node_agent_ref AS "sshHost",n.ram_cap_mb AS "ramCapMb",n.clone_concurrency AS "cloneConcurrency",
- st.id AS "storageId",st.name AS storage,n.media_storage AS "mediaStorage",b.id AS "buildJobId"
+ st.id AS "storageId",st.name AS storage,n.media_storage AS "mediaStorage",b.id AS "buildJobId",
+ COALESCE((SELECT jsonb_agg(jsonb_build_object('templateSlug',tb.template_slug,'version',tb.version,'pveVmid',tb.pve_vmid) ORDER BY tb.template_slug) FROM runtime.template_builds tb WHERE tb.node_id=n.id AND tb.status='active'),'[]'::jsonb) AS templates
  FROM runtime.nodes n
  JOIN LATERAL (SELECT id,name FROM runtime.storages WHERE node_id=n.id AND provider_id=n.provider_id AND driver='lvmthin' ORDER BY name LIMIT 1) st ON true
  LEFT JOIN runtime.node_build_jobs b ON b.node_id=n.id AND b.status IN ('running','interrupted')

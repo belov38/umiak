@@ -73,3 +73,29 @@ test("owner navigation and progress follow dashboard composition", () => {
 	assert.match(setup, /role="progressbar"/);
 	assert.doesNotMatch(setup, /<progress/);
 });
+
+test("setup names missing local templates and unfinished reservations per node", () => {
+	const html = renderSetup({
+		steps: {},
+		sandboxNodes: [
+			{
+				nodeId: "a",
+				name: "pve",
+				state: "active",
+				templates: [
+					{ templateSlug: "linux", version: "20261104.1", pveVmid: 600 },
+				],
+			},
+			{
+				nodeId: "b",
+				name: "pve2",
+				state: "cordoned",
+				templates: [],
+				buildJobId: "prepare-held",
+			},
+		],
+	});
+	assert.match(html, /linux · 20261104\.1 · VM 600/);
+	assert.match(html, /pve2[\s\S]*Linux template needed/);
+	assert.match(html, /Unfinished reservation: <code>prepare-held<\/code>/);
+});

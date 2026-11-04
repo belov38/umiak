@@ -294,6 +294,7 @@ export async function buildTemplate(
 		recipe.vmids = [o.templateVmid];
 	}
 	const job = newJob(deps, o, recipe);
+	if (o.nodeBuildJobId) job.manifest.nodeBuildJobId = o.nodeBuildJobId;
 	deps.registry.create(job.manifest);
 	const st: State = {
 		m: job.manifest,
