@@ -24,7 +24,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import rollback
-from .pve import CommandError, InstallerError, Runner, exists, get, media_storages, pending_sdn, write_secret
+from .pve import (
+    CommandError,
+    InstallerError,
+    Runner,
+    exists,
+    get,
+    media_storages,
+    pending_sdn,
+    private_dir,
+    write_secret,
+)
 
 USER_ID = "umiak@pve"
 TOKEN_NAME = "umiak"
@@ -290,7 +300,7 @@ class _Journal:
 
 def _arm(runner: Runner, state: Path, bridge: dict) -> None:
     script = state / "rollback.py"
-    script.write_text(Path(rollback.__file__).read_text())
+    write_secret(script, Path(rollback.__file__).read_text())
     script.chmod(0o700)
     write_secret(state / rollback.BRIDGE, json.dumps(bridge))
     rollback.write_journal(state, [])
@@ -386,6 +396,49 @@ def _apply(runner: Runner, cfg: PrepareConfig, facts: dict, out_dir: Path, journ
             runner.run(["pvesh", "set", "/cluster/sdn"])
         finally:
             rollback.restore_bridge(journal.state, runner.run)
+        verify_dnsmasq_unit(runner)
+
+
+DNSMASQ_UNIT = "dnsmasq@umiak"
+DNSMASQ_PRIVATE_FILES = ("/etc/dbus-1/system.d/dnsmasq.umiak.conf", "/etc/default/dnsmasq.umiak")
+DNSMASQ_CONF_DIR = "/etc/dnsmasq.d/umiak"
+
+
+def verify_dnsmasq_unit(runner: Runner) -> None:
+    """After an SDN apply the zone's own dnsmasq must run; otherwise guests get no DHCP."""
+    if not exists(runner, ZONE) or get(runner, ZONE).get("dhcp") != "dnsmasq":
+        return
+    try:
+        state = runner.run(["systemctl", "is-active", DNSMASQ_UNIT])
+    except CommandError as error:
+        state = (error.stdout or "").strip() or "failed"
+    if state == "active":
+        return
+    try:
+        log = runner.run(["journalctl", "-u", DNSMASQ_UNIT, "-n", "5", "--no-pager"])
+    except CommandError as error:
+        log = (error.stderr or str(error)).strip()
+    raise InstallerError(
+        f"{DNSMASQ_UNIT} is {state} after the SDN apply, so guests would get no DHCP on umiak0 "
+        f"(check that the dnsmasq configs it reads are world-readable).\n{log}"
+    )
+
+
+def repair_dnsmasq_modes(runner: Runner) -> bool:
+    """Undo configs PVE wrote as 0600 under a leaked umask 077 (messagebus cannot read them)."""
+    paths = [runner.path(p) for p in DNSMASQ_PRIVATE_FILES]
+    conf_dir = runner.path(DNSMASQ_CONF_DIR)
+    if conf_dir.is_dir():
+        paths += sorted(conf_dir.glob("*.conf"))
+    fixed = False
+    for path in paths:
+        if path.is_file() and path.stat().st_mode & 0o777 == 0o600:
+            path.chmod(0o644)
+            fixed = True
+    if fixed:
+        runner.run(["systemctl", "reload", "dbus"])
+        runner.run(["systemctl", "restart", DNSMASQ_UNIT])
+    return fixed
 
 
 def _zone_nodes(runner: Runner) -> list[str]:
@@ -419,6 +472,7 @@ def ensure_zone_nodes(runner: Runner, node: str) -> bool:
         runner.run(["pvesh", "set", "/cluster/sdn"])
     finally:
         rollback.restore_bridge(runner.path(STATE_DIR), runner.run)
+    verify_dnsmasq_unit(runner)
     return True
 
 
@@ -484,9 +538,9 @@ def _node_config(cfg: PrepareConfig, facts: dict) -> str:
 def prepare(runner: Runner, cfg: PrepareConfig, out_dir: Path) -> PrepareResult:
     facts = _preflight(runner, cfg)
     out_dir = Path(out_dir).resolve()
-    out_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    private_dir(out_dir)
     state = runner.path(STATE_DIR)
-    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    private_dir(state)
     lock = (state / rollback.LOCK).open("a")
     try:
         try:

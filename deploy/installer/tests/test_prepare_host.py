@@ -7,7 +7,7 @@ import stat
 import pytest
 
 from fake_pve import HOST_KEY, FakeRunner
-from umiak_installer import host_report, prepare_host
+from umiak_installer import host_report, prepare_host, pve
 from umiak_installer.pve import CommandError, InstallerError
 
 SECRETS = ["pve-token", "pve-token-id", "pve-root-ca.pem", "umiak-node_ed25519", "umiak-node_ed25519.pub", "known_hosts"]
@@ -609,3 +609,47 @@ def test_zone_differing_only_by_nodes_is_not_a_conflict(host):
     seed_old_zone(runner)
     prepare_host.prepare(runner, config(), out)
     assert runner.objects[ZONE]["nodes"] == "pve"
+
+
+def test_apply_fails_when_dnsmasq_unit_is_not_active(host):
+    runner, out = host
+    runner.dnsmasq_unit_active = False
+    with pytest.raises(InstallerError, match="(?s)dnsmasq@umiak is failed.*not allowed to own"):
+        prepare_host.prepare(runner, config(), out)
+    assert ["journalctl", "-u", "dnsmasq@umiak", "-n", "5", "--no-pager"] in runner.commands
+
+
+def test_apply_checks_dnsmasq_unit_after_sdn_apply(host):
+    runner, out = host
+    prepare_host.prepare(runner, config(), out)
+    assert ["systemctl", "is-active", "dnsmasq@umiak"] in runner.commands
+
+
+def test_repair_dnsmasq_modes_fixes_only_umiak_0600_files(host):
+    runner, _ = host
+    private = [runner.path(p) for p in (*prepare_host.DNSMASQ_PRIVATE_FILES, "/etc/dnsmasq.d/umiak/umiak0.conf")]
+    other = runner.path("/etc/dnsmasq.d/other/x.conf")
+    for path in [*private, other]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x")
+        path.chmod(0o600)
+    assert prepare_host.repair_dnsmasq_modes(runner) is True
+    assert all(path.stat().st_mode & 0o777 == 0o644 for path in private)
+    assert other.stat().st_mode & 0o777 == 0o600
+    assert runner.commands[-2:] == [["systemctl", "reload", "dbus"], ["systemctl", "restart", "dnsmasq@umiak"]]
+    runner.commands.clear()
+    assert prepare_host.repair_dnsmasq_modes(runner) is False
+    assert runner.commands == []
+
+
+def test_private_dir_and_secrets_ignore_the_umask(tmp_path):
+    import os
+    old = os.umask(0)
+    try:
+        d = tmp_path / "a" / "b"
+        pve.private_dir(d)
+        pve.write_secret(d / "s", "x")
+    finally:
+        os.umask(old)
+    assert d.stat().st_mode & 0o777 == 0o700
+    assert (d / "s").stat().st_mode & 0o777 == 0o600

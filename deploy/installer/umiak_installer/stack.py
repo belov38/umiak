@@ -17,7 +17,7 @@ from pathlib import Path
 
 from .ct import run_in, write_file
 from .prepare_host import TOKEN_ID
-from .pve import InstallerError, Runner, write_secret
+from .pve import InstallerError, Runner, private_dir, write_secret
 from .release import Release
 
 DIR = "/opt/umiak"
@@ -122,9 +122,9 @@ def write(runner: Runner, ct_id: int, release: Release, env: dict, work_dir: Pat
         run_in(runner, ct_id, "install", "-d", "-m", "0755", parent)
         _push(runner, ct_id, source, f"{DIR}/{name}", "0644")
     work_dir = Path(work_dir)
-    work_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    private_dir(work_dir)
     env_file = work_dir / "stack.env"
-    env_file.write_text(text)
+    write_secret(env_file, text)
     _push(runner, ct_id, env_file, f"{DIR}/.env", "0644")
 
 
@@ -157,10 +157,9 @@ def push_secrets(runner: Runner, ct_id: int, files: dict[str, Path], image: str)
 
 def write_network(runner: Runner, ct_id: int, content: bytes, image: str, work_dir: Path) -> None:
     work_dir = Path(work_dir)
-    work_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    private_dir(work_dir)
     local = work_dir / "quickstart-network.json"
-    local.write_bytes(content)
-    local.chmod(0o600)
+    write_secret(local, content)
     _staged(runner, ct_id, {"quickstart-network.json": local}, image, "network-config", "/n", "0644")
 
 
@@ -304,7 +303,7 @@ def extract_node_agent(runner: Runner, ct_id: int, image: str, dest: Path) -> Pa
     finally:
         run_in(runner, ct_id, "docker", "rm", "-f", EXTRACT_NAME)
     dest = Path(dest)
-    dest.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    private_dir(dest.parent)
     dest.unlink(missing_ok=True)
     try:
         runner.run(["pct", "pull", str(ct_id), EXTRACT_PATH, str(dest)])
