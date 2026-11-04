@@ -217,13 +217,21 @@ def _quiet(_line: str) -> None:
 
 
 def pull(runner: Runner, ct_id: int, say=_quiet) -> None:
-    """Pull service by service so a long first download shows progress (cached images return at once)."""
-    services = run_in(runner, ct_id, *compose("config", "--services")).split()
-    if not services:
+    """Pull image by image so a long first download shows progress (cached images return at once)."""
+    try:
+        config = json.loads(run_in(runner, ct_id, *compose("config", "--format", "json")) or "{}")
+    except ValueError:
+        config = {}
+    by_image: dict[str, str] = {}
+    for service, spec in sorted((config.get("services") or {}).items()):
+        if isinstance(spec, dict) and spec.get("image"):
+            by_image.setdefault(spec["image"], service)
+    if not by_image:
         run_in(runner, ct_id, *compose("pull", "--quiet"))
         return
-    for n, service in enumerate(services, 1):
-        say(f"Downloading images {n}/{len(services)}: {service}")
+    for n, (image, service) in enumerate(sorted(by_image.items()), 1):
+        name = image.rsplit("/", 1)[-1]
+        say(f"Downloading image {n}/{len(by_image)}: {name}")
         run_in(runner, ct_id, *compose("pull", "--quiet", service))
 
 

@@ -239,3 +239,28 @@ def test_quickstart_running_probe(runner):
     assert stack.quickstart_running(runner, 591) is False
     runner.quickstart_running = True
     assert stack.quickstart_running(runner, 591) is True
+
+
+def test_pull_reports_one_line_per_image(tmp_path):
+    import json as _json
+
+    from fake_ct import CtFake
+
+    runner = CtFake(tmp_path / "host")
+    original = runner.run
+    config = {"services": {"api": {"image": "ghcr.io/belov38/umiak-quickstart:1"},
+                           "worker": {"image": "ghcr.io/belov38/umiak-quickstart:1"},
+                           "web": {"image": "ghcr.io/belov38/umiak-web:1"}}}
+
+    def run(argv, input=None):
+        if "config" in argv and "json" in argv:
+            runner.commands.append(list(argv))
+            return _json.dumps(config)
+        return original(argv, input=input)
+
+    runner.run = run
+    said = []
+    stack.pull(runner, 591, say=said.append)
+    assert said == ["Downloading image 1/2: umiak-quickstart:1", "Downloading image 2/2: umiak-web:1"]
+    pulls = [a for a in runner.ct_commands() if "pull" in a]
+    assert [a[-1] for a in pulls] == ["api", "web"]
