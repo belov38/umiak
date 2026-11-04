@@ -1,30 +1,40 @@
 # Umiak
 
-Self-hosted платформа API-управляемых VM-sandbox для AI-агентов на Proxmox VE (аналог boat.dev). Guest templates: Linux (`linux`), Linux with desktop (`linux-desktop`), Windows 11 with desktop (`windows`). Windows Server Core is planned.
+Disposable VMs for AI agents, running on Proxmox VE. Create a sandbox from the CLI, API or MCP, run commands in it, open its ports as preview URLs, SSH in or use its desktop.
 
-- С чего начать: [docs/getting-started.md](docs/getting-started.md)
-- Архитектура: [docs/architecture.md](docs/architecture.md)
-- Области работ и статус: [docs/roadmap.md](docs/roadmap.md)
-- Спецификации: `docs/specs/`
+Templates: `linux`, `linux-desktop`, `windows` (Windows 11, bring your own ISO).
 
-## Install on Proxmox (homelab)
+## Install
 
-Prerequisites: Proxmox VE 9.x serving its default certificate on port 8006 (a custom or ACME `pveproxy-ssl.pem` is not supported yet), a root shell on the node, a free static LAN IPv4 address for the control plane container, and a Tailscale account with MagicDNS and HTTPS certificates enabled. Tailscale runs inside the control plane container, not on the PVE host. After the install, disable key expiry for the `umiak` machine in the Tailscale admin console.
+You need:
+
+- Proxmox VE 9 and a root shell on a node
+- a free static IP on your LAN, outside your router's DHCP range
+- a Tailscale account with MagicDNS and HTTPS enabled
+
+On the Proxmox node:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/belov38/umiak/main/install.sh | sh
 ```
 
-The installer verifies the release bundle, creates the Umiak objects in Proxmox (user and token, roles, pool, SDN zone and VNet, IPSet, restricted node-agent), an unprivileged Debian 13 LXC with Docker and Tailscale, pulls the images from GHCR and prints `https://umiak.<tailnet>.ts.net/claim#<code>`. Access is tailnet HTTPS only. Re-run the same command later for Update, Sign in a new browser, Reset owner access or Uninstall. Details: [docs/getting-started.md](docs/getting-started.md).
+The installer creates a Proxmox user, network and pool for Umiak, starts the control plane in a container and adds it to your tailnet. At the end it prints a link; open it on any device in your tailnet. Run the same command again to update, sign in from another browser or uninstall.
 
-Contributors build the stack from this checkout:
+Then:
+
+```sh
+umiak create --template linux --wait
+umiak exec <name> -- uname -a
+```
+
+Full guide: [docs/getting-started.md](docs/getting-started.md).
+
+## Development
 
 ```sh
 docker compose --env-file compose.dev.env -f compose.yaml -f compose.dev.yaml up --build
 ```
 
-The corporate OIDC deployment (Keycloak, oauth2-proxy) lives in [deploy/compose/README.md](deploy/compose/README.md).
+[Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md) · [Specs](docs/specs/) · [Corporate deployment (OIDC)](deploy/compose/README.md)
 
-## Windows template
-
-Windows 11 uses the single `windows` template and includes the desktop (4gb by default; 8gb optional). Linux offers `linux` and `linux-desktop`. The legacy `windows-desktop` slug remains an input alias of `windows`; API responses return `windows`. Existing headless Windows sandboxes and saved snapshots retain their retired build until deleted.
+Apache-2.0

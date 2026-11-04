@@ -1,61 +1,61 @@
-# E2E на dev control plane (CT 590)
+# E2E on the dev control plane (CT 590)
 
-> Исторический план до R1. Действующие имена и контракты — `docs/specs/rename-umiak.md`.
+> Historical plan, predating R1. Current names and contracts: `docs/specs/rename-umiak.md`.
 
-Первый подъём всего стека MVP (S1–S7) на CT 590 и сценарий Ильи с Mac: `sbx login` → `create` (шаблон 597, `linux 20261030.16`) → exec → файлы → превью → ssh → fork → snapshot → stop/resume → delete, плюс TS и Python SDK. Ветка `e2e-devcp`.
+First bring-up of the whole MVP stack (S1–S7) on CT 590 and Ilia's scenario from the Mac: `sbx login` → `create` (template 597, `linux 20261030.16`) → exec → files → preview → ssh → fork → snapshot → stop/resume → delete, plus the TS and Python SDKs. Branch `e2e-devcp`.
 
-## Что сделано
+## What was done
 
-- `infra/dev-cp/deploy.sh` разворачивает `main` со всеми сервисами S7 (api, Keycloak, oauth2-proxy) за Tailscale Serve; gateway ходит в api internal (`http://api:8082`), worker получает `SBX_TUNNEL_URL`. Шаблон 597 активен (`sbx-admin bootstrap` в `migrate`).
-- `infra/dev-cp/dev-users.sh`: пользователи realm `sbx`. `ilia@example.com` с временным паролем в `~/.config/sbx/dev-cp/ilia-initial-password` (0600, вне git) и `e2e@example.com` с постоянным паролем для сценария. Команда с ролью owner — личная команда, которую api создаёт при первом входе.
-- `infra/dev-cp/e2e.sh`: весь сценарий одной командой (таблица PASS/FAIL). Помощники: `kc-browser.py` (подтверждение device grant и вход в Keycloak для SSO-порта без браузера), `e2e-pty.py` (`sbx shell` в псевдотерминале). SDK: `packages/sdk-ts/e2e/devcp.ts`, `packages/sdk-py/e2e/devcp.py`.
-- `infra/dev-cp/QUICKSTART.md` для Ильи.
+- `infra/dev-cp/deploy.sh` deploys `main` with all S7 services (api, Keycloak, oauth2-proxy) behind Tailscale Serve; the gateway talks to the api internal listener (`http://api:8082`), the worker gets `SBX_TUNNEL_URL`. Template 597 is active (`sbx-admin bootstrap` in `migrate`).
+- `infra/dev-cp/dev-users.sh`: users of the `sbx` realm. `ilia@example.com` with a temporary password in `~/.config/sbx/dev-cp/ilia-initial-password` (0600, outside git) and `e2e@example.com` with a permanent password for the scenario. The team with the owner role is the personal team that the api creates on first login.
+- `infra/dev-cp/e2e.sh`: the whole scenario in one command (PASS/FAIL table). Helpers: `kc-browser.py` (device grant confirmation and Keycloak login for the SSO port without a browser), `e2e-pty.py` (`sbx shell` in a pseudo-terminal). SDKs: `packages/sdk-ts/e2e/devcp.ts`, `packages/sdk-py/e2e/devcp.py`.
+- A quickstart guide for Ilia (since removed together with the dev stand).
 
-## Результат
+## Result
 
-`infra/dev-cp/e2e.sh` на CT 590, 2026-10-31: 20/20 PASS, около 6 минут. Create ~14 s, resume ~10 s, fork ~15 s; первая строка `exec` ~130 ms; 80 MB `cp` в каждую сторону 4 s; idle stop при `--idle 60s` через 71–81 s. После прогона на `pve` нет VM 500–589 и LV снапшотов.
+`infra/dev-cp/e2e.sh` on CT 590, 2026-10-31: 20/20 PASS, about 6 minutes. Create ~14 s, resume ~10 s, fork ~15 s; first `exec` line ~130 ms; 80 MB `cp` each way 4 s; idle stop with `--idle 60s` after 71–81 s. After the run `pve` has no VMs 500–589 and no snapshot LVs.
 
-## Найденные ошибки
+## Bugs found
 
-### 1. Keycloak съедает всю память CT
+### 1. Keycloak eats all of the CT's memory
 
-- **Симптом.** Первый `deploy.sh` с S7 не завершился; CT перестал отвечать по SSH (`banner exchange` timeout), `memory.current` CT упёрся в лимит 3 GB, `memory.events high` рос. Keycloak умер с кодом 137 посреди импорта realm.
-- **Причина.** JVM в Docker внутри LXC без собственного cgroup-лимита считает heap от памяти хоста (`sysinfo` не виртуализирован lxcfs, 125 GB), по умолчанию `MaxRAMPercentage=70`. Keycloak вырос до 2.5 GB RSS.
-- **Исправление.** `infra/dev-cp/compose.dev-cp.yaml`: у `keycloak` `mem_limit: 1200m` и `JAVA_OPTS_KC_HEAP=-Xms128m -Xmx512m`. Базу `keycloak` после оборванного импорта удалили. Теперь Keycloak ~520 MB, весь стек ~1.1 GB из 3 GB.
-- **Тест.** Unit-теста нет (поведение JVM в LXC). Проверка — деплой на CT и `docker stats`.
+- **Symptom.** The first `deploy.sh` with S7 did not finish; the CT stopped answering over SSH (`banner exchange` timeout), the CT's `memory.current` hit the 3 GB limit, `memory.events high` kept growing. Keycloak died with code 137 in the middle of the realm import.
+- **Cause.** A JVM in Docker inside LXC without its own cgroup limit computes the heap from host memory (`sysinfo` is not virtualized by lxcfs, 125 GB), by default `MaxRAMPercentage=70`. Keycloak grew to 2.5 GB RSS.
+- **Fix.** `infra/dev-cp/compose.dev-cp.yaml`: `keycloak` gets `mem_limit: 1200m` and `JAVA_OPTS_KC_HEAP=-Xms128m -Xmx512m`. The `keycloak` database was dropped after the interrupted import. Keycloak is now ~520 MB, the whole stack ~1.1 GB of 3 GB.
+- **Test.** No unit test (JVM behavior in LXC). Verified by deploying to the CT and `docker stats`.
 
-### 2. SSH в sandbox не работает: worker не передаёт агенту SSH user CA
+### 2. SSH into the sandbox does not work: the worker does not pass the SSH user CA to the agent
 
-- **Симптом.** `sbx ssh` → `cannot reach sshd in sandbox`; в логе gateway `backend login failed ... unable to authenticate, attempted methods [none publickey]`. В VM `/etc/ssh/sbx_user_ca.pub` пустой.
-- **Причина.** Gateway входит в sshd VM сертификатом от SSH user CA (`SBX_GATEWAY_SSH_USER_CA_KEY_FILE`), а агент доверяет ключам из Claim (`ssh_user_ca_keys`). Worker берёт их из `SBX_SSH_USER_CA_KEYS_FILE`, но `deploy/compose/gateway.yaml` давал worker только токен gateway. Список был пустым в любом стеке compose.
-- **Исправление.** `deploy/compose/gateway.yaml`: worker получает `SBX_SSH_USER_CA_KEYS_FILE=/run/sbx-gateway/ssh_user_ca.pub` (каталог секретов gateway уже смонтирован).
-- **Тест.** `apps/worker/test/compose-wiring.test.ts` разбирает `gateway.yaml` и сверяет пару «CA gateway → `.pub` у worker». На старом `gateway.yaml` падал (`expected undefined to be '/run/sbx-gateway/ssh_user_ca.pub'`). Шаги `sbx ssh` и `plain ssh :2222` в `e2e.sh`.
-- **Ограничение.** Ключ приходит только в Claim (create, fork, create --from). Resume Claim не повторяет: sandbox, созданные до исправления, остаются без SSH, а смена SSH user CA не дойдёт до существующих sandbox. См. «Открытые вопросы». Закрыто веткой `fix-resume-sshca`: шаг `provision` (resume, recover, reprovision) вызывает `System/UpdateSshCa`.
+- **Symptom.** `sbx ssh` → `cannot reach sshd in sandbox`; the gateway log shows `backend login failed ... unable to authenticate, attempted methods [none publickey]`. In the VM `/etc/ssh/sbx_user_ca.pub` is empty.
+- **Cause.** The gateway logs into the VM's sshd with a certificate from the SSH user CA (`SBX_GATEWAY_SSH_USER_CA_KEY_FILE`), while the agent trusts the keys from Claim (`ssh_user_ca_keys`). The worker takes them from `SBX_SSH_USER_CA_KEYS_FILE`, but `deploy/compose/gateway.yaml` gave the worker only the gateway token. The list was empty in any compose stack.
+- **Fix.** `deploy/compose/gateway.yaml`: the worker gets `SBX_SSH_USER_CA_KEYS_FILE=/run/sbx-gateway/ssh_user_ca.pub` (the gateway secrets directory is already mounted).
+- **Test.** `apps/worker/test/compose-wiring.test.ts` parses `gateway.yaml` and checks the "gateway CA → worker's `.pub`" pair. It failed on the old `gateway.yaml` (`expected undefined to be '/run/sbx-gateway/ssh_user_ca.pub'`). Steps `sbx ssh` and `plain ssh :2222` in `e2e.sh`.
+- **Limitation.** The key arrives only in Claim (create, fork, create --from). Resume does not repeat Claim: sandboxes created before the fix stay without SSH, and a change of the SSH user CA does not reach existing sandboxes. See "Open questions". Closed by branch `fix-resume-sshca`: the `provision` step (resume, recover, reprovision) calls `System/UpdateSshCa`.
 
-### 3. Каждый деплой, пересоздающий gateway, кладёт стек на 16 минут
+### 3. Every deploy that recreates the gateway stalls the stack for 16 minutes
 
-- **Симптом.** Повторный `deploy.sh` висел больше 10 минут: старый gateway `unhealthy`, новый и worker в `Created`.
-- **Причина.** `gateway.yaml` задаёт продовый drain (`stop_grace_period: 960s`, drain до 950 s: ждёт, пока туннели и SSH уйдут на другой экземпляр). На CT gateway один, уходить некуда, и compose ждёт весь срок, а worker зависит от gateway.
-- **Исправление.** `infra/dev-cp/compose.dev-cp.yaml`: `SBX_GATEWAY_DRAIN_TIMEOUT=20s` и `stop_grace_period: 30s`. Compose берёт срок остановки у старого контейнера, поэтому первый деплой после исправления ещё раз ждал (старый gateway остановили `docker kill`); дальше пересоздание занимает секунды.
-- **Тест.** Деплой на CT; `docker inspect` у gateway: `StopTimeout 30`, `SBX_GATEWAY_DRAIN_TIMEOUT=20s`.
+- **Symptom.** A repeated `deploy.sh` hung for more than 10 minutes: the old gateway `unhealthy`, the new one and the worker in `Created`.
+- **Cause.** `gateway.yaml` sets the production drain (`stop_grace_period: 960s`, drain up to 950 s: it waits for tunnels and SSH to move to another instance). There is one gateway on the CT, nowhere to move, so compose waits the whole period, and the worker depends on the gateway.
+- **Fix.** `infra/dev-cp/compose.dev-cp.yaml`: `SBX_GATEWAY_DRAIN_TIMEOUT=20s` and `stop_grace_period: 30s`. Compose takes the stop timeout from the old container, so the first deploy after the fix waited once more (the old gateway was stopped with `docker kill`); after that recreation takes seconds.
+- **Test.** Deploy to the CT; `docker inspect` of the gateway: `StopTimeout 30`, `SBX_GATEWAY_DRAIN_TIMEOUT=20s`.
 
-### Мелочи по ходу (не ошибки продукта)
+### Minor findings along the way (not product bugs)
 
-- Realm `sbx` берёт email как username (`registrationEmailAsUsername`), поэтому логин Ильи — `ilia@example.com`, а не `ilia`.
-- Keycloak 26 требует имя и фамилию (required action `VERIFY_PROFILE`): без них вход по device grant останавливается на форме профиля. `dev-users.sh` их задаёт.
-- `docker compose exec -T` читает stdin: в скрипте, переданном через `ssh … bash -s`, он съедал остаток скрипта (`</dev/null` в `dev-users.sh`).
+- The `sbx` realm uses the email as the username (`registrationEmailAsUsername`), so Ilia's login is `ilia@example.com`, not `ilia`.
+- Keycloak 26 requires a first and last name (required action `VERIFY_PROFILE`): without them the device grant login stops at the profile form. `dev-users.sh` sets them.
+- `docker compose exec -T` reads stdin: in a script passed through `ssh … bash -s` it swallowed the rest of the script (`</dev/null` in `dev-users.sh`).
 
-## Открытые вопросы для master
+## Open questions for master
 
-- **SSH user CA только в Claim** (S3/S6). Агент сохраняет `ssh_user_ca_keys` из первого Claim, resume его не обновляет. Значит, ротация CA (S4 §9.3) не доходит до существующих sandbox. Нужна передача ключей при resume или отдельный вызов агента — это изменение протокола или оркестрации, в рамках e2e не делал.
-- `create --from <snapshot>` не переносит env и секреты исходной sandbox (переносится диск). Похоже на задуманное поведение (env задаётся в запросе), но в спеке S7 явно не сказано.
-- `sbx logs -f` выходит с `0` для команды с ненулевым кодом (спека задаёт код команды только для `exec`/`run`).
-- `sbx snapshot save` без `--wait`: снапшот готов через ~2 s, сценарий ждёт `snapshot list`.
-- Idle stop при `--idle 60s` срабатывает через ~80 s (шаг учёта активности).
+- **SSH user CA only in Claim** (S3/S6). The agent stores `ssh_user_ca_keys` from the first Claim, resume does not update them. So CA rotation (S4 §9.3) does not reach existing sandboxes. Passing keys on resume or a separate agent call is needed — a protocol or orchestration change, not done within e2e.
+- `create --from <snapshot>` does not carry over the source sandbox's env and secrets (the disk is carried over). Looks like the intended behavior (env is set in the request), but the S7 spec does not say so explicitly.
+- `sbx logs -f` exits with `0` for a command with a non-zero code (the spec defines the command's code only for `exec`/`run`).
+- `sbx snapshot save` without `--wait`: the snapshot is ready in ~2 s, the scenario waits for `snapshot list`.
+- Idle stop with `--idle 60s` fires after ~80 s (activity accounting step).
 
-## Закрыто веткой `fix-resume-sshca` (2026-10-31)
+## Closed by branch `fix-resume-sshca` (2026-10-31)
 
-- SSH user CA: worker шлёт `System/UpdateSshCa` с текущим набором ключей в шаге `provision` (S6 §7.6, S3 §8.1). Протокол агента не менялся: RPC был с S3. Sandbox, созданные до настройки CA, получают ключ при следующем stop/resume.
-- `sbx logs -f` выходит с кодом команды, как `exec` (S7 §14.2, §14.3); без `-f` — `0`.
-- `snapshot save --wait` был и раньше, сценарий его не использовал. Теперь вывод как у других ждущих команд (JSONL `accepted` → `ready`, лимит 5 min); `e2e.sh` ждёт через `--wait`.
-- `create --from <snapshot>` не переносит env и секреты — записано в S7 §8.3 как задуманное.
+- SSH user CA: the worker sends `System/UpdateSshCa` with the current key set in the `provision` step (S6 §7.6, S3 §8.1). The agent protocol did not change: the RPC existed since S3. Sandboxes created before the CA was configured get the key on the next stop/resume.
+- `sbx logs -f` exits with the command's code, like `exec` (S7 §14.2, §14.3); without `-f` — `0`.
+- `snapshot save --wait` existed before, the scenario did not use it. Now the output matches other waiting commands (JSONL `accepted` → `ready`, 5 min limit); `e2e.sh` waits via `--wait`.
+- `create --from <snapshot>` does not carry over env and secrets — recorded in S7 §8.3 as intended.

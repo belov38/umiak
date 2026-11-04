@@ -395,6 +395,24 @@ def _sdn_removed(steps) -> bool:
     return any(description.startswith("SDN ") for description, _ in steps)
 
 
+DNSMASQ_DIRS = ("/etc/dnsmasq.d/umiak",)
+DNSMASQ_FILES = ("/etc/default/dnsmasq.umiak", "/etc/dbus-1/system.d/dnsmasq.umiak.conf",
+                 "/var/lib/misc/dnsmasq.umiak.leases")
+
+
+def _remove_zone_dnsmasq(runner: Runner) -> None:
+    """PVE leaves the per-zone dnsmasq instance behind after the SDN zone is removed."""
+    try:
+        runner.run(["systemctl", "disable", "--now", "dnsmasq@umiak"])
+    except CommandError:
+        pass  # already gone or never enabled
+    for name in DNSMASQ_DIRS:
+        shutil.rmtree(runner.path(name), ignore_errors=True)
+    for name in DNSMASQ_FILES:
+        runner.path(name).unlink(missing_ok=True)
+    runner.run(["systemctl", "reload", "dbus"])
+
+
 def _remove_node_files(runner: Runner) -> None:
     prepare_host.remove_node_agent_key_lines(runner.path(prepare_host.AUTHORIZED_KEYS))
     for name in (prepare_host.NODE_BINARY, prepare_host.NODE_CONFIG):
@@ -456,6 +474,8 @@ def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: b
         plan += [f"remove {description}" for description, _ in pve_steps]
         if _sdn_removed(pve_steps):
             plan.append("apply SDN (pvesh set /cluster/sdn)")
+            plan.append("disable dnsmasq@umiak and remove " + ", ".join(DNSMASQ_DIRS + DNSMASQ_FILES)
+                        + " (reload dbus)")
         plan += [f"remove {prepare_host.NODE_BINARY} and {prepare_host.NODE_CONFIG}",
                  f"remove the umiak-node forced-command line from {prepare_host.AUTHORIZED_KEYS} (other lines kept)",
                  f"remove {STATE_DIR_ON_PVE} and {prepare_host.STATE_DIR} (installer state and secrets)"]
@@ -482,11 +502,19 @@ def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: b
     if remove_guests:
         for row in guests:
             path = f"/nodes/{row['node']}/{row['type']}/{int(row['vmid'])}"
+            vmid = str(int(row["vmid"]))
             progress(f"Destroying {row['type']} {row['vmid']}")
             # Re-read: the guest may have started since the plan was shown.
             if get(runner, path + "/status/current").get("status") != "stopped":
-                runner.run(["pvesh", "create", path + "/status/stop"])
-            runner.run(["pvesh", "delete", path, "--purge", "1", "--destroy-unreferenced-disks", "1"])
+                runner.run(["qm", "stop", vmid])
+            # Synchronous CLI: a failed destroy task is a non-zero exit. The unreferenced-disk scan is
+            # skipped: it aborts on any inactive storage of the node (e.g. a stale lvmthin).
+            runner.run(["qm", "destroy", vmid, "--purge", "1", "--destroy-unreferenced-disks", "0"])
+        remaining = {int(r["vmid"]) for r in get(runner, "/cluster/resources", "--type", "vm") or []}
+        left = [str(int(row["vmid"])) for row in guests if int(row["vmid"]) in remaining]
+        if left:
+            raise InstallerError(f"Umiak VMs still exist after destroy: {', '.join(left)}. Check the PVE task "
+                                 "log, fix the cause and rerun the uninstall; nothing else was removed.")
         # Snapshots belong to no VM; disks of destroyed guests may survive a failed purge.
         vg = lv_target[0]
         # Only LVs listed in the plan that still exist and still qualify.
@@ -508,6 +536,7 @@ def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: b
                 runner.run(["pvesh", "set", "/cluster/sdn"])
             finally:
                 rollback.restore_bridge(installer_state, runner.run)
+            _remove_zone_dnsmasq(runner)
         shutil.rmtree(runner.path(STATE_DIR_ON_PVE), ignore_errors=True)
         shutil.rmtree(runner.path(prepare_host.STATE_DIR), ignore_errors=True)
     (state_path or runner.path(str(state.DEFAULT_PATH))).unlink(missing_ok=True)

@@ -1,76 +1,76 @@
-# S11 MCP-сервер: план реализации
+# S11 MCP server: implementation plan
 
-> Исторический план до R1. Действующие имена и контракты — `docs/specs/rename-umiak.md`.
+> Historical plan, predating R1. Current names and contracts: `docs/specs/rename-umiak.md`.
 
-> **Для исполнителей:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development (по задаче на субагента, после каждой задачи — ревью свежим субагентом) и superpowers:test-driven-development. Шаги — чекбоксы `- [ ]`.
+> **For implementers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development (one subagent per task, a review by a fresh subagent after each task) and superpowers:test-driven-development. Steps are `- [ ]` checkboxes.
 
-**Цель:** реализовать MVP S11 по `docs/specs/s11-mcp.md`: пакет `@sbx/mcp` (`apps/mcp`) с 38 инструментами в 5 toolsets, stdio-сервер `sbx mcp` в бинарнике CLI и удалённый Streamable HTTP сервер `/mcp` без состояния, сервис `mcp` в `deploy/compose` и маршрут dev-стенда.
+**Goal:** implement the S11 MVP per `docs/specs/s11-mcp.md`: the package `@sbx/mcp` (`apps/mcp`) with 38 tools in 5 toolsets, the stdio server `sbx mcp` in the CLI binary and the stateless remote Streamable HTTP server `/mcp`, the `mcp` service in `deploy/compose` and the dev stand route.
 
-**Архитектура:** `apps/mcp` — тонкий адаптер MCP поверх `@sbx/sdk`: инструменты описаны декларативно (`ToolDef`: zod-схема, toolset, scopes, аннотации, обработчик), реестр собирает из них `McpServer` с учётом фильтров. Обработчик получает `ToolContext` (SDK-клиент, срок 50 s, отмена, progress, журнал). stdio — `serveStdio` из `@modelcontextprotocol/server/stdio` с обёрткой транспорта, которая отличает `notifications/cancelled` от закрытия stdin. HTTP — Hono + `createMcpHandler` (stateless), bearer проверяется через `GET /v1/me` с кэшем. Тесты идут против фейкового API (Hono в памяти), каждый запрос и ответ которого проверяется по `apps/api/openapi/v1.json` (и фрагменту S10 §13 для рабочего стола).
+**Architecture:** `apps/mcp` is a thin MCP adapter over `@sbx/sdk`: tools are described declaratively (`ToolDef`: zod schema, toolset, scopes, annotations, handler), and the registry builds an `McpServer` from them taking filters into account. The handler gets a `ToolContext` (SDK client, 50 s deadline, cancellation, progress, log). stdio uses `serveStdio` from `@modelcontextprotocol/server/stdio` with a transport wrapper that distinguishes `notifications/cancelled` from stdin closing. HTTP is Hono + `createMcpHandler` (stateless), the bearer is verified via `GET /v1/me` with a cache. Tests run against a fake API (in-memory Hono), every request and response of which is checked against `apps/api/openapi/v1.json` (and the S10 §13 fragment for the desktop).
 
-**Стек:** Node 26.13.0 (type stripping), TypeScript 7.0.2, vitest 5.0.5, biome 2.6.4, Bun 1.4.4 (CLI). Библиотеки (проверено `npm view` 2026-10-31, новее спеки ничего стабильного нет): `@modelcontextprotocol/server` 2.4.0, `@modelcontextprotocol/client` 2.4.0 (тесты), `@modelcontextprotocol/hono` 2.0.2 — **не берём** (см. решение 4), `hono` 4.13.14, `@hono/node-server` 2.1.5, `zod` 4.6.7, `pino` 10.4.0, `prom-client` 15.1.3, `@modelcontextprotocol/conformance` 0.1.16 (0.2.0 есть только alpha), `@modelcontextprotocol/inspector` 2.13.0, `ajv` 8.20.0 + `ajv-formats` 3.0.1 (тесты).
+**Stack:** Node 26.13.0 (type stripping), TypeScript 7.0.2, vitest 5.0.5, biome 2.6.4, Bun 1.4.4 (CLI). Libraries (checked with `npm view` 2026-10-31, nothing stable newer than the spec): `@modelcontextprotocol/server` 2.4.0, `@modelcontextprotocol/client` 2.4.0 (tests), `@modelcontextprotocol/hono` 2.0.2 — **not used** (see decision 4), `hono` 4.13.14, `@hono/node-server` 2.1.5, `zod` 4.6.7, `pino` 10.4.0, `prom-client` 15.1.3, `@modelcontextprotocol/conformance` 0.1.16 (0.2.0 exists only as alpha), `@modelcontextprotocol/inspector` 2.13.0, `ajv` 8.20.0 + `ajv-formats` 3.0.1 (tests).
 
-**Спецификация:** `docs/specs/s11-mcp.md` (источник истины; § ниже — из неё). Смежные: S7 (`apps/api/openapi/v1.json`, `@sbx/sdk`, `apps/cli`), S10 §12–§13 (computer-use API, ещё не реализован).
+**Specification:** `docs/specs/s11-mcp.md` (source of truth; the § below are from it). Related: S7 (`apps/api/openapi/v1.json`, `@sbx/sdk`, `apps/cli`), S10 §12–§13 (computer-use API, not implemented yet).
 
-## Глобальные ограничения
+## Global constraints
 
-- Инструменты только через mise (`mise exec -- <cmd>`). Перед добавлением зависимости — `npm view <pkg> version`.
-- Пакет в стиле S7: `"exports": {".": "./src/index.ts"}`, tsconfig как у `apps/cli` (`allowImportingTsExtensions`, `erasableSyntaxOnly`, `noEmit`), скрипты `test` (`vitest run`), `typecheck`. Без `enum`, `namespace`, parameter properties. HTTP-процесс — `node src/main.ts`. В корневых файлах — только свои строки.
-- `apps/mcp` ходит только в публичное API `/v1/*` через `@sbx/sdk` (`Sbx`, `sbx.raw`). Своей БД и состояния между вызовами нет.
-- Имена инструментов, toolsets, scopes, аннотации — ровно таблицы §8. Порядок `tools/list` — порядок §8.1–§8.7.
-- Схемы — подмножество §7.2: корень `object`; без `oneOf/anyOf/allOf/not/$ref/$defs/if/then/else`, без массивов типов и `nullable`; `enum` только строковые; у каждого свойства `description`; аргументы `snake_case`.
-- Ни один вызов не дольше 50 s (`CALL_BUDGET_MS = 50_000`); ожидания внутри заканчиваются за `RESPONSE_MARGIN_MS = 1_500` до срока.
-- Секреты не попадают в аргументы, логи, метрики. pino `redact`: `*.content`, `*.old_text`, `*.new_text`, `*.text`, `*.env`, `*.command`, `*.authorization`, `req.headers.authorization`. Исключения в ответах — только `url_with_token` и ссылка `desktop_url`, с пометкой «secret».
-- stdio: в stdout — только JSON-RPC; логи — stderr или `--log-file`.
-- На `pve` и CT 590 ничего не запускать и не менять.
-- Комментарии в коде на английском. Коммиты без `Claude-Session:` и ссылок claude.ai.
+- Tools only via mise (`mise exec -- <cmd>`). Before adding a dependency — `npm view <pkg> version`.
+- The package in the S7 style: `"exports": {".": "./src/index.ts"}`, tsconfig like `apps/cli` (`allowImportingTsExtensions`, `erasableSyntaxOnly`, `noEmit`), scripts `test` (`vitest run`), `typecheck`. No `enum`, `namespace`, parameter properties. The HTTP process is `node src/main.ts`. In root files — only your own lines.
+- `apps/mcp` talks only to the public API `/v1/*` through `@sbx/sdk` (`Sbx`, `sbx.raw`). It has no DB of its own and no state between calls.
+- Tool names, toolsets, scopes, annotations are exactly the tables of §8. The order of `tools/list` is the order of §8.1–§8.7.
+- Schemas are a subset of §7.2: root `object`; no `oneOf/anyOf/allOf/not/$ref/$defs/if/then/else`, no type arrays and `nullable`; `enum` only strings; every property has a `description`; arguments are `snake_case`.
+- No call lasts longer than 50 s (`CALL_BUDGET_MS = 50_000`); internal waits end `RESPONSE_MARGIN_MS = 1_500` before the deadline.
+- Secrets do not get into arguments, logs, metrics. pino `redact`: `*.content`, `*.old_text`, `*.new_text`, `*.text`, `*.env`, `*.command`, `*.authorization`, `req.headers.authorization`. Exceptions in responses are only `url_with_token` and the `desktop_url` link, marked "secret".
+- stdio: only JSON-RPC goes to stdout; logs go to stderr or `--log-file`.
+- Run and change nothing on `pve` and CT 590.
+- Code comments in English. Commits without `Claude-Session:` and claude.ai links.
 
-## Решения исполнителя (отклонения и уточнения спеки)
+## Implementer's decisions (deviations and spec clarifications)
 
-1. **Версии** — как в спеке §13.2; новее стабильных нет (2026-10-31). `@modelcontextprotocol/conformance` остаётся 0.1.16: 0.2.x только alpha.
-2. **Рабочий стол (S10 не реализован).** Ручки `/desktop*` вызываются через `sbx.raw` с приведением типа (в `v1.json` их нет) в одном модуле `src/desktop/api.ts`; после S10 его заменят хелперы SDK. Фейк API проверяет их по фрагменту `apps/mcp/test/fake-api/desktop.openapi.json`, написанному по S10 §13.2. Гейт: `404` от ручки рабочего стола (код не `sandbox_not_found`, т. е. в API нет маршрута) и `422 desktop_unsupported` → ошибка инструмента `desktop_unsupported` с подсказкой; инструменты в списке остаются (список статичен, golden). Scope `desktop` в API пока нет, поэтому командный ключ не видит `desktop_url` и `computer_*` до S10 — это верно по §8.7.
-3. **SDK:** в `RunOptions` добавлен колбэк `onStarted?: (s: {commandId: string; replayed: boolean}) => void` (кадр `started`), чтобы `exec_run` помечал `replayed: true` (§7.4). Остальное (`signal`, `retryBudgetMs`) уже есть в S7. Create, fork, `exec_start`, `snapshot_save` читают `Idempotency-Replayed` из ответа `sbx.raw` сами.
-4. **HTTP-адаптер:** `@modelcontextprotocol/hono` не нужен — `createMcpHandler(factory).fetch(request, {authInfo})` уже web-standard; маршруты, проверка `Host`/`Origin` и лимит тела — свои в Hono. Меньше зависимостей.
-5. **`401` от API посреди вызова (§6.3 п. 3):** обработчик помечает per-request `AuthFailure`; если ответ `createMcpHandler` — JSON (SSE не начат), маршрут заменяет его на HTTP `401` с `WWW-Authenticate: ... error="invalid_token"`; если поток SSE уже идёт — остаётся ошибка инструмента `unauthorized` (`retryable: true`).
-6. **Conformance:** прогон против `createHttpApp` с внедрённым `authenticate` (фиксированный principal) и фейковым API; сценарии, требующие resources/prompts/sampling и т. п., — в `apps/mcp/test/conformance-baseline.yml` с причиной.
-7. **stdio и scopes:** при старте соединения `GET /v1/me` с таймаутом 5 s; ошибка (нет входа, сеть) — список как у человека (все инструменты), вызовы всё равно проверяет `api`.
-8. **Проверка `Host`:** допустимые — host и hostname без порта из `SBX_MCP_PUBLIC_URL` плюс `SBX_MCP_ALLOWED_HOSTS` (через запятую); несовпадение — `421`. `Origin` не из `SBX_MCP_ALLOWED_ORIGINS` — `403`. `/healthz`, `/readyz` без проверок.
-9. **Порты:** `mcp` слушает `:8080` (`/mcp`, PRM, `/healthz`, `/readyz`) и `:9090` (`/metrics`, `/healthz`, `/readyz`). Compose публикует `127.0.0.1:8090:8080` и `127.0.0.1:9092:9090`. dev-cp: Serve `8443:/mcp` и `8443:/.well-known/oauth-protected-resource/mcp` → `127.0.0.1:8090`.
-10. **`exec_output`:** чтение — `GET /commands/{cmd}` (статус, `streams`) + `GET /output` по потокам; ожидание — `Command.follow({from: offsets, encoding: "base64"})` до первого куска + 500 ms добора или `exit` (§17 оставляет выбор исполнителю).
-11. **`files_read`:** `sbx.raw` `GET /files/content` с `Range: bytes=a-b` (`parseAs: "arrayBuffer"`); первые 8 KiB для `as: auto` — тем же запросом.
-12. **Интеграционные тесты против настоящего `api`** в процессе (`@sbx/api/testing`, как `apps/cli/test/helpers/api.ts`) — один сквозной сценарий в задаче 13, сверх спеки: ловит расхождения фейка с API.
-13. **E2E на `pve` (§14.4) и ручной чек-лист клиентов** — не в этом треде (CT 590 и `pve` запрещены); сценарий `sbx-bench s11` не пишется, чек-лист и конфиги записываются в `apps/mcp/README.md`, результаты — открытый вопрос для master.
-14. Метка `created-via=mcp` — валидна (labels в API свободной формы, `apps/api/src/schemas/common.ts`).
-15. **`fail_fast` и `warmAvailable` не вводятся:** S7 убрал их из публичного контракта (решение Ильи, тёплого пула нет; `failFast` в теле — `400`). Подсказка `pool_exhausted` не нужна.
-16. **Progress:** при `progressToken` ожидания create/resume/fork/recover/stop, `snapshot_save` и `exec_run` шлют `notifications/progress` раз в ~5 s (счётчик секунд ожидания, `message` — состояние или байты вывода).
-17. **`traceparent`** из `_meta` запроса передаётся в `api` заголовком `traceparent` (§13.3), если он есть; `User-Agent` SDK — `sbx-mcp/<version> (<client>/<version>; stdio|http)`, клиент — из `clientInfo`, если известен на момент создания SDK-клиента, иначе без него.
+1. **Versions** — as in spec §13.2; no newer stable ones exist (2026-10-31). `@modelcontextprotocol/conformance` stays at 0.1.16: 0.2.x is alpha only.
+2. **Desktop (S10 is not implemented).** The `/desktop*` endpoints are called through `sbx.raw` with a type cast (they are not in `v1.json`) in one module `src/desktop/api.ts`; after S10 SDK helpers will replace it. The fake API checks them against the fragment `apps/mcp/test/fake-api/desktop.openapi.json`, written from S10 §13.2. Gate: a `404` from a desktop endpoint (code other than `sandbox_not_found`, i.e. the API has no such route) and `422 desktop_unsupported` → the tool error `desktop_unsupported` with a hint; the tools stay in the list (the list is static, golden). The API has no `desktop` scope yet, so a team key does not see `desktop_url` and `computer_*` until S10 — correct per §8.7.
+3. **SDK:** `RunOptions` gets a callback `onStarted?: (s: {commandId: string; replayed: boolean}) => void` (the `started` frame) so that `exec_run` marks `replayed: true` (§7.4). The rest (`signal`, `retryBudgetMs`) already exists in S7. Create, fork, `exec_start`, `snapshot_save` read `Idempotency-Replayed` from the `sbx.raw` response themselves.
+4. **HTTP adapter:** `@modelcontextprotocol/hono` is not needed — `createMcpHandler(factory).fetch(request, {authInfo})` is already web-standard; the routes, `Host`/`Origin` checks, and the body limit are our own in Hono. Fewer dependencies.
+5. **`401` from the API in the middle of a call (§6.3 item 3):** the handler marks a per-request `AuthFailure`; if the `createMcpHandler` response is JSON (SSE not started), the route replaces it with HTTP `401` with `WWW-Authenticate: ... error="invalid_token"`; if the SSE stream is already going, the tool error `unauthorized` (`retryable: true`) remains.
+6. **Conformance:** a run against `createHttpApp` with an injected `authenticate` (a fixed principal) and the fake API; scenarios requiring resources/prompts/sampling etc. go in `apps/mcp/test/conformance-baseline.yml` with a reason.
+7. **stdio and scopes:** when the connection starts, `GET /v1/me` with a 5 s timeout; an error (not logged in, network) — the list as for a person (all tools), calls are still checked by `api`.
+8. **`Host` check:** allowed are the host and hostname without port from `SBX_MCP_PUBLIC_URL` plus `SBX_MCP_ALLOWED_HOSTS` (comma-separated); a mismatch gives `421`. An `Origin` not in `SBX_MCP_ALLOWED_ORIGINS` gives `403`. `/healthz`, `/readyz` without checks.
+9. **Ports:** `mcp` listens on `:8080` (`/mcp`, PRM, `/healthz`, `/readyz`) and `:9090` (`/metrics`, `/healthz`, `/readyz`). Compose publishes `127.0.0.1:8090:8080` and `127.0.0.1:9092:9090`. dev-cp: Serve `8443:/mcp` and `8443:/.well-known/oauth-protected-resource/mcp` → `127.0.0.1:8090`.
+10. **`exec_output`:** reading is `GET /commands/{cmd}` (status, `streams`) + `GET /output` per stream; waiting is `Command.follow({from: offsets, encoding: "base64"})` until the first chunk + 500 ms of extra collection or `exit` (§17 leaves the choice to the implementer).
+11. **`files_read`:** `sbx.raw` `GET /files/content` with `Range: bytes=a-b` (`parseAs: "arrayBuffer"`); the first 8 KiB for `as: auto` — by the same request.
+12. **Integration tests against the real `api`** in process (`@sbx/api/testing`, like `apps/cli/test/helpers/api.ts`) — one end-to-end scenario in task 13, on top of the spec: it catches discrepancies between the fake and the API.
+13. **E2E on `pve` (§14.4) and the manual client checklist** — not in this thread (CT 590 and `pve` are forbidden); the scenario `sbx-bench s11` is not written, the checklist and configs are recorded in `apps/mcp/README.md`, the results are an open question for master.
+14. The label `created-via=mcp` is valid (labels in the API are free-form, `apps/api/src/schemas/common.ts`).
+15. **`fail_fast` and `warmAvailable` are not introduced:** S7 removed them from the public contract (Ilia's decision, no warm pool; `failFast` in the body is `400`). The `pool_exhausted` hint is not needed.
+16. **Progress:** with a `progressToken`, the waits of create/resume/fork/recover/stop, `snapshot_save`, and `exec_run` send `notifications/progress` about every 5 s (a counter of seconds waited, `message` — the state or the output bytes).
+17. **`traceparent`** from the request `_meta` is passed to `api` in the `traceparent` header (§13.3) if present; the SDK `User-Agent` is `sbx-mcp/<version> (<client>/<version>; stdio|http)`, the client from `clientInfo` if known at the time the SDK client is created, otherwise without it.
 
 ## Review Focus
 
-1. **Многобайтовый символ на границе хвоста или куска** (`max_output_bytes` режет посреди UTF-8, хвост начинается с байта продолжения). Ожидание: offset-ы всегда на границе символа, цепочка `exec_output` собирает вывод байт в байт. Тест — задача 2 (unit) и задача 7 (sha256 вывода с кириллицей и эмодзи).
-2. **`wait_seconds` истёк, пока `POST /commands` ещё ждёт готовности sandbox** (id команды неизвестен). Ожидание: `deadline_exceeded`, `retryable: true`, `idempotency_key` в ответе; повтор с ним подключается к той же команде. Тест — задача 7.
-3. **Параллельные вызовы stdio при истёкшем токене.** Ожидание: один refresh через поставщик CLI, оба вызова успешны. Тест — задача 11.
-4. **`--sandbox self` без `SBX_SANDBOX_ID`** или с чужой sandbox в аргументах. Ожидание: понятная ошибка запуска в stderr и код выхода 2; у инструментов нет аргумента `sandbox`, подставляется привязанная. Тест — задачи 5 и 11.
-5. **`files_edit` по файлу с CRLF и `old_text` с LF; файл > 1 MiB; файл изменился между чтением и записью.** Ожидание: «not found» с числом совпадений 0, ошибка размера, `conflict`; файл не тронут. Тест — задача 8.
+1. **A multibyte character at the boundary of a tail or chunk** (`max_output_bytes` cuts in the middle of UTF-8, the tail starts with a continuation byte). Expectation: offsets always on a character boundary, a chain of `exec_output` assembles the output byte for byte. Test — task 2 (unit) and task 7 (sha256 of output with Cyrillic and emoji).
+2. **`wait_seconds` expired while `POST /commands` is still waiting for the sandbox to be ready** (the command id is unknown). Expectation: `deadline_exceeded`, `retryable: true`, `idempotency_key` in the response; a retry with it attaches to the same command. Test — task 7.
+3. **Parallel stdio calls with an expired token.** Expectation: one refresh through the CLI provider, both calls succeed. Test — task 11.
+4. **`--sandbox self` without `SBX_SANDBOX_ID`** or with a foreign sandbox in the arguments. Expectation: a clear startup error on stderr and exit code 2; the tools have no `sandbox` argument, the bound one is substituted. Test — tasks 5 and 11.
+5. **`files_edit` on a file with CRLF and an `old_text` with LF; a file > 1 MiB; a file changed between read and write.** Expectation: "not found" with a match count of 0, a size error, `conflict`; the file is untouched. Test — task 8.
 
 ---
 
-### Task 1: Каркас `apps/mcp` и спайк Bun (§12.2)
+### Task 1: `apps/mcp` skeleton and the Bun spike (§12.2)
 
 **Files:**
 - Create: `apps/mcp/{package.json,tsconfig.json,vitest.config.ts}`, `apps/mcp/src/{index.ts,version.ts}`, `apps/mcp/test/bun-spike.test.ts`, `apps/mcp/test/fixtures/spike-server.ts`
-- Modify: `pnpm-lock.yaml` (через `pnpm install`)
+- Modify: `pnpm-lock.yaml` (via `pnpm install`)
 
 **Interfaces:**
-- Produces: пакет `@sbx/mcp` (`exports: {".": "./src/index.ts"}`), `MCP_SERVER_NAME = "sbx"`, `MCP_VERSION` (= версия CLI `0.1.0`).
+- Produces: the package `@sbx/mcp` (`exports: {".": "./src/index.ts"}`), `MCP_SERVER_NAME = "sbx"`, `MCP_VERSION` (= the CLI version `0.1.0`).
 
-- [ ] **Step 1:** `package.json`: dependencies `@modelcontextprotocol/server@2.4.0`, `@sbx/sdk: workspace:*`, `hono@4.13.14`, `@hono/node-server@2.1.5`, `zod@4.6.7`, `pino@10.4.0`, `prom-client@15.1.3`; devDependencies `@modelcontextprotocol/client@2.4.0`, `@modelcontextprotocol/conformance@0.1.16`, `@modelcontextprotocol/inspector@2.13.0`, `ajv@8.20.0`, `ajv-formats@3.0.1`, `@sbx/api`, `@sbx/core`, `@sbx/db` (workspace, для интеграции). vitest config — как у `apps/cli` (условие `source`, `globalSetup` `@sbx/db/testing/global-setup`, `testTimeout` 120 000). `pnpm install`.
-- [ ] **Step 2: failing test** `bun-spike.test.ts`: `bun build --compile` фикстуры `spike-server.ts` (импорт `serveStdio` из `@modelcontextprotocol/server/stdio`, один инструмент `ping`) в tmp; запуск бинарника; клиент `@modelcontextprotocol/client` по stdio: `tools/list` содержит `ping`, `tools/call ping` → текст `pong`. Второй кейс: то же для `--target=bun-linux-x64` только сборка (код 0).
-- [ ] **Step 3:** фикстура и `src/index.ts`/`version.ts`; тест зелёный. Если `bun build --compile` не собирает SDK — записать причину в план и спеку §19, выбрать обходной путь (§12.2) до продолжения.
-- [ ] **Step 4:** `pnpm --filter @sbx/mcp test && pnpm --filter @sbx/mcp typecheck && pnpm lint` — зелёные.
+- [ ] **Step 1:** `package.json`: dependencies `@modelcontextprotocol/server@2.4.0`, `@sbx/sdk: workspace:*`, `hono@4.13.14`, `@hono/node-server@2.1.5`, `zod@4.6.7`, `pino@10.4.0`, `prom-client@15.1.3`; devDependencies `@modelcontextprotocol/client@2.4.0`, `@modelcontextprotocol/conformance@0.1.16`, `@modelcontextprotocol/inspector@2.13.0`, `ajv@8.20.0`, `ajv-formats@3.0.1`, `@sbx/api`, `@sbx/core`, `@sbx/db` (workspace, for integration). The vitest config is like `apps/cli` (the `source` condition, `globalSetup` `@sbx/db/testing/global-setup`, `testTimeout` 120 000). `pnpm install`.
+- [ ] **Step 2: failing test** `bun-spike.test.ts`: `bun build --compile` of the fixture `spike-server.ts` (import of `serveStdio` from `@modelcontextprotocol/server/stdio`, one tool `ping`) into tmp; run the binary; the `@modelcontextprotocol/client` over stdio: `tools/list` contains `ping`, `tools/call ping` → the text `pong`. A second case: the same for `--target=bun-linux-x64`, build only (code 0).
+- [ ] **Step 3:** the fixture and `src/index.ts`/`version.ts`; the test is green. If `bun build --compile` cannot build the SDK — record the reason in the plan and spec §19, pick a workaround (§12.2) before continuing.
+- [ ] **Step 4:** `pnpm --filter @sbx/mcp test && pnpm --filter @sbx/mcp typecheck && pnpm lint` — green.
 - [ ] **Step 5:** commit `mcp: package skeleton and Bun compile spike`.
 
-### Task 2: Вывод для LLM: декодер, очистка, ограждение, усечение (§9, §11.3)
+### Task 2: Output for the LLM: decoder, sanitizing, fencing, truncation (§9, §11.3)
 
 **Files:**
 - Create: `apps/mcp/src/output/{utf8.ts,sanitize.ts,fence.ts,budget.ts,result.ts}`
@@ -78,17 +78,17 @@
 
 **Interfaces:**
 - Produces:
-  - `decodeUtf8Chunk(bytes: Uint8Array, opts: {atStart: boolean; final: boolean}): {text: string; startSkip: number; endHold: number}` — `atStart=false` пропускает ведущие байты продолжения (≤ 3), `final=false` удерживает неполную последовательность на конце (≤ 3); некорректные байты — U+FFFD.
-  - `sanitizeForLlm(text: string): string` — §9.3 + §11.3 п. 3 (ANSI CSI/OSC/прочие ESC удаляются; `\r\n`→`\n`; одиночный `\r` — остаётся текст после последнего `\r` в строке; C0/C1 кроме `\t`,`\n` → `\u{XX}`; Unicode Tags U+E0000–E007F, bidi U+202A–202E, U+2066–2069, U+200E, U+200F, U+061C, U+200B, U+2060–2064, U+FEFF не в начале → `\u{XXXX}`; U+200C/U+200D остаются).
-  - `fenceUntrusted(blocks: {label: string; text: string}[], rand?: () => string): string` — общий `nonce` (6 hex) на ответ, формат `<<<sbx-untrusted id=<nonce> <label>>>>\n…\n<<<end id=<nonce>>>`; если любой текст содержит `<<<end id=<nonce>` — новый nonce. Текст очищается `sanitizeForLlm` внутри.
-  - `splitBudget(max: number, sizes: {stdout: number; stderr: number}): {stdout: number; stderr: number}` — по половине, неиспользованное коротким потоком отдаётся длинному.
-  - `truncationNote(stream: string, r: {from: number; to: number; size: number; mode: "tail" | "forward"}): string | null` — «stdout: last N of M bytes. Earlier output: exec_output with stdout_offset=0.» / «bytes A–B of M …»; `null`, если усечения нет.
-  - `MAX_RESULT_CHARS = 80_000`; `toolText(header: Record<string, unknown>, extra?: string[]): CallToolResult` (компактный JSON без пустых полей, `snake_case` ключи — как переданы) и `capResult(r: CallToolResult): CallToolResult` (текст сверх 80 000 символов режется с явной строкой «response cut at 80000 characters»).
-- [ ] **Step 1: failing tests:** разрезы `"é"`, `"€"`, `"😀"` на каждом байте (`startSkip`/`endHold` и склейка двух вызовов = исходный текст); `0xFF` → U+FFFD; очистка: `\x1b[31mred\x1b[0m`→`red`, OSC 8 со ссылкой → только текст ссылки, OSC 52 удалён, `"a\rb\rc\n"`→`"c\n"`, `\x07`→`\u{07}`, `\u0085`→`\u{85}`, `"\u{E0041}"`→`"\u{E0041}"` видимой записью, `"a‮b"`→`"a\u{202E}b"`, `"👨‍👩‍👧"` без изменений, ведущий U+FEFF сохраняется, внутренний — заменяется; ограждение: данные `<<<end id=abc123>>>` при `rand` → `abc123`, затем `def456` — блок с `def456`, данные целы; поддельный конец с другим id не закрывает блок; `splitBudget(16384, {stdout: 100000, stderr: 912})` → `{stdout: 15472, stderr: 912}`; `capResult` режет 100 000 символов до ≤ 80 000 с пометкой.
-- [ ] **Step 2:** запустить — FAIL. **Step 3:** реализовать. **Step 4:** PASS, `typecheck`, `lint`.
+  - `decodeUtf8Chunk(bytes: Uint8Array, opts: {atStart: boolean; final: boolean}): {text: string; startSkip: number; endHold: number}` — `atStart=false` skips leading continuation bytes (≤ 3), `final=false` holds an incomplete sequence at the end (≤ 3); invalid bytes become U+FFFD.
+  - `sanitizeForLlm(text: string): string` — §9.3 + §11.3 item 3 (ANSI CSI/OSC/other ESC are removed; `\r\n`→`\n`; a lone `\r` — the text after the last `\r` in the line remains; C0/C1 except `\t`,`\n` → `\u{XX}`; Unicode Tags U+E0000–E007F, bidi U+202A–202E, U+2066–2069, U+200E, U+200F, U+061C, U+200B, U+2060–2064, U+FEFF not at the start → `\u{XXXX}`; U+200C/U+200D stay).
+  - `fenceUntrusted(blocks: {label: string; text: string}[], rand?: () => string): string` — a shared `nonce` (6 hex) per response, format `<<<sbx-untrusted id=<nonce> <label>>>>\n…\n<<<end id=<nonce>>>`; if any text contains `<<<end id=<nonce>` — a new nonce. The text is cleaned by `sanitizeForLlm` inside.
+  - `splitBudget(max: number, sizes: {stdout: number; stderr: number}): {stdout: number; stderr: number}` — half each, what the shorter stream does not use goes to the longer one.
+  - `truncationNote(stream: string, r: {from: number; to: number; size: number; mode: "tail" | "forward"}): string | null` — "stdout: last N of M bytes. Earlier output: exec_output with stdout_offset=0." / "bytes A–B of M …"; `null` if there is no truncation.
+  - `MAX_RESULT_CHARS = 80_000`; `toolText(header: Record<string, unknown>, extra?: string[]): CallToolResult` (compact JSON without empty fields, `snake_case` keys — as passed) and `capResult(r: CallToolResult): CallToolResult` (text beyond 80 000 characters is cut with an explicit line "response cut at 80000 characters").
+- [ ] **Step 1: failing tests:** cuts of `"é"`, `"€"`, `"😀"` at every byte (`startSkip`/`endHold` and the concatenation of two calls = the original text); `0xFF` → U+FFFD; sanitizing: `\x1b[31mred\x1b[0m`→`red`, OSC 8 with a link → only the link text, OSC 52 removed, `"a\rb\rc\n"`→`"c\n"`, `\x07`→`\u{07}`, `\u0085`→`\u{85}`, `"\u{E0041}"`→`"\u{E0041}"` as a visible notation, `"a‮b"`→`"a\u{202E}b"`, `"👨‍👩‍👧"` unchanged, a leading U+FEFF is kept, an inner one is replaced; fencing: data `<<<end id=abc123>>>` with `rand` → `abc123`, then `def456` — the block with `def456`, data intact; a fake end with another id does not close the block; `splitBudget(16384, {stdout: 100000, stderr: 912})` → `{stdout: 15472, stderr: 912}`; `capResult` cuts 100 000 characters to ≤ 80 000 with a note.
+- [ ] **Step 2:** run — FAIL. **Step 3:** implement. **Step 4:** PASS, `typecheck`, `lint`.
 - [ ] **Step 5:** commit `mcp: utf8 decoder, sanitizer, untrusted fence, truncation`.
 
-### Task 3: Ошибки, срок вызова, ключи идемпотентности (§7.4–§7.6)
+### Task 3: Errors, call deadline, idempotency keys (§7.4–§7.6)
 
 **Files:**
 - Create: `apps/mcp/src/{errors.ts,deadline.ts,idempotency.ts}`
@@ -97,15 +97,15 @@
 **Interfaces:**
 - Produces:
   - `class ToolError extends Error {code: string; retryable: boolean; hint?: string; details?: Record<string, unknown>; idempotencyKey?: string}`.
-  - `errorResult(err: unknown, extra?: {idempotencyKey?: string}): CallToolResult` (`isError: true`, текст в формате §7.6: `error`, `message`, `retryable`, `retry_after` (s, если есть), `hint`, `idempotency_key`, `request_id`; неизвестная ошибка — `internal`, без стека).
-  - `hintFor(code: string, ctx: {sandbox?: string; details: Record<string, unknown>}): string | undefined` — таблица §7.6 плюс `not_logged_in` («run `sbx login` in a terminal, then retry»), `desktop_unsupported`, `desktop_busy`, `idempotency_key_reused` («use a new idempotency_key»), `deadline_exceeded`, `rate_limited`, `token_provider_failed`.
+  - `errorResult(err: unknown, extra?: {idempotencyKey?: string}): CallToolResult` (`isError: true`, text in the format of §7.6: `error`, `message`, `retryable`, `retry_after` (s, if present), `hint`, `idempotency_key`, `request_id`; an unknown error — `internal`, without a stack).
+  - `hintFor(code: string, ctx: {sandbox?: string; details: Record<string, unknown>}): string | undefined` — the table of §7.6 plus `not_logged_in` ("run `sbx login` in a terminal, then retry"), `desktop_unsupported`, `desktop_busy`, `idempotency_key_reused` ("use a new idempotency_key"), `deadline_exceeded`, `rate_limited`, `token_provider_failed`.
   - `CALL_BUDGET_MS = 50_000`, `RESPONSE_MARGIN_MS = 1_500`; `class Deadline { constructor(parent: AbortSignal, budgetMs = CALL_BUDGET_MS); signal: AbortSignal; remainingMs(): number; waitMs(waitSeconds: number): number /* min(ws*1000, remaining − margin), ≥ 0 */; expired(): boolean; cancelled(): boolean /* parent aborted */ }`.
-  - `apiIdempotencyKey(tool: string, modelKey: string, sandboxId?: string): string` — `mcp:<tool>:<sandbox id>:<key>` или `mcp:<tool>:<key>`; длиннее 255 — `sha256` hex строки. `IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9._-]{1,128}$/`.
-- [ ] **Step 1: failing tests:** каждая строка таблицы S7 §5.5 (`sandbox_not_ready`, `sandbox_starting`, `agent_unavailable`, `operation_in_progress`, `forbidden` с `details.requiredScope`, `confirmation_required`, `quota_exceeded`, `path_not_found`, `not_found`, `validation`, `rate_limited`, `idempotency_key_reused`) и S10 §13.2 (`desktop_unsupported`, `desktop_not_ready`, `desktop_busy`, `invalid_action`, `action_failed`, `streamer_unavailable`) → текст содержит `error: <code>` и ожидаемый `hint`; `forbidden` с `requiredScope: "files:write"` → hint упоминает `files:write`; `Deadline` с фейковыми таймерами: `waitMs(50)` при старте = 48 500; после 50 s `expired()`; отмена родителя → `cancelled()`; `apiIdempotencyKey("exec_run","k1","sb_1")` = `mcp:exec_run:sb_1:k1`, ключ 128 символов на длинном id — sha256.
-- [ ] **Steps 2–4:** FAIL → реализовать → PASS, typecheck, lint.
+  - `apiIdempotencyKey(tool: string, modelKey: string, sandboxId?: string): string` — `mcp:<tool>:<sandbox id>:<key>` or `mcp:<tool>:<key>`; longer than 255 — the `sha256` hex of the string. `IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9._-]{1,128}$/`.
+- [ ] **Step 1: failing tests:** every row of the S7 §5.5 table (`sandbox_not_ready`, `sandbox_starting`, `agent_unavailable`, `operation_in_progress`, `forbidden` with `details.requiredScope`, `confirmation_required`, `quota_exceeded`, `path_not_found`, `not_found`, `validation`, `rate_limited`, `idempotency_key_reused`) and S10 §13.2 (`desktop_unsupported`, `desktop_not_ready`, `desktop_busy`, `invalid_action`, `action_failed`, `streamer_unavailable`) → the text contains `error: <code>` and the expected `hint`; `forbidden` with `requiredScope: "files:write"` → the hint mentions `files:write`; `Deadline` with fake timers: `waitMs(50)` at start = 48 500; after 50 s `expired()`; parent cancellation → `cancelled()`; `apiIdempotencyKey("exec_run","k1","sb_1")` = `mcp:exec_run:sb_1:k1`, a 128-character key on a long id — sha256.
+- [ ] **Steps 2–4:** FAIL → implement → PASS, typecheck, lint.
 - [ ] **Step 5:** commit `mcp: tool errors with hints, call deadline, idempotency keys`.
 
-### Task 4: Фейковый API для контрактных тестов (§14.2)
+### Task 4: Fake API for contract tests (§14.2)
 
 **Files:**
 - Create: `apps/mcp/test/fake-api/{index.ts,state.ts,routes-sandboxes.ts,routes-commands.ts,routes-files.ts,routes-ports.ts,routes-snapshots.ts,routes-desktop.ts,openapi-check.ts,desktop.openapi.json}`
@@ -133,12 +133,12 @@
     noDesktopRoutes?: boolean;          // desktop routes -> plain 404 (API without S10)
   }
   ```
-  Команды фейка — сценарные: `command` вида `fake:emit <bytes>:<chunk>:<delayMs>` генерирует детерминированный вывод (в том числе многобайтовый), `fake:sleep <s>`, `fake:exit <code>`, `fake:inject` печатает `\x1b[31m`, теги Unicode и поддельный `<<<end id=...>>>`. Остальное — `echo`-подобно. Сандбоксы переходят `creating→ready` через `readyAfterMs` (по умолчанию 50). Скриншот — фиксированная PNG 1280×800 и JPEG; действия пишутся в `state.desktop.actions`.
-- [ ] **Step 1: failing test** `fake-api.test.ts`: валидатор (ajv 2020 + formats над `apps/api/openapi/v1.json` и `desktop.openapi.json`) ловит намеренно неверный ответ (`contractErrors` не пуст); обычный сценарий SDK (`new Sbx({baseUrl, apiKey})`: create → wait → exec → files write/read → ports → stop → delete) проходит с пустым `contractErrors`; `GET /v1/me` для `team_key` отдаёт `auth.kind: "team_key"` и scopes; NDJSON `/stream` с `follow=true` отдаёт `heartbeat`, `truncated`, `exit`.
-- [ ] **Steps 2–4:** FAIL → реализовать (Hono + `@hono/node-server` на случайном порту; проверка запроса и ответа по пути и методу из OpenAPI в middleware) → PASS.
+  The fake's commands are scenario-based: a `command` of the form `fake:emit <bytes>:<chunk>:<delayMs>` generates deterministic output (including multibyte), `fake:sleep <s>`, `fake:exit <code>`, `fake:inject` prints `\x1b[31m`, Unicode tags, and a fake `<<<end id=...>>>`. The rest is `echo`-like. Sandboxes go `creating→ready` after `readyAfterMs` (default 50). The screenshot is a fixed 1280×800 PNG and JPEG; actions are recorded in `state.desktop.actions`.
+- [ ] **Step 1: failing test** `fake-api.test.ts`: the validator (ajv 2020 + formats over `apps/api/openapi/v1.json` and `desktop.openapi.json`) catches a deliberately wrong response (`contractErrors` is not empty); an ordinary SDK scenario (`new Sbx({baseUrl, apiKey})`: create → wait → exec → files write/read → ports → stop → delete) passes with an empty `contractErrors`; `GET /v1/me` for a `team_key` returns `auth.kind: "team_key"` and scopes; NDJSON `/stream` with `follow=true` returns `heartbeat`, `truncated`, `exit`.
+- [ ] **Steps 2–4:** FAIL → implement (Hono + `@hono/node-server` on a random port; request and response checks by the path and method from OpenAPI in middleware) → PASS.
 - [ ] **Step 5:** commit `mcp: in-memory fake API checked against the OpenAPI document`.
 
-### Task 5: Реестр, контекст, фабрика сервера, линтер схем (§5, §7.1–§7.3, §7.7–§7.8, §8.8)
+### Task 5: Registry, context, server factory, schema linter (§5, §7.1–§7.3, §7.7–§7.8, §8.8)
 
 **Files:**
 - Create: `apps/mcp/src/{registry.ts,context.ts,server.ts,instructions.ts,schema-rules.ts,log.ts}`
@@ -190,49 +190,49 @@
   const SERVER_INSTRUCTIONS: string;       // ≤ 1500 chars, text of §7.8
   function lintToolSchema(name: string, schema: unknown): string[]; // §7.2 violations
   ```
-  Обёртка вызова в `createServer`: `Deadline` от `ctx.mcpReq.signal`; `acquireSlot`; ошибки → `errorResult`; `SbxError` 401 → `onAuthFailure` и ошибка `unauthorized` `retryable: true`; `capResult`; журнал (инструмент, sandbox, `command_id`, длительность, код ошибки, `request_id`) без аргументов.
-- [ ] **Step 1: failing tests** с тестовым набором из 4 фиктивных `ToolDef` (по одному на read-only, destructive, pinned-hidden, scope `files:write`): `selectTools` для toolsets × readOnly × principal (`team_key` без `files:write` не видит инструмент; `oidc` видит всё) × pinned (скрытые пропадают, у остальных нет `sandbox` в схеме, вызов подставляет pinned id); `tools/list` через in-memory клиента (`helpers/connect.ts`: `connectInMemory(server)` для эры 2026-07-28 и `legacy` 2025-11-25) — порядок как в массиве, аннотации все четыре, у результата `ttlMs`/`cacheScope` в модерн-эре; вызов скрытого инструмента — ошибка JSON-RPC «unknown tool»; ошибка аргументов — результат `isError: true`; `SERVER_INSTRUCTIONS.length ≤ 1500`; `lintToolSchema` находит `anyOf`, `type: ["integer","null"]`, свойство без `description`, числовой `enum`, корень не `object`.
-- [ ] **Steps 2–4:** FAIL → реализовать → PASS, typecheck, lint.
+  The call wrapper in `createServer`: `Deadline` from `ctx.mcpReq.signal`; `acquireSlot`; errors → `errorResult`; `SbxError` 401 → `onAuthFailure` and the error `unauthorized` `retryable: true`; `capResult`; log (tool, sandbox, `command_id`, duration, error code, `request_id`) without arguments.
+- [ ] **Step 1: failing tests** with a test set of 4 dummy `ToolDef`s (one each for read-only, destructive, pinned-hidden, scope `files:write`): `selectTools` for toolsets × readOnly × principal (a `team_key` without `files:write` does not see the tool; `oidc` sees everything) × pinned (hidden ones disappear, the rest have no `sandbox` in the schema, a call substitutes the pinned id); `tools/list` via an in-memory client (`helpers/connect.ts`: `connectInMemory(server)` for the 2026-07-28 era and `legacy` 2025-11-25) — order as in the array, all four annotations, the result has `ttlMs`/`cacheScope` in the modern era; calling a hidden tool is a JSON-RPC "unknown tool" error; an argument error is a result with `isError: true`; `SERVER_INSTRUCTIONS.length ≤ 1500`; `lintToolSchema` finds `anyOf`, `type: ["integer","null"]`, a property without `description`, a numeric `enum`, a non-`object` root.
+- [ ] **Steps 2–4:** FAIL → implement → PASS, typecheck, lint.
 - [ ] **Step 5:** commit `mcp: tool registry, filters, pinned mode, server factory`.
 
-### Task 6: Инструменты `core`: каталог и sandbox (§8.1–§8.2)
+### Task 6: `core` tools: catalog and sandbox (§8.1–§8.2)
 
 **Files:**
 - Create: `apps/mcp/src/tools/{catalog.ts,sandboxes.ts,index.ts,shapes.ts}`
 - Test: `apps/mcp/test/tools-sandboxes.test.ts`
 
 **Interfaces:**
-- Consumes: Task 5 `ToolDef`, `ToolContext`; Task 4 фейк.
-- Produces: `CATALOG_TOOLS` (`limits_get`, `templates_list`), `SANDBOX_TOOLS` (`sandbox_create`, `sandbox_list`, `sandbox_get`, `sandbox_update`, `sandbox_stop`, `sandbox_resume`, `sandbox_fork`, `sandbox_recover`, `sandbox_delete`); `ALL_TOOLS` в `tools/index.ts` (дополняется следующими задачами в порядке §8); `sandboxView(s: SandboxData): Record<string, unknown>` — форма ответа §8.2 (`snake_case`, без лишних полей); `waitSandbox(ctx, id: string, target: "ready" | "stopped", waitMs: number): Promise<SandboxData>` — long-poll `GET ?waitFor=&waitSeconds=` до цели, финального состояния или срока, без исключения по сроку; общие поля схем в `shapes.ts` (`waitShape`, `idempotencyKeyShape`, `envShape` с описанием «non-secret values only», `labelsShape`).
-- [ ] **Step 1: failing tests** через in-memory клиента и фейк: `limits_get` для ключа — «team key key_…», scopes, квоты; `templates_list` — `capabilities` и размеры; `sandbox_create` добавляет `created-via=mcp`, ждёт `ready`, ответ без `createdBy`/`templateVersion`, есть `idempotency_key`; при `readyAfterMs` 60 000 и `wait_seconds: 2` — ответ с `state: creating`, `operation_id` и подсказкой `sandbox_get wait_for=ready` за ≤ 3 s; повтор с тем же `idempotency_key` — одна sandbox в фейке и `replayed: true`; `error` → `isError: true` с `sandbox.error`; `sandbox_resume` с `env` + `unset_env` → тело `{env: {A: "1", B: null}}` в журнале фейка; `sandbox_update ttl_seconds: 0` → `ttlSeconds: null`; `sandbox_delete` без `confirm` — ошибка схемы; с чужим `confirm` — `confirmation_required` и sandbox цела; с верным — удалена; схемы create/resume/fork не содержат `secrets`/`secret_files`.
-- [ ] **Steps 2–4:** FAIL → реализовать → PASS, `contractErrors` пуст.
+- Consumes: Task 5 `ToolDef`, `ToolContext`; Task 4 fake.
+- Produces: `CATALOG_TOOLS` (`limits_get`, `templates_list`), `SANDBOX_TOOLS` (`sandbox_create`, `sandbox_list`, `sandbox_get`, `sandbox_update`, `sandbox_stop`, `sandbox_resume`, `sandbox_fork`, `sandbox_recover`, `sandbox_delete`); `ALL_TOOLS` in `tools/index.ts` (extended by the following tasks in the order of §8); `sandboxView(s: SandboxData): Record<string, unknown>` — the response shape of §8.2 (`snake_case`, no extra fields); `waitSandbox(ctx, id: string, target: "ready" | "stopped", waitMs: number): Promise<SandboxData>` — a long-poll `GET ?waitFor=&waitSeconds=` until the target, a final state, or the deadline, with no exception on the deadline; shared schema fields in `shapes.ts` (`waitShape`, `idempotencyKeyShape`, `envShape` with the description "non-secret values only", `labelsShape`).
+- [ ] **Step 1: failing tests** via an in-memory client and the fake: `limits_get` for a key — "team key key_…", scopes, quotas; `templates_list` — `capabilities` and sizes; `sandbox_create` adds `created-via=mcp`, waits for `ready`, the response has no `createdBy`/`templateVersion`, has `idempotency_key`; with `readyAfterMs` 60 000 and `wait_seconds: 2` — a response with `state: creating`, `operation_id`, and the hint `sandbox_get wait_for=ready` within ≤ 3 s; a retry with the same `idempotency_key` — one sandbox in the fake and `replayed: true`; `error` → `isError: true` with `sandbox.error`; `sandbox_resume` with `env` + `unset_env` → the body `{env: {A: "1", B: null}}` in the fake's journal; `sandbox_update ttl_seconds: 0` → `ttlSeconds: null`; `sandbox_delete` without `confirm` — a schema error; with a foreign `confirm` — `confirmation_required` and the sandbox is intact; with the right one — deleted; the create/resume/fork schemas contain no `secrets`/`secret_files`.
+- [ ] **Steps 2–4:** FAIL → implement → PASS, `contractErrors` empty.
 - [ ] **Step 5:** commit `mcp: catalog and sandbox lifecycle tools`.
 
-### Task 7: Инструменты команд (§8.3, §9.1–§9.2, §10.2) + `onStarted` в SDK
+### Task 7: Command tools (§8.3, §9.1–§9.2, §10.2) + `onStarted` in the SDK
 
 **Files:**
 - Create: `apps/mcp/src/tools/commands.ts`, `apps/mcp/src/output/tail.ts`
-- Modify: `packages/sdk-ts/src/commands.ts` (`RunOptions.onStarted`, вызов на кадре `started`), `packages/sdk-ts/test/facade.test.ts` (тест `onStarted` с `replayed`)
+- Modify: `packages/sdk-ts/src/commands.ts` (`RunOptions.onStarted`, called on the `started` frame), `packages/sdk-ts/test/facade.test.ts` (an `onStarted` test with `replayed`)
 - Test: `apps/mcp/test/tools-commands.test.ts`
 
 **Interfaces:**
 - Consumes: Task 2, 3, 5, 6.
-- Produces: `COMMAND_TOOLS` (`exec_run`, `exec_start`, `exec_output`, `exec_list`, `exec_kill`); `class ByteTail { constructor(max: number); push(bytes: Uint8Array, nextOffset: number): void; truncate(availableFrom: number): void; bytes(): Uint8Array; from: number; to: number }`; `KILL_GRACE_MS = 5_000` (stdio-отмена), `exec_kill` SIGTERM — `graceMs: 10_000`.
+- Produces: `COMMAND_TOOLS` (`exec_run`, `exec_start`, `exec_output`, `exec_list`, `exec_kill`); `class ByteTail { constructor(max: number); push(bytes: Uint8Array, nextOffset: number): void; truncate(availableFrom: number): void; bytes(): Uint8Array; from: number; to: number }`; `KILL_GRACE_MS = 5_000` (stdio cancellation), `exec_kill` SIGTERM — `graceMs: 10_000`.
 - [ ] **Step 1: failing tests:**
-  - SDK: `run(..., {onStarted})` получает `{commandId, replayed: true}` на повторе с тем же ключом.
-  - `exec_run` короткой команды: `status: exited`, `exit_code`, хвосты в ограждении, без примечания об усечении.
-  - `exec_run` `fake:emit 200000` с `max_output_bytes: 16384`: заголовок `stdout: {size, from, to}`, строка «last N of 200000 bytes»; при `wait_seconds: 1` и долгой команде — `status: running`, `command_id`, offset-ы, подсказка `exec_output`; цепочка `exec_output` (`wait_seconds: 5`) с возвращёнными offset-ами до `done: true` собирает вывод, sha256 совпадает с ожидаемым (вывод с кириллицей и эмодзи).
-  - Обрыв NDJSON (`breakStreamAfterBytes`) посреди `exec_run` — байты те же.
-  - `holdCommandsPostMs: 70_000` и `wait_seconds: 50` — ответ за < 50 s: `deadline_exceeded`, `retryable: true`, `idempotency_key`; повтор с ним — та же команда (`replayed: true`), в фейке одна команда.
-  - Один ключ модели на двух sandbox — две команды; тот же ключ с другими аргументами — ошибка с hint «new idempotency_key».
-  - `exec_output` без offset-ов — хвост; offset < `available_from` — строка «N bytes were dropped by retention»; остановленная sandbox — `sandbox_not_ready`.
-  - Отмена: `ctx.cancelledByClient()` = true при abort → `POST /kill` с `graceMs: 5000` в журнале; abort без отмены клиентом (закрытие stdin, HTTP) → `kill` нет.
-  - `exec_start` → `command_id`, `pid`; `exec_list` по умолчанию `status=running`; `exec_kill` SIGTERM → `/kill`, SIGINT → `/signal`.
-  - Вывод `fake:inject` очищен, поддельный конец ограждения не закрывает блок.
-- [ ] **Steps 2–4:** FAIL → реализовать (`exec_run`: `sb.run(cmd, {encoding: "base64", idempotencyKey: apiIdempotencyKey(...), timeoutSeconds, signal, onStart, onStarted})`, ожидание обрывается таймером `deadline.waitMs(wait_seconds)` выходом из цикла; до известного `command_id` — `deadline_exceeded`) → PASS.
+  - SDK: `run(..., {onStarted})` gets `{commandId, replayed: true}` on a retry with the same key.
+  - `exec_run` of a short command: `status: exited`, `exit_code`, tails in fencing, no truncation note.
+  - `exec_run` `fake:emit 200000` with `max_output_bytes: 16384`: header `stdout: {size, from, to}`, the line "last N of 200000 bytes"; with `wait_seconds: 1` and a long command — `status: running`, `command_id`, offsets, the `exec_output` hint; a chain of `exec_output` (`wait_seconds: 5`) with the returned offsets until `done: true` assembles the output, the sha256 matches the expected one (output with Cyrillic and emoji).
+  - An NDJSON break (`breakStreamAfterBytes`) in the middle of `exec_run` — the same bytes.
+  - `holdCommandsPostMs: 70_000` and `wait_seconds: 50` — a response in < 50 s: `deadline_exceeded`, `retryable: true`, `idempotency_key`; a retry with it — the same command (`replayed: true`), one command in the fake.
+  - One model key on two sandboxes — two commands; the same key with different arguments — an error with the hint "new idempotency_key".
+  - `exec_output` without offsets — the tail; an offset < `available_from` — the line "N bytes were dropped by retention"; a stopped sandbox — `sandbox_not_ready`.
+  - Cancellation: `ctx.cancelledByClient()` = true on abort → `POST /kill` with `graceMs: 5000` in the journal; an abort without client cancellation (stdin closing, HTTP) → no `kill`.
+  - `exec_start` → `command_id`, `pid`; `exec_list` defaults to `status=running`; `exec_kill` SIGTERM → `/kill`, SIGINT → `/signal`.
+  - The `fake:inject` output is sanitized, a fake fence end does not close the block.
+- [ ] **Steps 2–4:** FAIL → implement (`exec_run`: `sb.run(cmd, {encoding: "base64", idempotencyKey: apiIdempotencyKey(...), timeoutSeconds, signal, onStart, onStarted})`, the wait is cut by the timer `deadline.waitMs(wait_seconds)` by leaving the loop; before the `command_id` is known — `deadline_exceeded`) → PASS.
 - [ ] **Step 5:** commit `mcp: exec tools with offsets, deadlines and cancellation; sdk: onStarted`.
 
-### Task 8: Инструменты файлов (§8.4)
+### Task 8: File tools (§8.4)
 
 **Files:**
 - Create: `apps/mcp/src/tools/files.ts`, `apps/mcp/src/output/image.ts`
@@ -240,11 +240,11 @@
 
 **Interfaces:**
 - Produces: `FILE_TOOLS` (`files_read`, `files_write`, `files_edit`, `files_list`, `files_stat`, `files_delete`); `sniffImage(head: Uint8Array): "image/png" | "image/jpeg" | "image/gif" | "image/webp" | null`; `IMAGE_MAX_BYTES = 3 * 1024 * 1024`, `WRITE_MAX_BYTES = 1024 * 1024`.
-- [ ] **Step 1: failing tests:** `files_read` текста 100 000 байт с `max_bytes: 32768` — `next_offset`, конец сдвинут к границе символа, последний кусок — `eof: true`; PNG ≤ 3 MiB при `as: auto` — image content `image/png`; бинарный (NUL в первых 8 KiB) — без содержимого, подсказка `as: base64`; `as: image` для 4 MiB — ошибка; `files_write` `encoding: base64`, `mode: "0644"` → в журнале `mode=420`; больше 1 MiB — ошибка до API с советом `sbx cp`; `files_edit`: 0 совпадений — «not found», 2 без `replace_all` — «matches 2 times…», `replace_all` — число замен и ≤ 5 строк контекста; CRLF-файл и `old_text` с `\n` — «not found»; файл > 1 MiB — ошибка; файл изменён фейком между чтением и записью — `conflict`, содержимое не тронуто; бинарный — ошибка; `mode` сохраняется; `files_list` — строки `d|f|l`, размер, `modified_at`, путь, цель symlink, имя с `‮` очищено и в ограждении; `files_stat` отсутствующего — `exists: false` без `isError`; `files_delete recursive`.
-- [ ] **Steps 2–4:** FAIL → реализовать → PASS.
+- [ ] **Step 1: failing tests:** `files_read` of 100 000 bytes of text with `max_bytes: 32768` — `next_offset`, the end moved to a character boundary, the last chunk is `eof: true`; a PNG ≤ 3 MiB with `as: auto` — image content `image/png`; binary (NUL in the first 8 KiB) — without content, the hint `as: base64`; `as: image` for 4 MiB — error; `files_write` `encoding: base64`, `mode: "0644"` → `mode=420` in the journal; larger than 1 MiB — an error before the API with the advice `sbx cp`; `files_edit`: 0 matches — "not found", 2 without `replace_all` — "matches 2 times…", `replace_all` — the number of replacements and ≤ 5 lines of context; a CRLF file and an `old_text` with `\n` — "not found"; a file > 1 MiB — error; a file changed by the fake between read and write — `conflict`, content untouched; binary — error; `mode` is preserved; `files_list` — rows `d|f|l`, size, `modified_at`, path, symlink target, a name with `‮` sanitized and fenced; `files_stat` of a missing one — `exists: false` without `isError`; `files_delete recursive`.
+- [ ] **Steps 2–4:** FAIL → implement → PASS.
 - [ ] **Step 5:** commit `mcp: file tools with ranges, images and files_edit`.
 
-### Task 9: Порты и снапшоты (§8.5–§8.6)
+### Task 9: Ports and snapshots (§8.5–§8.6)
 
 **Files:**
 - Create: `apps/mcp/src/tools/{ports.ts,snapshots.ts}`
@@ -252,11 +252,11 @@
 
 **Interfaces:**
 - Produces: `PORT_TOOLS` (`port_expose`, `port_list`, `port_unexpose`), `SNAPSHOT_TOOLS` (`snapshot_save`, `snapshot_list`, `snapshot_delete`).
-- [ ] **Step 1: failing tests:** новый порт без `access` → `PUT` с `access: "sso"`, ответ без `url_with_token`; `access: token` → `url_with_token` с пометкой «secret: give it to the user, do not store it»; порт уже в `token`, вызов без `access` → `PUT` не отправлен (журнал), режим тот же, токен не показан; `rotate_token: true` → `rotate-token` и `url_with_token`; `port_list` сводит `hosted` и `listening` (процесс, адреса, опубликован, режим, URL), имена процессов очищены; `snapshot_save` с `wait` → состояние `ready`, повтор с ключом — `replayed: true`; имя вне `^[a-z0-9][a-z0-9-]{0,62}$` — ошибка схемы; `snapshot_delete` с неверным `confirm` — `confirmation_required`, снапшот цел; с верным — удалён.
-- [ ] **Steps 2–4:** FAIL → реализовать → PASS.
+- [ ] **Step 1: failing tests:** a new port without `access` → `PUT` with `access: "sso"`, the response without `url_with_token`; `access: token` → `url_with_token` with the note "secret: give it to the user, do not store it"; a port already in `token`, a call without `access` → no `PUT` sent (journal), the same mode, the token not shown; `rotate_token: true` → `rotate-token` and `url_with_token`; `port_list` merges `hosted` and `listening` (process, addresses, published, mode, URL), process names sanitized; `snapshot_save` with `wait` → state `ready`, a retry with a key — `replayed: true`; a name outside `^[a-z0-9][a-z0-9-]{0,62}$` — a schema error; `snapshot_delete` with a wrong `confirm` — `confirmation_required`, the snapshot intact; with the right one — deleted.
+- [ ] **Steps 2–4:** FAIL → implement → PASS.
 - [ ] **Step 5:** commit `mcp: port and snapshot tools`.
 
-### Task 10: Рабочий стол и computer-use (§8.7, S10 §12–§13)
+### Task 10: Desktop and computer-use (§8.7, S10 §12–§13)
 
 **Files:**
 - Create: `apps/mcp/src/desktop/{api.ts,coords.ts,keys.ts}`, `apps/mcp/src/tools/desktop.ts`
@@ -264,20 +264,20 @@
 
 **Interfaces:**
 - Produces:
-  - `desktopApi(ctx: ToolContext, sandbox: string)`: `status()`, `link()`, `screenshot(q)`: `{bytes, contentType, screen, image, cursor}`, `act(body)`, `clipboardGet()`, `clipboardSet(text)` — через `sbx.raw` с приведением типов; `404` без маршрута → `ToolError desktop_unsupported`.
-  - `defaultCoordinateSpace(screen: {width: number; height: number}, max = {width: 1280, height: 800}): {width: number; height: number}` — как API масштабирует скриншот (вписать с сохранением пропорций, не увеличивать, округление как в S10 §12.1: `scale = min(maxW/w, maxH/h, 1)`, размеры `Math.round`).
-  - `parseChord(s: string): string[]` (словарь S10 §12.2; неизвестное имя → `ToolError invalid_action` со списком допустимых); `KEY_NAMES`.
-  - `TYPE_BUDGET_MS = 40_000`; `SCREEN_CACHE_MS = 10_000` (кэш `GET /desktop` по sandbox в процессе).
+  - `desktopApi(ctx: ToolContext, sandbox: string)`: `status()`, `link()`, `screenshot(q)`: `{bytes, contentType, screen, image, cursor}`, `act(body)`, `clipboardGet()`, `clipboardSet(text)` — via `sbx.raw` with type casts; `404` without a route → `ToolError desktop_unsupported`.
+  - `defaultCoordinateSpace(screen: {width: number; height: number}, max = {width: 1280, height: 800}): {width: number; height: number}` — how the API scales the screenshot (fit preserving the aspect ratio, do not enlarge, rounding as in S10 §12.1: `scale = min(maxW/w, maxH/h, 1)`, sizes `Math.round`).
+  - `parseChord(s: string): string[]` (the S10 §12.2 dictionary; an unknown name → `ToolError invalid_action` with a list of allowed ones); `KEY_NAMES`.
+  - `TYPE_BUDGET_MS = 40_000`; `SCREEN_CACHE_MS = 10_000` (an in-process cache of `GET /desktop` per sandbox).
   - `DESKTOP_TOOLS` (`desktop_url`, `computer_screenshot`, `computer_click`, `computer_move`, `computer_drag`, `computer_scroll`, `computer_key`, `computer_type`, `computer_clipboard_read`, `computer_clipboard_write`), scopes `computer_*` — `["desktop", "sandboxes:read"]`, `desktop_url` — `["desktop"]`.
-- [ ] **Step 1: failing tests:** векторы координат (1920×1080 → 1280×720; 1280×800 → 1280×800; 3840×2160 → 1280×720; 1024×768 → 1024×768; 2560×1600 → 1280×800); `parseChord("ctrl+shift+t")`, `"enter"`, неизвестное `"hyper"`; скриншот — image content `image/jpeg` по умолчанию, текст с `coordinate_space`, с `region_*` — без `coordinate_space` и со строкой «region view…»; `computer_click` без `coordinate_*` → в журнале `coordinateSpace` по экрану фейка, действие `wait` `settle_ms` и `screenshot` в теле, ответ — текст + image; `computer_key repeat: 3` — три действия `key`; `computer_type` 10 000 символов с `delay_ms: 5` — ошибка до API (журнал пуст), совет `computer_clipboard_write` + `ctrl+v`; текст `computer_type` не в логе; `noDesktopRoutes` → `desktop_unsupported`; `desktop_busy` → `retryable: true`; `desktop_url` — пометка «secret».
-- [ ] **Steps 2–4:** FAIL → реализовать → PASS.
+- [ ] **Step 1: failing tests:** coordinate vectors (1920×1080 → 1280×720; 1280×800 → 1280×800; 3840×2160 → 1280×720; 1024×768 → 1024×768; 2560×1600 → 1280×800); `parseChord("ctrl+shift+t")`, `"enter"`, unknown `"hyper"`; a screenshot — image content `image/jpeg` by default, text with `coordinate_space`, with `region_*` — without `coordinate_space` and with the line "region view…"; `computer_click` without `coordinate_*` → `coordinateSpace` in the journal per the fake's screen, the action `wait` `settle_ms` and `screenshot` in the body, the response is text + image; `computer_key repeat: 3` — three `key` actions; `computer_type` of 10 000 characters with `delay_ms: 5` — an error before the API (empty journal), the advice `computer_clipboard_write` + `ctrl+v`; the `computer_type` text is not in the log; `noDesktopRoutes` → `desktop_unsupported`; `desktop_busy` → `retryable: true`; `desktop_url` — the note "secret".
+- [ ] **Steps 2–4:** FAIL → implement → PASS.
 - [ ] **Step 5:** commit `mcp: desktop and computer-use tools (S10 API, faked)`.
 
-### Task 11: stdio — `runStdio` и `sbx mcp` (§6.1, §10.2)
+### Task 11: stdio — `runStdio` and `sbx mcp` (§6.1, §10.2)
 
 **Files:**
 - Create: `apps/mcp/src/stdio.ts`
-- Modify: `apps/cli/src/commands/mcp.ts` (замена заглушки), `apps/cli/package.json` (`@sbx/mcp: workspace:*`), `apps/mcp/src/index.ts`
+- Modify: `apps/cli/src/commands/mcp.ts` (replacing the stub), `apps/cli/package.json` (`@sbx/mcp: workspace:*`), `apps/mcp/src/index.ts`
 - Test: `apps/mcp/test/stdio.test.ts`, `apps/cli/test/mcp.test.ts`, `apps/mcp/test/inspector-smoke.test.ts`
 
 **Interfaces:**
@@ -293,15 +293,15 @@
   class CancelTrackingTransport implements Transport { /* wraps StdioServerTransport, records ids of notifications/cancelled */ wasCancelled(id: string | number): boolean }
   function parseToolsets(csv: string): Toolset[];  // unknown name -> Error listing the valid ones
   ```
-  CLI: `sbx mcp [--toolsets] [--read-only] [--sandbox <id|slug|self>] [--log-level] [--log-file]`, env `SBX_MCP_TOOLSETS`, `SBX_MCP_READ_ONLY=1`; глобальные `--profile`, `--api-url`, `--team` — как у остальных команд; `sbx` для MCP — `new Sbx({..., tokenProvider})` от `ctx.bearer`, ошибки `not_logged_in`/`login_required` CLI → `SbxError {code: "not_logged_in"}`; `self` без `SBX_SANDBOX_ID` → ошибка в stderr, код 2.
+  CLI: `sbx mcp [--toolsets] [--read-only] [--sandbox <id|slug|self>] [--log-level] [--log-file]`, env `SBX_MCP_TOOLSETS`, `SBX_MCP_READ_ONLY=1`; global `--profile`, `--api-url`, `--team` — as for the other commands; `sbx` for MCP is `new Sbx({..., tokenProvider})` from `ctx.bearer`, the CLI errors `not_logged_in`/`login_required` → `SbxError {code: "not_logged_in"}`; `self` without `SBX_SANDBOX_ID` → an error on stderr, code 2.
 - [ ] **Step 1: failing tests:**
-  - `stdio.test.ts` (поток в памяти): `tools/list`; `notifications/cancelled` для `exec_run` → `kill` в журнале фейка; закрытие stdin посреди `exec_run` → `kill` нет; ничего, кроме JSON-RPC, в stdout (перехват).
-  - `apps/cli/test/mcp.test.ts` (дочерний процесс `bun src/main.ts mcp` против фейка): без входа — `tools/list` работает, вызов → `not_logged_in` с текстом про `sbx login`; с `SBX_API_KEY` ключа `read-only` — только инструменты чтения; профиль с истёкшим JWT — два параллельных вызова, один refresh у тестового OIDC (`startTestOidcServer`), оба успешны; `--sandbox self` без `SBX_SANDBOX_ID` — код 2 и сообщение в stderr; `--sandbox sb_x` — у схем нет `sandbox`; stdout дочернего процесса разбирается целиком как JSON-RPC; `notifications/cancelled` по настоящему stdio → `kill`.
-  - `inspector-smoke.test.ts`: `inspector --cli bun <cli>/src/main.ts mcp --method tools/list` и `--method tools/call --tool-name limits_get` против фейка — код 0, 38 инструментов.
-- [ ] **Steps 2–4:** FAIL → реализовать → PASS; `pnpm --filter @sbx/cli test` и `pnpm --filter @sbx/cli build` (бинарник собирается).
+  - `stdio.test.ts` (in-memory stream): `tools/list`; `notifications/cancelled` for `exec_run` → `kill` in the fake's journal; closing stdin in the middle of `exec_run` → no `kill`; nothing but JSON-RPC in stdout (intercepted).
+  - `apps/cli/test/mcp.test.ts` (child process `bun src/main.ts mcp` against the fake): without login — `tools/list` works, a call → `not_logged_in` with text about `sbx login`; with `SBX_API_KEY` of a `read-only` key — only read tools; a profile with an expired JWT — two parallel calls, one refresh at the test OIDC (`startTestOidcServer`), both succeed; `--sandbox self` without `SBX_SANDBOX_ID` — code 2 and a message on stderr; `--sandbox sb_x` — the schemas have no `sandbox`; the child's stdout is parsed entirely as JSON-RPC; `notifications/cancelled` over real stdio → `kill`.
+  - `inspector-smoke.test.ts`: `inspector --cli bun <cli>/src/main.ts mcp --method tools/list` and `--method tools/call --tool-name limits_get` against the fake — code 0, 38 tools.
+- [ ] **Steps 2–4:** FAIL → implement → PASS; `pnpm --filter @sbx/cli test` and `pnpm --filter @sbx/cli build` (the binary builds).
 - [ ] **Step 5:** commit `mcp: stdio server; cli: sbx mcp`.
 
-### Task 12: Удалённый HTTP-сервер (§6.2–§6.6, §11.5, §13.3)
+### Task 12: Remote HTTP server (§6.2–§6.6, §11.5, §13.3)
 
 **Files:**
 - Create: `apps/mcp/src/http/{app.ts,auth.ts,prm.ts,limits.ts}`, `apps/mcp/src/{settings.ts,metrics.ts,main.ts}`, `apps/mcp/test/conformance-baseline.yml`
@@ -326,58 +326,58 @@
   const EXP_MARGIN_MS = 55_000; const MAX_BODY_BYTES = 2 * 1024 * 1024; const MAX_CALLS_PER_PRINCIPAL = 16;
   function protectedResourceMetadata(o: {publicUrl: string; issuer: string | null}): Record<string, unknown>;
   ```
-  `main.ts`: `loadSettings(env)` → `createHttpApp` на `:8080` (`SBX_MCP_PORT`), ops на `:9090`; SIGTERM — `close()` и выход ≤ 10 s.
-- [ ] **Step 1: failing tests** (`createHttpApp` на случайном порту, фейк API, клиент `@modelcontextprotocol/client` Streamable HTTP в эрах 2026-07-28 и 2025-11-25):
-  - без bearer — `401`, `WWW-Authenticate: Bearer resource_metadata="<origin>/.well-known/oauth-protected-resource/mcp"`; PRM по RFC 9728 (`resource`, `authorization_servers`, `scopes_supported` без `offline_access`, `bearer_methods_supported: ["header"]`); невалидный токен — `401` с `error="invalid_token"`; `user_disabled` — `403`; JWT с `exp` через 30 s — `401` «token expires too soon»; кэш: второй запрос в 30 s без `/v1/me`, после 31 s — снова, отказ кэшируется 5 s; `Sbx-Team` и `?team=` попадают в `/v1/me` и вызовы.
-  - `Origin: https://evil.example` — `403`; чужой `Host` — `421`; `GET /mcp`, `DELETE /mcp` — `405`; тело > 2 MiB — `413`.
-  - `?toolsets=core&read_only=1` фильтрует; ключ с `read-only` видит только чтение; вызов скрытого — unknown tool; чужая команда: sandbox другой команды → `not_found` от API, ничего не изменено.
-  - `expireTokenOnce` посреди `exec_run` без progress → HTTP `401` с `WWW-Authenticate`; с `progressToken` (SSE начат) → ошибка инструмента `unauthorized`, `retryable: true`.
-  - 17-й одновременный вызов одного principal — `rate_limited`; HTTP-отмена/обрыв `exec_run` — `kill` нет.
-  - `/healthz`, `/readyz` без auth; `/metrics` на ops — счётчики вызовов и `401`.
-  - `conformance.test.ts`: `conformance server --url … --expected-failures test/conformance-baseline.yml` с внедрённым `authenticate` — код 0.
-- [ ] **Steps 2–4:** FAIL → реализовать (`createMcpHandler(factory, {legacy: "stateless", maxRequestBodySize: MAX_BODY_BYTES})`; фабрика берёт principal из `authInfo.extra`) → PASS.
+  `main.ts`: `loadSettings(env)` → `createHttpApp` on `:8080` (`SBX_MCP_PORT`), ops on `:9090`; SIGTERM — `close()` and exit within ≤ 10 s.
+- [ ] **Step 1: failing tests** (`createHttpApp` on a random port, the fake API, the `@modelcontextprotocol/client` Streamable HTTP client in the eras 2026-07-28 and 2025-11-25):
+  - without a bearer — `401`, `WWW-Authenticate: Bearer resource_metadata="<origin>/.well-known/oauth-protected-resource/mcp"`; PRM per RFC 9728 (`resource`, `authorization_servers`, `scopes_supported` without `offline_access`, `bearer_methods_supported: ["header"]`); an invalid token — `401` with `error="invalid_token"`; `user_disabled` — `403`; a JWT with `exp` in 30 s — `401` "token expires too soon"; cache: a second request within 30 s without `/v1/me`, after 31 s — again, a refusal is cached for 5 s; `Sbx-Team` and `?team=` reach `/v1/me` and the calls.
+  - `Origin: https://evil.example` — `403`; a foreign `Host` — `421`; `GET /mcp`, `DELETE /mcp` — `405`; a body > 2 MiB — `413`.
+  - `?toolsets=core&read_only=1` filters; a `read-only` key sees only reads; a call to a hidden tool — unknown tool; another team's resource: a sandbox of another team → `not_found` from the API, nothing changed.
+  - `expireTokenOnce` in the middle of `exec_run` without progress → HTTP `401` with `WWW-Authenticate`; with a `progressToken` (SSE started) → the tool error `unauthorized`, `retryable: true`.
+  - The 17th simultaneous call of one principal — `rate_limited`; an HTTP cancel/break of `exec_run` — no `kill`.
+  - `/healthz`, `/readyz` without auth; `/metrics` on ops — call counters and `401`.
+  - `conformance.test.ts`: `conformance server --url … --expected-failures test/conformance-baseline.yml` with an injected `authenticate` — code 0.
+- [ ] **Steps 2–4:** FAIL → implement (`createMcpHandler(factory, {legacy: "stateless", maxRequestBodySize: MAX_BODY_BYTES})`; the factory takes the principal from `authInfo.extra`) → PASS.
 - [ ] **Step 5:** commit `mcp: remote Streamable HTTP server with bearer check via /v1/me`.
 
-### Task 13: Golden-список, совместимость клиентов, безопасность, интеграция (§14.1–§14.2, §14.4)
+### Task 13: Golden list, client compatibility, security, integration (§14.1–§14.2, §14.4)
 
 **Files:**
 - Create: `apps/mcp/golden/tools-list.json`, `apps/mcp/scripts/golden.ts`
 - Test: `apps/mcp/test/{golden,client-compat,security,integration}.test.ts`, `apps/mcp/test/helpers/real-api.ts`
 
 **Interfaces:**
-- Consumes: всё выше.
+- Consumes: everything above.
 - [ ] **Step 1: failing tests:**
-  - `golden.test.ts`: `tools/list` (все toolsets, человек) равен `golden/tools-list.json` (имя, title, description, inputSchema, annotations); ровно 38 инструментов в порядке §8; JSON всего ответа ≤ 40 000 символов; имена из `git show origin/main:apps/mcp/golden/tools-list.json` (если файл там есть) все присутствуют. `UPDATE_GOLDEN=1` переписывает файл (`scripts/golden.ts`).
-  - `client-compat.test.ts`: для каждого инструмента — `lintToolSchema` пуст; Claude Code: `mcp__sbx__<name>` ≤ 64 и `^[a-zA-Z0-9_-]+$`, корень `type: object`; Codex/OpenAI: имя ≤ 64, у массивов `items`, нет ключевых слов вне списка OpenAI function parameters; OpenCode: объединение правил Anthropic и OpenAI (схема передаётся как есть); Gemini CLI: после вырезания `$schema` и `additionalProperties` схема остаётся валидной JSON Schema с теми же `required`, ключевые слова — из подмножества OpenAPI 3.0 Gemini (`type`, `description`, `enum`, `properties`, `required`, `items`, `minimum`, `maximum`, `minLength`, `maxLength`, `minItems`, `maxItems`, `pattern`, `default`, `format`).
-  - `security.test.ts`: (а) prompt injection — вывод команды, содержимое файла, имя файла, буфер обмена с `<<<end id=…>>>`, `\x1b]8;;`, тегами Unicode и «ignore previous instructions» → данные только внутри ограждения с неугадываемым nonce, невидимые символы видимы; (б) фильтр scopes — ключ `ci` и ключ без `ports:write`: инструменты скрыты и вызов — unknown tool; (в) cross-team — sandbox другой команды по id: `not_found`, журнал без изменений; (г) обход `confirm` — пустая строка, slug другой sandbox, id с пробелом, регистр — ничего не удалено; секреты: в логах (перехват pino) нет bearer, `content`, `command`, `text`, `url_with_token`.
-  - `integration.test.ts` (настоящий `api` в процессе через `helpers/real-api.ts` по образцу `apps/cli/test/helpers/api.ts`): create (`markReady`) → `exec_run` → `files_write`/`files_read` → `port_expose` → `sandbox_stop` → `sandbox_delete` с `confirm` через in-memory клиента; ответы без ошибок.
-- [ ] **Steps 2–4:** FAIL → сгенерировать golden, исправить найденное → PASS.
+  - `golden.test.ts`: `tools/list` (all toolsets, a person) equals `golden/tools-list.json` (name, title, description, inputSchema, annotations); exactly 38 tools in the order of §8; the JSON of the whole response ≤ 40 000 characters; the names from `git show origin/main:apps/mcp/golden/tools-list.json` (if the file exists there) are all present. `UPDATE_GOLDEN=1` rewrites the file (`scripts/golden.ts`).
+  - `client-compat.test.ts`: for every tool — `lintToolSchema` is empty; Claude Code: `mcp__sbx__<name>` ≤ 64 and `^[a-zA-Z0-9_-]+$`, root `type: object`; Codex/OpenAI: name ≤ 64, arrays have `items`, no keywords outside the OpenAI function parameters list; OpenCode: the union of the Anthropic and OpenAI rules (the schema is passed as is); Gemini CLI: after stripping `$schema` and `additionalProperties` the schema stays valid JSON Schema with the same `required`, the keywords from the Gemini OpenAPI 3.0 subset (`type`, `description`, `enum`, `properties`, `required`, `items`, `minimum`, `maximum`, `minLength`, `maxLength`, `minItems`, `maxItems`, `pattern`, `default`, `format`).
+  - `security.test.ts`: (a) prompt injection — command output, file content, a file name, the clipboard with `<<<end id=…>>>`, `\x1b]8;;`, Unicode tags, and "ignore previous instructions" → data only inside the fence with an unguessable nonce, invisible characters made visible; (b) scope filter — a `ci` key and a key without `ports:write`: the tools are hidden and a call is unknown tool; (c) cross-team — a sandbox of another team by id: `not_found`, the journal unchanged; (d) `confirm` bypass — an empty string, the slug of another sandbox, an id with a space, case — nothing deleted; secrets: the logs (pino capture) contain no bearer, `content`, `command`, `text`, `url_with_token`.
+  - `integration.test.ts` (the real `api` in process via `helpers/real-api.ts` modeled on `apps/cli/test/helpers/api.ts`): create (`markReady`) → `exec_run` → `files_write`/`files_read` → `port_expose` → `sandbox_stop` → `sandbox_delete` with `confirm` via an in-memory client; responses without errors.
+- [ ] **Steps 2–4:** FAIL → generate the golden, fix what is found → PASS.
 - [ ] **Step 5:** commit `mcp: golden tool list, client schema compatibility, security and integration tests`.
 
-### Task 14: Поставка: образ, compose, dev-cp, конфиги клиентов, документы
+### Task 14: Delivery: image, compose, dev-cp, client configs, documents
 
 **Files:**
 - Create: `apps/mcp/Dockerfile`, `apps/mcp/README.md`
-- Modify: `deploy/compose/compose.yaml` (сервис `mcp`), `deploy/compose/README.md`, `infra/dev-cp/{compose.dev-cp.yaml,names.sh,README.md}`, `docs/architecture.md` (§2, §10 по S11 §16.2), `docs/specs/s11-mcp.md` §19, `docs/plans/s11-mcp.md` (итоги)
+- Modify: `deploy/compose/compose.yaml` (service `mcp`), `deploy/compose/README.md`, `infra/dev-cp/{compose.dev-cp.yaml,names.sh,README.md}`, `docs/architecture.md` (§2, §10 per S11 §16.2), `docs/specs/s11-mcp.md` §19, `docs/plans/s11-mcp.md` (results)
 - Test: `apps/mcp/test/compose.test.ts`
 
 **Interfaces:**
-- Produces: образ `sbx-mcp:dev`; сервис `mcp` (`SBX_MCP_API_URL=http://api:8080`, `SBX_MCP_PUBLIC_URL=${SBX_MCP_PUBLIC_URL:-http://localhost:8090/mcp}`, `SBX_OIDC_ISSUER=*oidc-issuer`, `SBX_MCP_ALLOWED_ORIGINS=`, порты `127.0.0.1:8090:8080`, `127.0.0.1:9092:9090`, healthcheck `/readyz` на 9090, `depends_on: api healthy`); dev-cp: `SBX_MCP_PUBLIC_URL=https://<TS name>:8443/mcp` в `compose.dev-cp.yaml`, Serve `8443:/mcp=http://127.0.0.1:8090/mcp` и `8443:/.well-known/oauth-protected-resource/mcp=http://127.0.0.1:8090/.well-known/oauth-protected-resource/mcp` в `names.sh`.
-- [ ] **Step 1: failing test** `compose.test.ts`: `docker compose -f deploy/compose/compose.yaml config` содержит сервис `mcp` с нужными env и портами (пропуск без Docker); `names.sh` `SERVE` содержит оба пути `/mcp`.
-- [ ] **Step 2:** Dockerfile по образцу `apps/api/Dockerfile` (прод-зависимости `@sbx/mcp...`, `node apps/mcp/src/main.ts`, `USER node`, `EXPOSE 8080 9090`); `docker build -f apps/mcp/Dockerfile .` проходит; контейнер отвечает `/healthz`.
-- [ ] **Step 3:** README `apps/mcp`: запуск, переменные, Inspector (UI и `--cli`), конфиги Claude Code, Codex, OpenCode, Gemini CLI (§12.3) — ключи заново проверить по документации клиентов (perplexity) и записать дату; порт callback OpenCode — если фиксирован и не 33418, записать открытым вопросом (realm не менять без master).
-- [ ] **Step 4:** архитектура §2/§10, спека §19 (итог спайка Bun, фактический бюджет `tools/list`, отклонения из этого плана), compose README; `pnpm -r test`, `pnpm -r typecheck`, `pnpm lint`, `pnpm build` — зелёные.
+- Produces: image `sbx-mcp:dev`; service `mcp` (`SBX_MCP_API_URL=http://api:8080`, `SBX_MCP_PUBLIC_URL=${SBX_MCP_PUBLIC_URL:-http://localhost:8090/mcp}`, `SBX_OIDC_ISSUER=*oidc-issuer`, `SBX_MCP_ALLOWED_ORIGINS=`, ports `127.0.0.1:8090:8080`, `127.0.0.1:9092:9090`, healthcheck `/readyz` on 9090, `depends_on: api healthy`); dev-cp: `SBX_MCP_PUBLIC_URL=https://<TS name>:8443/mcp` in `compose.dev-cp.yaml`, Serve `8443:/mcp=http://127.0.0.1:8090/mcp` and `8443:/.well-known/oauth-protected-resource/mcp=http://127.0.0.1:8090/.well-known/oauth-protected-resource/mcp` in `names.sh`.
+- [ ] **Step 1: failing test** `compose.test.ts`: `docker compose -f deploy/compose/compose.yaml config` contains the service `mcp` with the needed env and ports (skipped without Docker); `names.sh` `SERVE` contains both `/mcp` paths.
+- [ ] **Step 2:** Dockerfile modeled on `apps/api/Dockerfile` (prod dependencies `@sbx/mcp...`, `node apps/mcp/src/main.ts`, `USER node`, `EXPOSE 8080 9090`); `docker build -f apps/mcp/Dockerfile .` passes; the container answers `/healthz`.
+- [ ] **Step 3:** README of `apps/mcp`: running, variables, Inspector (UI and `--cli`), configs for Claude Code, Codex, OpenCode, Gemini CLI (§12.3) — re-check the keys against the clients' documentation (perplexity) and record the date; the OpenCode callback port — if fixed and not 33418, record it as an open question (do not change the realm without master).
+- [ ] **Step 4:** architecture §2/§10, spec §19 (the result of the Bun spike, the actual `tools/list` budget, deviations from this plan), compose README; `pnpm -r test`, `pnpm -r typecheck`, `pnpm lint`, `pnpm build` — green.
 - [ ] **Step 5:** commit `mcp: image, compose service, dev-cp route, client configs`.
 
 ---
 
-## Итоги реализации
+## Implementation results
 
-Все 14 задач выполнены на ветке `s11-impl` (2026-10-31); подробности, бюджет `tools/list` и открытые вопросы — `docs/specs/s11-mcp.md` §19.
+All 14 tasks were completed on branch `s11-impl` (2026-10-31); details, the `tools/list` budget, and open questions are in `docs/specs/s11-mcp.md` §19.
 
-- **Результат:** 38 инструментов в 5 toolsets; `sbx mcp` (stdio) и HTTP-сервер `node apps/mcp/src/main.ts` (stateless, `/mcp` + PRM, `/healthz`, `/readyz`, `/metrics`); образ `sbx-mcp:dev`; сервис `mcp` в `deploy/compose` (`127.0.0.1:8090`, ops `9092`); маршруты Tailscale Serve `8443:/mcp` и `8443:/.well-known/oauth-protected-resource/mcp` в `infra/dev-cp`; конфиги Claude Code, Codex, OpenCode, Gemini CLI в `apps/mcp/README.md`.
-- **Бюджет:** `tools/list` — 37 922 символа из 40 000 (golden-тест).
-- **Bun:** `bun build --compile` собирает сервер 2.4.0 без обходных путей (хост и linux-x64 проверены).
-- **Отклонения от спеки:** решения 1–17 выше и решения controller при ревью (§19.3): `files_list.limit` ≤ 200, `files_read.max_bytes` ≤ 65 536, TTL ≤ 30 суток в схемах, `port_expose` требует `sandboxes:read`, ожидание `exec_run` до `command_id` ограничено сроком вызова, шлюз `desktop_unsupported` через повторное чтение sandbox.
-- **Подтверждено по документации клиентов 2026-10-31, отличается от §12.3:** OpenCode слушает фиксированный порт 19876 (в README задан `callbackPort: 33418`, realm не менялся); Gemini CLI — путь `/oauth/callback`; Codex — `[mcp_servers.<name>.oauth]` и `oauth.callback_port`.
-- **Не сделано (вопросы master):** E2E на `pve` и `sbx-bench s11`; ручной чек-лист клиентов; деплой на CT 590 (Host, который передаёт Serve); подтверждение `callbackPort` у OpenCode или правка redirect URIs `sbx-mcp`; переход `src/desktop/api.ts` на хелперы SDK после S10; отложенные minor из ревью задачи 12.
+- **Result:** 38 tools in 5 toolsets; `sbx mcp` (stdio) and the HTTP server `node apps/mcp/src/main.ts` (stateless, `/mcp` + PRM, `/healthz`, `/readyz`, `/metrics`); image `sbx-mcp:dev`; service `mcp` in `deploy/compose` (`127.0.0.1:8090`, ops `9092`); Tailscale Serve routes `8443:/mcp` and `8443:/.well-known/oauth-protected-resource/mcp` in `infra/dev-cp`; configs for Claude Code, Codex, OpenCode, Gemini CLI in `apps/mcp/README.md`.
+- **Budget:** `tools/list` — 37 922 characters of 40 000 (golden test).
+- **Bun:** `bun build --compile` builds the 2.4.0 server without workarounds (host and linux-x64 checked).
+- **Deviations from the spec:** decisions 1–17 above and the controller's decisions during review (§19.3): `files_list.limit` ≤ 200, `files_read.max_bytes` ≤ 65 536, TTL ≤ 30 days in the schemas, `port_expose` requires `sandboxes:read`, the `exec_run` wait before `command_id` is limited by the call deadline, the `desktop_unsupported` gate via re-reading the sandbox.
+- **Confirmed against the clients' documentation 2026-10-31, differs from §12.3:** OpenCode listens on a fixed port 19876 (the README sets `callbackPort: 33418`, the realm was not changed); Gemini CLI — the path `/oauth/callback`; Codex — `[mcp_servers.<name>.oauth]` and `oauth.callback_port`.
+- **Not done (questions for master):** E2E on `pve` and `sbx-bench s11`; the manual client checklist; deploy to CT 590 (the Host that Serve passes); confirmation of OpenCode's `callbackPort` or an edit of the `sbx-mcp` redirect URIs; moving `src/desktop/api.ts` to SDK helpers after S10; deferred minors from the review of task 12.
