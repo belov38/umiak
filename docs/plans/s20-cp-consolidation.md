@@ -149,39 +149,37 @@ previous section still applies; its only minor was fixed and retested. Only
 upstream fixes and the coordinator-approved MCP description compaction were
 added since that review. Main integration is an authorized fast-forward push.
 
-### Runtime consolidation follow-up (measurements, no implementation)
+### Deferred: runtime consolidation
 
-Fresh smoke snapshot: API369.3, worker324.9, MCP140.3, ingress113.9, web201.9,
-web-meta46.22, renewal33.52, gateway90.09, Postgres382.0 MiB; nine-service total
-1702.13 MiB. A disposable idle Node in the same amd64 image measured28.54 MiB.
-Emulated Docker on ARM Mac, not a production LXC or peak-load measurement.
+Decision: Ilia, 2026-11-04 — the memory footprint is acceptable. Defer all four
+options below; no exec-wrapper, renewal or process-merging implementation is
+planned as part of S20.
 
-- Eliminating only container boundaries while retaining processes does not remove
-  their V8 heaps; no material RAM saving was measured from that approach.
-- API+worker+MCP in one process removes two V8 runtimes and the worker wrapper;
-  about90 MiB of process overhead is a hypothesis from the measured idle runtime
-  and wrapper, with additional unmeasured Payload/module/pool deduplication.
-  MCP's140.3 MiB and worker's324.9 MiB are standalone footprints, NOT measured
-  savings: their functionality and heap remain in the merged process. This makes
-  MCP share API secrets and worker PVE credentials, event loop, OOM and restarts.
-  A genuine merged-process benchmark was not implemented or claimed.
-- Folding web-meta into an ingress GET-only private listener could remove its
-  46.22 MiB process minus the unmeasured added listener heap. Preserve the private
-  network and fixed metadata target; lose the separate secretless/read-only/
-  cap-dropped bridge sandbox and independent failure domain.
-- Replacing the permanent renewal process with an offline scheduled job removes
-  its33.52 MiB while idle, retaining scoped root/RW key access only during the job.
-  Folding it directly into the gateway would instead grant the network-facing
-  gateway RW key/CA access and weaken the existing boundary; avoid that trade.
-- Lower-risk first optimization: the credential wrapper currently stays as a
-  second Node process in API, worker, web, ingress and gateway. Measured private
-  memory of those five PID1 wrappers is29.88/31.82/29.86/30.04/32.08 MiB,
-  total153.67 MiB. Replacing spawn with a true exec (preserving UID/GID drop,
-  signal and credential handling) could reclaim that private memory without
-  merging secrets/networks. This is measured reclaimable process memory, not an
-  implemented before/after saving; container count would stay nine.
+Measured smoke memory: API369.3, worker324.9, MCP140.3, ingress113.9, web201.9,
+web-meta46.22, renewal33.52, gateway90.09 and Postgres382.0 MiB; total1702.13 MiB
+across nine steady services. Idle Node measured28.54 MiB. These are amd64/Rosetta
+measurements on an ARM Mac, not production LXC or peak-load guarantees.
 
-Backend merging plus removing bridge and permanent renewal could reduce nine
-steady containers to five, but the memory delta needs a separate approved spike.
-Recommend exec-wrapper removal and scheduled offline renewal before merging
-backend trust boundaries. No follow-up implementation is included in S20.
+1. **API+worker+MCP in one process:** removes two containers. About90 MiB of
+   process overhead is an estimate from the idle Node and wrapper measurements;
+   module/Payload/pool savings remain unmeasured. MCP and worker footprints are
+   not wholly reclaimable: functionality remains in the merged heap. Cost:
+   shared API/PVE secrets, event loop, OOM and restart domain.
+2. **web-meta inside ingress:** removes one container; its measured46.22 MiB
+   footprint is an upper bound before added listener memory. Keep GET-only
+   metadata access and web network isolation. Cost: lose the separate
+   secretless/read-only/cap-dropped bridge and its failure isolation.
+3. **Offline scheduled renewal:** removes one permanent container and its33.52 MiB
+   idle footprint. Preserve scoped root/RW access only during the job. Moving
+   renewal into the network-facing gateway instead would widen its current RO
+   key/CA access; that alternative is undesirable.
+4. **True exec instead of the credential wrapper's spawn:** container count stays
+   nine, but five parent Node processes disappear. Their measured private memory
+   is153.67 MiB total (API29.88, worker31.82, web29.86, ingress30.04, gateway32.08).
+   Preserve UID/GID drop, credentials and signal handling. This is reclaimable
+   process footprint, not an implemented before/after saving; secrets and
+   network boundaries can remain unchanged.
+
+No merged-process benchmark was implemented. Image consolidation alone does not
+remove V8 heaps. S20 is complete; further runtime consolidation remains deferred
+until a separate decision from Ilia.
