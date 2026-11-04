@@ -8,7 +8,14 @@ the control plane to a multi-node-capable release first; the installer checks
 capabilities before changing a target host.
 
 The installer uses the existing, strictly pinned PVE root SSH connection to
-an online cluster member. It prints prerequisite fixes, storage and RAM cap
+an online cluster member. It connects to the IP from cluster status with
+`HostKeyAlias=<node>`, using PVE 9's per-node
+`/etc/pve/nodes/<node>/ssh_known_hosts` when present, otherwise
+`/etc/pve/priv/known_hosts`. Strict host-key checking and batch mode remain
+enabled; no network keyscan or workstation trust is imported. If cluster trust
+is missing or SSH verification fails, verify the cluster and run
+`pvecm updatecerts` on the target node before retrying.
+It prints prerequisite fixes, storage and RAM cap
 before confirmation. It installs dnsmasq with the global service disabled,
 enables forwarding persistently if needed, prepares only Umiak ACLs/SDN, and
 installs the restricted node-agent. The cluster token/private key are reused;
