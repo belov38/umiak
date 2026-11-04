@@ -14,6 +14,7 @@ export const LimitsSchema = z
 		defaults: z
 			.object({
 				ttlSeconds: z.int().nullable(),
+				stoppedRetentionDays: z.int().nullable().optional(),
 				idleTimeoutSeconds: z.int().nullable(),
 			})
 			.optional()

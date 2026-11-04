@@ -315,7 +315,7 @@ describe("ctl-cleanup (§15.4)", () => {
 		).not.toContain(c.snapshotId);
 	});
 
-	it("error sandboxes without machines or disks after errorRetentionDays: system delete", async () => {
+	it("error sandboxes including remaining machines after errorRetentionDays: system delete", async () => {
 		const w = await createWorld(db);
 		const bare = await insertSandbox(w, { state: "error" });
 		await setRow(
@@ -360,7 +360,7 @@ describe("ctl-cleanup (§15.4)", () => {
 			expect.arrayContaining([bare, onlyDeleted]),
 		);
 		expect(res.errorDeletes).not.toContain(young);
-		expect(res.errorDeletes).not.toContain(withMachine.sandboxId);
+		expect(res.errorDeletes).toContain(withMachine.sandboxId);
 		const s = await row(w, "sandboxes", bare);
 		expect(s.state).toBe("deleting");
 		const ops = await activeOps(w, bare);
@@ -376,6 +376,22 @@ describe("ctl-cleanup (§15.4)", () => {
 		expect((await row(w, "sandboxes", young)).state).toBe("error");
 	});
 
+	it("enqueues retention beyond one 500-row page in the same pass", async () => {
+		const w = await createWorld(db);
+		const ids: string[] = [];
+		for (let i = 0; i < 501; i++)
+			ids.push(await insertSandbox(w, { state: "error" }));
+		await w.pool.query(
+			"UPDATE runtime.sandboxes SET state_changed_at=now()-interval '8 days' WHERE id=ANY($1::uuid[])",
+			[ids],
+		);
+		const result = await runCleanup(w.ctx);
+		expect(result.errorDeletes).toEqual(expect.arrayContaining(ids));
+		expect(
+			(await runCleanup(w.ctx)).errorDeletes.some((id) => ids.includes(id)),
+		).toBe(false);
+	});
+
 	it("stoppedRetentionDays: off by default; when set, stopped sandboxes are deleted with reason retention", async () => {
 		const w = await createWorld(db);
 		const l = await linkedSandbox(w, {
@@ -386,7 +402,7 @@ describe("ctl-cleanup (§15.4)", () => {
 			w,
 			"sandboxes",
 			l.sandboxId,
-			"stopped_at = now() - interval '4 days'",
+			"stopped_at = now() - interval '25 hours'",
 		);
 		const fresh = await linkedSandbox(w, {
 			state: "stopped",
@@ -396,7 +412,7 @@ describe("ctl-cleanup (§15.4)", () => {
 			w,
 			"sandboxes",
 			fresh.sandboxId,
-			"stopped_at = now() - interval '2 days'",
+			"stopped_at = now() - interval '23 hours'",
 		);
 
 		expect((await runCleanup(w.ctx)).retentionDeletes).toEqual([]);
@@ -415,7 +431,7 @@ describe("ctl-cleanup (§15.4)", () => {
 			sizes: [{ slug: "2gb", vcpu: 2, memoryMb: 2048 }],
 			defaults: {
 				defaultTemplate: w.topo.templateSlug,
-				stoppedRetentionDays: 3,
+				stoppedRetentionDays: 1,
 			},
 		});
 		const res = await runCleanup(w.ctx);

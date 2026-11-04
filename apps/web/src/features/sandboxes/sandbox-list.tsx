@@ -291,6 +291,13 @@ function SandboxTable({
 	rows: SandboxData[];
 }) {
 	const creator = useCreatorName(teamId);
+	const umiak = useUmiak(teamId);
+	const limits = useQuery({
+		queryKey: ["limits", teamId],
+		queryFn: ({ signal }) => umiak.limits({ signal }),
+		refetchInterval: POLL_MS,
+	});
+	const retention = limits.data?.defaults?.stoppedRetentionDays;
 	const now = Date.now();
 	return (
 		<>
@@ -336,6 +343,15 @@ function SandboxTable({
 								</TableCell>
 								<TableCell>
 									<StateCell sandbox={s} />
+									{s.state === "stopped" &&
+										s.stoppedAt &&
+										retention != null && (
+											<div className="text-xs text-muted-foreground">
+												{Date.parse(s.stoppedAt) + retention * 86_400_000 > now
+													? `Deleted in ${Math.ceil((Date.parse(s.stoppedAt) + retention * 86_400_000 - now) / 3_600_000)} h`
+													: "Deletion pending"}
+											</div>
+										)}
 								</TableCell>
 								<TableCell className="text-xs whitespace-nowrap">
 									{formatTime(s.createdAt)}
@@ -381,6 +397,13 @@ function SandboxTable({
 								{s.name ?? s.slug}
 							</Link>
 							<StateCell sandbox={s} />
+							{s.state === "stopped" && s.stoppedAt && retention != null && (
+								<div className="text-xs text-muted-foreground">
+									{Date.parse(s.stoppedAt) + retention * 86_400_000 > now
+										? `Deleted in ${Math.ceil((Date.parse(s.stoppedAt) + retention * 86_400_000 - now) / 3_600_000)} h`
+										: "Deletion pending"}
+								</div>
+							)}
 							<BlockLock sandbox={s} />
 							<RowActions teamId={teamId} sandbox={s} />
 						</header>

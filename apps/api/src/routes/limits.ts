@@ -85,6 +85,7 @@ export function registerLimitsRoutes(app: ApiApp, deps: ApiDeps): void {
 		const body: Limits = {
 			defaults: {
 				ttlSeconds: defaults.ttlSeconds,
+				stoppedRetentionDays: defaults.stoppedRetentionDays,
 				idleTimeoutSeconds: defaults.idleTimeoutSeconds,
 			},
 			quota: {

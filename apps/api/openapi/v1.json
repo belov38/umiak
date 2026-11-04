@@ -2035,6 +2035,12 @@
 									"null"
 								]
 							},
+							"stoppedRetentionDays": {
+								"type": [
+									"integer",
+									"null"
+								]
+							},
 							"ttlSeconds": {
 								"type": [
 									"integer",

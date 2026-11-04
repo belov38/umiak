@@ -72,26 +72,46 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 			ttlSeconds: null,
 			maxTtlSeconds: 604800,
 			idleTimeoutSeconds: 900,
-			stoppedRetentionDays: null,
-			errorRetentionDays: 7,
+			stoppedRetentionDays: 1,
+			errorRetentionDays: 1,
 			recoverMinIntervalSeconds: 600,
 			defaultTemplate: "linux",
 			publicPortsEnabled: true,
 			ssoPortPolicy: "any",
 			rateLimits: { requestsPerSecond: 20, burst: 100, startsPerMinute: 30 },
 			defaultQuota: {
-				maxActiveSandboxes: 3,
-				maxRamMb: 6144,
+				maxActiveSandboxes: 10000,
+				maxRamMb: 8192,
 				maxSavedSnapshots: 10,
 			},
 			newSharedTeamQuota: {
-				maxActiveSandboxes: 3,
-				maxRamMb: 6144,
+				maxActiveSandboxes: 10000,
+				maxRamMb: 8192,
 				maxSavedSnapshots: 10,
 			},
 			maxOwnedTeamsPerUser: 3,
 			ssoPolicyEpoch: 0,
 		});
+	});
+
+	it("Update preserves disabled and explicitly configured retention", async () => {
+		for (const stopped of [null, 3]) {
+			await t.pool.query(
+				"UPDATE payload.platform_defaults SET stopped_retention_days=$1, error_retention_days=4",
+				[stopped],
+			);
+			await migrateUmiakPayload(payload);
+			const r = await t.pool.query(
+				"SELECT stopped_retention_days, error_retention_days FROM payload.platform_defaults",
+			);
+			expect(r.rows[0].stopped_retention_days).toBe(
+				stopped === null ? null : String(stopped),
+			);
+			expect(r.rows[0].error_retention_days).toBe("4");
+		}
+		await t.pool.query(
+			"UPDATE payload.platform_defaults SET stopped_retention_days=1, error_retention_days=1",
+		);
 	});
 
 	it("seeds desktop capability and 4gb/8gb without a pool", async () => {

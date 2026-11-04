@@ -2030,6 +2030,7 @@ export interface components {
             /** @description Effective platform lifecycle defaults; null disables the policy. Omitted by older servers. */
             defaults?: {
                 idleTimeoutSeconds: number | null;
+                stoppedRetentionDays?: number | null;
                 ttlSeconds: number | null;
             };
             quota: {

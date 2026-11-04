@@ -29,7 +29,7 @@ import { lockSandboxRow } from "../db.ts";
 // job again (singleton: a duplicate is dropped).
 //
 // System deletes (core `requestSystemDelete`, no principal): `error` sandboxes
-// without live machines or disks after `errorRetentionDays` (event reason
+// including live machines and disks after `errorRetentionDays` (event reason
 // `error_retention`); `stopped` sandboxes after `stoppedRetentionDays` when set
 // (event reason `retention`). Never with an active operation.
 //
@@ -192,11 +192,7 @@ export async function runCleanup(ctx: WorkerCtx): Promise<CleanupResult> {
 		res.errorDeletes = await systemDeletes(
 			ctx,
 			`s.state = 'error'
-			 AND s.state_changed_at < now() - make_interval(days => $1)
-			 AND NOT EXISTS (SELECT 1 FROM runtime.machines m
-			                 WHERE m.sandbox_id = s.id AND m.state <> 'deleted')
-			 AND NOT EXISTS (SELECT 1 FROM runtime.disks dk JOIN runtime.machines m ON m.id = dk.machine_id
-			                 WHERE m.sandbox_id = s.id AND dk.state <> 'deleted')`,
+			 AND s.state_changed_at < now() - make_interval(days => $1)`,
 			d.errorRetentionDays,
 			"error_retention",
 		);
@@ -361,36 +357,44 @@ async function systemDeletes(
 	const where = `${cond}
 		AND NOT EXISTS (SELECT 1 FROM runtime.operations o
 		                WHERE o.sandbox_id = s.id AND o.state IN ('pending', 'running'))`;
-	const r = await ctx.pool.query<{ id: string }>(
-		`SELECT s.id FROM runtime.sandboxes s WHERE ${where} ORDER BY s.id LIMIT ${BATCH}`,
-		[days],
-	);
 	const out: string[] = [];
-	for (const { id } of r.rows) {
-		try {
-			const op = await withTx(ctx.pool, async (tx) => {
-				const ok = await tx.client.query(
-					`SELECT 1 FROM runtime.sandboxes s WHERE s.id = $2 AND ${where} FOR UPDATE OF s`,
-					[days, id],
+	let cursor: string | null = null;
+	// Page through the whole eligible set so a 10k fleet does not require
+	// twenty 10-minute controller passes merely to enqueue its deletes.
+	for (;;) {
+		const r: { rows: { id: string }[] } = await ctx.pool.query<{ id: string }>(
+			`SELECT s.id FROM runtime.sandboxes s WHERE ${where} AND ($2::uuid IS NULL OR s.id > $2::uuid) ORDER BY s.id LIMIT ${BATCH}`,
+			[days, cursor],
+		);
+		for (const { id } of r.rows) {
+			try {
+				const op = await withTx(ctx.pool, async (tx) => {
+					const ok = await tx.client.query(
+						`SELECT 1 FROM runtime.sandboxes s WHERE s.id = $2 AND ${where} FOR UPDATE OF s`,
+						[days, id],
+					);
+					if (ok.rowCount !== 1) return null;
+					return requestSystemDelete(tx, ctx.jobs, id, reason);
+				});
+				if (op === null) continue;
+				out.push(id);
+				ctx.metrics.inc("umiak_cleanup_delete_total", { reason });
+				ctx.log.info(
+					{ sandboxId: id, operationId: op.id, reason },
+					"cleanup: sandbox deleted",
 				);
-				if (ok.rowCount !== 1) return null;
-				return requestSystemDelete(tx, ctx.jobs, id, reason);
-			});
-			if (op === null) continue;
-			out.push(id);
-			ctx.metrics.inc("umiak_cleanup_delete_total", { reason });
-			ctx.log.info(
-				{ sandboxId: id, operationId: op.id, reason },
-				"cleanup: sandbox deleted",
-			);
-		} catch (err) {
-			if (!(err instanceof UmiakError)) throw err;
-			ctx.log.warn(
-				{ sandboxId: id, code: err.code },
-				"cleanup: delete skipped",
-			);
+			} catch (err) {
+				if (!(err instanceof UmiakError)) throw err;
+				ctx.log.warn(
+					{ sandboxId: id, code: err.code },
+					"cleanup: delete skipped",
+				);
+			}
 		}
+		if (r.rows.length < BATCH) break;
+		cursor = r.rows.at(-1)?.id ?? null;
 	}
+
 	return out;
 }
 

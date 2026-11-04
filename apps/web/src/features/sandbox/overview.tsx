@@ -6,6 +6,7 @@ import type { Sandbox, SandboxData } from "@umiak/sdk";
 import { CopyLine } from "@/components/app/copy-button";
 import { QueryError } from "@/components/app/query-error";
 import { Button } from "@/components/ui/button";
+import { useUmiak } from "@/lib/api";
 import { formatAgo, formatTime } from "@/lib/format";
 import { formatDuration } from "./output";
 import { portsKey } from "./ports";
@@ -21,6 +22,17 @@ export function OverviewTab({
 	handle: Sandbox;
 	onOpenTab: (tab: "commands" | "ports") => void;
 }) {
+	const umiak = useUmiak(teamId);
+	const limits = useQuery({
+		queryKey: ["limits", teamId],
+		queryFn: ({ signal }) => umiak.limits({ signal }),
+		refetchInterval: 30_000,
+	});
+	const retention = limits.data?.defaults?.stoppedRetentionDays;
+	const deleteAt =
+		s.state === "stopped" && s.stoppedAt && retention != null
+			? Date.parse(s.stoppedAt) + retention * 86_400_000
+			: null;
 	const commands = useQuery({
 		queryKey: ["commands", teamId, s.id, "last10"],
 		queryFn: async ({ signal }) => {
@@ -57,6 +69,16 @@ export function OverviewTab({
 					<dt className="text-muted-foreground">Stopped</dt>
 					<dd>
 						{formatTime(s.stoppedAt)}
+						{deleteAt !== null && (
+							<span
+								className="ml-2 text-muted-foreground"
+								title={formatTime(new Date(deleteAt).toISOString())}
+							>
+								{deleteAt > now
+									? `Deleted in ${Math.ceil((deleteAt - now) / 3_600_000)} h`
+									: "Deletion pending"}
+							</span>
+						)}
 						{s.stopReason && (
 							<span className="text-muted-foreground"> ({s.stopReason})</span>
 						)}

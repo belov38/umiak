@@ -6,6 +6,8 @@ from typing import Any, TypeVar, cast
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
+from ..types import UNSET, Unset
+
 T = TypeVar("T", bound="LimitsDefaults")
 
 
@@ -16,10 +18,12 @@ class LimitsDefaults:
     Attributes:
         idle_timeout_seconds (int | None):
         ttl_seconds (int | None):
+        stopped_retention_days (int | None | Unset):
     """
 
     idle_timeout_seconds: int | None
     ttl_seconds: int | None
+    stopped_retention_days: int | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -29,6 +33,12 @@ class LimitsDefaults:
         ttl_seconds: int | None
         ttl_seconds = self.ttl_seconds
 
+        stopped_retention_days: int | None | Unset
+        if isinstance(self.stopped_retention_days, Unset):
+            stopped_retention_days = UNSET
+        else:
+            stopped_retention_days = self.stopped_retention_days
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
@@ -37,6 +47,8 @@ class LimitsDefaults:
                 "ttlSeconds": ttl_seconds,
             }
         )
+        if stopped_retention_days is not UNSET:
+            field_dict["stoppedRetentionDays"] = stopped_retention_days
 
         return field_dict
 
@@ -58,9 +70,19 @@ class LimitsDefaults:
 
         ttl_seconds = _parse_ttl_seconds(d.pop("ttlSeconds"))
 
+        def _parse_stopped_retention_days(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        stopped_retention_days = _parse_stopped_retention_days(d.pop("stoppedRetentionDays", UNSET))
+
         limits_defaults = cls(
             idle_timeout_seconds=idle_timeout_seconds,
             ttl_seconds=ttl_seconds,
+            stopped_retention_days=stopped_retention_days,
         )
 
         limits_defaults.additional_properties = d

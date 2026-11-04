@@ -347,6 +347,8 @@ export async function down({ db }: MigrateDownArgs): Promise<void> {
 // Defaults of S6 §5.11 (StaticConfigReader), S7 and S8 §7, and the PoC
 // template and size (S6 §9.1). No pool target: warm pools are not in the MVP.
 // Ids are UUIDv7 (Postgres 18).
+// Fresh database policy only: applied migrations are never replayed, so Update
+// preserves existing retention (including null) and quota choices.
 const SEED = sql`
   INSERT INTO "payload"."platform_defaults" (
     "id", "ttl_seconds", "max_ttl_seconds", "idle_timeout_seconds",
@@ -359,11 +361,11 @@ const SEED = sql`
     "max_owned_teams_per_user", "sso_policy_epoch", "updated_at", "created_at"
   ) VALUES (
     uuidv7(), NULL, 604800, 900,
-    NULL, 7, 600,
+    1, 1, 600,
     'linux', true, 'any',
     20, 100, 30,
-    3, 6144, 10,
-    3, 6144,
+    10000, 8192, 10,
+    10000, 8192,
     10,
     3, 0, now(), now()
   );

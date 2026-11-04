@@ -913,8 +913,8 @@ A CLI in `apps/worker` (the same image): `providers add`, `nodes add|cordon|unco
 
 - `idempotency_keys` past `expires_at`; `agent_events` and synthetic ones older than 7 days; `commands` older than 90 days; tombstones of `deleted` sandboxes older than 30 days; `sandbox_events` older than 90 days.
 - A safety net for `fork_source` (the main path is §7.7): snapshots in `ready`/`failed` whose target is in `error`/`deleted`, and any `fork_source` older than 1 h → delete.
-- A sandbox `error` without a machine and without disks older than `errorRetentionDays` (7) → delete.
-- If `stoppedRetentionDays` is set — a sandbox in `stopped` longer than this period → delete (`stop_reason` is kept in the events as `retention`). Off by default.
+- A sandbox `error` older than `errorRetentionDays` → normal delete, including any remaining machines/disks.
+- If `stoppedRetentionDays` is set — a sandbox in `stopped` longer than this period → delete (`stop_reason` is kept in the events as `retention`). New databases seed both retention fields to 1 day (24 hours); the cleanup controller queues normal deletion on its next 10-minute pass, paging the whole eligible set in batches of 500. Existing databases retain their saved values, including null stopped retention; Update does not enable it. Owners can edit Platform defaults in the web settings. Explicitly saved snapshots are retained.
 - Re-encryption of `sandbox_secrets` with an old key version.
 - pg-boss jobs are cleaned by pg-boss itself (`deleteAfterSeconds` 7 days).
 
@@ -1007,7 +1007,7 @@ The plan is written separately (`docs/plans/s6-*.md`). Recommended order:
 ## 21. Answers to the open questions (master session, 2026-10-29)
 
 1. **TTL.** An explicitly set TTL stays hard, but the default is `ttlSeconds = null`. The main protection against costs is idle-stop at 900 s (§12).
-2. **Retention of stopped sandboxes.** In the PoC there is no default limit (`stoppedRetentionDays` is off).
+2. **Retention of stopped sandboxes.** New installs retain stopped sandboxes for 24 hours (`stoppedRetentionDays: 1`); existing installs preserve their settings. The day fields are retained for compatibility. The dashboard shows the remaining time.
 3. **Starting a stopped sandbox on a request to its URL** — phase 2.
 
 Left for phase 2: moving a sandbox between nodes and archiving stopped ones to PBS will need a new machine for the same sandbox; the 1:N model already allows this.
@@ -1017,3 +1017,6 @@ Left for phase 2: moving a sandbox between nodes and archiving stopped ones to P
 do not bypass `retryOnVmLock`: the whole deletion attempt is repeated with a new check of the
 lease owner, the shared node power lock is released between attempts.
 The fake-PVE regression holds the lock for up to 30 s, then confirms the deletion.
+
+
+New database quota seeds allow 10,000 active sandboxes, subject to the RAM quota and node RAM admission. Stopped and error sandboxes do not count toward active/RAM quotas (§8.5); saved snapshots have their own quota. Allocations fetch PVE inventory and LV inventory once per allocation, then use in-memory sets; no per-VMID host requests. Inventory reads, LVM operations, PVE UI rendering, sequential cleanup jobs and loading many dashboard pages remain scale hot spots.

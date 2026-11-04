@@ -8,7 +8,8 @@ import {
 } from "../hooks/routes.ts";
 
 // Platform defaults (S6 §5.11, S7, S8 §7). The values are seeded by the
-// initial migration; the defaultValue of every field matches the seed.
+// initial migration. Retention defaults below preserve legacy behavior when
+// reading old installs; only the fresh database seed enables 24-hour retention.
 export const PlatformDefaults: GlobalConfig = {
 	slug: "platform-defaults",
 	access: { read: operatorOnly, update: operatorOnly },
@@ -27,7 +28,15 @@ export const PlatformDefaults: GlobalConfig = {
 			defaultValue: 604800,
 		},
 		{ name: "idleTimeoutSeconds", type: "number", min: 1, defaultValue: 900 },
-		{ name: "stoppedRetentionDays", type: "number", min: 1 },
+		{
+			name: "stoppedRetentionDays",
+			type: "number",
+			min: 1,
+			admin: {
+				description:
+					"Days after stopping before full deletion. Blank disables it. New installs: 1 day (24 h). Saved snapshots are kept.",
+			},
+		},
 		{
 			name: "errorRetentionDays",
 			type: "number",

@@ -507,3 +507,6 @@ valid. CLI sessions cannot mint browser access. The installer's **Reset owner ac
 use it only as a last resort because it revokes every browser and CLI credential.
 
 Multi-node sandbox placement, per-node templates and safe node removal: [operations guide](operations-multi-node.md).
+
+
+New installations reserve 10,000 sandbox VMIDs (10000–19999), template IDs 20000–20099 and a private /18 guest subnet (10.88.0.0/18 by default). Conflicts select the next free block/subnet. Running capacity remains limited by configured RAM. Stopped and error sandboxes are deleted after 24 hours on the next cleanup pass; saved snapshots remain. Change retention in the web admin's Platform defaults (days; blank stopped retention disables it). Updates preserve existing ranges, subnet and retention, including disabled/null retention.
