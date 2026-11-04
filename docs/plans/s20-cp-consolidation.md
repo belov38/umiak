@@ -95,15 +95,24 @@ mcp 241.2, web 140.0, secrets-init 4.5 MiB compressed; union 1304.7 MiB
   isolation from API, absent MCP secret paths PASS. No installer facts/PVE calls,
   so full sandbox/template/desktop workflow is outside this local smoke.
   Owner browser session survives ingress restart; repeated real-volume init PASS.
-- OCI gzip manifests (linux/amd64): CP 660.12 MiB, web 140.03 MiB; unique layer
-  union 719.96 MiB excluding Postgres, versus GHCR 0.1.0 baseline 1304.7 MiB:
+- OCI gzip manifests (linux/amd64): CP 660.08 MiB, web 140.03 MiB; unique layer
+  union 719.93 MiB excluding Postgres, versus GHCR 0.1.0 baseline 1304.7 MiB:
   reduction 44.8%. Base layers counted once. This measures download bytes, not
   a guaranteed first-install wall time; no comparable cold timing was available.
 - Docker stats snapshot after lightweight HTTP smoke: ingress121.9, MCP123.7,
   web-meta49.65, API328.8, worker240.4, web182.2, gateway90.08, renewal31.55,
   Postgres368.3 MiB; total1536.58 MiB. Emulated idle-ish development workload,
   no templates/VMs, 24GiB Docker VM: not a peak-memory/4GiB-LXC guarantee.
-- Independent acceptance: running; merge requires coordinator confirmation.
+- Fresh independent acceptance (GPT-6-astra): no blocking/important regressions.
+  One minor found: workspace src/testing helpers copied with production source.
+  Fixed via RED image test, Dockerfile-specific exclusions, rebuild and GREEN
+  image acceptance 2/2. Root/corporate contracts 4/4 remain PASS.
+  Reviewer independently ran those contracts and diff whitespace checks; heavier
+  gates use the evidence above. Limits: no full old-release→new-release upgrade,
+  corporate OIDC login, real PVE/template/desktop or 4GiB load acceptance.
+  Repeated init and local image-recreation smoke preserve existing volumes.
+  Final full pnpm suite still waits for coordinator-owned S19 budget fix;
+  merge requires coordinator confirmation.
 
 Installer scope: only `umiak_installer/stack.py` STACK_FILES (remove two scripts
 now shipped in the image) and the bundle image-set test. No host logic, live

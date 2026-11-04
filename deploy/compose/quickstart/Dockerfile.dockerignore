@@ -47,3 +47,6 @@ apps/web/e2e/.state
 
 # Runtime COPY globs select production modules only.
 **/*.test.mjs
+# Workspace test entrypoints are never needed by production roles.
+**/src/testing
+**/src/testing.ts

@@ -85,6 +85,7 @@ test("runtime contains assets and compiled libraries without dev tools or test s
   ! command -v go
   test ! -e /app/node_modules/typescript
   test ! -e /app/node_modules/vitest
+  test -z "$(find /app/apps /app/packages -path '*/src/testing' -print -o -path '*/src/testing.ts' -print)"
   test -z "$(find /app/deploy/compose/quickstart -name '*.test.mjs' -print)"
  `,
 	);
