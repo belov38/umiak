@@ -30,7 +30,8 @@ from pathlib import Path
 from .pve import InstallerError
 
 REPO = "belov38/umiak"
-VERSION = re.compile(r"[0-9][0-9A-Za-z.+-]{0,63}")
+# Strict semver (optional pre-release suffix); no "+" because Docker tags cannot contain it.
+VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?")
 SHA = re.compile(r"[0-9a-f]{64}")
 BUNDLE_ROOT = Path(__file__).resolve().parent.parent
 
@@ -56,7 +57,7 @@ class Release:
 
 
 def valid_version(version: str) -> str:
-    if not isinstance(version, str) or not VERSION.fullmatch(version) or ".." in version:
+    if not isinstance(version, str) or len(version) > 64 or not VERSION.fullmatch(version) or ".." in version:
         raise ReleaseError("Invalid release version: " + repr(version))
     return version
 

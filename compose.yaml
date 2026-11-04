@@ -1,6 +1,6 @@
 # Pull-only product stack: every image is a published GHCR image pinned by
 # UMIAK_VERSION (the installer writes it to .env). Contributors build locally with
-#   docker compose -f compose.yaml -f compose.dev.yaml up --build
+#   docker compose --env-file compose.dev.env -f compose.yaml -f compose.dev.yaml up --build
 # The corporate OIDC deployment remains at deploy/compose/compose.yaml.
 # Project `umiak`: named volumes are umiak_<name> (the installer writes
 # umiak_pve-secrets and umiak_network-config before the first start).
@@ -17,7 +17,7 @@ x-app-env: &app-env
   UMIAK_LOCAL_ALLOWED_CIDRS: 127.0.0.0/8,::1/128,172.29.116.0/24
   UMIAK_LOCAL_DENIED_CIDRS: ${UMIAK_LOCAL_DENIED_CIDRS:-10.88.0.0/24}
   # The installer's .env sets the tailnet origin, preview domain and SSH host;
-  # the fallbacks keep a contributor's local `docker compose -f compose.yaml -f compose.dev.yaml up --build` working.
+  # the fallbacks keep a contributor's local `docker compose --env-file compose.dev.env -f compose.yaml -f compose.dev.yaml up --build` working.
   UMIAK_APP_ORIGIN: ${UMIAK_PUBLIC_URL:-http://localhost:4180}
   UMIAK_APP_URL: ${UMIAK_PUBLIC_URL:-http://localhost:4180}
   UMIAK_API_URL: ${UMIAK_PUBLIC_URL:-http://localhost:4180}

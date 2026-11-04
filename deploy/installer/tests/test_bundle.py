@@ -64,7 +64,7 @@ def test_unpacks_with_release_module(built, tmp_path):
     assert (result.root / "compose.yaml").is_file()
 
 
-@pytest.mark.parametrize("version", ["", "../x", "v1"])
+@pytest.mark.parametrize("version", ["", "../x", "v1", "1.2", "1.2.3+build", "1.2.3-"])
 def test_rejects_bad_version(tmp_path, version):
     with pytest.raises(release.InstallerError):
         build_bundle.build(version, tmp_path, SHA)

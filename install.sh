@@ -41,13 +41,9 @@ if [ -z "$version" ]; then
  version=${latest##*/tag/v}
  [ "$version" != "$latest" ] || die 'Could not resolve the latest Umiak release.'
 fi
-case "$version" in
- [0-9]*) ;;
- *) die 'Invalid UMIAK_VERSION.' ;;
-esac
-case "$version" in
- *[!0-9A-Za-z.+-]*|*..*) die 'Invalid UMIAK_VERSION.' ;;
-esac
+# Strict semver with an optional pre-release suffix (no "+": Docker tags cannot contain it).
+printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || die 'Invalid UMIAK_VERSION.'
+[ "${#version}" -le 64 ] || die 'Invalid UMIAK_VERSION.'
 
 base="https://github.com/$repo/releases/download/v$version"
 bundle="umiak-installer-$version.tar.gz"

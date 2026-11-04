@@ -10,9 +10,5 @@ powershell = "7.6.9"
 python = "3.15.2"
 uv = "0.13.6"
 
-# Local builds (compose.dev.yaml) tag images with this version.
-[env]
-UMIAK_VERSION = "dev"
-
 [settings]
 experimental = false

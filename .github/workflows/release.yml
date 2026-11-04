@@ -22,7 +22,55 @@ env:
   VERSION: ${{ inputs.version }}
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      latest: ${{ steps.flags.outputs.latest }}
+      prerelease: ${{ steps.flags.outputs.prerelease }}
+    steps:
+      - name: Guard
+        # Dispatch from main only; a version is published once (builds are not reproducible).
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "Run this workflow from main" >&2; exit 1; }
+          printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' && [ "${#VERSION}" -le 64 ] \
+            || { echo "Invalid version: $VERSION" >&2; exit 1; }
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists" >&2; exit 1
+          fi
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Refuse an existing image tag
+        run: |
+          if docker buildx imagetools inspect "$REGISTRY/umiak-quickstart:$VERSION" >/dev/null 2>&1; then
+            echo "Image umiak-quickstart:$VERSION already exists" >&2; exit 1
+          fi
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: python uv
+      - name: Installer tests and dry bundle (before anything is pushed)
+        working-directory: deploy/installer
+        run: |
+          uv run pytest -q
+          uv run python build_bundle.py "$VERSION" "$RUNNER_TEMP/dry" --node-agent-sha256 "$(printf '0%.0s' $(seq 64))"
+      - id: flags
+        run: |
+          case "$VERSION" in
+            *-*) echo "latest=false" >> "$GITHUB_OUTPUT"; echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "latest=true" >> "$GITHUB_OUTPUT"; echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
   images:
+    needs: preflight
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -38,15 +86,6 @@ jobs:
           - { name: web, dockerfile: apps/web/Dockerfile }
           - { name: mcp, dockerfile: apps/mcp/Dockerfile }
     steps:
-      - name: Validate the version
-        run: |
-          case "$VERSION" in
-            [0-9]*) ;;
-            *) echo "Invalid version: $VERSION" >&2; exit 1 ;;
-          esac
-          case "$VERSION" in
-            *[!0-9A-Za-z.+-]*|*..*|latest) echo "Invalid version: $VERSION" >&2; exit 1 ;;
-          esac
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
@@ -55,6 +94,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v7
+        id: build
         with:
           context: .
           file: ${{ matrix.dockerfile }}
@@ -62,16 +102,24 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/umiak-${{ matrix.name }}:${{ inputs.version }}
-            ${{ env.REGISTRY }}/umiak-${{ matrix.name }}:latest
+            ${{ needs.preflight.outputs.latest == 'true' && format('{0}/umiak-{1}:latest', env.REGISTRY, matrix.name) || '' }}
           labels: |
             org.opencontainers.image.source=https://github.com/belov38/umiak
             org.opencontainers.image.version=${{ inputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,scope=${{ matrix.name }},mode=max
+      - name: Record the image digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: printf '%s\n' "$DIGEST" > "digest-${{ matrix.name }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ matrix.name }}
+          path: digest-${{ matrix.name }}
 
   bundle:
-    needs: images
+    needs: [preflight, images]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -81,9 +129,10 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           install_args: python uv
-      - name: Installer tests
-        working-directory: deploy/installer
-        run: uv run pytest -q
+      - uses: actions/download-artifact@v8
+        with:
+          name: digest-quickstart
+          path: ${{ runner.temp }}/digest
       - uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -93,8 +142,10 @@ jobs:
         # The installer refuses a node-agent whose SHA256 differs from node-agent.sha256, so the
         # value comes from the pushed quickstart image itself, not from a separate build.
         run: |
-          image="$REGISTRY/umiak-quickstart:$VERSION"
-          docker pull "$image"
+          # By the digest the build step produced, never by a (mutable) tag.
+          digest=$(cat "$RUNNER_TEMP/digest/digest-quickstart")
+          image="$REGISTRY/umiak-quickstart@$digest"
+          docker pull --platform linux/amd64 "$image"
           container=$(docker create "$image")
           docker cp "$container:/app/quickstart-assets/umiak-node-linux-amd64" "$RUNNER_TEMP/umiak-node-linux-amd64"
           docker rm "$container"
@@ -103,11 +154,13 @@ jobs:
       - name: Build the installer bundle
         run: |
           mkdir -p dist
-          python deploy/installer/build_bundle.py "$VERSION" dist --node-agent-sha256 "$(cat "$RUNNER_TEMP/node-agent.sha256")"
+          uv run --project deploy/installer python deploy/installer/build_bundle.py "$VERSION" dist --node-agent-sha256 "$(cat "$RUNNER_TEMP/node-agent.sha256")"
           (cd dist && sha256sum -c SHA256SUMS)
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.preflight.outputs.prerelease == 'true' && '--prerelease' || '' }}
         run: |
+          # shellcheck disable=SC2086 # PRERELEASE is empty or a single flag
           gh release create "v$VERSION" "dist/umiak-installer-$VERSION.tar.gz" dist/SHA256SUMS \
-            --title "Umiak $VERSION" --generate-notes --target "$GITHUB_SHA"
+            --title "Umiak $VERSION" --generate-notes --target "$GITHUB_SHA" $PRERELEASE

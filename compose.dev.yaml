@@ -1,7 +1,7 @@
 # Contributor override: build the images from this checkout instead of pulling them.
-#   docker compose -f compose.yaml -f compose.dev.yaml up --build
-# The images keep the published names; UMIAK_VERSION is "dev" in this repo (mise.toml [env]),
-# so a local build never shadows a release tag. The release workflow builds the same Dockerfiles.
+#   docker compose --env-file compose.dev.env -f compose.yaml -f compose.dev.yaml up --build
+# The images keep the published names; compose.dev.env sets UMIAK_VERSION=dev (compose interpolates
+# the base file on its own, so the override cannot supply it), so a local build never shadows a release tag. The release workflow builds the same Dockerfiles.
 x-quickstart-build: &quickstart-build
   context: .
   dockerfile: deploy/compose/quickstart/Dockerfile
