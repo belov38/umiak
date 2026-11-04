@@ -89,29 +89,46 @@ class Ui:
         self.input = input_fn
         self.say = out
 
-    def ask(self, prompt: str, default: str | None, flag: str) -> str:
+    def read(self, prompt: str) -> str:
+        """One line from the user; undecodable bytes (another keyboard layout, a half-erased
+        multibyte character) are reported and asked again instead of crashing."""
+        while True:
+            try:
+                return self.input(prompt).strip()
+            except UnicodeDecodeError:
+                self.say("  Could not read that input; type it again using Latin letters and digits.")
+
+    def ask(self, prompt: str, default: str | None, flag: str, check=None):
+        """A prompt with a default. `check` validates and normalizes the answer: it raises
+        UsageError, which interactive mode prints before asking again."""
         if not self.interactive:
             if default is None:
                 raise UsageError(f"Missing {flag} (required with --non-interactive)")
-            return default
+            return check(default) if check else default
         while True:
             suffix = f" [{default}]" if default is not None else ""
-            value = self.input(f"{prompt}{suffix}: ").strip()
-            if value or default is not None:
-                return value or default
+            value = self.read(f"{prompt}{suffix}: ") or default
+            if value is None:
+                continue
+            if check is None:
+                return value
+            try:
+                return check(value)
+            except UsageError as error:
+                self.say(f"  {error}")
 
     def confirm(self, prompt: str) -> bool:
         if self.yes:
             return True
         if not self.interactive:
             raise UsageError("The listed host changes need confirmation: rerun with --yes")
-        return self.input(f"{prompt} [y/N]: ").strip().lower() in ("y", "yes")
+        return self.read(f"{prompt} [y/N]: ").lower() in ("y", "yes")
 
     def choose(self, options: list[str]) -> str:
         for number, option in enumerate(options, 1):
             self.say(f"  {number}) {option}")
         while True:
-            value = self.input("Choose an action: ").strip()
+            value = self.read("Choose an action: ")
             if value.isdigit() and 1 <= int(value) <= len(options):
                 return options[int(value) - 1]
 
@@ -121,16 +138,16 @@ class Ui:
             if self.yes:
                 return True
             raise UsageError("This action needs confirmation: rerun with --yes")
-        return self.input(f"{prompt}: ").strip() == word
+        return self.read(f"{prompt}: ") == word
 
     def ask_bool(self, prompt: str, flag_value: bool) -> bool:
         """An opt-in choice: the flag, otherwise a prompt (interactive); never implied by --yes."""
         if flag_value or not self.interactive:
             return flag_value
-        return self.input(f"{prompt} [y/N]: ").strip().lower() in ("y", "yes")
+        return self.read(f"{prompt} [y/N]: ").lower() in ("y", "yes")
 
     def wait_enter(self, prompt: str) -> None:
-        self.input(prompt)
+        self.read(prompt)
 
 
 def _range(text: str, flag: str) -> tuple[int, int]:
@@ -165,57 +182,121 @@ def _lan_defaults(runner: Runner) -> str | None:
 def gather(runner: Runner, args, ui: Ui, saved: dict | None = None) -> dict:
     """Answers from flags, otherwise prompts (interactive) with defaults. Validated before any change.
 
-    `saved` (answers of an unfinished install) become the defaults, so Resume
-    can correct an answer (flag or prompt) instead of failing the same way again.
+    Each answer is checked as it is given: an invalid flag is a usage error, an invalid
+    interactive answer is explained and asked again. `saved` (answers of an unfinished
+    install) become the defaults, so Resume can correct an answer instead of failing again.
     """
     saved = saved or {}
 
     def default(key, fallback):
         return str(saved[key]) if key in saved else fallback
 
+    def field(flag_value, prompt, fallback, flag, check):
+        if flag_value is not None and flag_value != "":
+            return check(str(flag_value))
+        return ui.ask(prompt, fallback, flag, check)
+
     lvm = [row["storage"] for row in lvmthin_storages(runner, runner.hostname())]
-    storage = args.storage or ui.ask("LVM-thin storage for sandboxes", default("storage", lvm[0] if lvm else None),
-                                     "--storage")
-    vmids = _range(args.vmid_range or ui.ask("Sandbox VMID range", "500-589", "--vmid-range"), "--vmid-range")
-    if vmids != SANDBOX_RANGE:
-        raise UsageError("This release supports only the sandbox VMID range 500-589")
+
+    def check_storage(value):
+        if lvm and value not in lvm:
+            raise UsageError(f"No LVM-thin storage named {value} on this node; available: {', '.join(lvm)}")
+        return value
+
+    storage_prompt = "LVM-thin storage for sandboxes" + (f" ({', '.join(lvm)})" if len(lvm) > 1 else "")
+    storage = field(args.storage, storage_prompt, default("storage", lvm[0] if lvm else None), "--storage",
+                    check_storage)
+
+    def check_vmids(value):
+        vmids = _range(value, "--vmid-range")
+        if vmids != SANDBOX_RANGE:
+            raise UsageError("This release supports only the sandbox VMID range 500-589")
+        return vmids
+
+    vmids = field(args.vmid_range, "Sandbox VMID range", "500-589", "--vmid-range", check_vmids)
+
+    def check_templates(value):
+        templates = _range(value, "--template-range")
+        if templates[0] < 500 or (templates[0] <= vmids[1] and vmids[0] <= templates[1]):
+            raise UsageError("Template VMIDs must start at 500 or above and not overlap the sandbox range")
+        if any(templates[0] <= vmid <= templates[1] for vmid in PROTECTED_VMIDS):
+            raise UsageError("Template VMID range contains a protected VMID (590, 599, 9000, 9001)")
+        return templates
+
     tpl_default = f"{saved['tpl_min']}-{saved['tpl_max']}" if "tpl_min" in saved else "600-699"
-    templates = _range(args.template_range or ui.ask("Template VMID range", tpl_default, "--template-range"),
-                       "--template-range")
-    if templates[0] < 500 or (templates[0] <= vmids[1] and vmids[0] <= templates[1]):
-        raise UsageError("Template VMIDs must start at 500 or above and not overlap the sandbox range")
-    if any(templates[0] <= vmid <= templates[1] for vmid in PROTECTED_VMIDS):
-        raise UsageError("Template VMID range contains a protected VMID (590, 599, 9000, 9001)")
-    ram = args.ram_cap_mb or _int(ui.ask("Sandbox RAM cap (MiB)", default("ram_cap_mb", str(DEFAULT_RAM_CAP)), "--ram-cap-mb"),
-                                    "--ram-cap-mb")
-    if not 2048 <= ram <= 8192:
-        raise UsageError("Sandbox RAM cap must be 2048-8192 MiB")
-    ct_id = args.ct_id or _int(ui.ask("Control-plane CT ID", default("ct_id", str(DEFAULT_CT_ID)), "--ct-id"), "--ct-id")
-    if any(low <= ct_id <= high for low, high in (vmids, templates)):
-        raise UsageError("The CT ID must lie outside the sandbox and template ranges")
+    templates = field(args.template_range, "Template VMID range", tpl_default, "--template-range", check_templates)
+
+    def check_ram(value):
+        ram = _int(value, "--ram-cap-mb")
+        if not 2048 <= ram <= 8192:
+            raise UsageError("Sandbox RAM cap must be 2048-8192 MiB")
+        return ram
+
+    ram = field(args.ram_cap_mb, "Sandbox RAM cap (MiB)", default("ram_cap_mb", str(DEFAULT_RAM_CAP)),
+                "--ram-cap-mb", check_ram)
+
+    def check_ct_id(value):
+        ct_id = _int(value, "--ct-id")
+        if not 100 <= ct_id <= 999_999_999:
+            raise UsageError("Invalid CT ID")
+        if any(low <= ct_id <= high for low, high in (vmids, templates)):
+            raise UsageError("The CT ID must lie outside the sandbox and template ranges")
+        row = ct.existing(runner, ct_id)
+        if row is not None and not ct.is_umiak_ct(row):
+            raise UsageError(f"Guest {ct_id} exists and is not an Umiak container; choose another CT ID")
+        return ct_id
+
+    ct_id = field(args.ct_id, "Control-plane CT ID", default("ct_id", str(DEFAULT_CT_ID)), "--ct-id", check_ct_id)
+
+    def check_lan(value):
+        try:
+            gw, prefix = value.split("/")
+            gw = str(ipaddress.IPv4Address(gw))
+            cidr = int(prefix)
+        except ValueError as error:
+            raise UsageError(f"LAN router and prefix must look like 192.168.1.1/24 ({error})") from error
+        if not 8 <= cidr <= 30:
+            raise UsageError("The LAN prefix length must be 8-30")
+        return gw, cidr
+
     lan_default = f"{saved['gw']}/{saved['cidr']}" if "gw" in saved else _lan_defaults(runner)
-    lan = args.gateway_cidr or ui.ask("LAN router and prefix", lan_default, "--gateway-cidr")
+    gw, cidr = field(args.gateway_cidr, "LAN router and prefix", lan_default, "--gateway-cidr", check_lan)
+    network = ipaddress.IPv4Network(f"{gw}/{cidr}", strict=False)
+    ct_exists = ct.existing(runner, ct_id) is not None
+
+    def check_ip(value):
+        try:
+            ip = ipaddress.IPv4Address(value)
+        except ValueError as error:
+            raise UsageError(f"Invalid address: {error}") from error
+        if ip not in network or str(ip) == gw or ip in (network.network_address, network.broadcast_address):
+            raise UsageError(f"The address must be a host address in {network} other than the router")
+        if not ct_exists and ct.address_in_use(runner, str(ip)):
+            raise UsageError(f"Address {ip} is already in use on the LAN; choose a free static address")
+        return str(ip)
+
+    ip_default = default("ct_ip", None)
     if not args.ct_ip and "ct_ip" not in saved:
-        ui.say("The control plane needs a static LAN address outside your router's DHCP pool "
-               "(reserve it on the router); guests reach the gateway there.")
-        ui.say("Pick an address outside your router's DHCP range (it must never be handed to another device).")
-    ct_ip = args.ct_ip or ui.ask("Control-plane static IPv4 address", default("ct_ip", None), "--ct-ip")
-    hostname = args.hostname or ui.ask("Tailnet hostname", default("hostname", "umiak"), "--hostname")
+        ui.say("The control plane needs a static LAN address outside your router's DHCP range "
+               "(it must never be handed to another device); guests reach the gateway there.")
+        if ui.interactive:
+            ui.say("Looking for a free address…")
+            ip_default = ct.suggest_ip(runner, gw, cidr)
+            if ip_default:
+                ui.say(f"Suggested {ip_default}: nothing on the LAN answers there and no Proxmox guest uses it. "
+                       "Check that it is outside your router's DHCP range.")
+    ct_ip = field(args.ct_ip, "Control-plane static IPv4 address", ip_default, "--ct-ip", check_ip)
+
+    def check_hostname(value):
+        if not tailnet.HOSTNAME.fullmatch(value):
+            raise UsageError("Invalid tailnet hostname: use lowercase letters, digits and hyphens")
+        return value
+
+    hostname = field(args.hostname, "Tailnet hostname", default("hostname", "umiak"), "--hostname", check_hostname)
     dns = args.guest_dns or saved.get("guest_dns") or GUEST_DNS
-    try:
-        gw, prefix = lan.split("/")
-        spec = ct.CtSpec(id=ct_id, ip=str(ipaddress.IPv4Address(ct_ip)), cidr=int(prefix),
-                         gw=str(ipaddress.IPv4Address(gw)), storage=storage, dns=dns)
-    except ValueError as error:
-        raise UsageError(f"Invalid address: {error}") from error
-    if not tailnet.HOSTNAME.fullmatch(hostname):
-        raise UsageError("Invalid tailnet hostname: use lowercase letters, digits and hyphens")
+    spec = ct.CtSpec(id=ct_id, ip=ct_ip, cidr=cidr, gw=gw, storage=storage, dns=dns)
     try:
         ct.validate(spec)
-        # Read-only: CT ID ownership and a free address, before any host change.
-        ct.check_target(runner, spec)
-    except UsageError:
-        raise
     except InstallerError as error:
         raise UsageError(str(error)) from error
     return {"storage": storage, "vmid_min": vmids[0], "vmid_max": vmids[1], "tpl_min": templates[0],
@@ -437,7 +518,7 @@ def main(argv=None, runner: Runner | None = None, bundle: release.Release | None
                 raise UsageError(f"{action} is not available now; available: {', '.join(options)}")
         elif ui.interactive:
             out(f"Umiak installer {bundle.version}")
-            action = ui.choose(options)
+            action = ui.choose(options) if len(options) > 1 else options[0]
         elif options[0] in ("Install", "Resume install"):
             action = options[0]
         else:
@@ -467,4 +548,8 @@ def main(argv=None, runner: Runner | None = None, bundle: release.Release | None
 
 
 def run() -> int:
+    try:
+        import readline  # noqa: F401  # line editing for input(): arrows, and backspace over multibyte characters
+    except ImportError:
+        pass
     return main(sys.argv[1:])

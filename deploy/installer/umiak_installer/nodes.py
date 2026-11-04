@@ -16,7 +16,7 @@ from pathlib import Path
 
 from . import day2, node_host, prepare_host, stack, state
 from .ct import run_in
-from .pve import CommandError, InstallerError, get, write_secret
+from .pve import CommandError, InstallerError, get, lvmthin_storages, write_secret
 
 BOOTSTRAP = """import json,tempfile,pathlib,sys,os
 os.umask(0o022)
@@ -161,6 +161,25 @@ def _serialized(action):
     return run
 
 
+def _ask_storage(runner, node, fallback, ui):
+    """A new node's LVM-thin storage: asked interactively (names differ between nodes), otherwise the CP's."""
+    if not getattr(ui, "interactive", False):
+        return fallback
+    from .main import UsageError  # main imports this module lazily
+
+    names = [row["storage"] for row in lvmthin_storages(runner, node)]
+    if not names:
+        raise InstallerError(f"Node {node} has no LVM-thin storage; add one in Proxmox (Datacenter → Storage) first")
+
+    def check(value):
+        if value not in names:
+            raise UsageError(f"No LVM-thin storage named {value} on {node}; available: {', '.join(names)}")
+        return value
+
+    return ui.ask(f"LVM-thin storage on {node} ({', '.join(names)})", fallback if fallback in names else names[0],
+                  "--storage", check)
+
+
 @_serialized
 def add_node(runner, current, bundle, node, *, ui, storage=None, ram_cap_mb=None, console=None, host=None):
     day2._require_node(runner, current)
@@ -170,7 +189,7 @@ def add_node(runner, current, bundle, node, *, ui, storage=None, ram_cap_mb=None
     _capable(console)
     inventory = console.call("list")["nodes"]
     existing = next((n for n in inventory if n["name"] == node), {})
-    storage = storage or existing.get("storage") or current.answers["storage"]
+    storage = storage or existing.get("storage") or _ask_storage(runner, node, current.answers["storage"], ui)
     ram_cap_mb = ram_cap_mb or existing.get("ramCapMb") or 4096
     if not isinstance(ram_cap_mb, int) or not 2048 <= ram_cap_mb <= 8192:
         raise InstallerError("Sandbox node RAM cap must be 2048-8192 MiB")

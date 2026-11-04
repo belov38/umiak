@@ -119,8 +119,8 @@ def test_tailnet_without_https_stops_non_interactive_with_exit_3_then_resumes(en
 def test_interactive_tailnet_not_ready_waits_for_enter_and_rechecks(env):
     runner, run, printed = env
     runner.ts_states = [{**TS_STATUS, "CertDomains": []}, {**TS_STATUS, "CertDomains": []}, TS_STATUS]
-    # Menu choice, confirm the listed host changes, then Enter after each HTTPS hint.
-    answers = iter(["1", "y", "", ""])
+    # A single-option menu (Install) is skipped: confirm the host changes, then Enter after each HTTPS hint.
+    answers = iter(["y", "", ""])
     assert run(FLAGS[2:], input_fn=lambda prompt="": next(answers)) == 0
     assert any("https://login.tailscale.com/admin/dns" in line for line in printed)
 
@@ -324,3 +324,40 @@ def test_guest_dns_flag_reaches_pct_create(env):
     assert run(FLAGS + ["--guest-dns", "9.9.9.9"]) == 0
     create = next(a for a in runner.commands if a[:2] == ["pct", "create"])
     assert create[create.index("--nameserver") + 1] == "9.9.9.9"
+
+
+def test_interactive_install_reasks_bad_answers_and_suggests_a_free_ip(env):
+    runner, run, printed = env
+    runner.objects["/cluster/resources"].append({"vmid": 590, "type": "lxc", "name": "home", "tags": "home"})
+    guest = runner.path("/etc/pve/nodes/pve/lxc/110.conf")
+    guest.parent.mkdir(parents=True, exist_ok=True)
+    guest.write_text("net0: name=eth0,bridge=vmbr0,ip=192.168.68.50/22,gw=192.168.68.1\n")
+    prompts = []
+    replies = {
+        "LVM-thin storage for sandboxes": iter(["fast", ""]),
+        "Control-plane CT ID": iter(["590", "591"]),
+        "Control-plane static IPv4 address": iter(["192.168.68.", "\xd1", ""]),
+    }
+
+    def answer(prompt=""):
+        prompts.append(prompt)
+        if "[y/N]" in prompt:
+            return "y"
+        for key, values in replies.items():
+            if prompt.startswith(key):
+                value = next(values)
+                if value == "\xd1":
+                    raise UnicodeDecodeError("utf-8", b"\xd1", 0, 1, "invalid continuation byte")
+                return value
+        return ""
+
+    assert run([], input_fn=answer) == 0
+    assert not any(p.startswith("Choose") for p in prompts)
+    assert any("No LVM-thin storage named fast" in line for line in printed)
+    assert any("590 exists and is not an Umiak container" in line for line in printed)
+    assert any("Invalid address" in line for line in printed)
+    assert any("Could not read that input" in line for line in printed)
+    # .50 is a stopped guest's static address, so the suggestion skips it.
+    assert any(p.startswith("Control-plane static IPv4 address [192.168.68.51]") for p in prompts)
+    assert saved(runner).ct_ip == "192.168.68.51" and saved(runner).ct_id == 591
+

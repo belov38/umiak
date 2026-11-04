@@ -126,6 +126,42 @@ def address_in_use(runner: Runner, ip: str, bridge: str = "vmbr0") -> bool:
     return any("lladdr" in line and line.split()[-1] in LIVE_NEIGH for line in table.splitlines())
 
 
+GUEST_IP = re.compile(r"\bip=(\d{1,3}(?:\.\d{1,3}){3})")
+
+
+def configured_ips(runner: Runner) -> set[str]:
+    """Static IPv4 addresses in the cluster's guest configs: stopped guests do not answer ARP."""
+    found: set[str] = set()
+    for conf in runner.path("/etc/pve/nodes").glob("*/*/*.conf"):
+        if conf.parent.name in ("lxc", "qemu-server"):
+            try:
+                found.update(GUEST_IP.findall(conf.read_text(errors="replace")))
+            except OSError:
+                continue
+    return found
+
+
+def suggest_ip(runner: Runner, gw: str, cidr: int, bridge: str = "vmbr0", first: int = 50, last: int = 99,
+               probes: int = 8) -> str | None:
+    """First address from .50 to .99 (below the usual DHCP pools) that no guest config uses and nothing answers.
+
+    Probes at most `probes` addresses (about a second each); None when none is found.
+    """
+    network = ipaddress.IPv4Network(f"{gw}/{cidr}", strict=False)
+    base = max(int(network.network_address), int(ipaddress.IPv4Address(gw)) & ~0xFF)
+    taken = configured_ips(runner) | {gw}
+    for offset in range(first, last + 1):
+        ip = ipaddress.IPv4Address(base + offset)
+        if ip not in network or ip in (network.network_address, network.broadcast_address) or str(ip) in taken:
+            continue
+        if probes <= 0:
+            return None
+        probes -= 1
+        if not address_in_use(runner, str(ip), bridge):
+            return str(ip)
+    return None
+
+
 def check_target(runner: Runner, spec: CtSpec) -> dict | None:
     """Read-only: the CT ID must be free or an Umiak CT; a new CT needs a free address.
 

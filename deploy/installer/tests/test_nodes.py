@@ -430,3 +430,18 @@ def test_remove_cleans_only_the_retired_nodes_umiak_dnsmasq_instance(tmp_path):
     assert not own.exists()
     assert foreign.read_text() == "unrelated\n"
     assert not runner.dnsmasq_enabled
+
+
+def test_new_node_storage_is_asked_from_that_nodes_lvm_thin_storages(tmp_path):
+    from umiak_installer.main import Ui
+
+    runner = FakeRunner(tmp_path)
+    runner.objects["/storage"].append({"storage": "fast", "type": "lvmthin", "nodes": "pve2", "vgname": "f",
+                                       "thinpool": "data"})
+    answers = iter(["vmdata", "fast"])
+    said = []
+    ui = Ui(interactive=True, yes=False, input_fn=lambda prompt="": next(answers), out=said.append)
+    assert nodes._ask_storage(runner, "pve2", "vmdata", ui) == "fast"
+    assert any("No LVM-thin storage named vmdata on pve2; available: local-lvm, fast" in line for line in said)
+    # Non-interactive: the control plane's storage, checked later by the node's inspect report.
+    assert nodes._ask_storage(runner, "pve2", "vmdata", FakeUi(interactive=False)) == "vmdata"
