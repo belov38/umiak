@@ -61,3 +61,18 @@ func TestDesktopRewriteStripsSpoofedIdentityAndSecrets(t *testing.T) {
 		t.Fatalf("unsafe forwarded request: %v %v", pr.Out, pr.Out.Header)
 	}
 }
+
+func TestDesktopRewriteDropsIngressCredential(t *testing.T) {
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "http://a-desktop.umiak.test:8085/stream", nil)
+	r.Header.Set("Umiak-Ingress-Desktop", "a-desktop.1.sig")
+	r.Header.Set("Authorization", "Bearer owner")
+	h := &handler{}
+	x := &exchange{r: r, rid: "rid"}
+	pr := &httputil.ProxyRequest{In: r, Out: r.Clone(t.Context())}
+	rt := cpapi.Route{Kind: cpapi.KindDesktop, Port: 47800, HostRewrite: "localhost"}
+	h.rewrite(x, pr, rt, portauth.Result{Ingress: true}, "target", nil)
+	hd := pr.Out.Header
+	if hd.Get("Umiak-Ingress-Desktop") != "" || hd.Get("Authorization") != "" || hd.Get("X-Umiak-Desktop-User") != "umiak" {
+		t.Fatalf("forwarded headers: %v", hd)
+	}
+}

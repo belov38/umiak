@@ -41,26 +41,29 @@ const (
 
 // File names in the output directory.
 const (
-	FileCACert         = "ca.pem"
-	FileCAKey          = "ca.key"
-	FileUmiakCert      = "umiak.pem"
-	FileUmiakKey       = "umiak.key"
-	FileTunnelCert     = "tunnel.pem"
-	FileTunnelKey      = "tunnel.key"
-	FileCookieKeys     = "cookie-keys"
-	FileHostEd25519    = "ssh_host_ed25519_key"
-	FileHostECDSA      = "ssh_host_ecdsa_key"
-	FileUserCA         = "ssh_user_ca"
-	FileLoginCA        = "ssh_login_ca"
-	FileLoginCAKeys    = "login-ca-keys"
-	FileServiceTokens  = "service-tokens.json"
-	FileAPIToken       = "api-token"
-	FileWorkerGWToken  = "worker-gateway-token"
-	modeSecret         = 0o600
-	modePublic         = 0o644
-	caValidity         = 10 * 365 * 24 * time.Hour
-	leafValidity       = 397 * 24 * time.Hour // within the browser and macOS caps
-	clockSkewAllowance = time.Hour
+	FileCACert        = "ca.pem"
+	FileCAKey         = "ca.key"
+	FileUmiakCert     = "umiak.pem"
+	FileUmiakKey      = "umiak.key"
+	FileTunnelCert    = "tunnel.pem"
+	FileTunnelKey     = "tunnel.key"
+	FileCookieKeys    = "cookie-keys"
+	FileHostEd25519   = "ssh_host_ed25519_key"
+	FileHostECDSA     = "ssh_host_ecdsa_key"
+	FileUserCA        = "ssh_user_ca"
+	FileLoginCA       = "ssh_login_ca"
+	FileLoginCAKeys   = "login-ca-keys"
+	FileServiceTokens = "service-tokens.json"
+	FileAPIToken      = "api-token"
+	FileWorkerGWToken = "worker-gateway-token"
+	// FileIngressDesktopKey is 32 raw random bytes: the HMAC key shared by the
+	// gateway and the owner ingress (UMIAK_GATEWAY_INGRESS_DESKTOP_KEY_FILE).
+	FileIngressDesktopKey = "ingress-desktop-key"
+	modeSecret            = 0o600
+	modePublic            = 0o644
+	caValidity            = 10 * 365 * 24 * time.Hour
+	leafValidity          = 397 * 24 * time.Hour // within the browser and macOS caps
+	clockSkewAllowance    = time.Hour
 )
 
 // Owner is a numeric owner of the created files.
@@ -147,6 +150,7 @@ func Generate(o Options) ([]string, error) {
 		func() error { return g.once(FileServiceTokens, modeSecret, serviceTokens) },
 		func() error { return g.once(FileAPIToken, modeSecret, tokenFile) },
 		func() error { return g.derived(FileWorkerGWToken, modeSecret, g.workerToken) },
+		func() error { return g.once(FileIngressDesktopKey, modeSecret, randomKey) },
 		g.chownAll,
 	}
 	for _, s := range steps {
@@ -163,16 +167,17 @@ var allFiles = []string{
 	FileCookieKeys,
 	FileHostEd25519, FileHostEd25519 + ".pub", FileHostECDSA, FileHostECDSA + ".pub",
 	FileUserCA, FileUserCA + ".pub", FileLoginCA, FileLoginCA + ".pub", FileLoginCAKeys,
-	FileServiceTokens, FileAPIToken, FileWorkerGWToken,
+	FileServiceTokens, FileAPIToken, FileWorkerGWToken, FileIngressDesktopKey,
 }
 
 // lchown changes the owner of a file; tests replace it.
 var lchown = os.Lchown
 
-// owner returns the owner of name: WorkerOwner for the worker token when
-// set, else Owner.
+// owner returns the owner of name: WorkerOwner for the worker token and the
+// ingress key (the quickstart service runs as the worker's user and signs
+// with it; the gateway runs as root there) when set, else Owner.
 func (g *gen) owner(name string) *Owner {
-	if name == FileWorkerGWToken && g.o.WorkerOwner != nil {
+	if (name == FileWorkerGWToken || name == FileIngressDesktopKey) && g.o.WorkerOwner != nil {
 		return g.o.WorkerOwner
 	}
 	return g.o.Owner
@@ -625,6 +630,15 @@ func cookieKeys() ([]byte, error) {
 		return nil, err
 	}
 	return []byte("k1:" + base64.StdEncoding.EncodeToString(k) + "\n"), nil
+}
+
+// randomKey is 32 raw random bytes.
+func randomKey() ([]byte, error) {
+	k := make([]byte, 32)
+	if _, err := rand.Read(k); err != nil {
+		return nil, err
+	}
+	return k, nil
 }
 
 func token() (string, error) {

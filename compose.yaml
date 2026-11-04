@@ -312,6 +312,7 @@ services:
       UMIAK_GATEWAY_API_TOKEN_FILE: /gateway-secrets/api-token
       UMIAK_GATEWAY_SERVICE_TOKENS_FILE: /gateway-secrets/service-tokens.json
       UMIAK_GATEWAY_COOKIE_KEYS_FILE: /gateway-secrets/cookie-keys
+      UMIAK_GATEWAY_INGRESS_DESKTOP_KEY_FILE: /gateway-secrets/ingress-desktop-key
       UMIAK_GATEWAY_TLS_PREVIEW_CERT_FILE: /gateway-secrets/umiak.pem
       UMIAK_GATEWAY_TLS_PREVIEW_KEY_FILE: /gateway-secrets/umiak.key
       UMIAK_GATEWAY_TLS_TUNNEL_CERT_FILE: /gateway-secrets/tunnel.pem

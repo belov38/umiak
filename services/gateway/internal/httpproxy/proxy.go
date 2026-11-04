@@ -279,6 +279,11 @@ func (h *handler) rewrite(x *exchange, pr *httputil.ProxyRequest, rt cpapi.Route
 	hd.Set("X-Request-Id", x.rid)
 	if rt.Kind == cpapi.KindDesktop {
 		hd.Set("X-Umiak-Desktop-User", "umiak")
+		if auth.Ingress {
+			// The ingress credential was already removed with the other
+			// Umiak-* headers; the viewer must not see any bearer either.
+			hd.Del("Authorization")
+		}
 		q := out.URL.Query()
 		q.Del("_ticket")
 		out.URL.RawQuery = q.Encode()

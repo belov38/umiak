@@ -276,6 +276,9 @@ func New(cfg config.Config, deps Deps) (*Instance, error) {
 		CrossSite:     cfg.CookieCrossSite,
 		Limits:        i.limits,
 		Metrics:       i.metrics,
+
+		IngressDesktopKey: cfg.IngressDesktopKey,
+		Now:               deps.Now,
 	})
 	i.streams = httpproxy.NewStreamTracker()
 	accessLog := obs.NewAccessLog(deps.AccessLog)

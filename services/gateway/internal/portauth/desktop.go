@@ -20,6 +20,14 @@ func (a *Auth) CheckDesktop(w http.ResponseWriter, r *http.Request, l routes.Lab
 		umiakerr.Write(w, r, umiakerr.Error{Status: status, Code: code, RequestID: rid})
 		return Result{AuthResult: ResultInvalid}
 	}
+	if len(r.Header.Values(IngressDesktopHeader)) > 0 {
+		// A present header is the only credential considered: an invalid one
+		// never falls back to the cookie or ticket.
+		if !a.validIngressDesktop(r.Header.Values(IngressDesktopHeader), l.Raw) {
+			return reject(http.StatusForbidden, "ingress_forbidden")
+		}
+		return Result{Proceed: true, AuthResult: ResultOK, Ingress: true}
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead || strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		origins := r.Header.Values("Origin")
 		if len(origins) != 1 || origins[0] != a.previewOrigin(l) {
