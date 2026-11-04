@@ -187,7 +187,7 @@ export const desktopUrl = defineTool({
 	name: "desktop_url",
 	title: "Desktop link",
 	description:
-		"Link that opens the live desktop in the owner's signed-in browser (owner mode), or a single-use link valid for 10 minutes (corporate OIDC). Give it to the user: an agent cannot open it itself. To act on the desktop yourself use computer_* tools.",
+		"Live desktop link: owner browser sign-in in owner mode; single-use, 10 minutes in OIDC. Give it to the user. Agents act via computer_* tools.",
 	toolset: "desktop",
 	scopes: ["desktop"],
 	annotations: {
@@ -343,7 +343,7 @@ export const computerClick = defineTool({
 	name: "computer_click",
 	title: "Click",
 	description:
-		"Clicks at x,y (pixels of a full screenshot). Returns a screenshot of the result unless screenshot_after is false.",
+		"Clicks at x,y in full-screenshot pixels. Screenshot follows unless screenshot_after=false.",
 	toolset: "desktop",
 	scopes: ["desktop", "sandboxes:read"],
 	annotations: ACTION_NOTE,
