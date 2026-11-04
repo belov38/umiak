@@ -56,7 +56,8 @@ class HostConsole:
         repair = f"Verify cluster SSH trust and run `pvecm updatecerts` on target {node}, then retry"
         if not self.runner.path(known).is_file():
             raise InstallerError(repair)
-        sources = {p.name: p.read_text() for p in Path(__file__).parent.glob("*.py")}
+        # macOS tar may add binary AppleDouble ._*.py metadata beside sources.
+        sources = {p.name: p.read_text() for p in Path(__file__).parent.glob("*.py") if not p.name.startswith(".")}
         command = [
             "ssh",
             "-T",

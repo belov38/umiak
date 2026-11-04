@@ -385,3 +385,28 @@ def test_removal_refuses_orphan_template_disks_without_vm_rows(tmp_path):
     )
     with pytest.raises(InstallerError, match="base-601-disk-0"):
         _unused(runner, "pve", 590)
+
+
+def test_root_transport_ignores_macos_archive_metadata(tmp_path, monkeypatch):
+    import json
+
+    runner = FakeRunner(tmp_path / "host")
+    pin = runner.path("/etc/pve/priv/known_hosts")
+    pin.write_text("pve2 ssh-rsa cluster-key\n")
+    source = tmp_path / "sources"
+    source.mkdir()
+    (source / "nodes.py").write_text("# source\n")
+    (source / "._nodes.py").write_bytes(b"\x00\x05\xa3\xff")
+    monkeypatch.setattr(nodes, "__file__", str(source / "nodes.py"))
+    original = runner.run
+    sent = []
+
+    def run(argv, input=None):
+        if argv[0] == "ssh":
+            sent.append(json.loads(input))
+            return "{}"
+        return original(argv, input)
+
+    runner.run = run
+    nodes.HostConsole(runner).call("pve2", "remove")
+    assert sent[0]["sources"] == {"nodes.py": "# source\n"}
