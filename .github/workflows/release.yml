@@ -79,8 +79,14 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - { name: quickstart, dockerfile: deploy/compose/quickstart/Dockerfile }
-          - { name: secrets-init, dockerfile: deploy/compose/secrets-init/Dockerfile }
+          - {
+              name: quickstart,
+              dockerfile: deploy/compose/quickstart/Dockerfile,
+            }
+          - {
+              name: secrets-init,
+              dockerfile: deploy/compose/secrets-init/Dockerfile,
+            }
           - { name: api, dockerfile: apps/api/Dockerfile }
           - { name: worker, dockerfile: apps/worker/Dockerfile }
           - { name: web, dockerfile: apps/web/Dockerfile }
