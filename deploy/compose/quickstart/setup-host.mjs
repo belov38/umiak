@@ -63,8 +63,11 @@ export function pinnedPve(connection, tokenSecret) {
 	};
 	return {
 		certificate: () => leaf,
-		get(path) {
-			return this.request("GET", path);
+		get(path, parameters) {
+			const query = parameters
+				? new URLSearchParams(parameters).toString()
+				: "";
+			return this.request("GET", query ? `${path}?${query}` : path);
 		},
 		post(path, data) {
 			return this.request("POST", path, data);
@@ -74,7 +77,7 @@ export function pinnedPve(connection, tokenSecret) {
 		},
 		request(method, path, data) {
 			if (
-				!/^\/[a-zA-Z0-9_@!./%-]+(?:\?pending=1|\?start=\d+&limit=500)?$/.test(
+				!/^\/[a-zA-Z0-9_@!./%-]+(?:\?pending=1|\?start=\d+&limit=500|\?source=active)?$/.test(
 					path,
 				)
 			)

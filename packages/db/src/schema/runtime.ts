@@ -632,6 +632,11 @@ export const nodeBuildJobs = runtime.table("node_build_jobs", {
 	id: text("id").primaryKey(),
 	nodeId: uuid("node_id").notNull(),
 	templateSlug: text("template_slug").notNull(),
+	retiringBuildId: uuid("retiring_build_id").references(
+		() => templateBuilds.id,
+	),
+	pveTaskUpid: text("pve_task_upid"),
+	pveDeleteRequestedAt: tstz("pve_delete_requested_at"),
 	status: text("status", {
 		enum: ["running", "interrupted", "succeeded", "failed"],
 	})

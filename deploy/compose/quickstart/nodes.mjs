@@ -6,11 +6,11 @@ import {
 	beginNodeBuild,
 	finishNodeBuild,
 	lockNode,
-	lockNodeBuildCleanup,
 	registerSandboxNode,
 	retireNode,
 } from "../../../packages/core/src/index.ts";
 import pg from "../../../packages/db/node_modules/pg/lib/index.js";
+import { retireNodeTemplate } from "./node-template-retirement.mjs";
 import { PgSetupStore } from "./setup.mjs";
 import { checkNode, pinnedPve } from "./setup-host.mjs";
 import { nodeService } from "./setup-nodes.mjs";
@@ -37,7 +37,7 @@ export async function nodeCommand(
 	if (request.op === "capabilities") {
 		const schema = (
 			await pool.query(
-				"SELECT to_regclass('runtime.node_build_jobs') IS NOT NULL AND (SELECT count(*)=2 FROM information_schema.columns WHERE table_schema='runtime' AND table_name='nodes' AND column_name IN ('retired_at','media_storage')) AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='runtime' AND table_name='vmid_leases' AND column_name='build_job_id') AS ready",
+				"SELECT to_regclass('runtime.node_build_jobs') IS NOT NULL AND (SELECT count(*)=2 FROM information_schema.columns WHERE table_schema='runtime' AND table_name='nodes' AND column_name IN ('retired_at','media_storage')) AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='runtime' AND table_name='vmid_leases' AND column_name='build_job_id') AND (SELECT count(*)=3 FROM information_schema.columns WHERE table_schema='runtime' AND table_name='node_build_jobs' AND column_name IN ('retiring_build_id','pve_task_upid','pve_delete_requested_at')) AS ready",
 			)
 		).rows[0];
 		return { multiNode: Boolean(schema?.ready) };
@@ -54,6 +54,12 @@ export async function nodeCommand(
 			retiredNodes: (
 				await pool.query(
 					'SELECT id AS "nodeId",name FROM runtime.nodes WHERE provider_id=$1 AND retired_at IS NOT NULL',
+					[limits.providerId],
+				)
+			).rows,
+			jobs: (
+				await pool.query(
+					"SELECT b.id,b.node_id,b.status,b.template_slug,b.retiring_build_id,b.pve_task_upid,b.pve_delete_requested_at,b.created_at FROM runtime.node_build_jobs b JOIN runtime.nodes n ON n.id=b.node_id WHERE n.provider_id=$1 ORDER BY b.created_at",
 					[limits.providerId],
 				)
 			).rows,
@@ -195,103 +201,47 @@ export async function nodeCommand(
 				[request.buildId, node.nodeId, limits.providerId],
 			)
 		).rows[0];
-		if (!build || build.status === "retired")
-			throw Error("Unknown or already retired template build");
+		if (!build) throw Error("Unknown template build");
 		if (
 			build.pve_vmid < limits.templateVmidMin ||
 			build.pve_vmid > limits.templateVmidMax ||
 			[590, 599, 9000, 9001].includes(build.pve_vmid)
 		)
 			throw Error("Template VMID is outside the configured disposable range");
-		const pve = await api();
-		const config = await pve.get(
-			`/nodes/${node.name}/qemu/${build.pve_vmid}/config`,
-		);
-		if (
-			Number(config.template) !== 1 ||
-			!String(config.tags || "")
-				.split(";")
-				.includes("umiak-tpl")
-		)
-			throw Error("Refusing to delete an unverified template VM");
-		const job = {
-			nodeId: node.nodeId,
-			id: `retire-${randomUUID()}`,
-			slug: build.template_slug,
-		};
-		await service.transact(async (tx) => {
-			await lockNode(tx, node.nodeId);
-			const refs = await tx.client.query(
-				"SELECT 1 FROM runtime.machines WHERE template_build_id=$1 AND state<>'deleted' UNION ALL SELECT 1 FROM runtime.snapshots WHERE template_build_id=$1 AND state<>'deleted' LIMIT 1",
-				[build.id],
-			);
-			if (refs.rowCount)
-				throw Error("Template still has machine or snapshot references");
-			await lockNodeBuildCleanup(tx, node.nodeId, "build");
-			// Nested transaction helper is intentionally avoided: admission and promotion
-			// share this exact node lock through the reservation insert below.
-			await tx.client.query(
-				"INSERT INTO runtime.node_build_jobs(id,node_id,template_slug) VALUES($1,$2,$3)",
-				[job.id, node.nodeId, build.template_slug],
-			);
-			await tx.client.query(
-				"UPDATE runtime.template_builds SET status='deprecated' WHERE id=$1",
-				[build.id],
-			);
+		return retireNodeTemplate({
+			pool,
+			service,
+			node,
+			build,
+			limits,
+			pve: await api(),
+			taskUpid: request.taskUpid,
+			probeLocal: (operation) =>
+				probe(
+					{
+						...state.steps.connection.data,
+						node: node.name,
+						sshHost: node.sshHost,
+					},
+					secretsDir,
+					operation,
+				),
 		});
-		try {
-			const task = await pve.delete(
-				`/nodes/${node.name}/qemu/${build.pve_vmid}`,
-			);
-			const deadline = Date.now() + 300000;
-			let done = false;
-			while (Date.now() < deadline) {
-				const status = await pve.get(
-					`/nodes/${node.name}/tasks/${encodeURIComponent(task)}/status`,
-				);
-				if (status.status === "stopped") {
-					if (status.exitstatus !== "OK")
-						throw Error(`Template deletion task: ${status.exitstatus}`);
-					done = true;
-					break;
-				}
-				await new Promise((resolve) => setTimeout(resolve, 1000));
-			}
-			if (!done)
-				throw Error(
-					"Template deletion task is still running; reservation retained",
-				);
-			await service.transact(async (tx) => {
-				await lockNode(tx, node.nodeId);
-				await tx.client.query(
-					"UPDATE runtime.template_builds SET status='retired' WHERE id=$1",
-					[build.id],
-				);
-				await tx.client.query(
-					"DELETE FROM runtime.vmid_leases WHERE provider_id=$1 AND vmid=$2 AND purpose='template' AND machine_id IS NULL",
-					[limits.providerId, build.pve_vmid],
-				);
-				await finishNodeBuild(tx, {
-					nodeId: node.nodeId,
-					jobId: job.id,
-					status: "succeeded",
-				});
-			});
-			return { ok: true };
-		} catch (error) {
-			await service.interrupt(job);
-			throw error;
-		}
 	}
+
 	if (request.op === "cleanup-build") {
 		await service.transact(async (tx) => {
 			await lockNode(tx, node.nodeId);
 			const job = (
 				await tx.client.query(
-					"SELECT status,template_slug FROM runtime.node_build_jobs WHERE id=$1 AND node_id=$2",
+					"SELECT status,template_slug,retiring_build_id FROM runtime.node_build_jobs WHERE id=$1 AND node_id=$2",
 					[request.jobId, node.nodeId],
 				)
 			).rows[0];
+			if (job?.retiring_build_id)
+				throw Error(
+					"Template retirement has a durable intent; retry retire-template with its buildId instead of cleanup-build",
+				);
 			if (job?.status !== "interrupted" || job.template_slug === "node-prepare")
 				throw Error(
 					"Only an interrupted template build can be cleaned up; a running runner or node preparation must finish first",

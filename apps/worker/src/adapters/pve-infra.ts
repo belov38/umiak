@@ -2,7 +2,8 @@
 // providers/nodes/storages rows and the mounted Secret files (S6 §8.4).
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { PgAllocatorStore } from "@umiak/db";
+import { lockNode } from "@umiak/core";
+import { PgAllocatorStore, withTx } from "@umiak/db";
 import {
 	Allocator,
 	checkLeaseOwner,
@@ -11,6 +12,7 @@ import {
 	familyForTunnelUrl,
 	LvmThinDriver,
 	Machines,
+	macFor,
 	type NodeOps,
 	OwnerMismatchError,
 	PveApi,
@@ -321,12 +323,21 @@ export class PveNodeInfra implements NodeInfra {
 		});
 	}
 
-	/** Active template VMIDs of this node; records a template lease for new ones. */
+	/** Recheck the active generation under the retirement/admission lock before leasing it. */
 	async setTemplates(vmids: number[]): Promise<void> {
-		for (const v of vmids)
-			if (!this.#templates.includes(v))
-				await this.#allocatorFor(v).ensureTemplate();
-		this.#templates = [...vmids].sort((a, b) => a - b);
+		this.#templates = await withTx(this.#db, async (tx) => {
+			await lockNode(tx, this.#t.nodeId);
+			const active = await tx.client.query<{ vmid: number }>(
+				"SELECT DISTINCT tb.pve_vmid AS vmid FROM runtime.template_builds tb JOIN runtime.nodes n ON n.id=tb.node_id WHERE tb.node_id=$1 AND tb.status='active' AND n.retired_at IS NULL AND tb.pve_vmid=ANY($2::int[]) ORDER BY vmid",
+				[this.#t.nodeId, vmids],
+			);
+			for (const { vmid } of active.rows)
+				await tx.client.query(
+					"INSERT INTO runtime.vmid_leases(provider_id,vmid,mac,state,purpose) VALUES($1,$2,$3,'active','template') ON CONFLICT DO NOTHING",
+					[this.#t.providerId, vmid, macFor(this.#t.clusterMacId, vmid)],
+				);
+			return active.rows.map((row) => row.vmid);
+		});
 	}
 
 	/** Machines bound to one template (S1 keeps the template in its config). */

@@ -1219,3 +1219,22 @@ describe("pveClientsFromSecrets", () => {
 		).rejects.toThrow(/no pinned host key/);
 	});
 });
+
+it("a stale template refresh cannot reclaim the lease of a retired build", async () => {
+	const e = await setup();
+	const refresh = e.infra as NodeInfra & {
+		setTemplates(vmids: number[]): Promise<void>;
+	};
+	await refresh.setTemplates([]);
+	await db.pool.query(
+		"UPDATE runtime.template_builds SET status='retired' WHERE id=$1",
+		[e.topo.templateBuildId],
+	);
+	await db.pool.query(
+		"DELETE FROM runtime.vmid_leases WHERE provider_id=$1 AND vmid=599",
+		[e.topo.providerId],
+	);
+	await refresh.setTemplates([599]);
+	expect(e.infra.templateVmids).toEqual([]);
+	expect(await leases(e.topo.providerId)).toEqual([]);
+});

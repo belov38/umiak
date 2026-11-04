@@ -187,7 +187,12 @@ unfinished local cleanup. Return blocker kinds, IDs and counts with a clear
 message. Deleting/failed/stopped machines still block until cleanup proves
 their disks are gone. Active templates must be explicitly retired first.
 Deprecated templates with retained local VMs/disks also need explicit
-cleanup; never erase their history or underlying volumes implicitly.
+cleanup; never erase their history or underlying volumes implicitly. Persist
+retirement intent and the PVE delete task ID so an interrupted console can
+resume deletion even after the VM disappears. Finalization verifies no active
+task, VM or local disks remain before freeing its lease and retiring history.
+An ambiguous delete response requires operator-supplied matching PVE task
+identity; it must not be treated as proven completion.
 
 If blocked, refuse removal without uninstalling the agent or changing SDN.
 An explicit cordon can be used to prevent new work while the operator

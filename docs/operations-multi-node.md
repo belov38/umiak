@@ -77,7 +77,18 @@ build IDs. To explicitly delete and retire a verified Umiak template, send
 `{"op":"retire-template","nodeId":"<node UUID>","buildId":"<build UUID>"}`
 through the same bridge. It refuses non-template guests, protected/out-of-range
 VMIDs, machine/snapshot references and an existing build reservation. A failed
-PVE delete retains a reservation for inspection.
+PVE delete retains its retirement intent and reservation. Retry the same
+`retire-template` request after a polling failure or console restart; it resumes
+the recorded PVE task and verifies that the VM and local LV names are gone
+before retiring history or freeing the template lease. A surviving retirement
+process cannot be taken over.
+
+If the DELETE response was lost before its task ID could be saved, inspect the
+Proxmox task history. Retry the same request with `"taskUpid":"<UPID>"`.
+Recovery accepts only an Umiak `qmdestroy` task for this VMID started after the
+retirement intent. Uncertain ownership, task state or remaining disks keeps the
+reservation. `cleanup-build` cannot clear a template retirement; use its
+original `buildId` and retirement request.
 
 After stopping the old builder process and removing its build/verification VMs,
 send `{"op":"cleanup-build","nodeId":"<node UUID>","jobId":"<job ID>"}`.

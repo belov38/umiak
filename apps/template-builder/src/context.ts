@@ -87,7 +87,7 @@ export async function makeContext(over: { node?: string } = {}): Promise<Ctx> {
 			if (!locked.rows[0]?.ok)
 				throw new Error("Template build runner is already alive");
 			const job = await runner.query(
-				"SELECT 1 FROM runtime.node_build_jobs b JOIN runtime.nodes n ON n.id=b.node_id WHERE b.id=$1 AND b.status='running' AND n.provider_id=$2 AND n.name=$3",
+				"SELECT 1 FROM runtime.node_build_jobs b JOIN runtime.nodes n ON n.id=b.node_id WHERE b.id=$1 AND b.status='running' AND b.retiring_build_id IS NULL AND b.template_slug<>'node-prepare' AND n.provider_id=$2 AND n.name=$3",
 				[scope.buildJobId, scope.providerId, cfg.node],
 			);
 			if (!job.rowCount)

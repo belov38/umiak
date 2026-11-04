@@ -28,9 +28,11 @@ test("pinned PVE transport supports task log pagination and volume deletion", as
 			"test",
 		);
 		await api.get("/nodes/pve/tasks/UPID%3Apve/log?start=500&limit=500");
+		await api.get("/nodes/pve/tasks", { source: "active" });
 		await api.delete("/nodes/pve/storage/local/content/local%3Aiso%2Fa.iso");
 		assert.deepEqual(requests, [
 			["GET", "/api2/json/nodes/pve/tasks/UPID%3Apve/log?start=500&limit=500"],
+			["GET", "/api2/json/nodes/pve/tasks?source=active"],
 			[
 				"DELETE",
 				"/api2/json/nodes/pve/storage/local/content/local%3Aiso%2Fa.iso",

@@ -82,10 +82,13 @@ it("console explicitly retires only a verified idle Umiak template, enabling nod
 	await writeFile(join(dir, "pve-token"), "test");
 	let deleted = false;
 	const fake = {
-		get: async (path: string) =>
-			path.endsWith("/config")
-				? { template: 1, tags: "umiak-tpl" }
-				: { status: "stopped", exitstatus: "OK" },
+		get: async (path: string) => {
+			if (path.endsWith("/config")) return { template: 1, tags: "umiak-tpl" };
+			if (path.endsWith("/tasks")) return [];
+			if (path.endsWith("/qemu"))
+				return deleted ? [] : [{ vmid: 601, status: "stopped" }];
+			return { status: "stopped", exitstatus: "OK" };
+		},
 		delete: async () => {
 			deleted = true;
 			return "task";
@@ -95,7 +98,11 @@ it("console explicitly retires only a verified idle Umiak template, enabling nod
 		const result = await nodeCommand(
 			db.pool,
 			{ op: "retire-template", nodeId: a.nodeId, buildId: a.templateBuildId },
-			{ secretsDir: dir, makePve: () => fake },
+			{
+				secretsDir: dir,
+				makePve: () => fake,
+				probe: async () => ({ lvs: [] }),
+			},
 		);
 		expect(result.ok).toBe(true);
 		expect(deleted).toBe(true);
@@ -308,6 +315,326 @@ it("a new verified artifact may reuse the VMID of a physically retired template"
 				)
 			).rows[0].status,
 		).toBe("retired");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+it("retries interrupted retirement after PVE deleted the VM and task polling failed", async () => {
+	const a = await createTopology(db.pool);
+	await db.pool.query(
+		"UPDATE runtime.template_builds SET pve_vmid=602 WHERE id=$1",
+		[a.templateBuildId],
+	);
+	await db.pool.query("UPDATE quickstart.setup SET state=$1 WHERE id=true", [
+		{
+			steps: {
+				limits: {
+					data: {
+						providerId: a.providerId,
+						templateVmidMin: 600,
+						templateVmidMax: 699,
+						vmidMin: 500,
+						vmidMax: 589,
+					},
+				},
+				connection: { data: { node: "pve" } },
+			},
+		},
+	]);
+	const dir = await mkdtemp(join(tmpdir(), "s19-retire-retry-"));
+	await writeFile(join(dir, "pve-token"), "test");
+	let present = true,
+		failed = false,
+		deletes = 0;
+	const pve = {
+		get: async (path: string) => {
+			if (path.endsWith("/config")) {
+				if (!present)
+					throw Object.assign(Error("PVE config missing"), { status: 404 });
+				return { template: 1, tags: "umiak-tpl" };
+			}
+			if (path.endsWith("/qemu"))
+				return present ? [{ vmid: 602, status: "stopped" }] : [];
+			if (path.endsWith("/tasks")) return [];
+			if (!failed) {
+				failed = true;
+				throw Error("poll network failure");
+			}
+			return { status: "stopped", exitstatus: "OK" };
+		},
+		delete: async () => {
+			present = false;
+			deletes++;
+			return "retire-task";
+		},
+	};
+	const options = {
+		secretsDir: dir,
+		makePve: () => pve,
+		probe: async () => ({ lvs: [] }),
+	};
+	try {
+		await expect(
+			nodeCommand(
+				db.pool,
+				{ op: "retire-template", nodeId: a.nodeId, buildId: a.templateBuildId },
+				options,
+			),
+		).rejects.toThrow(/poll network failure/);
+		expect(
+			(
+				await db.pool.query(
+					"SELECT status FROM runtime.template_builds WHERE id=$1",
+					[a.templateBuildId],
+				)
+			).rows[0].status,
+		).toBe("deprecated");
+		const job = (
+			await db.pool.query(
+				"SELECT id FROM runtime.node_build_jobs WHERE retiring_build_id=$1",
+				[a.templateBuildId],
+			)
+		).rows[0].id;
+		expect(
+			(
+				await db.pool.query(
+					"SELECT purpose,build_job_id FROM runtime.vmid_leases WHERE provider_id=$1 AND vmid=602",
+					[a.providerId],
+				)
+			).rows[0],
+		).toEqual({ purpose: "template", build_job_id: job });
+		const alive = await db.pool.connect();
+		try {
+			await alive.query(
+				"SELECT pg_advisory_lock(hashtextextended('template-runner:' || $1::text,0))",
+				[job],
+			);
+			await expect(
+				nodeCommand(
+					db.pool,
+					{
+						op: "retire-template",
+						nodeId: a.nodeId,
+						buildId: a.templateBuildId,
+					},
+					options,
+				),
+			).rejects.toThrow(/still alive/);
+		} finally {
+			alive.release(true);
+		}
+		// A console killed before its catch handler leaves running, not interrupted.
+		await db.pool.query(
+			"UPDATE runtime.node_build_jobs SET status='running' WHERE id=$1",
+			[job],
+		);
+
+		expect(
+			await nodeCommand(
+				db.pool,
+				{ op: "retire-template", nodeId: a.nodeId, buildId: a.templateBuildId },
+				options,
+			),
+		).toEqual({ ok: true });
+		expect(deletes).toBe(1);
+		expect(
+			(
+				await db.pool.query(
+					"SELECT status FROM runtime.template_builds WHERE id=$1",
+					[a.templateBuildId],
+				)
+			).rows[0].status,
+		).toBe("retired");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+it("ordinary interrupted cleanup reads active tasks and frees only absent job leases", async () => {
+	const a = await createTopology(db.pool),
+		job = `clean-tasks-${a.nodeId}`;
+	await db.pool.query("UPDATE quickstart.setup SET state=$1 WHERE id=true", [
+		{
+			steps: {
+				limits: {
+					data: {
+						providerId: a.providerId,
+						templateVmidMin: 600,
+						templateVmidMax: 699,
+						vmidMin: 500,
+						vmidMax: 589,
+					},
+				},
+				connection: { data: { node: "pve" } },
+			},
+		},
+	]);
+	await db.pool.query(
+		"INSERT INTO runtime.node_build_jobs(id,node_id,template_slug,status) VALUES($1,$2,'linux','interrupted')",
+		[job, a.nodeId],
+	);
+	await db.pool.query(
+		"INSERT INTO runtime.vmid_leases(provider_id,vmid,mac,state,purpose,build_job_id) VALUES($1,550,'02:ed:00:00:02:26','active','machine',$2)",
+		[a.providerId, job],
+	);
+	const dir = await mkdtemp(join(tmpdir(), "s19-active-clean-"));
+	await writeFile(join(dir, "pve-token"), "test");
+	let active = true;
+	const options = {
+		secretsDir: dir,
+		makePve: () => ({
+			get: async (path: string, parameters?: { source: string }) => {
+				if (path.endsWith("/tasks")) {
+					expect(parameters).toEqual({ source: "active" });
+					return active ? [{ user: "umiak@pve!sandbox" }] : [];
+				}
+				return [];
+			},
+		}),
+	};
+	try {
+		await expect(
+			nodeCommand(
+				db.pool,
+				{ op: "cleanup-build", nodeId: a.nodeId, jobId: job },
+				options,
+			),
+		).rejects.toThrow(/still running/);
+		expect(
+			(
+				await db.pool.query(
+					"SELECT 1 FROM runtime.vmid_leases WHERE build_job_id=$1",
+					[job],
+				)
+			).rowCount,
+		).toBe(1);
+		active = false;
+		expect(
+			await nodeCommand(
+				db.pool,
+				{ op: "cleanup-build", nodeId: a.nodeId, jobId: job },
+				options,
+			),
+		).toEqual({ ok: true });
+		expect(
+			(
+				await db.pool.query(
+					"SELECT 1 FROM runtime.vmid_leases WHERE build_job_id=$1",
+					[job],
+				)
+			).rowCount,
+		).toBe(0);
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+it("retirement retains its lease for local disks and recovers a lost delete reply with verified task identity", async () => {
+	const a = await createTopology(db.pool);
+	await db.pool.query(
+		"UPDATE runtime.template_builds SET pve_vmid=603 WHERE id=$1",
+		[a.templateBuildId],
+	);
+	await db.pool.query(
+		"INSERT INTO runtime.vmid_leases(provider_id,vmid,mac,state,purpose) VALUES($1,603,'02:ed:00:00:02:27','active','template')",
+		[a.providerId],
+	);
+	await db.pool.query("UPDATE quickstart.setup SET state=$1 WHERE id=true", [
+		{
+			steps: {
+				limits: {
+					data: {
+						providerId: a.providerId,
+						templateVmidMin: 600,
+						templateVmidMax: 699,
+						vmidMin: 500,
+						vmidMax: 589,
+					},
+				},
+				connection: { data: { node: "pve" } },
+			},
+		},
+	]);
+	const dir = await mkdtemp(join(tmpdir(), "s19-retire-identity-"));
+	await writeFile(join(dir, "pve-token"), "test");
+	let disk = true,
+		deletes = 0,
+		foreign = true;
+	const pve = {
+		get: async (path: string) => {
+			if (path.endsWith("/config")) return { template: 1, tags: "umiak-tpl" };
+			if (path.endsWith("/tasks") || path.endsWith("/qemu")) return [];
+			return {
+				status: "stopped",
+				exitstatus: "OK",
+				type: "qmdestroy",
+				id: foreign ? "999" : "603",
+				user: "umiak@pve!sandbox",
+				starttime: Math.ceil(Date.now() / 1000),
+			};
+		},
+		delete: async () => {
+			deletes++;
+			throw Error("delete reply lost");
+		},
+	};
+	const options = {
+		secretsDir: dir,
+		makePve: () => pve,
+		probe: async () => ({ lvs: disk ? [{ name: "base-603-disk-0" }] : [] }),
+	};
+	const request = {
+		op: "retire-template",
+		nodeId: a.nodeId,
+		buildId: a.templateBuildId,
+	};
+	try {
+		await expect(nodeCommand(db.pool, request, options)).rejects.toThrow(
+			/delete reply lost/,
+		);
+		const job = (
+			await db.pool.query(
+				"SELECT id FROM runtime.node_build_jobs WHERE retiring_build_id=$1",
+				[a.templateBuildId],
+			)
+		).rows[0].id;
+		await expect(
+			nodeCommand(
+				db.pool,
+				{ op: "cleanup-build", nodeId: a.nodeId, jobId: job },
+				options,
+			),
+		).rejects.toThrow(/retry retire-template/);
+		await expect(nodeCommand(db.pool, request, options)).rejects.toThrow(
+			/taskUpid/,
+		);
+		await expect(
+			nodeCommand(db.pool, { ...request, taskUpid: "recovery-task" }, options),
+		).rejects.toThrow(/does not match/);
+		foreign = false;
+		await expect(
+			nodeCommand(db.pool, { ...request, taskUpid: "recovery-task" }, options),
+		).rejects.toThrow(/local disks remain/);
+		expect(
+			(
+				await db.pool.query(
+					"SELECT 1 FROM runtime.vmid_leases WHERE provider_id=$1 AND vmid=603",
+					[a.providerId],
+				)
+			).rowCount,
+		).toBe(1);
+		disk = false;
+		expect(await nodeCommand(db.pool, request, options)).toEqual({ ok: true });
+		expect(deletes).toBe(1);
+		expect(
+			(
+				await db.pool.query(
+					"SELECT 1 FROM runtime.vmid_leases WHERE provider_id=$1 AND vmid=603",
+					[a.providerId],
+				)
+			).rowCount,
+		).toBe(0);
 	} finally {
 		await rm(dir, { recursive: true, force: true });
 	}

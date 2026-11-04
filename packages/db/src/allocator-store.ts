@@ -62,7 +62,7 @@ export class PgAllocatorStore implements AllocatorStore {
 			`INSERT INTO runtime.vmid_leases
 			   (provider_id, vmid, mac, state, purpose, machine_id, created_at, updated_at, build_job_id)
 			 SELECT $1, $2, $3, $4, $5, $6, to_timestamp($7::float8 / 1000), to_timestamp($8::float8 / 1000), $9
- WHERE $9::text IS NULL OR EXISTS (SELECT 1 FROM runtime.node_build_jobs b JOIN runtime.nodes n ON n.id=b.node_id WHERE b.id=$9 AND b.status='running' AND n.provider_id=$1)
+ WHERE $9::text IS NULL OR EXISTS (SELECT 1 FROM runtime.node_build_jobs b JOIN runtime.nodes n ON n.id=b.node_id WHERE b.id=$9 AND b.status='running' AND b.retiring_build_id IS NULL AND b.template_slug<>'node-prepare' AND n.provider_id=$1)
 			 ON CONFLICT DO NOTHING`,
 			[
 				this.#providerId,
