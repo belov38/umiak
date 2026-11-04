@@ -1,38 +1,38 @@
-# S2. Протокол туннеля агент ↔ gateway
+# S2. Agent ↔ gateway tunnel protocol
 
-Статус: согласовано, 2026-10-29. Область S2 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§4, §10, §11).
+Status: agreed, 2026-10-29. Area S2 from `docs/roadmap.md`. Architecture: `docs/architecture.md` (§4, §10, §11).
 
-Документ задаёт контракт между гостевым агентом (Go, внутри каждой VM), `gateway` (Go, в Kubernetes) и control plane (`api`, `worker` на TS). Что агент умеет делать (exec, files, ports, claim), решает S3, здесь только общие правила, по которым это вызывается. HTTP-маршрутизация `*.umiak` и публичный TLS — S4.
+The document defines the contract between the guest agent (Go, inside each VM), `gateway` (Go, in Kubernetes), and the control plane (`api`, `worker` in TS). What the agent can do (exec, files, ports, claim) is decided by S3; here are only the general rules by which it is invoked. HTTP routing of `*.umiak` and public TLS belong to S4.
 
-Пометка **[исполнитель]** означает решение, которое принял автор спеки в рамках брифа; его можно менять без нового согласования, если причина изменения записана.
+The mark **[implementer]** means a decision taken by the author of the spec within the brief; it can be changed without new agreement if the reason for the change is recorded.
 
-## 1. Зачем и что считается успехом
+## 1. Why, and what counts as success
 
-Принцип: **состояние живёт в агенте, а не в соединении.** Обрыв туннеля — штатная ситуация.
+Principle: **state lives in the agent, not in the connection.** A tunnel drop is a normal situation.
 
-Сценарии по приоритету:
+Scenarios by priority:
 
-1. **Длинная команда.** AI-агент или CI запускает через API команду на 20–60 минут (сборка, тесты, coding-агент). Посреди неё туннель обрывается или gateway передеплоивается. Процесс этого не замечает. Клиент переподключается по `commandId` + offset и получает вывод байт в байт, без пропусков и дублей, и правильный код выхода. Вызывающий API видит паузу не больше 30 s или retryable `503`, который SDK повторяет сам.
-2. **Rolling deploy gateway.** Ни одна команда не теряется и не выполняется дважды. Агенты переезжают на другой экземпляр за несколько секунд, новые вызовы идут на нужный экземпляр, человек не нужен.
-3. **Интерактивный терминал.** Обрыв до ~10 s восстанавливается автоматически, scrollback на месте. PTY живёт до 10 минут без клиента.
-4. **Перезапуск или самообновление агента.** Запущенные процессы и их вывод сохраняются, attach после этого работает.
+1. **A long command.** An AI agent or CI runs through the API a command of 20–60 minutes (a build, tests, a coding agent). In the middle the tunnel drops or the gateway is redeployed. The process does not notice. The client reconnects by `commandId` + offset and gets the output byte for byte, without gaps and duplicates, and the correct exit code. The API caller sees a pause of no more than 30 s or a retryable `503` that the SDK retries itself.
+2. **Rolling gateway deploy.** No command is lost or executed twice. Agents move to another instance within seconds, new calls go to the right instance, no human is needed.
+3. **An interactive terminal.** A drop of up to ~10 s recovers automatically, the scrollback is in place. A PTY lives up to 10 minutes without a client.
+4. **Agent restart or self-update.** Running processes and their output are preserved, attach works afterwards.
 
-**Допустимые потери:** сырые TCP-потоки (SSH-сессия, WebSocket приложения пользователя через публичный URL, HTTP-запрос в полёте) могут оборваться, клиент переподключается. Прозрачное возобновление — фаза 2 (§11).
+**Acceptable losses:** raw TCP streams (an SSH session, a user application's WebSocket through a public URL, an in-flight HTTP request) may break, the client reconnects. Transparent resumption is phase 2 (§11).
 
-## 2. Цели, не-цели, анти-цели
+## 2. Goals, non-goals, anti-goals
 
-**Цели:** один исходящий канал от VM; мультиплексирование RPC и TCP-потоков с flow control; аутентификация machine без секретов на диске гостя; быстрое обнаружение обрыва; drain без потерь при деплое; возобновление вывода по offset; идемпотентность мутаций; один proto для Go и TS; работа на Linux и Windows одним кодом.
+**Goals:** one outbound channel per VM; multiplexing of RPC and TCP streams with flow control; machine authentication with no secrets on the guest disk; fast drop detection; lossless drain on deploy; output resumption by offset; idempotency of mutations; one proto for Go and TS; the same code working on Linux and Windows.
 
-**Не-цели:** набор функций агента (S3); публичный HTTP-прокси, TLS `*.umiak`, SSH gateway (S4); операции Proxmox (S1); модель данных и машины состояний (S6); публичный API и его NDJSON (S7).
+**Non-goals:** the set of agent features (S3); the public HTTP proxy, `*.umiak` TLS, SSH gateway (S4); Proxmox operations (S1); the data model and state machines (S6); the public API and its NDJSON (S7).
 
-**Анти-цели** (провал, даже если формально работает):
-- команда выполнилась дважды после повтора;
-- вывод после переподключения отличается от реального хотя бы на байт;
-- секрет machine попал на диск гостя и уехал в fork или saved snapshot;
-- деплой gateway требует ручных действий или рвёт команды;
-- gateway стал разбирать RPC агента, и его версия жёстко связана с версией агента.
+**Anti-goals** (a failure even if it formally works):
+- a command ran twice after a retry;
+- the output after reconnect differs from the real one by even a byte;
+- the machine's secret ended up on the guest disk and went into a fork or saved snapshot;
+- a gateway deploy requires manual actions or breaks commands;
+- the gateway started parsing agent RPC, and its version became tightly coupled to the agent's version.
 
-## 3. Обзор
+## 3. Overview
 
 ```
  VM (Linux / Windows)                         Kubernetes
@@ -57,63 +57,63 @@
                                               +--------------+  +----------------+
 ```
 
-Соединение открывает агент (в VM нет входящих портов), но на нём роли развёрнуты: **агент — HTTP/2-сервер, gateway — HTTP/2-клиент.** Так устроен Cloudflare Tunnel. HTTP/2 даёт мультиплексирование, flow control на поток и на соединение, справедливый планировщик кадров, PING и CONNECT. Свой mux не пишем.
+The connection is opened by the agent (the VM has no inbound ports), but the roles on it are inverted: **the agent is the HTTP/2 server, the gateway is the HTTP/2 client.** This is how Cloudflare Tunnel works. HTTP/2 gives multiplexing, flow control per stream and per connection, a fair frame scheduler, PING, and CONNECT. We do not write our own mux.
 
-Gateway для RPC — authenticated reverse proxy: тела Connect-запросов он не разбирает. Control plane вызывает агента сгенерированными Connect-клиентами через `/v1/machines/{id}/rpc/<service>/<method>`.
+For RPC the gateway is an authenticated reverse proxy: it does not parse the bodies of Connect requests. The control plane calls the agent with generated Connect clients through `/v1/machines/{id}/rpc/<service>/<method>`.
 
-Схема проверена одноразовым экспериментом (2026-10-29): агент открывает WebSocket и обслуживает на нём `http2.Server.ServeConn`, gateway делает `http2.Transport.NewClientConn`. Потоковый ответ с flush, CONNECT к TCP-серверу с half-close и h2 PING работают.
+The scheme was verified by a one-off experiment (2026-10-29): the agent opens a WebSocket and serves `http2.Server.ServeConn` on it, the gateway does `http2.Transport.NewClientConn`. A streaming response with flush, CONNECT to a TCP server with half-close, and h2 PING work.
 
-## 4. Транспорт
+## 4. Transport
 
-### 4.1 Соединение
+### 4.1 Connection
 
 - `GET wss://tunnel.<domain>/v1/connect`, WS subprotocol `umiak-tunnel.v1`.
-- Сообщения WS бинарные; поверх WS — поток байт (`websocket.NetConn`), на нём HTTP/2 с prior knowledge (h2c внутри уже зашифрованного WSS).
-- Заголовки upgrade-запроса:
+- WS messages are binary; on top of WS is a byte stream (`websocket.NetConn`), on it HTTP/2 with prior knowledge (h2c inside the already encrypted WSS).
+- Headers of the upgrade request:
 
-| Заголовок | Значение |
+| Header | Value |
 |---|---|
-| `Authorization` | `Bearer <MT>` или `Umiak-Bootstrap <BS>` (§5.2) |
-| `Umiak-Machine-Id` | machineId из smbios |
-| `Umiak-Boot-Id` | id загрузки ОС (Linux `/proc/sys/kernel/random/boot_id`, Windows — эквивалент, выбирает S3/S9) |
-| `Umiak-Agent-Instance-Id` | случайный id, новый при каждом старте процесса агента |
+| `Authorization` | `Bearer <MT>` or `Umiak-Bootstrap <BS>` (§5.2) |
+| `Umiak-Machine-Id` | machineId from smbios |
+| `Umiak-Boot-Id` | OS boot id (Linux `/proc/sys/kernel/random/boot_id`, Windows — an equivalent, chosen by S3/S9) |
+| `Umiak-Agent-Instance-Id` | a random id, new at every start of the agent process |
 | `Umiak-Vmgenid` | VM Generation ID |
-| `Umiak-Agent-Version` | semver агента |
+| `Umiak-Agent-Version` | agent semver |
 
-- Ответ `101` содержит `Umiak-Gateway-Instance` и `Umiak-Conn-Epoch`. Ошибки — в §5.3.
-- После `101` gateway вызывает у агента `umiak.tunnel.v1.Control/Info` (capabilities, версии, §10), при необходимости `Control/SetToken`, и открывает `Events/Subscribe` (§9.6).
+- The `101` response contains `Umiak-Gateway-Instance` and `Umiak-Conn-Epoch`. Errors are in §5.3.
+- After `101` the gateway calls `umiak.tunnel.v1.Control/Info` on the agent (capabilities, versions, §10), `Control/SetToken` if needed, and opens `Events/Subscribe` (§9.6).
 
-### 4.2 Что ходит по HTTP/2
+### 4.2 What goes over HTTP/2
 
-| Что | Как | Инициатор |
+| What | How | Initiator |
 |---|---|---|
-| RPC агента (`umiak.agent.v1.*`) | Connect, unary и server-streaming | control plane → gateway → агент |
-| Служебные RPC (`umiak.tunnel.v1.*`) | Connect | только сам gateway |
-| Файлы | обычный HTTP `/files/*` (§9.5) | control plane → gateway → агент |
-| TCP-потоки (порты, SSH, сигналинг рабочего стола) | `CONNECT <addr>:<port>`, полный дуплекс, half-close через END_STREAM | gateway → агент |
+| Agent RPC (`umiak.agent.v1.*`) | Connect, unary and server-streaming | control plane → gateway → agent |
+| Service RPC (`umiak.tunnel.v1.*`) | Connect | only the gateway itself |
+| Files | plain HTTP `/files/*` (§9.5) | control plane → gateway → agent |
+| TCP streams (ports, SSH, desktop signaling) | `CONNECT <addr>:<port>`, full duplex, half-close via END_STREAM | gateway → agent |
 
-Все запросы инициирует gateway: агент — только сервер. Сообщения агента наружу идут как ответы в долгом `Events/Subscribe`.
+All requests are initiated by the gateway: the agent is only a server. Agent messages outward go as responses in the long-lived `Events/Subscribe`.
 
-CONNECT агент разрешает только на адреса самой VM: loopback и адреса её интерфейсов. Другие хосты (LAN, соседние VM) — `403`. Порт 0 и порты вне 1–65535 — `400`.
+The agent allows CONNECT only to the VM's own addresses: loopback and its interface addresses. Other hosts (LAN, neighboring VMs) — `403`. Port 0 and ports outside 1–65535 — `400`.
 
-### 4.3 Параметры HTTP/2
+### 4.3 HTTP/2 parameters
 
-| Параметр | Значение |
+| Parameter | Value |
 |---|---|
-| `MaxConcurrentStreams` на агенте | 1000 |
-| Начальное окно потока | 1 MiB |
-| Окно соединения | 16 MiB |
-| Максимальный кадр | по умолчанию (16 KiB) |
-| Планировщик записи | round-robin (по умолчанию в Go) |
-| Максимальное сообщение Connect | 16 MiB |
+| `MaxConcurrentStreams` on the agent | 1000 |
+| Initial stream window | 1 MiB |
+| Connection window | 16 MiB |
+| Maximum frame | default (16 KiB) |
+| Write scheduler | round-robin (the Go default) |
+| Maximum Connect message | 16 MiB |
 
 ### 4.4 Head-of-line
 
-HTTP/2 делит одно TCP-соединение, поэтому большой поток файла может задержать терминал на уровне TCP. Правило: **одно соединение на агента**. Отдельное bulk-соединение добавляем, только если перф-тест (§14.3) покажет p99 эха терминала больше 50 ms во время передачи 1 GB. Протокол к этому готов: `Umiak-Lane` в upgrade зарезервирован, в v1 не используется.
+HTTP/2 shares one TCP connection, so a large file stream can delay the terminal at the TCP level. Rule: **one connection per agent**. A separate bulk connection is added only if the perf test (§14.3) shows a terminal echo p99 above 50 ms during a 1 GB transfer. The protocol is ready for this: `Umiak-Lane` in the upgrade is reserved and unused in v1.
 
-### 4.5 Транспорт за интерфейсом
+### 4.5 Transport behind an interface
 
-Код протокола не знает, что под ним WebSocket. **[исполнитель]** Форма интерфейсов:
+The protocol code does not know that there is a WebSocket underneath. **[implementer]** The shape of the interfaces:
 
 ```go
 // Agent side: produces connections on which the agent serves HTTP/2.
@@ -131,111 +131,111 @@ type MachineConn interface {
 }
 ```
 
-Userspace WireGuard (wireguard-go + netstack) в фазе 2 встаёт под тот же интерфейс: агент обслуживает HTTP/2 на listener-е netstack. Тот же интерфейс используется в тестах: in-memory транспорт с инъекцией сбоев.
+Userspace WireGuard (wireguard-go + netstack) in phase 2 slots in under the same interface: the agent serves HTTP/2 on the netstack listener. The same interface is used in tests: an in-memory transport with failure injection.
 
 ### 4.6 Windows
 
-Агент — тот же код, как служба Windows (`golang.org/x/sys/windows/svc`). Весь стек на чистом Go, cgo не нужен: `coder/websocket`, `x/net/http2`, `connect-go`, `protobuf`. Препятствий нет. Отличия: нет `TCP_USER_TIMEOUT` (полагаемся на ping), smbios читается через `GetSystemFirmwareTable` или WMI.
+The agent is the same code, as a Windows service (`golang.org/x/sys/windows/svc`). The whole stack is pure Go, no cgo needed: `coder/websocket`, `x/net/http2`, `connect-go`, `protobuf`. No obstacles. Differences: no `TCP_USER_TIMEOUT` (we rely on ping), smbios is read via `GetSystemFirmwareTable` or WMI.
 
-## 5. Идентичность и аутентификация
+## 5. Identity and authentication
 
-### 5.1 Идентификаторы
+### 5.1 Identifiers
 
-| Изменился | Что произошло | Последствия |
+| What changed | What happened | Consequences |
 |---|---|---|
-| только `connId` (новое соединение) | короткий обрыв | ничего, стримы продолжаются по offset |
-| `agentInstanceId` | агент перезапустился | процессы и PTY живы |
-| `bootId` | VM перезагрузилась | незавершённые команды → `lost`, PTY закрыты |
-| `machineId` в smbios ≠ сохранённому агентом | fork или VM из saved snapshot | смена идентичности (S3), журнал и кэши агента сбрасываются |
+| only `connId` (a new connection) | a short drop | nothing, streams continue by offset |
+| `agentInstanceId` | the agent restarted | processes and PTYs are alive |
+| `bootId` | the VM rebooted | unfinished commands → `lost`, PTYs closed |
+| `machineId` in smbios ≠ the one saved by the agent | fork or a VM from a saved snapshot | identity change (S3), the agent's journal and caches are reset |
 
-`machineId` — UUID (v7), его выдаёт control plane. **Machine никогда не переиспользуется между sandbox:** после delete VM уничтожается, новая sandbox получает новую machine. Поэтому bootstrap secret не переживает одного арендатора.
+`machineId` is a UUID (v7), issued by the control plane. **A machine is never reused between sandboxes:** after delete the VM is destroyed, a new sandbox gets a new machine. So the bootstrap secret does not outlive a single tenant.
 
-### 5.2 Учётные данные
+### 5.2 Credentials
 
-- **Bootstrap secret (BS).** 32 случайных байта, свой у каждой VM. Worker кладёт его в конфиг VM при создании (`docs/specs/s1-proxmox-foundation.md` §6.4, допущения — S2 §15). В БД хранится SHA-256. Многоразовый, действует, пока machine не списана. **На диск гостя не попадает.**
-- **Machine token (MT).** 32 случайных байта, opaque, выдаёт gateway. Живёт **только в памяти агента**: после перезапуска агента или VM агент снова предъявляет BS. В БД хранятся SHA-256 текущего и следующего токена.
-- **Ротация MT.** Двухфазная: gateway пишет `mt_next_hash`, вызывает `Control/SetToken`, после ответа переносит `next` в `current`. Если связь оборвалась посередине, действуют оба токена; подключение с `next` завершает ротацию. Поводы: claim (control plane вызывает `POST /v1/machines/{id}/rotate-token` на gateway), раз в 24 h, по запросу оператора.
-- **Следствие.** Секретов на диске нет, значит fork, снапшоты и пользовательские шаблоны не уносят чужие учётные данные. Новая VM получает свои `machineId` и BS в собственном smbios.
-- **Одно активное соединение на machine.** Новое соединение получает `epoch+1` и вытесняет старое (§8.3). Исключение — короткое окно make-before-break при drain. Два живых соединения с одной machine вне drain дают метрику тревоги `tunnel_duplicate_sessions_total`.
-- **Списание.** Worker ставит `retired_at`. Gateway закрывает соединение (по `NOTIFY`) и отвечает `403` на новые попытки.
+- **Bootstrap secret (BS).** 32 random bytes, separate for each VM. The worker puts it into the VM config at creation (`docs/specs/s1-proxmox-foundation.md` §6.4, assumptions — S2 §15). The DB stores a SHA-256. Reusable, valid until the machine is retired. **It does not reach the guest disk.**
+- **Machine token (MT).** 32 random bytes, opaque, issued by the gateway. Lives **only in agent memory**: after an agent or VM restart the agent presents the BS again. The DB stores the SHA-256 of the current and the next token.
+- **MT rotation.** Two-phase: the gateway writes `mt_next_hash`, calls `Control/SetToken`, and after the response moves `next` into `current`. If the link breaks in the middle, both tokens are valid; connecting with `next` completes the rotation. Triggers: claim (the control plane calls `POST /v1/machines/{id}/rotate-token` on the gateway), every 24 h, on an operator's request.
+- **Consequence.** There are no secrets on disk, so forks, snapshots, and user templates do not carry away foreign credentials. A new VM gets its own `machineId` and BS in its own smbios.
+- **One active connection per machine.** A new connection gets `epoch+1` and displaces the old one (§8.3). The exception is a short make-before-break window during drain. Two live connections of one machine outside drain give the alert metric `tunnel_duplicate_sessions_total`.
+- **Retirement.** The worker sets `retired_at`. The gateway closes the connection (by `NOTIFY`) and answers `403` to new attempts.
 
-Формат smbios **[исполнитель]**: `smbios1: uuid=<machineId>,serial=<base64("umiak1:" + machineId + ":" + base64url(BS))>,base64=1`. Версия `umiak1` позволяет поменять формат позже. Длину поля проверить в S1.
+The smbios format **[implementer]**: `smbios1: uuid=<machineId>,serial=<base64("umiak1:" + machineId + ":" + base64url(BS))>,base64=1`. The version `umiak1` allows changing the format later. Check the field length in S1.
 
-### 5.3 Ответы на upgrade и поведение агента
+### 5.3 Upgrade responses and agent behavior
 
-| Ответ | Значит | Агент |
+| Response | Meaning | Agent |
 |---|---|---|
-| `101` | принято | работает |
-| `401` с MT | токен неизвестен или отозван | забывает MT, сразу пробует BS |
-| `401` с BS | BS неверен | перечитывает smbios, backoff 60 s |
-| `403` | machine списана | попытки раз в 5 min |
-| `426` | версия протокола не поддерживается или агент ниже минимума по безопасности | backoff 5 min; восстановление через запасной канал QEMU guest agent (S3) |
-| `503` + `Retry-After` | экземпляр в drain или перегружен | ждёт `Retry-After` с jitter, затем обычный backoff |
+| `101` | accepted | works |
+| `401` with MT | the token is unknown or revoked | forgets the MT, immediately tries the BS |
+| `401` with BS | the BS is wrong | re-reads smbios, backoff 60 s |
+| `403` | the machine is retired | attempts every 5 min |
+| `426` | the protocol version is unsupported or the agent is below the security minimum | backoff 5 min; recovery through the QEMU guest agent fallback channel (S3) |
+| `503` + `Retry-After` | the instance is draining or overloaded | waits `Retry-After` with jitter, then the usual backoff |
 
 ### 5.4 TLS
 
-- Отдельный приватный **tunnel CA**. Сертификат `tunnel.<domain>` выпущен этим CA. TLS терминирует ingress или gateway (TLS passthrough), это решает S12. Важно только, чтобы агент видел сертификат от tunnel CA.
-- Агент доверяет только бандлу CA из своего конфига (текущий и следующий CA, для ротации). Системные корни не используются. Бандл обновляется вместе с агентом (S3).
-- Публичный TLS для `*.umiak` и `api.<domain>` (S4, S12) с этим не связан.
+- A separate private **tunnel CA**. The `tunnel.<domain>` certificate is issued by this CA. TLS is terminated by the ingress or the gateway (TLS passthrough), S12 decides. It only matters that the agent sees a certificate from the tunnel CA.
+- The agent trusts only the CA bundle from its config (current and next CA, for rotation). System roots are not used. The bundle is updated together with the agent (S3).
+- Public TLS for `*.umiak` and `api.<domain>` (S4, S12) is unrelated to this.
 
 ### 5.5 Control plane → gateway
 
-- Внутренний listener gateway (ClusterIP Service и pod IP), h2c, NetworkPolicy пускает только `api`, `worker` и другие поды gateway.
-- `Authorization: Bearer <service-token>`. Токен свой для каждого вызывающего (`api`, `worker`, `gateway`), хранится в Kubernetes Secret. Одновременно действуют два токена на вызывающего, чтобы ротировать без простоя. mTLS — позже.
-- Обратное направление — `POST /internal/v1/agent-events` в `api` — тоже по сети кластера, с service token gateway, мимо oauth2-proxy.
-- Через `/rpc/` прокси пропускает только `umiak.agent.v1.*`, через `/files/` — только `/files/*` агента. `umiak.tunnel.v1.*` вызывает только сам gateway, снаружи — `403`.
+- The internal gateway listener (a ClusterIP Service and pod IP), h2c, a NetworkPolicy lets in only `api`, `worker`, and other gateway pods.
+- `Authorization: Bearer <service-token>`. A separate token for each caller (`api`, `worker`, `gateway`), stored in a Kubernetes Secret. Two tokens per caller are valid at the same time to rotate without downtime. mTLS later.
+- The reverse direction — `POST /internal/v1/agent-events` to `api` — also goes over the cluster network, with the gateway's service token, bypassing oauth2-proxy.
+- Through `/rpc/` the proxy passes only `umiak.agent.v1.*`, through `/files/` — only the agent's `/files/*`. `umiak.tunnel.v1.*` is called only by the gateway itself, from outside — `403`.
 
-## 6. Живость и переподключение
+## 6. Liveness and reconnect
 
-| Что | Значение | Зачем |
+| What | Value | Why |
 |---|---|---|
-| WS ping от агента | каждые 5 s; мёртв через 15 s без pong | агент быстро решает переподключиться |
-| h2 PING от gateway | `ReadIdleTimeout` 10 s, `PingTimeout` 5 s | gateway чистит мёртвые соединения |
-| TCP keepalive | 15 s, обе стороны | |
-| `TCP_USER_TIMEOUT` | 20 s, Linux | зависшая отправка |
+| WS ping from the agent | every 5 s; dead after 15 s without a pong | the agent decides quickly to reconnect |
+| h2 PING from the gateway | `ReadIdleTimeout` 10 s, `PingTimeout` 5 s | the gateway cleans up dead connections |
+| TCP keepalive | 15 s, both sides | |
+| `TCP_USER_TIMEOUT` | 20 s, Linux | a stuck send |
 
-В §4 архитектуры было 10/30 s. Ужесточили, потому что бюджет паузы — 30 s: обнаружение до 15 s + переподключение 1–3 s.
+Architecture §4 had 10/30 s. We tightened it because the pause budget is 30 s: detection up to 15 s + reconnect 1–3 s.
 
-**Backoff агента:** первая попытка через случайные 0–250 ms, дальше от 500 ms ×2 до потолка 10 s, full jitter. Сброс после 30 s стабильной работы. Ответы из §5.3 задают свои задержки.
+**Agent backoff:** the first attempt after a random 0–250 ms, then from 500 ms ×2 up to a ceiling of 10 s, full jitter. Reset after 30 s of stable operation. The responses of §5.3 set their own delays.
 
-**Grace.** Запись в реестре переходит в `disconnected` с `disconnected_at`. Control plane считает sandbox `degraded`, если агент недоступен дольше 60 s (S6). Отдельный вызов API ждёт агента до 30 s (§8.4). Gateway в течение grace ничего не держит: состояние в агенте.
+**Grace.** The registry entry goes to `disconnected` with `disconnected_at`. The control plane considers a sandbox `degraded` if the agent is unavailable for more than 60 s (S6). An individual API call waits for the agent up to 30 s (§8.4). During the grace the gateway holds nothing: the state is in the agent.
 
-**Ingress для WSS** (контроллер не выбран, требования):
-- WebSocket upgrade, соединения живут часами и днями, без лимита на длительность;
-- idle timeout не меньше 60 s (ping каждые 5 s, запас многократный);
-- без буферизации запросов и ответов;
-- снятие пода из endpoints по readiness probe;
-- сертификат `tunnel.<domain>` от tunnel CA (§5.4).
+**Ingress for WSS** (the controller is not chosen, requirements):
+- WebSocket upgrade, connections live for hours and days, no limit on duration;
+- idle timeout of at least 60 s (ping every 5 s, a many-fold margin);
+- no buffering of requests and responses;
+- removing a pod from endpoints by the readiness probe;
+- the `tunnel.<domain>` certificate from the tunnel CA (§5.4).
 
-## 7. Drain при деплое и падение экземпляра
+## 7. Drain on deploy and instance crash
 
-Gateway — HTTP/2-клиент, поэтому GOAWAY от него не значит «переподключись». Используем явный RPC `Control/Drain{reason, tcpDeadline}`.
+The gateway is an HTTP/2 client, so a GOAWAY from it does not mean "reconnect". We use an explicit RPC `Control/Drain{reason, tcpDeadline}`.
 
-Gateway работает как Kubernetes Deployment, drain — часть завершения пода:
+The gateway runs as a Kubernetes Deployment, drain is part of pod termination:
 
-1. `preStop` (или SIGTERM) переводит экземпляр в `draining`: readiness probe падает, `gateway_instances.state = draining`, новые upgrade получают `503`.
-2. Экземпляр ждёт удаления из endpoints ingress (по умолчанию 5 s).
-3. Он вызывает `Control/Drain` у своих агентов, равномерно размазывая вызовы по `spreadMs` (по умолчанию 5000). Темп задаёт только gateway: он знает, сколько у него агентов. RPC отвечает сразу.
-4. Агент, получив `Drain`, сразу (jitter 0–250 ms) делает **make-before-break**: открывает новое соединение, а старое продолжает обслуживать. Ingress ведёт его на готовый под. Если он попал на draining-под и получил `503`, агент повторяет попытку.
-5. Новый экземпляр пишет в реестр `epoch+1` и шлёт `NOTIFY`.
-6. На старом экземпляре:
-   - unary-вызовы в полёте завершаются сами;
-   - новые вызовы для переехавшей machine получают `421 machine_moved` с `instanceUrl` нового владельца, `agent-client` повторяет туда;
-   - RPC-стримы (`/rpc/`: attach, events) закрываются с Connect `unavailable` сразу после переезда, `agent-client` продолжает их по offset на новом экземпляре;
-   - TCP-потоки (`/tcp/`) живут до `tcpDeadline` (по умолчанию 2 min), потом закрываются.
-7. Когда соединений не осталось или истёк общий срок, процесс выходит. Агент сам закрывает старое соединение через `tcpDeadline + 10 s`.
+1. `preStop` (or SIGTERM) moves the instance to `draining`: the readiness probe fails, `gateway_instances.state = draining`, new upgrades get `503`.
+2. The instance waits for removal from the ingress endpoints (5 s by default).
+3. It calls `Control/Drain` on its agents, spreading the calls evenly over `spreadMs` (5000 by default). The pace is set only by the gateway: it knows how many agents it has. The RPC answers immediately.
+4. An agent that receives `Drain` immediately (jitter 0–250 ms) does **make-before-break**: opens a new connection while the old one keeps serving. The ingress sends it to a ready pod. If it landed on a draining pod and got `503`, the agent retries.
+5. The new instance writes `epoch+1` into the registry and sends `NOTIFY`.
+6. On the old instance:
+   - in-flight unary calls complete on their own;
+   - new calls for the moved machine get `421 machine_moved` with the `instanceUrl` of the new owner, `agent-client` retries there;
+   - RPC streams (`/rpc/`: attach, events) are closed with Connect `unavailable` right after the move, `agent-client` continues them by offset on the new instance;
+   - TCP streams (`/tcp/`) live until `tcpDeadline` (2 min by default), then are closed.
+7. When no connections remain or the overall deadline has passed, the process exits. The agent itself closes the old connection after `tcpDeadline + 10 s`.
 
-`terminationGracePeriodSeconds` должен покрывать шаги 2–7. С одним `tcpDeadline` 2 min это было бы 5 s + 5 s + 120 s + запас → 180. **S4 переопределяет:** gateway передаёт `tcpDeadline` = 15 min, чтобы дожили SSH-потоки, а остальные TCP-потоки закрывает сам через 2 min (`docs/specs/s4-gateway.md` §10). Итог — **960**.
+`terminationGracePeriodSeconds` must cover steps 2–7. With a `tcpDeadline` of 2 min alone this would be 5 s + 5 s + 120 s + margin → 180. **S4 overrides:** the gateway passes `tcpDeadline` = 15 min so that SSH streams survive, and closes the other TCP streams itself after 2 min (`docs/specs/s4-gateway.md` §10). The result is **960**.
 
-**Падение без drain** (OOM, нода умерла): агенты замечают это по ping не позже чем через 15 s и переподключаются. Записи `tunnel_sessions` указывают на экземпляр, чей `heartbeat_at` устарел. Через 15 s `agent-client` считает такие machine отключёнными и ждёт новую запись.
+**A crash without drain** (OOM, node died): agents notice by ping no later than 15 s and reconnect. The `tunnel_sessions` records point to an instance whose `heartbeat_at` is stale. After 15 s `agent-client` considers such machines disconnected and waits for a new record.
 
-**Sweep устаревших экземпляров.** Каждый gateway раз в 5 s ищет экземпляры с `heartbeat_at` старше 15 s (`FOR UPDATE SKIP LOCKED`, чтобы sweep делал один). Их ещё не переехавшие сессии он переводит в `disconnected` (`disconnected_at` = последний heartbeat), шлёт `NOTIFY` и событие `disconnected`, затем удаляет запись экземпляра. Так правило `degraded` в S6 работает и после падения пода.
+**Sweep of stale instances.** Every gateway every 5 s looks for instances with `heartbeat_at` older than 15 s (`FOR UPDATE SKIP LOCKED`, so that only one does the sweep). It moves their not-yet-moved sessions to `disconnected` (`disconnected_at` = the last heartbeat), sends `NOTIFY` and a `disconnected` event, then deletes the instance record. This way the `degraded` rule in S6 works after a pod crash too.
 
-## 8. Реестр и маршрутизация
+## 8. Registry and routing
 
-### 8.1 Таблицы
+### 8.1 Tables
 
-Postgres, схема `tunnel`. Redis не нужен.
+Postgres, schema `tunnel`. Redis is not needed.
 
 ```
 gateway_instances(
@@ -262,162 +262,162 @@ tunnel_credentials(
 )
 ```
 
-Владение: `gateway_instances` и `tunnel_sessions` пишет gateway. В `tunnel_credentials` worker пишет `bs_hash` и `retired_at`, gateway — поля MT. Остальное читают все.
+Ownership: `gateway_instances` and `tunnel_sessions` are written by the gateway. In `tunnel_credentials` the worker writes `bs_hash` and `retired_at`, the gateway writes the MT fields. Everyone else reads.
 
-`internal_url` — адрес конкретного пода (pod IP), а не Service: после `421` API должен попасть именно в этот экземпляр.
+`internal_url` is the address of a concrete pod (pod IP), not a Service: after `421` the API must reach exactly that instance.
 
-### 8.2 Запись
+### 8.2 Writes
 
-Реестр пишется только при подключении и отключении, не на каждый ping. При подключении, в одной транзакции:
-1. проверить учётные данные;
+The registry is written only on connect and disconnect, not on every ping. On connect, in one transaction:
+1. verify the credentials;
 2. `epoch = epoch + 1`;
-3. записать экземпляр;
+3. write the instance;
 4. `NOTIFY tunnel_sessions, '<machineId>'`.
 
 ### 8.3 Fencing
 
-Экземпляр, у которого для machine локальный epoch меньше, чем в реестре, по `NOTIFY` закрывает своё соединение. Исключение — окно drain, там он только закрывает RPC-стримы, а TCP держит до `tcpDeadline`. Вызовы к устаревшему соединению он не обслуживает, а отвечает `421`.
+An instance whose local epoch for a machine is lower than that in the registry closes its connection on `NOTIFY`. The exception is the drain window, where it only closes RPC streams, while TCP is held until `tcpDeadline`. It does not serve calls to the stale connection but answers `421`.
 
-### 8.4 Как control plane вызывает агента
+### 8.4 How the control plane calls the agent
 
-Пакет `packages/agent-client` (TS):
-- клиенты сгенерированы `protoc-gen-es` из `proto/umiak/agent/v1`, transport — `@connectrpc/connect-node`, HTTP/2;
-- `baseUrl = <internal_url>/v1/machines/{machineId}/rpc`, заголовок `Authorization: Bearer <service-token>`;
-- поиск экземпляра: `tunnel_sessions` join `gateway_instances`, где `state = connected` и heartbeat свежий. Результат кэшируется, кэш сбрасывается по `LISTEN tunnel_sessions`;
-- **повтор:** на `421`, ошибку соединения, Connect `unavailable` — заново найти экземпляр и повторить. Если machine не подключена, ждать `NOTIFY` (с опросом раз в 1 s на всякий случай) до 30 s, затем ошибка `agent_unavailable` с `retryable: true`, которую API отдаёт как `503`;
-- повторять можно любой вызов: мутирующие несут `requestId` или `commandId` (§9.2);
-- server-stream (attach, PTY) `agent-client` продолжает сам с последнего полученного offset (§9.1), вызывающий видит паузу;
-- `invalid_argument`, `not_found`, `permission_denied`, `failed_precondition` не повторяются.
+Package `packages/agent-client` (TS):
+- the clients are generated by `protoc-gen-es` from `proto/umiak/agent/v1`, the transport is `@connectrpc/connect-node`, HTTP/2;
+- `baseUrl = <internal_url>/v1/machines/{machineId}/rpc`, header `Authorization: Bearer <service-token>`;
+- instance lookup: `tunnel_sessions` join `gateway_instances` where `state = connected` and the heartbeat is fresh. The result is cached, the cache is reset by `LISTEN tunnel_sessions`;
+- **retry:** on `421`, a connection error, Connect `unavailable` — find the instance again and retry. If the machine is not connected, wait for `NOTIFY` (polling once per 1 s just in case) up to 30 s, then the error `agent_unavailable` with `retryable: true`, which the API returns as `503`;
+- any call may be retried: mutating ones carry `requestId` or `commandId` (§9.2);
+- `agent-client` itself continues a server stream (attach, PTY) from the last received offset (§9.1), the caller sees a pause;
+- `invalid_argument`, `not_found`, `permission_denied`, `failed_precondition` are not retried.
 
-Gateway как прокси:
-- проверяет service token и путь;
-- снимает `Authorization`, ставит `Umiak-Caller: api|worker`;
-- пробрасывает заголовки Connect (`Connect-Timeout-Ms`, `Umiak-Request-Id`);
-- стримит тела без буферизации.
+The gateway as a proxy:
+- verifies the service token and the path;
+- strips `Authorization`, sets `Umiak-Caller: api|worker`;
+- passes through Connect headers (`Connect-Timeout-Ms`, `Umiak-Request-Id`);
+- streams bodies without buffering.
 
-Для S4 и SSH:
-- `CONNECT /v1/machines/{id}/tcp/{port}` на внутреннем listener-е — для вызова из другого экземпляра gateway, когда публичный запрос попал не туда, где туннель. **Уточнение S4 (§7.2):** обычный HTTP/2 CONNECT не несёт `:path`, а extended CONNECT в Go включается только глобальным GODEBUG. Поэтому на проводе это `CONNECT <machineId>:<port>` (цель в `:authority`) с service token; `MaxConcurrentStreams` внутреннего listener-а — 10 000;
-- Go-интерфейс `MachineConn.DialTCP` внутри процесса.
+For S4 and SSH:
+- `CONNECT /v1/machines/{id}/tcp/{port}` on the internal listener — for a call from another gateway instance when a public request landed not where the tunnel is. **S4 clarification (§7.2):** a plain HTTP/2 CONNECT carries no `:path`, and extended CONNECT in Go is enabled only by a global GODEBUG. So on the wire this is `CONNECT <machineId>:<port>` (the target in `:authority`) with a service token; the internal listener's `MaxConcurrentStreams` is 10 000;
+- The Go interface `MachineConn.DialTCP` inside the process.
 
-## 9. Возобновляемость
+## 9. Resumability
 
-### 9.1 Команды и вывод
+### 9.1 Commands and output
 
-- **`commandId`** (ULID) генерирует control plane до вызова и сохраняет запись Command. `Process/Start(commandId, spec)` идемпотентен по нему: повтор с тем же id и тем же spec возвращает существующую команду; с другим spec — `already_exists`.
-- Агент записывает команду на диск с fsync **до** запуска процесса. После ответа `Start` команда durable.
-- Процесс запускается под **shim** — отдельным процессом (тот же бинарник агента в другом режиме). Shim:
-  - пишет stdout и stderr прямо в файлы;
-  - держит PTY master;
-  - записывает код выхода в файл;
-  - живёт вне жизни агента: на Linux в systemd scope, на Windows в job object с breakaway.
+- **`commandId`** (ULID) is generated by the control plane before the call, and the Command record is saved. `Process/Start(commandId, spec)` is idempotent by it: a retry with the same id and the same spec returns the existing command; with a different spec — `already_exists`.
+- The agent writes the command to disk with fsync **before** starting the process. After the `Start` response the command is durable.
+- The process runs under a **shim** — a separate process (the same agent binary in a different mode). The shim:
+  - writes stdout and stderr straight into files;
+  - holds the PTY master;
+  - writes the exit code to a file;
+  - lives outside the agent's lifetime: on Linux in a systemd scope, on Windows in a job object with breakaway.
   
-  Механизм — S3 и S9, контракт — здесь.
-- **Offset** — байтовая позиция в файле потока (`stdout`, `stderr` или `pty`), `uint64`, монотонная.
-- `Process/Attach(commandId, stdoutOffset, stderrOffset)` — server stream с событиями:
+  The mechanism is S3 and S9, the contract is here.
+- **Offset** is a byte position in a stream file (`stdout`, `stderr`, or `pty`), `uint64`, monotonic.
+- `Process/Attach(commandId, stdoutOffset, stderrOffset)` — a server stream with events:
 
-| Событие | Поля | Когда |
+| Event | Fields | When |
 |---|---|---|
-| `data` | `stream, offset, bytes` (≤ 64 KiB) | вывод |
-| `heartbeat` | — | после 15 s тишины |
-| `truncated` | `stream, availableFrom` | запрошенный offset вытеснен по retention |
-| `exit` | `status (exited/killed/lost), code, signal, stdoutEnd, stderrEnd` | **только после** того, как отдан весь вывод до `*End` |
+| `data` | `stream, offset, bytes` (≤ 64 KiB) | output |
+| `heartbeat` | — | after 15 s of silence |
+| `truncated` | `stream, availableFrom` | the requested offset was evicted by retention |
+| `exit` | `status (exited/killed/lost), code, signal, stdoutEnd, stderrEnd` | **only after** all output up to `*End` has been delivered |
 
-- `Process/Run` — `Start` + `Attach` в одном стриме, первое событие `started{commandId}`.
-- **Backpressure сквозная.** Агент читает файл с той скоростью, с какой забирает потребитель через flow control HTTP/2, и ничего не копит в памяти. Медленный клиент не раздувает память ни в агенте, ни в gateway.
-- **Склейка в `agent-client`** по каждому потоку:
-  - `offset == expected` → принять;
-  - перекрытие → обрезать;
-  - разрыв → повторный attach с `expected`.
-- Внешний клиент тоже может переподключиться к API по `commandId` и offset (S7).
-- Сколько хранить вывод на диске VM, решает S3. Контракт: offset-ы не сдвигаются при вытеснении, вытесненное отдаётся как `truncated`.
+- `Process/Run` — `Start` + `Attach` in one stream, the first event `started{commandId}`.
+- **End-to-end backpressure.** The agent reads the file at the speed at which the consumer takes it through HTTP/2 flow control, and accumulates nothing in memory. A slow client does not inflate memory in the agent or the gateway.
+- **Stitching in `agent-client`** per stream:
+  - `offset == expected` → accept;
+  - overlap → trim;
+  - gap → a repeated attach with `expected`.
+- An external client can also reconnect to the API by `commandId` and offset (S7).
+- How much output to keep on the VM disk is decided by S3. Contract: offsets do not shift on eviction, the evicted part is reported as `truncated`.
 
 ### 9.2 `requestId`
 
-- Заголовок `Umiak-Request-Id` (UUID или ULID) **обязателен** на мутирующих unary. Без него агент отвечает `invalid_argument`.
-- Освобождены методы с `option idempotency_level = IDEMPOTENT` или `NO_SIDE_EFFECTS`, а также `Start` (ключ — `commandId`).
-- Middleware агента хранит на диске `requestId → (hash запроса, код, тело ответа)` с TTL 24 h и ограничением размера (S3).
-  - Повтор с тем же телом → сохранённый ответ.
-  - Тот же id с другим телом → `invalid_argument`.
-  - Параллельный дубль ждёт результата первого вызова.
-- `requestId` генерирует control plane: из публичного `Idempotency-Key`, если он есть, иначе новый на каждую логическую операцию. При повторах тот же.
+- The header `Umiak-Request-Id` (UUID or ULID) is **mandatory** on mutating unary calls. Without it the agent answers `invalid_argument`.
+- Exempt are methods with `option idempotency_level = IDEMPOTENT` or `NO_SIDE_EFFECTS`, and also `Start` (the key is `commandId`).
+- The agent middleware stores on disk `requestId → (request hash, code, response body)` with a TTL of 24 h and a size limit (S3).
+  - A retry with the same body → the saved response.
+  - The same id with a different body → `invalid_argument`.
+  - A parallel duplicate waits for the result of the first call.
+- `requestId` is generated by the control plane: from the public `Idempotency-Key` if present, otherwise a new one per logical operation. On retries the same one.
 
-### 9.3 Ввод и PTY
+### 9.3 Input and PTY
 
-- `Process/SendInput(commandId, inputSessionId, seq, bytes)`, unary. Дубли с `seq ≤ last` для данного `inputSessionId` отбрасываются. Клиент может склеивать нажатия за 5 ms.
-- Размер окна PTY — `Process/Update(commandId, cols, rows)`.
-- PTY — команда с `pty: {cols, rows}` и одним потоком `pty`. Scrollback — хвост этого лога.
-- PTY master держит shim, поэтому сессия переживает перезапуск агента.
-- Через 10 min без подключённого клиента (таймер на агенте от последнего detach) PTY закрывается с SIGHUP.
+- `Process/SendInput(commandId, inputSessionId, seq, bytes)`, unary. Duplicates with `seq ≤ last` for a given `inputSessionId` are dropped. A client may coalesce keystrokes over 5 ms.
+- The PTY window size — `Process/Update(commandId, cols, rows)`.
+- A PTY is a command with `pty: {cols, rows}` and a single stream `pty`. The scrollback is the tail of this log.
+- The PTY master is held by the shim, so the session survives an agent restart.
+- After 10 min without a connected client (a timer on the agent from the last detach) the PTY is closed with SIGHUP.
 
-Bidi-стримы не используются: всё работает по HTTP/1.1 и HTTP/2 и одинаково переживает переподключения.
+Bidi streams are not used: everything works over HTTP/1.1 and HTTP/2 and survives reconnects in the same way.
 
-### 9.4 Kill и прочее
+### 9.4 Kill and the rest
 
-`Process/Signal(commandId, signal)` идемпотентен сам по себе. Остальные мутации (move, delete, mkdir, claim, quiesce) — с `requestId`.
+`Process/Signal(commandId, signal)` is idempotent by itself. The other mutations (move, delete, mkdir, claim, quiesce) carry a `requestId`.
 
-### 9.5 Файлы
+### 9.5 Files
 
-Обычные HTTP-ручки агента `/files/*`, как в E2B `envd`. Снаружи они доступны как `/v1/machines/{id}/files/*` на внутреннем listener-е gateway.
+Plain HTTP endpoints of the agent `/files/*`, as in E2B `envd`. From outside they are available as `/v1/machines/{id}/files/*` on the gateway's internal listener.
 
-- **Скачивание:** `GET /files?path=` с `Range`, `ETag` (inode + size + mtime) и `If-Range`. Докачка штатными средствами HTTP.
-- **Загрузка:**
-  1. `PUT /files/uploads/{uploadId}?offset=` — чанки до 8 MiB (рекомендуется 4 MiB) во временный файл рядом с целевым;
-  2. `HEAD /files/uploads/{uploadId}` — текущий размер, чтобы продолжить;
-  3. `POST /files/uploads/{uploadId}/commit {path, sha256?, mode?}` — атомарный rename. Идемпотентен по `uploadId`.
+- **Download:** `GET /files?path=` with `Range`, `ETag` (inode + size + mtime), and `If-Range`. Resuming with standard HTTP means.
+- **Upload:**
+  1. `PUT /files/uploads/{uploadId}?offset=` — chunks up to 8 MiB (4 MiB recommended) into a temporary file next to the target;
+  2. `HEAD /files/uploads/{uploadId}` — the current size, to continue;
+  3. `POST /files/uploads/{uploadId}/commit {path, sha256?, mode?}` — an atomic rename. Idempotent by `uploadId`.
   
-  Незавершённые загрузки удаляются через 24 h.
-- Мелкие операции (stat, list, mkdir, move, delete) — Connect unary (S3).
+  Unfinished uploads are deleted after 24 h.
+- Small operations (stat, list, mkdir, move, delete) — Connect unary (S3).
 
-### 9.6 События агент → control plane
+### 9.6 Events agent → control plane
 
-- Агент ведёт **durable-журнал событий** с `seq` (`uint64`). Seq монотонный через перезапуски агента, сбрасывается только при смене machineId.
-- Конверт: `{seq, time, bootId, type, payload (protobuf Any)}`.
-- Типы событий определяют S3 и S6: команда завершилась, PTY закрыт, изменились порты, фаза готовности, простой и т.д.
-- Поток доставки:
-  1. Gateway после подключения вызывает `Events/Subscribe(afterSeq)`, где `afterSeq` — последний подтверждённый seq, его хранит сам агент.
-  2. Gateway шлёт пачки (до 500 событий или раз в 1 s) в `POST /internal/v1/agent-events` в `api`.
-  3. `api` пишет их durable, дедуплицирует по `(machineId, seq)` и отвечает `{ackedSeq}`.
-  4. Gateway вызывает `Events/Ack(seq)`, агент чистит журнал.
-- Доставка **at-least-once**. Если `api` недоступен, gateway перестаёт читать стрим, журнал копится на агенте (лимит — S3).
-- Синтетические события `connected`, `disconnected`, `agent_restarted`, `rebooted`, `identity_changed` gateway выводит из §5.1 и шлёт в ту же ручку. Это отдельный класс событий без `seq`: ключ `(machineId, epoch, type)`, поля `time` и `instanceId`. Порядка относительно событий агента и между экземплярами нет. `api` дедуплицирует их по ключу, а текущее состояние подключения берёт из `tunnel_sessions`, а не из порядка событий. `disconnected` после падения пода шлёт sweep (§7).
+- The agent keeps a **durable event journal** with `seq` (`uint64`). The seq is monotonic across agent restarts and is reset only when machineId changes.
+- Envelope: `{seq, time, bootId, type, payload (protobuf Any)}`.
+- The event types are defined by S3 and S6: a command finished, a PTY closed, ports changed, the readiness phase, idle, etc.
+- Delivery flow:
+  1. After connecting, the gateway calls `Events/Subscribe(afterSeq)`, where `afterSeq` is the last acknowledged seq, kept by the agent itself.
+  2. The gateway sends batches (up to 500 events or once per 1 s) to `POST /internal/v1/agent-events` in `api`.
+  3. `api` writes them durably, deduplicates by `(machineId, seq)`, and answers `{ackedSeq}`.
+  4. The gateway calls `Events/Ack(seq)`, the agent cleans the journal.
+- Delivery is **at-least-once**. If `api` is unavailable, the gateway stops reading the stream, the journal accumulates on the agent (limit — S3).
+- The synthetic events `connected`, `disconnected`, `agent_restarted`, `rebooted`, `identity_changed` are derived by the gateway from §5.1 and sent to the same endpoint. This is a separate class of events without `seq`: the key `(machineId, epoch, type)`, fields `time` and `instanceId`. There is no ordering relative to agent events and between instances. `api` deduplicates them by the key and takes the current connection state from `tunnel_sessions`, not from the order of events. `disconnected` after a pod crash is sent by the sweep (§7).
 
-## 10. Схема и версионирование
+## 10. Schema and versioning
 
 ### 10.1 Proto
 
-- `proto/umiak/tunnel/v1/` — владеет S2:
+- `proto/umiak/tunnel/v1/` — owned by S2:
   - `Control`: `Info`, `SetToken`, `Drain`;
   - `Events`: `Subscribe`, `Ack`;
-  - общие сообщения: `ErrorDetail`, конверт события.
-- `proto/umiak/agent/v1/` — наполняет S3: `Process` (`Start`, `Run`, `Attach`, `SendInput`, `Update`, `Signal`, `List`), `Filesystem`, `System` (claim, quiesce, identity) — по соглашениям из этой спеки.
-- Codec — protobuf binary. JSON Connect принимается всегда, для отладки через curl.
-- Ошибки: коды Connect + деталь `ErrorDetail{code string, retryable bool}`. `retryable` — истина для `unavailable` и `deadline_exceeded`.
+  - shared messages: `ErrorDetail`, the event envelope.
+- `proto/umiak/agent/v1/` — filled in by S3: `Process` (`Start`, `Run`, `Attach`, `SendInput`, `Update`, `Signal`, `List`), `Filesystem`, `System` (claim, quiesce, identity) — following the conventions of this spec.
+- Codec — protobuf binary. JSON Connect is always accepted, for debugging via curl.
+- Errors: Connect codes + a detail `ErrorDetail{code string, retryable bool}`. `retryable` is true for `unavailable` and `deadline_exceeded`.
 
-### 10.2 Три уровня версий
+### 10.2 Three levels of versions
 
-1. **Провод.** WS subprotocol `umiak-tunnel.v1` и заголовки §4.1. Gateway поддерживает текущую и предыдущую major-версии. Ломающее изменение — `umiak-tunnel.v2`.
-2. **RPC.** Пакеты `v1`, только добавление (новые поля, методы, сервисы). `buf breaking` в CI сравнивает с `main`. Ломающее — `v2` рядом с `v1`.
-3. **Возможности.** `Control/Info` возвращает `{agentVersion, os, arch, protoPackages[], capabilities[]}`, например `process.pty`, `files.upload.v1`. Это сохраняется в `tunnel_sessions.capabilities`. API проверяет нужную возможность до вызова, иначе отвечает `409 agent_outdated`.
+1. **Wire.** The WS subprotocol `umiak-tunnel.v1` and the headers of §4.1. The gateway supports the current and the previous major versions. A breaking change is `umiak-tunnel.v2`.
+2. **RPC.** Packages `v1`, additions only (new fields, methods, services). `buf breaking` in CI compares with `main`. A breaking change is `v2` next to `v1`.
+3. **Capabilities.** `Control/Info` returns `{agentVersion, os, arch, protoPackages[], capabilities[]}`, for example `process.pty`, `files.upload.v1`. This is saved in `tunnel_sessions.capabilities`. The API checks the needed capability before the call, otherwise it answers `409 agent_outdated`.
 
-Старые агенты при подключении **не отвергаются**: они живут в warm pool и остановленных VM. Единственное исключение — минимальная версия по безопасности в конфиге gateway (`426`). Обновление агента — S3.
+Old agents are **not rejected** on connect: they live in the warm pool and in stopped VMs. The only exception is the security minimum version in the gateway config (`426`). Agent updating is S3.
 
-Gateway не разбирает `umiak.agent.v1`, поэтому его версия не связана с версией агента. Связаны только `umiak.tunnel.v1` и проводной уровень.
+The gateway does not parse `umiak.agent.v1`, so its version is not tied to the agent's version. Only `umiak.tunnel.v1` and the wire level are tied.
 
-## 11. Что рвётся и фаза 2
+## 11. What breaks and phase 2
 
-**Рвётся:**
-- TCP-потоки (CONNECT): при любом обрыве туннеля, по истечении `tcpDeadline` при drain и при перезапуске агента (сокеты к `localhost:port` принадлежат агенту);
-- при перезагрузке VM: незавершённые команды получают `exit{status: lost}`, PTY пропадают.
+**What breaks:**
+- TCP streams (CONNECT): on any tunnel drop, at the expiry of `tcpDeadline` during drain, and on an agent restart (the sockets to `localhost:port` belong to the agent);
+- on a VM reboot: unfinished commands get `exit{status: lost}`, PTYs disappear.
 
-**Варианты на фазу 2:**
-- **(a) Возобновляемые TCP-потоки на уровне туннеля.** У каждого потока id, seq/ack и буфер повтора 1–4 MiB с обеих сторон. При переподключении поток продолжается. Если агент переехал на другой экземпляр, публичный экземпляр строит мост через `/tcp/`. Спасает от обрывов и деплоев, не спасает от перезапуска агента.
-- **(b) Userspace WireGuard** под интерфейсом §4.5. TCP идёт от конца до конца через netstack и переживает короткие обрывы. Состояние TCP живёт в netstack конкретного пода gateway, поэтому деплой и перезапуск агента его всё равно рвут.
+**Options for phase 2:**
+- **(a) Resumable TCP streams at the tunnel level.** Each stream has an id, seq/ack, and a retransmit buffer of 1–4 MiB on both sides. On reconnect the stream continues. If the agent moved to another instance, the public instance builds a bridge via `/tcp/`. Protects against drops and deploys, does not protect against an agent restart.
+- **(b) Userspace WireGuard** under the interface of §4.5. TCP goes end to end through netstack and survives short drops. The TCP state lives in the netstack of a particular gateway pod, so a deploy and an agent restart still break it.
 
-Рекомендация, если дойдёт: **(a)**.
+Recommendation if it comes to this: **(a)**.
 
-## 12. Диаграммы последовательностей
+## 12. Sequence diagrams
 
-### 12.1 Первое подключение (BS → MT)
+### 12.1 First connection (BS → MT)
 
 ```mermaid
 sequenceDiagram
@@ -441,7 +441,7 @@ sequenceDiagram
   G->>A: Events/Subscribe(afterSeq)
 ```
 
-### 12.2 Переподключение после короткого обрыва
+### 12.2 Reconnect after a short drop
 
 ```mermaid
 sequenceDiagram
@@ -466,7 +466,7 @@ sequenceDiagram
   A-->>API: data from exact offsets, then exit after all output
 ```
 
-### 12.3 Drain gateway при деплое
+### 12.3 Gateway drain on deploy
 
 ```mermaid
 sequenceDiagram
@@ -491,7 +491,7 @@ sequenceDiagram
   G1->>G1: no conns left or deadline: exit
 ```
 
-### 12.4 Перезапуск агента во время длинной команды
+### 12.4 Agent restart during a long command
 
 ```mermaid
 sequenceDiagram
@@ -518,166 +518,166 @@ sequenceDiagram
   A2-->>API: data from offsets, exit(code) after all output
 ```
 
-## 13. Наблюдаемость
+## 13. Observability
 
-Метрики Prometheus в gateway и агенте:
-- подключённые агенты по экземпляру;
-- подключения и переподключения в минуту по причине (blip, drain, agent restart, reboot);
-- длительность разрыва (от `disconnected_at` до нового подключения);
-- `421` и повторы в `agent-client`;
+Prometheus metrics in the gateway and the agent:
+- connected agents per instance;
+- connects and reconnects per minute by reason (blip, drain, agent restart, reboot);
+- the duration of a gap (from `disconnected_at` to the new connection);
+- `421` and retries in `agent-client`;
 - `tunnel_duplicate_sessions_total`;
-- отказы upgrade по коду;
+- upgrade rejections by code;
 - RTT h2 PING;
-- отставание журнала событий (`seq − ackedSeq`);
-- байты через туннель по типу (rpc, files, tcp);
-- активные потоки.
+- event journal lag (`seq − ackedSeq`);
+- bytes through the tunnel by type (rpc, files, tcp);
+- active streams.
 
-Журнал агента пишет каждую смену соединения с `connId`, `epoch` и причиной.
+The agent log records every connection change with `connId`, `epoch`, and the reason.
 
-## 14. Приёмка
+## 14. Acceptance
 
-Где идут тесты **[исполнитель]**:
-- **CI:** in-memory транспорт за интерфейсом §4.5 с инъекцией сбоев, реальный Postgres в контейнере.
-- **Локальный кластер** (kind или k3s, любой ingress с WebSocket): 2–3 пода gateway, агенты — процессы реального бинарника агента в контейнерах с фиктивными machineId, не VM. Так идёт drain-тест на 50 агентов (на `pve` всего 8 GB RAM).
-- **Стенд `pve`:** 1–2 реальные VM для chaos-, перф- и терминального тестов.
+Where tests run **[implementer]**:
+- **CI:** the in-memory transport behind the interface of §4.5 with failure injection, a real Postgres in a container.
+- **A local cluster** (kind or k3s, any ingress with WebSocket): 2–3 gateway pods, agents are processes of the real agent binary in containers with fake machineIds, not VMs. This is how the drain test with 50 agents runs (`pve` has only 8 GB of RAM).
+- **The `pve` stand:** 1–2 real VMs for chaos, perf, and terminal tests.
 
-### 14.1 Chaos-тест (главный)
+### 14.1 Chaos test (the main one)
 
-Детерминированная команда длительностью не меньше 20 min:
-- пишет в stdout и stderr пронумерованные строки с известным содержимым (суммарно ≥ 200 MiB);
-- создаёт файл-маркер один раз за запуск;
-- выходит с кодом 42.
+A deterministic command of at least 20 min:
+- writes numbered lines of known content to stdout and stderr (≥ 200 MiB in total);
+- creates a marker file once per run;
+- exits with code 42.
 
-Во время работы инжектор случайно, раз в 10–60 s, делает одно из:
-- обрыв TCP туннеля;
-- блокировку трафика на 20 s;
-- SIGKILL пода gateway;
+While it runs, the injector at random, every 10–60 s, does one of:
+- a TCP tunnel drop;
+- blocking traffic for 20 s;
+- SIGKILL of a gateway pod;
 - graceful rollout gateway;
-- SIGKILL агента;
-- рестарт службы агента.
+- SIGKILL of the agent;
+- a restart of the agent service.
 
-Клиент читает вывод через API с прозрачным resume. Второй клиент сам переподключается по offset.
+The client reads the output through the API with transparent resume. A second client reconnects by offset itself.
 
-**Проходит, если:**
-- sha256 stdout и stderr совпадают с ожидаемыми у обоих клиентов;
-- код выхода 42;
-- маркер создан ровно один раз;
-- пауза в выдаче после каждого сбоя не больше 30 s;
-- ни один вызов API не завершился ошибкой, кроме retryable `503`, которую клиент повторил.
+**Passes if:**
+- the sha256 of stdout and stderr matches the expected ones for both clients;
+- exit code 42;
+- the marker was created exactly once;
+- the pause in output after each failure is no more than 30 s;
+- no API call ended with an error other than a retryable `503` that the client retried.
 
-### 14.2 Drain-тест
+### 14.2 Drain test
 
-2–3 пода gateway, 50 агентов, у каждого идут команды и attach-стримы. Делается rolling update gateway.
+2–3 gateway pods, 50 agents, each with commands and attach streams running. A rolling update of the gateway is done.
 
-**Проходит, если:**
-- 0 потерянных и 0 двойных команд;
-- все стримы продолжились по offset;
-- p99 времени переезда агента (от получения `Drain` агентом до нового `101`) не больше 5 s; все агенты пода переехали не позже `spreadMs + 5 s` от начала шага 3;
-- новые вызовы после `421` доходят с первого повтора;
-- под завершился в пределах `terminationGracePeriodSeconds`.
+**Passes if:**
+- 0 lost and 0 doubled commands;
+- all streams continued by offset;
+- the p99 of the agent move time (from the agent receiving `Drain` to the new `101`) is no more than 5 s; all agents of the pod moved no later than `spreadMs + 5 s` from the start of step 3;
+- new calls after `421` get through on the first retry;
+- the pod terminated within `terminationGracePeriodSeconds`.
 
-### 14.3 Перф-тест head-of-line
+### 14.3 Head-of-line perf test
 
-В PTY раз в 100 ms отправляется 1 байт, измеряется эхо. Параллельно через тот же туннель идёт загрузка и скачивание 1 GB.
+1 byte is sent into a PTY every 100 ms, and the echo is measured. In parallel through the same tunnel a 1 GB upload and download run.
 
-**Порог:** p99 эха не больше 50 ms. Если порог не выдержан, добавляем bulk-соединение (§4.4).
+**Threshold:** echo p99 no more than 50 ms. If the threshold is not met, we add a bulk connection (§4.4).
 
-### 14.4 Терминал
+### 14.4 Terminal
 
-- Обрыв до 10 s: PTY переподключается сам, scrollback совпадает.
-- Без клиента 9 min: PTY жив. Через 10 min закрыт.
+- A drop of up to 10 s: the PTY reconnects itself, the scrollback matches.
+- Without a client for 9 min: the PTY is alive. After 10 min it is closed.
 
-### 14.5 Безопасность
+### 14.5 Security
 
-- Fork и VM из saved snapshot не могут подключиться как исходная machine: на диске нет секрета, в smbios — новый.
-- Списанная machine получает `403`.
-- Вызов `umiak.tunnel.v1.*` через `/rpc/` → `403`.
-- CONNECT на адрес вне VM → `403`.
-- Вызов внутреннего listener-а без service token → `401`.
+- A fork and a VM from a saved snapshot cannot connect as the original machine: there is no secret on disk, and the smbios has a new one.
+- A retired machine gets `403`.
+- A call to `umiak.tunnel.v1.*` through `/rpc/` → `403`.
+- CONNECT to an address outside the VM → `403`.
+- A call to the internal listener without a service token → `401`.
 
-### 14.6 Масштаб
+### 14.6 Scale
 
-Цель дизайна **[исполнитель]**: до 2000 агентов на под gateway и до 10 000 machine всего. Нагрузочно проверяем 2000 агентов на под (агенты-процессы, без VM). Что важно на этом масштабе:
-- `NOTIFY` на каждое подключение: при деплое пода это до 2000 уведомлений за `spreadMs`, слушателей единицы (поды api, worker, gateway). Если не уложится, батчим.
-- Память на соединение: окна HTTP/2 — это пределы, а не выделенная память. Проверяем RSS gateway на 2000 простаивающих агентов.
+Design target **[implementer]**: up to 2000 agents per gateway pod and up to 10 000 machines in total. Under load we check 2000 agents per pod (agent processes, no VMs). What matters at this scale:
+- `NOTIFY` on every connection: on a pod deploy this is up to 2000 notifications within `spreadMs`, with a handful of listeners (the api, worker, and gateway pods). If it does not fit, we batch.
+- Memory per connection: HTTP/2 windows are limits, not allocated memory. We check the gateway RSS with 2000 idle agents.
 
-### 14.7 Объём реализации S2 и приёмка
+### 14.7 Scope of the S2 implementation and acceptance
 
-- **S2 при реализации даёт только контракт и общие части:** proto (`umiak.tunnel.v1` и соглашения), Go-библиотеку туннеля, приёмник туннелей, реестр, drain и прокси в gateway, клиентскую часть туннеля в агенте и TS `agent-client`.
-- **Проверка S2:** in-memory транспорт с инъекцией сбоев и тестовый двойник `Process`, который соблюдает контракт `commandId`/offset/`exit`. Двойник не идёт в продукт.
-- **Полный §14** (chaos-, drain-, перф-, терминальный тесты на реальных компонентах) — совместная приёмка, когда реализованы S3 и S4.
-- **Windows:** в CI S2 только кросс-компиляция (`GOOS=windows`, без cgo). Реальная проверка — в S9.
+- **S2 at implementation delivers only the contract and shared parts:** the proto (`umiak.tunnel.v1` and the conventions), the Go tunnel library, the tunnel receiver, the registry, drain, and the proxy in the gateway, the client part of the tunnel in the agent, and the TS `agent-client`.
+- **S2 verification:** an in-memory transport with failure injection and a test double of `Process` that follows the `commandId`/offset/`exit` contract. The double does not go into the product.
+- **The full §14** (chaos, drain, perf, and terminal tests on real components) is a joint acceptance when S3 and S4 are implemented.
+- **Windows:** in the S2 CI only cross-compilation (`GOOS=windows`, no cgo). The real check is in S9.
 
-## 15. Интерфейсы к другим областям (допущения)
+## 15. Interfaces to other areas (assumptions)
 
 - **S1:**
-  - `create`, `fork` и создание из saved snapshot принимают от вызывающего `smbios1` (`uuid`, `serial` с base64 machineId и BS);
-  - fork никогда не наследует `smbios1` и `vmgenid` исходной VM;
-  - у каждой новой VM новый `vmgenid`;
-  - QEMU guest agent доступен как запасной канал.
+  - `create`, `fork`, and creation from a saved snapshot accept from the caller `smbios1` (`uuid`, `serial` with the base64 machineId and BS);
+  - a fork never inherits `smbios1` and `vmgenid` of the source VM;
+  - every new VM has a new `vmgenid`;
+  - the QEMU guest agent is available as a fallback channel.
 - **S3:**
-  - shim и его scope или job object;
-  - durable-каталог состояния (команды, логи, кэш `requestId`, журнал событий);
-  - retention вывода;
-  - чтение smbios и смена идентичности;
-  - `Control/Info` и capabilities;
-  - клиентская часть туннеля по этой спеке;
-  - обновление бандла tunnel CA вместе с агентом;
-  - самообновление и восстановление через QEMU guest agent.
-- **S4:** gateway-процесс содержит приёмник туннелей и реестр из этой спеки. Публичный HTTP-прокси и SSH используют `MachineConn.DialTCP` или `/v1/machines/{id}/tcp/{port}` на экземпляре-владельце. Публичный TLS — отдельно.
+  - the shim and its scope or job object;
+  - the durable state directory (commands, logs, the `requestId` cache, the event journal);
+  - output retention;
+  - reading smbios and identity change;
+  - `Control/Info` and capabilities;
+  - the client part of the tunnel per this spec;
+  - updating the tunnel CA bundle together with the agent;
+  - self-update and recovery through the QEMU guest agent.
+- **S4:** the gateway process contains the tunnel receiver and the registry from this spec. The public HTTP proxy and SSH use `MachineConn.DialTCP` or `/v1/machines/{id}/tcp/{port}` on the owner instance. Public TLS is separate.
 - **S6:**
-  - worker создаёт `machineId` и BS, пишет `tunnel_credentials.bs_hash` и передаёт smbios в S1;
-  - при claim вызывает `rotate-token`;
-  - при delete ставит `retired_at`;
-  - потребляет `/internal/v1/agent-events`;
-  - правило `degraded` через 60 s;
-  - machine не переиспользуется между sandbox.
-- **S7:** публичный attach по `commandId` и offset поверх `agent-client`, heartbeat в NDJSON.
-- **S9:** то же для Windows: служба, job object, ConPTY, чтение smbios.
+  - the worker creates `machineId` and BS, writes `tunnel_credentials.bs_hash`, and passes the smbios to S1;
+  - at claim it calls `rotate-token`;
+  - at delete it sets `retired_at`;
+  - consumes `/internal/v1/agent-events`;
+  - the `degraded` rule after 60 s;
+  - a machine is not reused between sandboxes.
+- **S7:** public attach by `commandId` and offset on top of `agent-client`, heartbeat in NDJSON.
+- **S9:** the same for Windows: a service, a job object, ConPTY, reading smbios.
 - **S12:**
-  - ingress для `tunnel.<domain>` по требованиям §6;
-  - tunnel CA и его секреты;
-  - Deployment gateway с readiness, `preStop` и `terminationGracePeriodSeconds: 960` (S4 §10);
-  - NetworkPolicy внутреннего listener-а;
-  - service tokens в Secrets.
+  - ingress for `tunnel.<domain>` per the requirements of §6;
+  - the tunnel CA and its secrets;
+  - the gateway Deployment with readiness, `preStop`, and `terminationGracePeriodSeconds: 960` (S4 §10);
+  - the NetworkPolicy of the internal listener;
+  - service tokens in Secrets.
 
-## 16. Security assumptions (приняты Ильёй, 2026-10-29)
+## 16. Security assumptions (accepted by Ilia, 2026-10-29)
 
-1. **root внутри VM может прочитать BS и MT своей VM.** Это позволяет только выдать себя за свою же VM. Machine не переиспользуется между sandbox, секретов на диске нет, поэтому чужие VM недоступны. Принято.
-2. **Операторы с правом чтения конфигов Proxmox видят BS.** Они и так администраторы всего хоста. Принято.
-3. **Между control plane и gateway в PoC и MVP — статические ротируемые service-токены в приватной сети кластера** (NetworkPolicy), без mTLS. mTLS — позже. Принято.
+1. **Root inside a VM can read the BS and MT of its own VM.** This only allows impersonating the same VM. A machine is not reused between sandboxes, there are no secrets on disk, so other VMs are unreachable. Accepted.
+2. **Operators with permission to read Proxmox configs see the BS.** They are administrators of the whole host anyway. Accepted.
+3. **Between the control plane and the gateway in the PoC and MVP there are static rotatable service tokens in the cluster's private network** (NetworkPolicy), without mTLS. mTLS later. Accepted.
 
-## 17. Библиотеки и инструменты
+## 17. Libraries and tools
 
-Правило проекта (`CLAUDE.md`): **последние стабильные версии.** Перед добавлением зависимости проверить актуальную (`go list -m -versions`, `npm view`, релизы GitHub) и взять её. Инструменты запускать через mise (`mise exec -- <cmd>`). Ниже — версии, проверенные 2026-10-29; при реализации перепроверить.
+Project rule (`CLAUDE.md`): **the latest stable versions.** Before adding a dependency, check the current one (`go list -m -versions`, `npm view`, GitHub releases) and take it. Run tools through mise (`mise exec -- <cmd>`). Below are the versions checked on 2026-10-29; re-check during implementation.
 
-| Назначение | Библиотека | Проверено |
+| Purpose | Library | Checked |
 |---|---|---|
 | Go toolchain | `mise.toml` | go 1.27.3 |
-| WebSocket (агент и gateway) | `github.com/coder/websocket` | v1.8.15 |
+| WebSocket (agent and gateway) | `github.com/coder/websocket` | v1.8.15 |
 | HTTP/2 `ServeConn` / `NewClientConn` | `golang.org/x/net/http2` | v0.62.0 |
 | Connect RPC (Go) | `connectrpc.com/connect` | v1.21.1 |
 | Protobuf (Go) | `google.golang.org/protobuf` | v1.36.12 |
-| Служба Windows, smbios | `golang.org/x/sys` | v0.49.0 |
-| Postgres из gateway | `github.com/jackc/pgx/v5` | v5.11.0 |
+| Windows service, smbios | `golang.org/x/sys` | v0.49.0 |
+| Postgres from the gateway | `github.com/jackc/pgx/v5` | v5.11.0 |
 | Connect RPC (TS) | `@connectrpc/connect`, `@connectrpc/connect-node` | 2.3.0 |
-| Protobuf (TS) и генератор | `@bufbuild/protobuf`, `@bufbuild/protoc-gen-es` | 2.16.0 |
-| buf CLI (генерация, lint, breaking) | `@bufbuild/buf` или `buf` в mise | 1.75.0 |
-| Фаза 2: userspace WireGuard | `golang.zx2c4.com/wireguard` | тегов нет, последний коммит |
+| Protobuf (TS) and generator | `@bufbuild/protobuf`, `@bufbuild/protoc-gen-es` | 2.16.0 |
+| buf CLI (generation, lint, breaking) | `@bufbuild/buf` or `buf` in mise | 1.75.0 |
+| Phase 2: userspace WireGuard | `golang.zx2c4.com/wireguard` | no tags, the latest commit |
 
-Отвергнуто: `hashicorp/yamux` (v0.1.2, 2024; свой control-канал и FIFO без планировщика), свой mux в одном gRPC bidi-стриме, grpc-go (не ложится на `net/http` и reverse proxy так же просто, как Connect).
+Rejected: `hashicorp/yamux` (v0.1.2, 2024; its own control channel and FIFO without a scheduler), our own mux in one gRPC bidi stream, grpc-go (does not fit `net/http` and a reverse proxy as simply as Connect).
 
-## 18. Оставлено исполнителю
+## 18. Left to the implementer
 
-- раскладка `proto/`, `buf.yaml`, `buf.gen.yaml`; коммитить ли сгенерированный код;
-- структура Go-пакетов (общий модуль туннеля для агента и gateway);
-- инструмент инъекции сбоев (in-process транспорт, toxiproxy, nftables на стенде);
-- точные пределы размеров кэша `requestId` и журнала (с S3);
-- использовать ли std `net/http` HTTP/2 вместо `x/net/http2`, если std даст `ServeConn` и клиентское соединение поверх готового `net.Conn`.
+- the layout of `proto/`, `buf.yaml`, `buf.gen.yaml`; whether to commit generated code;
+- the structure of the Go packages (a shared tunnel module for the agent and the gateway);
+- the failure injection tool (an in-process transport, toxiproxy, nftables on the stand);
+- exact size limits of the `requestId` cache and the journal (with S3);
+- whether to use the std `net/http` HTTP/2 instead of `x/net/http2`, if std provides `ServeConn` and a client connection on top of a ready `net.Conn`.
 
-## 19. Открытые вопросы
+## 19. Open questions
 
-- ~~`tcpDeadline` 2 min при drain: хватит ли для SSH-сессий?~~ Решено в S4 §10: SSH-потоки 15 min, остальные 2 min, grace 960 s.
-- Список типов событий журнала и их payload (S3, S6).
-- Retention вывода команд на диске VM и лимиты (S3).
-- Ingress controller и где терминируется TLS `tunnel.<domain>` (S12).
+- ~~`tcpDeadline` of 2 min on drain: is it enough for SSH sessions?~~ Decided in S4 §10: SSH streams 15 min, the others 2 min, grace 960 s.
+- The list of journal event types and their payload (S3, S6).
+- Retention of command output on the VM disk and limits (S3).
+- The ingress controller and where the `tunnel.<domain>` TLS is terminated (S12).
