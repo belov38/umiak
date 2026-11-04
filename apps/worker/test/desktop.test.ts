@@ -81,6 +81,20 @@ it("configures a desktop after cold claim, keeps headless claims unchanged", asy
 	expect(w.agent.callsOf("desktopReady")).toHaveLength(5);
 });
 
+it("configures a desktop with no ICE servers when TURN is not configured", async () => {
+	const w = await desktopWorld();
+	delete w.ctx.turn;
+	w.agent.desktopReadyStates = [true];
+	const env = opsEnv(w);
+	const { sandboxId, operationId } = await createSandbox(w, env);
+	expect(await run(w, operationId)).toBe("succeeded");
+	const calls = w.agent.callsOf("configureDesktop");
+	expect(calls).toHaveLength(1);
+	expect(calls[0]?.args).toMatchObject({ iceServers: [] });
+	expect(await refreshDesktopTurn(w.ctx)).toBe(0);
+	expect(w.agent.callsOf("configureDesktop")).toHaveLength(1);
+	expect(sandboxId).toBeTruthy();
+});
 it("does not finish desktop readiness on another boot", async () => {
 	const w = await desktopWorld();
 	const env = opsEnv(w);

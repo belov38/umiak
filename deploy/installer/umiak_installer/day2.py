@@ -28,6 +28,7 @@ SECRETS_DIR = prepare_host.STATE_DIR + "/secrets"
 STATE_DIR_ON_PVE = str(state.DEFAULT_PATH.parent)
 IPSET = "/cluster/firewall/ipset/umiak-gateway"
 EGRESS_GROUP = "/cluster/firewall/groups/umiak-egress"
+IMAGE_PREFIX = "ghcr.io/belov38/umiak-"
 QUICKSTART_DIR = "/app/deploy/compose/quickstart"
 SIGNIN_LINK = re.compile(r"^/signin#([A-Z2-7-]+)$", re.M)
 # Thin LVs Umiak creates (packages/pve/src/storage/lvmthin.ts): snapshots and VM disks,
@@ -222,7 +223,45 @@ def update(runner: Runner, current: state.InstallState, bundle, *, ui, sleep=tim
     tailnet.serve(runner, ct_id)
     updated = dataclasses.replace(current, release=bundle.version, tailnet_host=identity.dns_name)
     state.save(updated, state_path or runner.path(str(state.DEFAULT_PATH)))
+    # Keep the new and the previous version (rollback); the stack is healthy at this point.
+    prune_old_images(runner, ct_id, {bundle.version, current.release}, ui=ui)
     return updated
+
+
+def _free_bytes(runner: Runner, ct_id: int) -> int | None:
+    try:
+        return int(run_in(runner, ct_id, "df", "-B1", "--output=avail", "/").split()[-1])
+    except (CommandError, ValueError, IndexError):
+        return None
+
+
+def prune_old_images(runner: Runner, ct_id: int, keep: set[str], *, ui) -> None:
+    """Remove local Umiak images of other versions than `keep`; never anything else.
+
+    Only repositories ghcr.io/belov38/umiak-* are candidates. `docker rmi` without
+    -f refuses images that a container uses, which is treated as a skip. Best effort:
+    the update already succeeded, so a failure here only produces a note.
+    """
+    try:
+        before = _free_bytes(runner, ct_id)
+        listing = run_in(runner, ct_id, "docker", "image", "ls", "--format", "{{.Repository}}:{{.Tag}}")
+        removed = 0
+        for ref in sorted(set(listing.split())):
+            repo, _, tag = ref.rpartition(":")
+            if not repo.startswith(IMAGE_PREFIX) or tag in keep or tag in ("", "<none>"):
+                continue
+            try:
+                run_in(runner, ct_id, "docker", "rmi", ref)
+                removed += 1
+            except CommandError:
+                pass  # in use by a container
+        run_in(runner, ct_id, "docker", "image", "prune", "-f")
+        after = _free_bytes(runner, ct_id)
+    except CommandError as error:
+        ui.say(f"Could not clean up old images: {error}")
+        return
+    freed = f", freed {(after - before) / 1e9:.1f} GB" if before is not None and after is not None else ""
+    ui.say(f"Removed {removed} old Umiak image(s){freed}.")
 
 
 # --- sign in and owner reset ----------------------------------------------

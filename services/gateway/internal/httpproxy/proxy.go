@@ -324,6 +324,13 @@ func (h *handler) modifyResponse(x *exchange, res *http.Response, setCookie *htt
 	cleanResponseHeader(res.Header)
 	res.Header.Set("X-Robots-Tag", robotsTag)
 	if x.route != nil && x.route.Kind == cpapi.KindDesktop {
+		if res.StatusCode == http.StatusSwitchingProtocols && x.w != nil {
+			// ReverseProxy appends the 101 fields to the writer's existing
+			// header map; CheckDesktop already set these two there, so drop
+			// them to keep each field single on the wire.
+			x.w.Header().Del("Cache-Control")
+			x.w.Header().Del("Referrer-Policy")
+		}
 		res.Header.Set("Cache-Control", "no-store")
 		res.Header.Set("Referrer-Policy", "no-referrer")
 	}

@@ -51,7 +51,7 @@ class CtSpec:
     hostname: str = "umiak-cp"
     memory: int = 4096
     cores: int = 2
-    disk_gb: int = 32
+    disk_gb: int = 48  # 32 filled up after two updates (each release is ~5 GB of images)
     # Explicit resolver: without --nameserver pct copies the HOST's resolv.conf (e.g. Tailscale MagicDNS
     # 100.100.100.100), which does not answer inside the CT before tailscaled runs. With a nameserver
     # given and no --searchdomain, pct writes no search line (it inherits both only when neither is set).

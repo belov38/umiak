@@ -81,8 +81,19 @@ async function setup(overrides = {}) {
 	};
 	let state = { steps: {}, complete: false };
 	let writes = 0;
+	// Simulate jsonb: keys come back sorted by length, then alphabetically.
+	const jsonb = (value) =>
+		Array.isArray(value)
+			? value.map(jsonb)
+			: value && typeof value === "object"
+				? Object.fromEntries(
+						Object.keys(value)
+							.sort((a, b) => a.length - b.length || (a < b ? -1 : 1))
+							.map((key) => [key, jsonb(value[key])]),
+					)
+				: value;
 	const store = {
-		read: async () => structuredClone(state),
+		read: async () => jsonb(structuredClone(state)),
 		write: async (value) => {
 			writes++;
 			state = value;

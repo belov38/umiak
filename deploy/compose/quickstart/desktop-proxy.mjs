@@ -527,6 +527,14 @@ const hasControl = (line) =>
 		return (code < 32 && code !== 9) || code === 127;
 	});
 
+const WS_RESPONSE_FIELDS = new Set([
+	"upgrade",
+	"connection",
+	"sec-websocket-accept",
+	"sec-websocket-protocol",
+	"sec-websocket-extensions",
+]);
+
 /** WebSocket for the viewer stream; same `ctx` as handleDesktop. */
 export function handleDesktopUpgrade(req, socket, head, ctx) {
 	if (!isDesktopRequest(req.url)) return false;
@@ -598,11 +606,14 @@ export function handleDesktopUpgrade(req, socket, head, ctx) {
 		if (!/^HTTP\/1\.1 101 /.test(lines[0])) return abort();
 		// Rebuild the 101 ourselves; upstream values are validated, never copied.
 		const fields = new Map();
+		// Only WebSocket-relevant fields are validated; every other upstream
+		// field (security headers, request id, ...) is ignored, duplicates included.
 		for (const line of lines.slice(1)) {
 			const colon = line.indexOf(":");
-			if (colon < 1 || hasControl(line)) return abort();
+			if (colon < 1) continue;
 			const name = line.slice(0, colon).trim().toLowerCase();
-			if (fields.has(name)) return abort();
+			if (!WS_RESPONSE_FIELDS.has(name)) continue;
+			if (hasControl(line) || fields.has(name)) return abort();
 			fields.set(name, line.slice(colon + 1).trim());
 		}
 		const protocol = fields.get("sec-websocket-protocol");

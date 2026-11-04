@@ -500,3 +500,29 @@ def test_retired_original_host_update_preserves_media_facts_without_local_media(
     monkeypatch.setattr(day2, "media_storages", lambda *_args: [])
     day2.update(runner, current, new_bundle(tmp_path), ui=FakeUi(), sleep=lambda _: None)
     assert json.loads(facts.read_text())["limits"]["mediaStorage"] == "historic-media"
+
+
+# --- image pruning --------------------------------------------------------
+
+def test_update_prunes_old_umiak_images_keeping_new_and_previous(installed):
+    runner, current, tmp_path = installed
+    prev = current.release
+    runner.images = [f"ghcr.io/belov38/umiak-api:{prev}", "ghcr.io/belov38/umiak-api:1.3.0",
+                     "ghcr.io/belov38/umiak-api:0.0.1", "ghcr.io/belov38/umiak-web:0.0.1",
+                     "ghcr.io/belov38/umiak-web:0.0.2", "postgres:0.0.1", "node:22", "ghcr.io/other/umiak-x:0.0.1"]
+    runner.images_in_use = {"ghcr.io/belov38/umiak-web:0.0.2"}
+    ui = FakeUi()
+    day2.update(runner, current, new_bundle(tmp_path), ui=ui, sleep=lambda _: None)
+    assert sorted(runner.images) == sorted([f"ghcr.io/belov38/umiak-api:{prev}", "ghcr.io/belov38/umiak-api:1.3.0",
+                                            "ghcr.io/belov38/umiak-web:0.0.2", "postgres:0.0.1", "node:22",
+                                            "ghcr.io/other/umiak-x:0.0.1"])
+    inside = runner.ct_commands()
+    assert ["docker", "image", "prune", "-f"] in inside
+    assert any("Removed 2 old Umiak image(s)" in line for line in ui.said)
+
+
+def test_update_brings_up_the_stack_with_remove_orphans(installed):
+    runner, current, tmp_path = installed
+    day2.update(runner, current, new_bundle(tmp_path), ui=FakeUi(), sleep=lambda _: None)
+    ups = [a for a in runner.ct_commands() if a[:2] == ["docker", "compose"] and "up" in a]
+    assert ups and all("--remove-orphans" in a for a in ups)
