@@ -104,27 +104,26 @@ def is_umiak_ct(row: dict) -> bool:
     return row.get("type") == "lxc" and TAG in tags
 
 
-ARPING_PATHS = ("/usr/bin/arping", "/usr/sbin/arping")
-
-
-def have_arping(runner: Runner) -> bool:
-    return any(runner.path(name).exists() for name in ARPING_PATHS)
+PROBE_WAIT = 1.0
+LIVE_NEIGH = ("REACHABLE", "STALE", "DELAY", "PROBE", "PERMANENT")
 
 
 def address_in_use(runner: Runner, ip: str, bridge: str = "vmbr0") -> bool:
-    """ARP duplicate-address detection first (devices that ignore ICMP still answer ARP), then ping."""
-    if have_arping(runner):
+    """Package-free ARP probe: ping only triggers ARP; the neighbour table says who answered.
+
+    Devices that ignore ICMP (phones, tablets) still answer ARP, so a resolved lladdr means in use.
+    """
+    for argv in (["ip", "neigh", "flush", "to", ip, "dev", bridge], ["ping", "-c", "1", "-W", "1", ip]):
         try:
-            runner.run(["arping", "-D", "-c", "2", "-w", "3", "-I", bridge, ip])
-        except CommandError as error:
-            if error.returncode != 1:  # iputils: 1 = a reply arrived (duplicate); anything else is a failed probe
-                raise InstallerError(f"Could not probe {ip} with arping on {bridge}: {error.stderr.strip() or error}") from error
-            return True
+            runner.run(argv)
+        except CommandError:
+            pass
+    time.sleep(PROBE_WAIT)
     try:
-        runner.run(["ping", "-c", "1", "-W", "1", ip])
-        return True
+        table = runner.run(["ip", "neigh", "show", "to", ip, "dev", bridge])
     except CommandError:
         return False
+    return any("lladdr" in line and line.split()[-1] in LIVE_NEIGH for line in table.splitlines())
 
 
 def check_target(runner: Runner, spec: CtSpec) -> dict | None:

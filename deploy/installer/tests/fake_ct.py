@@ -57,7 +57,7 @@ class CtFake(FakeRunner):
 
     def run(self, argv, input=None):
         argv = list(argv)
-        if argv[0] not in ("pct", "pveam", "ping", "arping") and argv[:2] != ["ip", "-j"]:
+        if argv[0] not in ("pct", "pveam", "ping") and argv[:2] not in (["ip", "-j"], ["ip", "neigh"]):
             return super().run(argv, input)
         assert all(isinstance(part, str) for part in argv), argv
         self.commands.append(argv)
@@ -71,10 +71,13 @@ class CtFake(FakeRunner):
         if argv[:2] == ["pveam", "download"]:
             self.local_templates.append(argv[3])
             return ""
-        if argv[0] == "arping":
-            if self.ip_in_use or self.ip_arp_only:
-                raise CommandError(argv, 1, "", "reply")
+        if argv[:3] == ["ip", "neigh", "flush"]:
             return ""
+        if argv[:3] == ["ip", "neigh", "show"]:
+            ip = argv[4]
+            if self.ip_in_use or self.ip_arp_only:
+                return f"{ip} lladdr 80:83:f6:dc:3c:71 REACHABLE"
+            return f"{ip} INCOMPLETE"
         if argv[0] == "ping":
             if self.ip_in_use:
                 return "64 bytes from"

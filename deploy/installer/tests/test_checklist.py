@@ -11,7 +11,7 @@ def test_pve_like_host_is_all_ok(tmp_path):
     assert [c.name for c in checks if not c.ok] == []
     assert {c.name for c in checks} == {
         "root", "pve-version", "cluster-quorum", "python", "lvmthin-storage", "media-storage",
-        "dnsmasq", "arping", "ip-forward", "cluster-firewall", "sdn-pending", "free-vmids", "pveproxy-cert",
+        "dnsmasq", "ip-forward", "cluster-firewall", "sdn-pending", "free-vmids", "pveproxy-cert",
     }
 
 
@@ -80,8 +80,3 @@ def test_custom_pveproxy_certificate_is_refused_without_fix(tmp_path):
         "certificate on port 8006; custom/ACME certificates are not supported yet."
     )
 
-
-def test_missing_arping_proposes_install(tmp_path):
-    check = by_name(checklist.inspect(FakeRunner(tmp_path, arping=False)))["arping"]
-    assert not check.ok
-    assert check.fix.commands == [["apt-get", "install", "-y", "iputils-arping"]]

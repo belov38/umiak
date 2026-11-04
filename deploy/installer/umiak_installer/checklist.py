@@ -6,7 +6,6 @@ inspect() never changes the host; apply_fix() runs one fix the user confirmed.
 import sys
 from dataclasses import dataclass, field
 
-from .ct import have_arping
 from .prepare_host import dnsmasq_service_enabled
 from .pve import CommandError, Runner, get, lvmthin_storages, media_storages, pending_sdn
 
@@ -36,10 +35,6 @@ DNSMASQ_FIX = Fix(
 DNSMASQ_SERVICE_FIX = Fix(
     "Disable the system-wide dnsmasq service (Proxmox SDN runs its own instances)",
     [["systemctl", "disable", "--now", "dnsmasq"]],
-)
-ARPING_FIX = Fix(
-    "Install iputils-arping (ARP check that the control-plane IP is not already used on the LAN)",
-    [["apt-get", "install", "-y", "iputils-arping"]],
 )
 FORWARD_FIX = Fix(
     "Enable IPv4 forwarding persistently for SDN SNAT (/etc/sysctl.d/99-umiak.conf)",
@@ -102,11 +97,6 @@ def _dnsmasq(runner):
     return _check("dnsmasq", not enabled, detail, DNSMASQ_SERVICE_FIX)
 
 
-def _arping(runner):
-    present = have_arping(runner)
-    return _check("arping", present, "arping " + ("present" if present else "missing"), ARPING_FIX)
-
-
 def _forward(runner):
     value = runner.run(["sysctl", "-n", "net.ipv4.ip_forward"])
     return _check("ip-forward", value == "1", f"net.ipv4.ip_forward = {value}", FORWARD_FIX)
@@ -166,7 +156,6 @@ def inspect(runner: Runner, node: str | None = None, storage: str | None = None,
         _safe("lvmthin-storage", lambda: _lvmthin(runner, node, storage)),
         _safe("media-storage", lambda: _media(runner, node)),
         _safe("dnsmasq", lambda: _dnsmasq(runner)),
-        _safe("arping", lambda: _arping(runner)),
         _safe("ip-forward", lambda: _forward(runner)),
         _safe("cluster-firewall", lambda: _firewall(runner)),
         _safe("sdn-pending", lambda: _pending(runner)),

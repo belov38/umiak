@@ -133,37 +133,31 @@ def test_create_sets_explicit_nameserver_without_searchdomain(runner):
     assert "--searchdomain" not in create
 
 
-def test_arping_detects_device_that_ignores_icmp(runner):
+def test_neighbour_probe_detects_device_that_ignores_icmp(runner):
     runner.ip_arp_only = True
     with pytest.raises(InstallerError, match="in use"):
         ct.create(runner, SPEC, sleep=lambda _: None)
-    assert ["arping", "-D", "-c", "2", "-w", "3", "-I", "vmbr0", "192.168.68.50"] in runner.commands
+    assert ["ip", "neigh", "flush", "to", "192.168.68.50", "dev", "vmbr0"] in runner.commands
+    assert ["ip", "neigh", "show", "to", "192.168.68.50", "dev", "vmbr0"] in runner.commands
     assert not any(a[:2] == ["pct", "create"] for a in runner.commands)
 
 
-def test_free_address_passes_arping_and_ping(runner):
+def test_free_address_has_incomplete_neighbour_entry(runner):
     ct.create(runner, SPEC, sleep=lambda _: None)
-    assert any(a[0] == "arping" for a in runner.commands) and any(a[0] == "ping" for a in runner.commands)
+    assert ["ping", "-c", "1", "-W", "1", "192.168.68.50"] in runner.commands
+    assert any(a[:3] == ["ip", "neigh", "show"] for a in runner.commands)
 
 
-def test_arping_failure_other_than_reply_is_an_error(runner):
+@pytest.mark.parametrize("table,used", [
+    ("", False), ("192.168.68.50 INCOMPLETE", False), ("192.168.68.50 dev vmbr0  FAILED", False),
+    ("192.168.68.50 dev vmbr0 lladdr 80:83:f6:dc:3c:71 STALE", True),
+    ("192.168.68.50 lladdr 80:83:f6:dc:3c:71 REACHABLE", True),
+    ("192.168.68.50 lladdr 80:83:f6:dc:3c:71 PERMANENT", True),
+])
+def test_neighbour_states(runner, table, used):
     original = runner.run
-
-    def run(argv, input=None):
-        if argv[0] == "arping":
-            raise ct.CommandError(argv, 2, "", "interface down")
-        return original(argv, input)
-
-    runner.run = run
-    with pytest.raises(InstallerError, match="arping"):
-        ct.check_target(runner, SPEC)
-
-
-def test_missing_arping_falls_back_to_ping(tmp_path):
-    fake = CtFake(tmp_path / "h", arping=False)
-    fake.ip_arp_only = True
-    ct.check_target(fake, SPEC)  # the checklist is what asks to install arping
-    assert not any(a[0] == "arping" for a in fake.commands)
+    runner.run = lambda argv, input=None: table if argv[:3] == ["ip", "neigh", "show"] else original(argv, input)
+    assert ct.address_in_use(runner, "192.168.68.50") is used
 
 
 def test_dns_wait_times_out_with_clear_error_and_progress(runner):

@@ -31,7 +31,6 @@ class FakeRunner(Runner):
         root: Path,
         *,
         dnsmasq=True,
-        arping=True,
         dnsmasq_enabled=False,
         strict_deletes=True,
         ip_forward="1",
@@ -79,8 +78,6 @@ class FakeRunner(Runner):
         }
         if dnsmasq:
             files["/usr/sbin/dnsmasq"] = "fake"
-        if arping:
-            files["/usr/bin/arping"] = "fake"
         self.ip_forward = ip_forward
         self.dnsmasq_enabled = dnsmasq_enabled
         # Like real pvesh/pveum: deleting a missing object exits non-zero.
