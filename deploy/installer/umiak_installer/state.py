@@ -24,6 +24,8 @@ class InstallState:
     phase: str
     # Install answers (storage, ranges, addresses, hostname) so Resume needs no questions.
     answers: dict = field(default_factory=dict)
+    # Bookkeeping only; runtime.nodes is authoritative.
+    sandbox_nodes: list[str] = field(default_factory=list)
 
     def __post_init__(self):
         if self.phase not in PHASES:

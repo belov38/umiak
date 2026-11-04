@@ -505,3 +505,5 @@ browser's **Owner sessions → Sign in another browser**, or by re-running the i
 Enter the code and select **Sign in**. Other browsers and CLI credentials remain
 valid. CLI sessions cannot mint browser access. The installer's **Reset owner access** is destructive:
 use it only as a last resort because it revokes every browser and CLI credential.
+
+Multi-node sandbox placement, per-node templates and safe node removal: [operations guide](operations-multi-node.md).

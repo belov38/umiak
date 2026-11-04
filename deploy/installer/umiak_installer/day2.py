@@ -22,7 +22,7 @@ from pathlib import Path
 
 from . import ct, host_report, prepare_host, rollback, stack, state, tailnet
 from .ct import run_in
-from .pve import CommandError, InstallerError, Runner, exists, get, pending_sdn
+from .pve import CommandError, InstallerError, Runner, exists, get, media_storages, pending_sdn
 
 SECRETS_DIR = prepare_host.STATE_DIR + "/secrets"
 STATE_DIR_ON_PVE = str(state.DEFAULT_PATH.parent)
@@ -72,7 +72,8 @@ def _sha256(path: Path) -> str | None:
 
 
 def apply_stack(runner: Runner, ct_id: int, bundle, a: dict, node_ip: str, public_key: str,
-                identity: tailnet.TailnetInfo, out_dir: Path, sleep, *, agent_only_if_changed: bool) -> bool:
+                identity: tailnet.TailnetInfo, out_dir: Path, sleep, *, agent_only_if_changed: bool,
+                sandbox_host: bool = True) -> bool:
     """Write the stack for `bundle`, refresh installer facts and secrets, start it, wait for the import.
 
     Shared by install and Update. The node-agent comes from the pulled image and
@@ -93,13 +94,15 @@ def apply_stack(runner: Runner, ct_id: int, bundle, a: dict, node_ip: str, publi
     stack.pull(runner, ct_id)
     stack.create(runner, ct_id)
     image = stack.quickstart_image(bundle.version)
-    install_agent = not (agent_only_if_changed
+    install_agent = sandbox_host and not (agent_only_if_changed
                          and _sha256(runner.path(prepare_host.NODE_BINARY)) == bundle.node_agent_sha256)
     if install_agent:
         binary = stack.extract_node_agent(runner, ct_id, image, work / "umiak-node-linux-amd64")
         prepare_host.install_node_agent(runner, binary, bundle.node_agent_sha256, public_key)
-    host_report.write(host_report.collect(runner, node, a["vmid_min"], a["vmid_max"]), out_dir)
-    limits = {"storage": a["storage"], "vmidMin": a["vmid_min"], "vmidMax": a["vmid_max"],
+    if sandbox_host:
+        host_report.write(host_report.collect(runner, node, a["vmid_min"], a["vmid_max"]), out_dir)
+    limits = {"mediaStorage": media_storages(runner, node)[0]["storage"],
+              "storage": a["storage"], "vmidMin": a["vmid_min"], "vmidMax": a["vmid_max"],
               "ramCapMb": a["ram_cap_mb"], "templateVmidMin": a["tpl_min"], "templateVmidMax": a["tpl_max"]}
     stack.write_install_json(stack.install_json(
         release=bundle.version, node=node, node_ip=node_ip, fingerprint=stack.pve_fingerprint(runner),
@@ -195,10 +198,14 @@ def update(runner: Runner, current: state.InstallState, bundle, *, ui, sleep=tim
     out_dir = runner.path(SECRETS_DIR)
     public_key = " ".join((out_dir / "umiak-node_ed25519.pub").read_text().split()[:3])
     node_ip = prepare_host.node_address(runner, runner.hostname())
+    from . import nodes
+    inventory = nodes.NodeConsole(runner, current).call("list")["nodes"]
+    sandbox_host = any(n["name"] == current.node for n in inventory)
     progress(f"Updating the Umiak stack to {bundle.version}")
     if apply_stack(runner, ct_id, bundle, a, node_ip, public_key, identity, out_dir, sleep,
-                   agent_only_if_changed=True):
+                   agent_only_if_changed=True, sandbox_host=sandbox_host):
         ui.say("Node-agent updated on this node.")
+    nodes.refresh_agents(runner, current, bundle, ui=ui)
     progress("Publishing the control plane on your tailnet")
     tailnet.serve(runner, ct_id)
     updated = dataclasses.replace(current, release=bundle.version, tailnet_host=identity.dns_name)
@@ -352,6 +359,8 @@ def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: b
     """
     progress = progress or ui.say
     _require_node(runner, current)
+    from . import nodes
+    nodes.require_detached_others(runner, current)
     ct_id = current.ct_id
     ct_row = _umiak_ct(runner, ct_id)
 

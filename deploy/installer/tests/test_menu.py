@@ -22,7 +22,7 @@ def test_menu_options_follow_state():
     assert main.menu_options(None) == ["Install"]
     assert main.menu_options(sample("ct-created")) == ["Resume install", "Uninstall"]
     assert main.menu_options(sample("prepared")) == ["Resume install", "Uninstall"]
-    assert main.menu_options(sample("complete")) == ["Update", "Sign in a new browser", "Reset owner access", "Uninstall"]
+    assert main.menu_options(sample("complete")) == ["Update", "Sign in a new browser", "Reset owner access", "Add or remove sandbox nodes", "Uninstall"]
 
 
 @pytest.fixture

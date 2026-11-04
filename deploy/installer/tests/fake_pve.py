@@ -219,7 +219,7 @@ class FakeRunner(Runner):
             self.path("/sys/class/net/vmbr0/bridge/mcast_hash_max").write_text("8192")
         elif head == ["pvesh", "set"]:
             values = dict(zip(argv[3::2], argv[4::2], strict=True))
-            self.objects[argv[2]].update({k.removeprefix("--"): int(v) for k, v in values.items()})
+            self.objects[argv[2]].update({k.removeprefix("--"): (int(v) if v.isdigit() else v) for k, v in values.items()})
         elif argv[:3] == ["ip", "link", "set"]:
             self.path("/sys/class/net/vmbr0/bridge/mcast_hash_max").write_text(argv[-1])
         elif argv[:3] == ["systemctl", "is-enabled", "dnsmasq"]:

@@ -1,0 +1,268 @@
+"""Day-2 multi-node actions from the original root console.
+
+Only the root installer uses PVE's existing pinned root SSH. The control plane
+gets inventory requests and the restricted node-agent key, never root SSH keys.
+"""
+
+import base64
+import dataclasses
+import hashlib
+import json
+import shlex
+from pathlib import Path
+
+from . import day2, node_host, prepare_host, stack, state
+from .ct import run_in
+from .pve import CommandError, InstallerError, get, write_secret
+
+BOOTSTRAP = """import json,tempfile,pathlib,sys
+p=json.load(sys.stdin)
+with tempfile.TemporaryDirectory(prefix='umiak-node-') as d:
+ root=pathlib.Path(d)/'umiak_installer';root.mkdir()
+ for name,text in p['sources'].items():
+  if pathlib.Path(name).name!=name or not name.endswith('.py'): raise ValueError('invalid helper source')
+  (root/name).write_text(text)
+ sys.path.insert(0,d)
+ from umiak_installer.node_host import dispatch
+ from umiak_installer.pve import Runner
+ print(json.dumps(dispatch(Runner(),p['request'])))
+"""
+
+
+class HostConsole:
+    def __init__(self, runner):
+        self.runner = runner
+
+    def call(self, node, op, **data):
+        if not prepare_host.NAME.fullmatch(node):
+            raise InstallerError("Invalid cluster node name")
+        request = dict(data, node=node, op=op)
+        if node == self.runner.hostname():
+            return node_host.dispatch(self.runner, request)
+        sources = {p.name: p.read_text() for p in Path(__file__).parent.glob("*.py")}
+        command = [
+            "ssh",
+            "-T",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            "ConnectTimeout=10",
+            "root@" + node,
+            shlex.join(["python3", "-c", BOOTSTRAP]),
+        ]
+        return json.loads(self.runner.run(command, input=json.dumps({"sources": sources, "request": request})))
+
+
+READ_INVENTORY = """// Umiak node inventory; works before the S19 quickstart image is pulled.
+import pg from '/app/packages/db/node_modules/pg/lib/index.js';
+const pool=new pg.Pool({connectionString:process.env.DATABASE_URL});
+try {
+ const state=(await pool.query('SELECT state FROM quickstart.setup WHERE id=true')).rows[0]?.state;
+ const provider=state?.steps?.limits?.data?.providerId;
+ if(!provider) throw Error('Finish the installer bootstrap first');
+ const all=(await pool.query(`SELECT n.id AS "nodeId",n.name,n.state,n.node_agent_ref AS "sshHost",n.ram_cap_mb AS "ramCapMb",
+ COALESCE(to_jsonb(n)->>'media_storage','local') AS "mediaStorage",
+ to_jsonb(n)->>'retired_at' AS "retiredAt",st.name AS storage
+ FROM runtime.nodes n
+ LEFT JOIN LATERAL (SELECT name FROM runtime.storages WHERE node_id=n.id AND driver='lvmthin' ORDER BY name LIMIT 1) st ON true
+ WHERE n.provider_id=$1 ORDER BY n.name`,[provider])).rows;
+ console.log(JSON.stringify({nodes:all.filter(n=>!n.retiredAt),retiredNodes:all.filter(n=>n.retiredAt)}));
+} catch(e) {console.error(e.message);process.exitCode=1;} finally {await pool.end();}
+"""
+
+
+class NodeConsole:
+    def __init__(self, runner, current):
+        self.runner, self.current = runner, current
+
+    def call(self, op, **data):
+        command = (
+            ["node", "deploy/compose/quickstart/nodes.mjs"]
+            if op != "list"
+            else ["node", "--input-type=module", "-e", READ_INVENTORY]
+        )
+        argv = stack.compose("exec", "-T", "quickstart", "node", "deploy/compose/quickstart/run.mjs", *command)
+        return json.loads(run_in(self.runner, self.current.ct_id, *argv, input=json.dumps(dict(data, op=op))))
+
+
+def _capable(console):
+    try:
+        if not console.call("capabilities").get("multiNode"):
+            raise InstallerError("Update the control plane to a multi-node-capable release first")
+    except CommandError as error:
+        raise InstallerError("Update the control plane to a multi-node-capable release first") from error
+
+
+def _target(runner, node):
+    if not prepare_host.NAME.fullmatch(node or ""):
+        raise InstallerError("Invalid cluster node name")
+    members = [n for n in get(runner, "/cluster/status") if n.get("type") == "node"]
+    if not any(n.get("name") == node and n.get("online") == 1 for n in members):
+        raise InstallerError("Choose an online node from this Proxmox cluster")
+
+
+def _pinned(content, node, address, key):
+    aliases = {node, address}
+    for line in content.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and aliases.intersection(parts[0].split(",")):
+            if " ".join(parts[1:3]) != key:
+                raise InstallerError("Pinned node host key changed; verify and rotate it explicitly before adding the node")
+    line = f"{address},{node} {key}"
+    return content if line in content.splitlines() else content.rstrip() + "\n" + line + "\n"
+
+
+def add_node(runner, current, bundle, node, *, ui, storage=None, ram_cap_mb=None, console=None, host=None):
+    day2._require_node(runner, current)
+    day2._require_complete(current)
+    _target(runner, node)
+    console, host = console or NodeConsole(runner, current), host or HostConsole(runner)
+    _capable(console)
+    inventory = console.call("list")["nodes"]
+    existing = next((n for n in inventory if n["name"] == node), {})
+    storage = storage or existing.get("storage") or current.answers["storage"]
+    ram_cap_mb = ram_cap_mb or existing.get("ramCapMb") or 4096
+    if not isinstance(ram_cap_mb, int) or not 2048 <= ram_cap_mb <= 8192:
+        raise InstallerError("Sandbox node RAM cap must be 2048-8192 MiB")
+    cfg = {
+        "storage": storage,
+        "gateway_ip": current.ct_ip,
+        "guest_dns": current.answers["guest_dns"],
+        "vmid_min": current.answers["vmid_min"],
+        "vmid_max": current.answers["vmid_max"],
+        "tpl_min": current.answers["tpl_min"],
+        "tpl_max": current.answers["tpl_max"],
+    }
+    report = host.call(node, "inspect", config=cfg)
+    for check in report["checks"]:
+        if not check["ok"] and check["fix"] is None:
+            raise InstallerError(f"Prerequisite {check['name']}: {check['detail']}")
+    secrets = runner.path(day2.SECRETS_DIR)
+    known = secrets / "known_hosts"
+    merged = _pinned(known.read_text(), node, report["sshHost"], report["hostKey"])
+    ui.say(f"Add sandbox node {node}: SSH {report['sshHost']}, storage {storage}, RAM cap {ram_cap_mb} MiB")
+    for check in report["checks"]:
+        if not check["ok"]:
+            ui.say(check["fix"]["description"])
+            for path, text in check["fix"]["files"].items():
+                ui.say(f"  write {path}: {text.strip()}")
+            for argv in check["fix"]["commands"]:
+                ui.say("  run: " + " ".join(argv))
+    ui.say(
+        "Install restricted umiak-node/config, extend Umiak ACLs/SDN membership, pin SSH host key; "
+        "no root key enters the control plane."
+    )
+    if not ui.confirm("Apply these node changes?"):
+        raise InstallerError("Cancelled; no sandbox node changes were applied")
+    work = runner.path(prepare_host.STATE_DIR) / "work"
+    binary = stack.extract_node_agent(
+        runner, current.ct_id, stack.quickstart_image(current.release), work / "umiak-node-linux-amd64"
+    )
+    if hashlib.sha256(binary.read_bytes()).hexdigest() != bundle.node_agent_sha256:
+        raise InstallerError("Installed image and installer bundle node-agent checksums differ; Update first")
+    public = (secrets / "umiak-node_ed25519.pub").read_text().strip()
+    members = sorted({n["name"] for n in inventory} | {node})
+    result = host.call(
+        node,
+        "prepare",
+        config=cfg,
+        members=members,
+        public_key=public,
+        binary=base64.b64encode(binary.read_bytes()).decode(),
+        sha256=bundle.node_agent_sha256,
+    )
+    if result["sshHost"] != report["sshHost"] or result["hostKey"] != report["hostKey"]:
+        raise InstallerError("Node identity changed during preparation; not registering it")
+    write_secret(known, merged)
+    stack.push_secrets(runner, current.ct_id, {"known_hosts": known}, stack.quickstart_image(current.release))
+    registered = console.call(
+        "register",
+        node={
+            "name": node,
+            "sshHost": result["sshHost"],
+            "storage": storage,
+            "mediaStorage": result["mediaStorage"],
+            "ramCapMb": ram_cap_mb,
+        },
+    )
+    if not registered.get("ok"):
+        raise InstallerError("Node verification/registration failed; inspect preparation and retry")
+    return registered
+
+
+def remove_node(runner, current, node, *, ui, console=None, host=None):
+    day2._require_node(runner, current)
+    day2._require_complete(current)
+    _target(runner, node)
+    console, host = console or NodeConsole(runner, current), host or HostConsole(runner)
+    _capable(console)
+    listed = console.call("list")
+    inventory = listed["nodes"]
+    target = next((n for n in inventory + listed.get("retiredNodes", []) if n["name"] == node), None)
+    if target is None:
+        raise InstallerError("Node is not registered for sandbox use")
+    ui.say(
+        f"Remove sandbox node {node}: retain history/control-plane CT and shared cluster key; "
+        "remove only its node-agent/config and narrow Umiak SDN membership."
+    )
+    if not ui.confirm("Remove this sandbox node if it is empty?"):
+        raise InstallerError("Cancelled; no sandbox node changes were applied")
+    result = console.call("retire", nodeId=target["nodeId"])
+    if not result["ok"]:
+        blockers = ", ".join(f"{b['kind']} {b['id']}" for b in result["blockers"])
+        raise InstallerError("Node removal blocked: " + blockers)
+    remaining = sorted(n["name"] for n in inventory if n["name"] != node)
+    host.call(node, "remove", remaining_nodes=remaining, control_plane_id=current.ct_id)
+    return result
+
+
+def remember(runner, current, state_path=None):
+    names = [n["name"] for n in NodeConsole(runner, current).call("list")["nodes"]]
+    updated = dataclasses.replace(current, sandbox_nodes=names)
+    state.save(updated, state_path or runner.path(str(state.DEFAULT_PATH)))
+    return updated
+
+
+def refresh_agents(runner, current, bundle, *, ui):
+    inventory = NodeConsole(runner, current).call("list")["nodes"]
+    targets = [n for n in inventory if n["name"] != current.node]
+    if not targets:
+        return
+    secrets = runner.path(day2.SECRETS_DIR)
+    binary = stack.extract_node_agent(
+        runner,
+        current.ct_id,
+        stack.quickstart_image(bundle.version),
+        runner.path(prepare_host.STATE_DIR) / "work/umiak-node-linux-amd64",
+    )
+    public = (secrets / "umiak-node_ed25519.pub").read_text().strip()
+    host = HostConsole(runner)
+    for node in targets:
+        ui.say("Updating restricted node-agent on " + node["name"])
+        cfg = {
+            "storage": node["storage"],
+            "gateway_ip": current.ct_ip,
+            "guest_dns": current.answers["guest_dns"],
+            "vmid_min": current.answers["vmid_min"],
+            "vmid_max": current.answers["vmid_max"],
+            "tpl_min": current.answers["tpl_min"],
+            "tpl_max": current.answers["tpl_max"],
+        }
+        host.call(
+            node["name"],
+            "update",
+            config=cfg,
+            public_key=public,
+            binary=base64.b64encode(binary.read_bytes()).decode(),
+            sha256=bundle.node_agent_sha256,
+        )
+
+
+def require_detached_others(runner, current):
+    if current.phase != "complete":
+        return
+    names = [n["name"] for n in NodeConsole(runner, current).call("list")["nodes"] if n["name"] != current.node]
+    if names:
+        raise InstallerError("Remove the other sandbox nodes before platform uninstall: " + ", ".join(names))

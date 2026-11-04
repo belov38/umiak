@@ -63,6 +63,8 @@ class Day2Fake(CtFake):
         return out
 
     def _in_ct(self, argv, input):
+        if any(part.endswith("/nodes.mjs") or part.startswith("// Umiak node inventory") for part in argv):
+            return json.dumps({"nodes": [{"name": "pve", "nodeId": "node", "storage": "local-lvm", "ramCapMb": 8192}]})
         if argv[:2] == ["docker", "compose"] and "exec" in argv:
             if "umiak-signin" in argv:
                 return f"/signin#{SIGNIN}\nExpires: 2026-11-04T10:10:00.000Z. Existing sessions remain valid."

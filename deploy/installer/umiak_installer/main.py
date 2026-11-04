@@ -48,7 +48,7 @@ def menu_options(current: state.InstallState | None) -> list[str]:
         return ["Install"]
     if current.phase != "complete":
         return ["Resume install", "Uninstall"]
-    return ["Update", "Sign in a new browser", "Reset owner access", "Uninstall"]
+    return ["Update", "Sign in a new browser", "Reset owner access", "Add or remove sandbox nodes", "Uninstall"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -67,6 +67,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ram-cap-mb", type=int, help=f"sandbox RAM cap in MiB, 2048-8192 (default {DEFAULT_RAM_CAP})")
     parser.add_argument("--hostname", help="tailnet hostname of the control plane (default umiak)")
     parser.add_argument("--action", choices=sorted(ACTIONS), help="day-2 action without the menu (non-interactive)")
+    parser.add_argument("--node", help="Sandbox node name from this cluster")
+    parser.add_argument("--node-action", choices=["add", "remove"], help="Action for --action nodes")
     parser.add_argument("--version", help="Update: release version (default: the latest release)")
     parser.add_argument("--remove-guests", action="store_true",
                         help="Uninstall: also destroy Umiak sandboxes and templates in pool umiak")
@@ -76,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 ACTIONS = {"update": "Update", "signin": "Sign in a new browser", "reset-owner": "Reset owner access",
-           "uninstall": "Uninstall"}
+           "uninstall": "Uninstall", "nodes": "Add or remove sandbox nodes"}
 
 
 class Ui:
@@ -367,6 +369,20 @@ class Flow:
                 return 1
             ui.say("Owner access was reset. The link below is a one-time owner claim; do not share it.")
             ui.say(f"Open {link}")
+        elif action == "Add or remove sandbox nodes":
+            from . import nodes
+            self.step = "Managing sandbox nodes"
+            operation = args.node_action or ui.ask("Node action (add/remove)", None, "--node-action")
+            if operation not in ("add", "remove"):
+                raise UsageError("--node-action must be add or remove")
+            node = args.node or ui.ask("Sandbox node name", None, "--node")
+            if operation == "add":
+                nodes.add_node(self.runner, current, self.bundle, node, ui=ui, storage=args.storage,
+                               ram_cap_mb=args.ram_cap_mb)
+            else:
+                nodes.remove_node(self.runner, current, node, ui=ui)
+            self.current = nodes.remember(self.runner, current, self.state_path)
+            ui.say(f"Sandbox node {node}: {operation} complete.")
         elif action == "Uninstall":
             self.step = "Uninstall questions"
             guests = ui.ask_bool("Also destroy the Umiak sandboxes and templates in pool umiak?", args.remove_guests)
