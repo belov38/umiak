@@ -300,3 +300,24 @@ def test_command_failure_names_step_inner_command_and_stderr_tail(env):
     assert "exit code 18" in text
     lines = text.splitlines()
     assert "err line 30" in lines and "err line 11" in lines and "err line 10" not in lines
+
+
+def test_main_turns_on_line_buffering(env, monkeypatch):
+    runner, run, printed = env
+    calls = []
+
+    class Stream:
+        def reconfigure(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setattr(main.sys, "stdout", Stream())
+    monkeypatch.setattr(main.sys, "stderr", Stream())
+    run(FLAGS)
+    assert calls == [{"line_buffering": True}] * 2
+
+
+def test_guest_dns_flag_reaches_pct_create(env):
+    runner, run, printed = env
+    assert run(FLAGS + ["--guest-dns", "9.9.9.9"]) == 0
+    create = next(a for a in runner.commands if a[:2] == ["pct", "create"])
+    assert create[create.index("--nameserver") + 1] == "9.9.9.9"

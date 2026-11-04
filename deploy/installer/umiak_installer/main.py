@@ -62,6 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ct-id", type=int, help=f"control-plane CT ID (default {DEFAULT_CT_ID})")
     parser.add_argument("--ct-ip", help="static LAN IPv4 address of the control-plane CT")
     parser.add_argument("--gateway-cidr", help="LAN router and prefix, e.g. 192.168.1.1/24 (default: from vmbr0)")
+    parser.add_argument("--guest-dns", help=f"DNS server(s) for sandboxes and the control-plane CT (default {GUEST_DNS})")
     parser.add_argument("--vmid-range", help="sandbox VMIDs (default 500-589)")
     parser.add_argument("--template-range", help="template VMIDs (default 600-699)")
     parser.add_argument("--ram-cap-mb", type=int, help=f"sandbox RAM cap in MiB, 2048-8192 (default {DEFAULT_RAM_CAP})")
@@ -195,12 +196,14 @@ def gather(runner: Runner, args, ui: Ui, saved: dict | None = None) -> dict:
     if not args.ct_ip and "ct_ip" not in saved:
         ui.say("The control plane needs a static LAN address outside your router's DHCP pool "
                "(reserve it on the router); guests reach the gateway there.")
+        ui.say("Pick an address outside your router's DHCP range (it must never be handed to another device).")
     ct_ip = args.ct_ip or ui.ask("Control-plane static IPv4 address", default("ct_ip", None), "--ct-ip")
     hostname = args.hostname or ui.ask("Tailnet hostname", default("hostname", "umiak"), "--hostname")
+    dns = args.guest_dns or saved.get("guest_dns") or GUEST_DNS
     try:
         gw, prefix = lan.split("/")
         spec = ct.CtSpec(id=ct_id, ip=str(ipaddress.IPv4Address(ct_ip)), cidr=int(prefix),
-                         gw=str(ipaddress.IPv4Address(gw)), storage=storage)
+                         gw=str(ipaddress.IPv4Address(gw)), storage=storage, dns=dns)
     except ValueError as error:
         raise UsageError(f"Invalid address: {error}") from error
     if not tailnet.HOSTNAME.fullmatch(hostname):
@@ -215,7 +218,7 @@ def gather(runner: Runner, args, ui: Ui, saved: dict | None = None) -> dict:
         raise UsageError(str(error)) from error
     return {"storage": storage, "vmid_min": vmids[0], "vmid_max": vmids[1], "tpl_min": templates[0],
             "tpl_max": templates[1], "ram_cap_mb": ram, "ct_id": ct_id, "ct_ip": spec.ip, "gw": spec.gw,
-            "cidr": spec.cidr, "hostname": hostname, "guest_dns": GUEST_DNS}
+            "cidr": spec.cidr, "hostname": hostname, "guest_dns": dns}
 
 
 def run_checklist(runner: Runner, ui: Ui, storage: str | None) -> None:
@@ -302,8 +305,9 @@ class Flow:
         self.save("prepared", a)
 
         self.progress(f"Creating control-plane container {ct_id}")
-        ct.create(runner, ct.CtSpec(id=ct_id, ip=a["ct_ip"], cidr=a["cidr"], gw=a["gw"], storage=a["storage"]),
-                  sleep=self.sleep)
+        ct.create(runner, ct.CtSpec(id=ct_id, ip=a["ct_ip"], cidr=a["cidr"], gw=a["gw"], storage=a["storage"],
+                                  dns=a["guest_dns"]),
+                  sleep=self.sleep, say=self.ui.say)
         self.save("ct-created", a)
 
         self.progress("Connecting the control plane to your tailnet")
@@ -396,6 +400,10 @@ def main(argv=None, runner: Runner | None = None, bundle: release.Release | None
          sleep=time.sleep, state_path: Path | None = None, download=release.download,
          latest=release.latest_version) -> int:
     args = build_parser().parse_args(argv)
+    # Output is block-buffered when redirected to a file or pipe; long waits must stay visible.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(line_buffering=True)
     runner = runner or Runner()
     ui = Ui(interactive=not args.non_interactive, yes=args.yes, input_fn=input_fn, out=out)
     flow = None
