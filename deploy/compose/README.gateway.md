@@ -1,25 +1,25 @@
-# Gateway (S4) в локальном стеке
+# Gateway (S4) in the local stack
 
-`gateway.yaml` добавляет к стеку из `compose.yaml` два сервиса:
+`gateway.yaml` adds two services to the stack from `compose.yaml`:
 
-- `gateway-secrets` — одноразовый, создаёт недостающие dev-секреты в `deploy/compose/secrets/gateway/`;
-- `gateway` — образ `umiak-gateway:dev` из `services/gateway/Dockerfile`.
+- `gateway-secrets` — one-shot, creates missing dev secrets in `deploy/compose/secrets/gateway/`;
+- `gateway` — the `umiak-gateway:dev` image from `services/gateway/Dockerfile`.
 
-Кроме того, он дописывает в `worker` токен для внутреннего listener-а gateway.
+It also adds the token for the gateway internal listener to `worker`.
 
-## Подключение
+## Wiring
 
-`compose.yaml` включает `gateway.yaml` (`include: [gateway.yaml]` в начале), поэтому gateway поднимается
-обычной командой:
+`compose.yaml` includes `gateway.yaml` (`include: [gateway.yaml]` at the top), so the gateway starts with the
+usual command:
 
 ```sh
 docker compose -f deploy/compose/compose.yaml up -d --build
 ```
 
-`secrets-init` зависит от `gateway-secrets`: токены `api`, login CA и host keys берутся из
-`secrets/gateway/`. Сеть `umiak` объявлена в обоих файлах, конфликта нет: compose сливает объявления.
-Дополнение сервиса `worker` тоже применяется. `gateway.yaml` можно использовать и отдельно, слоем `-f`
-поверх `compose.yaml` без `include`.
+`secrets-init` depends on `gateway-secrets`: the `api` tokens, login CA and host keys are taken from
+`secrets/gateway/`. The `umiak` network is declared in both files without a conflict: compose merges the declarations.
+The addition to the `worker` service is applied too. `gateway.yaml` can also be used on its own, as an `-f` layer
+on top of `compose.yaml` without `include`.
 
 ```sh
 docker compose -f deploy/compose/compose.yaml ps -a
@@ -28,104 +28,104 @@ curl -i http://127.0.0.1:9190/readyz     # 200 ok
 curl -s http://127.0.0.1:9190/metrics | grep '^umiak_gateway' | head
 ```
 
-## Порты (только 127.0.0.1)
+## Ports (127.0.0.1 only)
 
-| Хост | Контейнер | Что | Переменная в `deploy/compose/.env` |
+| Host | Container | What | Variable in `deploy/compose/.env` |
 |---|---|---|---|
-| 8443 | 8443 | TLS: `*.umiak.localhost` и `tunnel.localhost` (по SNI) | `GATEWAY_HTTPS_PORT` |
+| 8443 | 8443 | TLS: `*.umiak.localhost` and `tunnel.localhost` (by SNI) | `GATEWAY_HTTPS_PORT` |
 | 2222 | 2222 | SSH | `GATEWAY_SSH_PORT` |
-| 7000 | 7000 | внутренний listener (peer, worker, api); для отладки | `GATEWAY_INTERNAL_PORT` |
-| 9190 | 9090 | `/metrics`, `/healthz`, `/readyz` (9090 на хосте занят worker-ом) | `GATEWAY_METRICS_PORT` |
+| 7000 | 7000 | internal listener (peer, worker, api); for debugging | `GATEWAY_INTERNAL_PORT` |
+| 9190 | 9090 | `/metrics`, `/healthz`, `/readyz` (host port 9090 is taken by the worker) | `GATEWAY_METRICS_PORT` |
 
-На macOS порт 7000 слушает AirPlay Receiver (`*:7000`). Публикация на `127.0.0.1:7000` при этом работает,
-но если Docker не сможет его занять, поменяйте `GATEWAY_INTERNAL_PORT`.
+On macOS, port 7000 is listened on by AirPlay Receiver (`*:7000`). Publishing on `127.0.0.1:7000` still works,
+but if Docker cannot bind it, change `GATEWAY_INTERNAL_PORT`.
 
-## Секреты
+## Secrets
 
-`gateway-secrets` запускает `umiak-gateway dev-secrets -dir /secrets`. Каталог `deploy/compose/secrets/`
-в `.gitignore`. Команда создаёт только отсутствующие файлы, поэтому её можно запускать на каждом `up`.
-Исключение — два производных файла: `login-ca-keys` (из `ssh_login_ca`) и `worker-gateway-token`
-(из `service-tokens.json`). Их команда переписывает, если они разошлись с источником.
+`gateway-secrets` runs `umiak-gateway dev-secrets -dir /secrets`. The `deploy/compose/secrets/` directory
+is in `.gitignore`. The command creates only missing files, so it is safe to run on every `up`.
+The exception is two derived files: `login-ca-keys` (from `ssh_login_ca`) and `worker-gateway-token`
+(from `service-tokens.json`). The command rewrites them if they drift from the source.
 
-| Файл | Права | Назначение |
+| File | Mode | Purpose |
 |---|---|---|
-| `ca.pem`, `ca.key` | 644 / 600 | dev CA. Ограничен name constraints: подписывает только `umiak.localhost`, `tunnel.localhost`, `ssh.localhost` и их поддомены |
-| `umiak.pem`, `umiak.key` | 644 / 600 | сертификат `*.umiak.localhost` и `umiak.localhost` (397 дней) |
-| `tunnel.pem`, `tunnel.key` | 644 / 600 | сертификат `tunnel.localhost` для агентов |
-| `cookie-keys` | 600 | ключ cookie портов, `k1:<base64 32 байта>` |
-| `ssh_host_ed25519_key`, `ssh_host_ecdsa_key` (+ `.pub`) | 600 / 644 | host keys SSH-gateway |
-| `ssh_user_ca` (+ `.pub`) | 600 / 644 | CA, которым gateway подписывает сертификаты для sshd в VM. `.pub` нужен шаблону VM (`TrustedUserCAKeys`) |
-| `ssh_login_ca` (+ `.pub`) | 600 / 644 | CA коротких login-сертификатов. Закрытый ключ — для `api` (S7, `UMIAK_SSH_LOGIN_CA_KEY_FILE`) |
-| `login-ca-keys` | 644 | `ssh_login_ca.pub` в формате authorized_keys (`UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS_FILE`) |
-| `service-tokens.json` | 600 | токены, которые gateway принимает: `{"api":[..],"worker":[..],"gateway":[..]}`. `gateway[0]` gateway шлёт пирам |
-| `api-token` | 600 | токен, с которым gateway ходит в `api` (`UMIAK_GATEWAY_API_TOKEN_FILE`) |
-| `worker-gateway-token` | 600 | равен `service-tokens.json` → `worker[0]`. Worker читает его через `UMIAK_GATEWAY_SERVICE_TOKEN_FILE` |
+| `ca.pem`, `ca.key` | 644 / 600 | dev CA. Limited by name constraints: signs only `umiak.localhost`, `tunnel.localhost`, `ssh.localhost` and their subdomains |
+| `umiak.pem`, `umiak.key` | 644 / 600 | certificate for `*.umiak.localhost` and `umiak.localhost` (397 days) |
+| `tunnel.pem`, `tunnel.key` | 644 / 600 | certificate for `tunnel.localhost`, used by agents |
+| `cookie-keys` | 600 | port cookie key, `k1:<base64 32 bytes>` |
+| `ssh_host_ed25519_key`, `ssh_host_ecdsa_key` (+ `.pub`) | 600 / 644 | SSH gateway host keys |
+| `ssh_user_ca` (+ `.pub`) | 600 / 644 | CA the gateway uses to sign certificates for sshd in the VM. The VM template needs the `.pub` (`TrustedUserCAKeys`) |
+| `ssh_login_ca` (+ `.pub`) | 600 / 644 | CA for short-lived login certificates. The private key is for `api` (S7, `UMIAK_SSH_LOGIN_CA_KEY_FILE`) |
+| `login-ca-keys` | 644 | `ssh_login_ca.pub` in authorized_keys format (`UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS_FILE`) |
+| `service-tokens.json` | 600 | tokens the gateway accepts: `{"api":[..],"worker":[..],"gateway":[..]}`. The gateway sends `gateway[0]` to peers |
+| `api-token` | 600 | token the gateway uses to call `api` (`UMIAK_GATEWAY_API_TOKEN_FILE`) |
+| `worker-gateway-token` | 600 | equal to `service-tokens.json` → `worker[0]`. The worker reads it via `UMIAK_GATEWAY_SERVICE_TOKEN_FILE` |
 
-Владельцы. `gateway-secrets` работает от root и отдаёт файлы пользователю gateway (distroless `nonroot`, 65532),
-а `worker-gateway-token` — пользователю worker (`node`, 1000). Это делается на каждом запуске и для уже
-существующих файлов. В Docker Desktop это не видно: на хосте файлы
-принадлежат вам. На Linux-хосте закрытые файлы после этого читает только root. Если каталога нет, Docker создаст его
-от root. Чтобы каталог остался вашим и файлы можно было удалять без `sudo`, создайте его заранее:
+Owners. `gateway-secrets` runs as root and hands the files to the gateway user (distroless `nonroot`, 65532),
+and `worker-gateway-token` to the worker user (`node`, 1000). This happens on every start, including for
+existing files. Docker Desktop hides this: on the host the files
+belong to you. On a Linux host, the private files are then readable only by root. If the directory does not exist, Docker creates it
+as root. To keep the directory yours and be able to delete files without `sudo`, create it beforehand:
 
 ```sh
 mkdir -p deploy/compose/secrets/gateway
 ```
 
-Пересоздание. Удалите файл, и следующий `up` создаст его заново. Пары удаляются целиком: сертификат с ключом,
-закрытый ключ SSH с `.pub`. Если осталась одна половина пары, `dev-secrets` откажется работать и назовёт файл.
-При новом `ca.*` удалите и `umiak.*`, `tunnel.*`. Срок сертификатов — 397 дней (лимит браузеров и macOS); по
-истечении удалите `umiak.*` и `tunnel.*`. После пересоздания нужен `up -d --force-recreate gateway`
-(сертификаты gateway перечитывает сам, остальные секреты — только при старте).
+Regeneration. Delete a file and the next `up` recreates it. Pairs are deleted whole: a certificate with its key,
+an SSH private key with its `.pub`. If only one half of a pair is left, `dev-secrets` refuses to run and names the file.
+When `ca.*` is new, delete `umiak.*` and `tunnel.*` too. Certificates last 397 days (the browser and macOS limit); when they
+expire, delete `umiak.*` and `tunnel.*`. After regeneration run `up -d --force-recreate gateway`
+(the gateway reloads certificates by itself; other secrets are read only at start).
 
-## Токен worker-а
+## Worker token
 
-`gateway.yaml` монтирует каталог секретов в worker (`/run/umiak-gateway`, только чтение) и задаёт
-`UMIAK_GATEWAY_SERVICE_TOKEN_FILE=/run/umiak-gateway/worker-gateway-token`. Монтируется каталог, а не файл: Docker
-создал бы на месте ещё не существующего файла каталог раньше, чем отработает `gateway-secrets`. Worker находит
-gateway через реестр (`tunnel.gateway_instances`, `internal_url = http://gateway:7000`) и вызывает на нём `rotate-token`.
+`gateway.yaml` mounts the secrets directory into the worker (`/run/umiak-gateway`, read-only) and sets
+`UMIAK_GATEWAY_SERVICE_TOKEN_FILE=/run/umiak-gateway/worker-gateway-token`. A directory is mounted, not a file: Docker
+would create a directory in place of a not-yet-existing file before `gateway-secrets` runs. The worker finds the
+gateway through the registry (`tunnel.gateway_instances`, `internal_url = http://gateway:7000`) and calls `rotate-token` on it.
 
 ## api
 
-По умолчанию `UMIAK_GATEWAY_API_URL=http://api:8082` (внутренний listener `api`, S7). Через него gateway
-ищет маршруты preview-адресов, проверяет SSH-ключи и сертификаты и шлёт события агентов.
-`secrets-init` берёт токены из `secrets/gateway/`: `api-token` попадает в `api/service-tokens.json` под
-ключом `gateway`, а `service-tokens.json` → `api[0]` становится токеном `api` для внутреннего listener
-gateway (`api/gateway-token`). Если файлы `gateway-secrets` пересоздали, перезапустите `api` и `gateway`
+By default `UMIAK_GATEWAY_API_URL=http://api:8082` (the `api` internal listener, S7). Through it the gateway
+looks up preview address routes, checks SSH keys and certificates, and sends agent events.
+`secrets-init` takes the tokens from `secrets/gateway/`: `api-token` goes into `api/service-tokens.json` under
+the `gateway` key, and `service-tokens.json` → `api[0]` becomes the `api` token for the gateway internal listener
+(`api/gateway-token`). If the `gateway-secrets` files were regenerated, restart `api` and `gateway`
 (`up -d --force-recreate api gateway`).
 
-Стек без `api`: задайте в `deploy/compose/.env` `UMIAK_GATEWAY_API_URL=none`. Все preview-адреса тогда
-отвечают `503 route_lookup_unavailable`, SSH-логины отклоняются, события агентов пишутся в лог и
-отбрасываются. Туннели агентов, реестр и внутренний listener работают.
+Stack without `api`: set `UMIAK_GATEWAY_API_URL=none` in `deploy/compose/.env`. All preview addresses then
+answer `503 route_lookup_unavailable`, SSH logins are rejected, and agent events are logged and
+dropped. Agent tunnels, the registry and the internal listener work.
 
-## HTTPS: доверие dev CA и имена
+## HTTPS: trusting the dev CA and names
 
-`*.localhost` браузеры сами резолвят в loopback; системный резолвер и curl — не всегда. Gateway разбирает
-метку только из Host без порта (или с `:443`, спецификация §4.2), поэтому `https://demo-3000.umiak.localhost:8443/`
-ответит `404 route_not_found`.
+Browsers resolve `*.localhost` to loopback themselves; the system resolver and curl do not always. The gateway parses the
+label only from a Host without a port (or with `:443`, spec §4.2), so `https://demo-3000.umiak.localhost:8443/`
+answers `404 route_not_found`.
 
-curl, порт 8443: `--connect-to` подменяет адрес, а Host и SNI оставляет как есть:
+curl, port 8443: `--connect-to` substitutes the address and leaves Host and SNI as they are:
 
 ```sh
 curl --cacert deploy/compose/secrets/gateway/ca.pem \
   --connect-to demo-3000.umiak.localhost:443:127.0.0.1:8443 \
   https://demo-3000.umiak.localhost/
-# 404 {"error":{"code":"route_not_found",...}} от api (без api: 503 route_lookup_unavailable)
+# 404 {"error":{"code":"route_not_found",...}} from api (without api: 503 route_lookup_unavailable)
 ```
 
-Браузер: задайте `GATEWAY_HTTPS_PORT=443` в `deploy/compose/.env` (Docker Desktop и Linux-docker умеют
-публиковать порт 443) и добавьте `ca.pem` в доверенные:
+Browser: set `GATEWAY_HTTPS_PORT=443` in `deploy/compose/.env` (Docker Desktop and Linux Docker can
+publish port 443) and add `ca.pem` to the trusted certificates:
 
 ```sh
 # macOS
 security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db deploy/compose/secrets/gateway/ca.pem
-# Linux (Debian/Ubuntu); Firefox и Chrome на Linux держат своё хранилище (certutil из libnss3-tools)
+# Linux (Debian/Ubuntu); Firefox and Chrome on Linux keep their own store (certutil from libnss3-tools)
 sudo cp deploy/compose/secrets/gateway/ca.pem /usr/local/share/ca-certificates/umiak-dev-ca.crt && sudo update-ca-certificates
 ```
 
-Name constraints у CA не дают ему подписать чужие имена, даже если `ca.key` утечёт. Удалить доверие:
-`security delete-certificate -c "umiak dev CA <id>"` (точное имя показывает `openssl x509 -in ca.pem -noout -subject`).
+The CA name constraints keep it from signing foreign names even if `ca.key` leaks. To remove trust:
+`security delete-certificate -c "umiak dev CA <id>"` (`openssl x509 -in ca.pem -noout -subject` shows the exact name).
 
-С `GATEWAY_HTTPS_PORT=443` curl-у хватает `--resolve demo-3000.umiak.localhost:443:127.0.0.1` (или строки в `/etc/hosts`).
+With `GATEWAY_HTTPS_PORT=443`, `--resolve demo-3000.umiak.localhost:443:127.0.0.1` is enough for curl (or a line in `/etc/hosts`).
 
 ## SSH
 
@@ -134,30 +134,30 @@ printf '[127.0.0.1]:2222 %s\n' "$(cut -d' ' -f1,2 deploy/compose/secrets/gateway
 ssh -p 2222 -o UserKnownHostsFile=/tmp/umiak_known_hosts <slug>@127.0.0.1
 ```
 
-Авторизация ключа и сертификата идёт через `api` (внутренний listener); без `api` SSH-логин всегда отклоняется.
+Key and certificate authorization goes through `api` (the internal listener); without `api` an SSH login is always rejected.
 
-## Остановка и drain
+## Stop and drain
 
-`stop_grace_period: 960s`, как `terminationGracePeriodSeconds` пода (спецификация §10.5). По SIGTERM gateway
-сразу отдаёт `/readyz 503`, ещё 5 s принимает соединения, затем дренирует. HTTP-потокам даётся 2 мин, SSH-сессиям
-15 мин; весь drain ограничен 950 s. Без открытых сессий `docker compose stop gateway` занимает около 5 s.
-Повторный сигнал (Ctrl-C дважды при `up` без `-d`) останавливает процесс сразу.
+`stop_grace_period: 960s`, like a pod's `terminationGracePeriodSeconds` (spec §10.5). On SIGTERM the gateway
+immediately returns `/readyz 503`, keeps accepting connections for another 5 s, then drains. HTTP streams get 2 min, SSH sessions
+15 min; the whole drain is capped at 950 s. With no open sessions, `docker compose stop gateway` takes about 5 s.
+A second signal (Ctrl-C twice during `up` without `-d`) stops the process immediately.
 
-Для локальных прогонов есть две переменные окружения gateway (в `environment:` сервиса или через override):
+For local runs the gateway has two environment variables (in the service `environment:` or via an override):
 
-- `UMIAK_GATEWAY_ENDPOINT_WAIT` — пауза перед закрытием listener-ов (по умолчанию 5s);
-- `UMIAK_GATEWAY_DRAIN_TIMEOUT` — общий предел drain (по умолчанию бюджет drain + 30 s = 950 s, больше 950 s не принимается).
+- `UMIAK_GATEWAY_ENDPOINT_WAIT` — pause before closing the listeners (default 5s);
+- `UMIAK_GATEWAY_DRAIN_TIMEOUT` — overall drain limit (default is the drain budget + 30 s = 950 s; values above 950 s are not accepted).
 
-`docker compose stop -t 10 gateway` прервёт долгий drain через 10 s (SIGKILL).
+`docker compose stop -t 10 gateway` interrupts a long drain after 10 s (SIGKILL).
 
-## Образ
+## Image
 
 ```sh
 docker build -f services/gateway/Dockerfile -t umiak-gateway:dev --build-arg VERSION=$(git rev-parse --short HEAD) .
 docker run --rm umiak-gateway:dev version
 ```
 
-Сборка идёт из корня репозитория. `services/gateway/Dockerfile.dockerignore` заменяет корневой `.dockerignore`
-и оставляет в контексте только `libs/proto`, `libs/tunnel`, `services/gateway`. Модуль собирается с `GOWORK=off`
-через свои `replace`. Итоговый образ — `gcr.io/distroless/static-debian13:nonroot`. В нём нет shell, поэтому
-healthcheck вызывает `umiak-gateway healthcheck`.
+The build runs from the repository root. `services/gateway/Dockerfile.dockerignore` replaces the root `.dockerignore`
+and leaves only `libs/proto`, `libs/tunnel`, `services/gateway` in the context. The module is built with `GOWORK=off`
+through its own `replace` directives. The final image is `gcr.io/distroless/static-debian13:nonroot`. It has no shell, so
+the healthcheck calls `umiak-gateway healthcheck`.

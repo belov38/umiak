@@ -1,178 +1,178 @@
 # @umiak/api
 
-Публичное API v1 (S7): Hono + `@hono/zod-openapi` на Node. Спецификация — `docs/specs/s7-public-api.md`, отличия
-реализации — её §23. Маршруты вызывают `SandboxService` (`packages/core`, S6) и агента через интерфейс `AgentApi`.
+Public API v1 (S7): Hono + `@hono/zod-openapi` on Node. The specification is `docs/specs/s7-public-api.md`; where the
+implementation differs, see its §23. Routes call `SandboxService` (`packages/core`, S6) and the agent through the `AgentApi` interface.
 
-## Запуск
+## Running
 
-Сам `api` не собирается: `node src/main.ts` (type stripping). `@umiak/proto` и `@umiak/agent-client` в рантайме
-берутся из `dist`, их надо собрать один раз и после изменений:
+`api` itself is not built: `node src/main.ts` (type stripping). `@umiak/proto` and `@umiak/agent-client` are taken
+from `dist` at runtime, so build them once and after changes:
 
 ```sh
-mise exec -- pnpm --filter "@umiak/agent-client..." run build   # или mise exec -- pnpm build
-mise exec -- node apps/api/src/main.ts                         # переменные окружения — ниже
+mise exec -- pnpm --filter "@umiak/agent-client..." run build   # or mise exec -- pnpm build
+mise exec -- node apps/api/src/main.ts                         # environment variables — below
 ```
 
-Личности (пользователи, команды, ключи) и конфиг (шаблоны, размеры, квоты, `defaults`) берутся из Payload
-(`@umiak/payload`: `PayloadIdentityStore`, `PayloadConfigReader` с `LISTEN umiak_config`, свой пул на 10 соединений).
-Миграции схемы `payload` `api` не применяет: это делает `node packages/payload/src/migrate.ts` (в compose —
-`web-migrate`) до старта; до тех пор `/readyz` отвечает `503`.
+Identities (users, teams, keys) and config (templates, sizes, quotas, `defaults`) come from Payload
+(`@umiak/payload`: `PayloadIdentityStore`, `PayloadConfigReader` with `LISTEN umiak_config`, its own pool of 10 connections).
+`api` does not apply the `payload` schema migrations: `node packages/payload/src/migrate.ts` does (in compose,
+`web-migrate`) before start; until then `/readyz` answers `503`.
 
-В docker compose это сервис `api` (`deploy/compose/README.md`), образ — `deploy/compose/quickstart/Dockerfile`. Неверное
-окружение — выход с кодом `1` и список всех ошибок. Битый файл (ключи, токены, CA, личности) роняет старт до
-первого подключения к Postgres. SIGTERM/SIGINT: readiness → false, стримам — кадр `reconnect`, PTY — `1012`,
-sync-командам — `503 server_shutting_down`, выход не позже чем через 10 s; второй сигнал — выход `1` сразу.
+In docker compose this is the `api` service (`deploy/compose/README.md`); the image is `deploy/compose/quickstart/Dockerfile`. An invalid
+environment makes it exit with code `1` and a list of all errors. A broken file (keys, tokens, CA, identities) fails the start before the
+first Postgres connection. SIGTERM/SIGINT: readiness → false, a `reconnect` frame to streams, `1012` to PTYs,
+`503 server_shutting_down` to sync commands, exit within 10 s; a second signal exits with `1` immediately.
 
-## Listener-ы
+## Listeners
 
-| Порт (env) | По умолчанию | Кто | Аутентификация |
+| Port (env) | Default | Who | Authentication |
 |---|---|---|---|
-| `UMIAK_API_PUBLIC_PORT` | 8080 | SDK, CLI, MCP, CI | Keycloak JWT или командный ключ `umiak_`; `X-Auth-Request-*` вырезаются |
-| `UMIAK_API_PROXIED_PORT` | 8081 | браузер через oauth2-proxy | заголовки oauth2-proxy, проверка `Origin`; `UMIAK_API_PROXIED_ENABLED=0` — не запускать |
+| `UMIAK_API_PUBLIC_PORT` | 8080 | SDK, CLI, MCP, CI | Keycloak JWT or team key `umiak_`; `X-Auth-Request-*` are stripped |
+| `UMIAK_API_PROXIED_PORT` | 8081 | browser via oauth2-proxy | oauth2-proxy headers, `Origin` check; `UMIAK_API_PROXIED_ENABLED=0` — do not start |
 | `UMIAK_API_INTERNAL_PORT` | 8082 | gateway (S4) | service token |
-| `UMIAK_API_METRICS_PORT` | 9090 | Prometheus, пробы | нет: `/healthz`, `/readyz`, `/metrics` |
+| `UMIAK_API_METRICS_PORT` | 9090 | Prometheus, probes | none: `/healthz`, `/readyz`, `/metrics` |
 
-`/readyz` готов, когда работают Postgres и `LISTEN umiak_identity`, применены все известные коду миграции Payload и
-процесс не останавливается; иначе `503 not_ready` с `details.reasons` (`postgres`, `identity_listener`,
+`/readyz` is ready when Postgres and `LISTEN umiak_identity` work, all Payload migrations known to the code are applied, and the
+process is not shutting down; otherwise `503 not_ready` with `details.reasons` (`postgres`, `identity_listener`,
 `payload_migrations`, `shutting_down`).
-OpenAPI — `GET /v1/openapi.json`, документация — `GET /v1/docs` (без аутентификации; docs — только на public:
-страница грузит Scalar с jsDelivr, закреплённый с SRI).
+OpenAPI is `GET /v1/openapi.json`, documentation is `GET /v1/docs` (no authentication; docs only on public:
+the page loads Scalar from jsDelivr, pinned with SRI).
 
-**Ingress перед public и proxied должен ограничивать частоту запросов по IP клиента.** Лимиты `api` считаются по
-principal, то есть после аутентификации; до неё каждый запрос с `Bearer umiak_…` — поиск ключа (кэш 30 s / 5 s на
-неизвестный хеш, дальше Postgres), каждый JWT — проверка подписи. Тела запросов до аутентификации не читаются,
-ограниченные тела должны прийти за 60 s; чанк загрузки — без общего срока, но не дольше 30 s без новых байт
+**The ingress in front of public and proxied must rate-limit requests by client IP.** `api` limits are counted per
+principal, that is, after authentication; before it, every request with `Bearer umiak_…` is a key lookup (cache 30 s / 5 s for an
+unknown hash, then Postgres), and every JWT is a signature check. Request bodies are not read before authentication,
+bounded bodies must arrive within 60 s; an upload chunk has no overall deadline but no more than 30 s without new bytes
 (`408 request_timeout`, retryable).
 
-## Переменные окружения
+## Environment variables
 
-Источник правды — `src/settings.ts`. Пустая строка считается «не задано».
+The source of truth is `src/settings.ts`. An empty string counts as "not set".
 
-| Переменная | По умолчанию | Что |
+| Variable | Default | What |
 |---|---|---|
-| `DATABASE_URL` | обязательна | Postgres (`postgres://…`) |
-| `PAYLOAD_SECRET` | обязательна | секрет конфига Payload (тот же, что у `web` и `worker`) |
-| `UMIAK_DATA_KEYS_FILE` | обязательна | ключи данных S6 (формат `deploy/compose/config/data-keys.example.json`) |
-| `UMIAK_API_CURSOR_KEY` | обязательна | base64, не меньше 32 байт: HMAC курсоров |
-| `UMIAK_API_SERVICE_TOKENS_FILE` | обязательна | JSON `{"gateway": ["<t1>", "<t2>"]}`: токены, которые принимает internal listener |
-| `UMIAK_API_GATEWAY_TOKEN_FILE` | — | токен `api` для internal listener gateway (одна строка). Без него RPC агента и `/files/*` — `503 agent_unavailable` |
-| `UMIAK_IDENTITY_FILE` | — | YAML личностей: `teams`, `users`, `apiKeys` по sha256 (формат — `packages/auth/src/seed.ts`); upsert в Payload (`seedPayloadIdentity`) при каждом старте; без применённых миграций Payload старт падает |
-| `UMIAK_OPERATOR_GROUPS` | — | группы IdP операторов, через запятую |
-| `UMIAK_OIDC_ISSUER` | — | issuer Keycloak (`https://<keycloak>/realms/umiak`); без него JWT не принимаются, `/v1/meta` `oidc: null` |
-| `UMIAK_OIDC_DISCOVERY_URL` | `<issuer>/.well-known/openid-configuration` | discovery по внутреннему адресу |
-| `UMIAK_OIDC_JWKS_URL` | `jwks_uri` из discovery | JWKS по внутреннему адресу |
-| `UMIAK_OIDC_AUDIENCE` | `umiak-api` | обязательный `aud` |
-| `UMIAK_OIDC_ALLOWED_CLIENTS` | `umiak-cli,umiak-mcp` | допустимые `azp` |
-| `UMIAK_API_URL` | обязательна | публичный адрес API (`/v1/meta` `apiUrl`) |
-| `UMIAK_APP_URL` | обязательна | адрес дашборда (`/v1/meta` `appUrl`) |
-| `UMIAK_APP_ORIGIN` | origin `UMIAK_APP_URL` | `Origin`, который принимает proxied listener |
-| `UMIAK_PREVIEW_DOMAIN` | обязательна | домен портов (`<slug>-<port>.<domain>`) |
-| `UMIAK_PREVIEW_SCHEME`, `UMIAK_PREVIEW_PORT` | `https`, `443` (для `http`: `80`) | схема и внешний порт preview URL; quickstart использует `http` и `8085` |
-| `UMIAK_SSH_HOST`, `UMIAK_SSH_PORT` | `ssh.<UMIAK_PREVIEW_DOMAIN>`, `22` | SSH gateway для `/v1/meta` и `/ssh` |
-| `UMIAK_DESKTOP_PATH_PREFIX` | — | owner-режим: ссылки desktop имеют вид `<origin>/desktop/<slug>/?dataTransport=websocket` на origin владельца, без тикета (авторизует сессия браузера); без неё — hostname-ссылки `<slug>-desktop.<domain>` с тикетом; compose задаёт `/desktop` |
-| `UMIAK_SSH_HOST_KEYS_FILE` | — | публичные host keys gateway, по одному в строке |
-| `UMIAK_SSH_LOGIN_CA_KEY_FILE` | — | закрытый ed25519 SSH login CA без пароля (PKCS#8 PEM или OpenSSH); без него `ssh/certificate` недоступен |
-| `UMIAK_API_TRUSTED_PROXY_CIDRS` | — | CIDR через запятую: от них `X-Forwarded-For` идёт в `clientIp` лога |
-| `UMIAK_API_RATE_RPS`, `UMIAK_API_RATE_BURST` | `20`, `100` | лимит запросов на principal: `burst` за `burst/rps` s |
-| `UMIAK_API_RATE_STARTS_PER_MIN` | `30` | create, fork, resume в минуту на команду |
-| `UMIAK_API_MAX_STREAMS` | `100` | открытых стримов и PTY на principal на процесс |
+| `DATABASE_URL` | required | Postgres (`postgres://…`) |
+| `PAYLOAD_SECRET` | required | Payload config secret (the same as for `web` and `worker`) |
+| `UMIAK_DATA_KEYS_FILE` | required | S6 data keys (format of `deploy/compose/config/data-keys.example.json`) |
+| `UMIAK_API_CURSOR_KEY` | required | base64, at least 32 bytes: HMAC for cursors |
+| `UMIAK_API_SERVICE_TOKENS_FILE` | required | JSON `{"gateway": ["<t1>", "<t2>"]}`: tokens the internal listener accepts |
+| `UMIAK_API_GATEWAY_TOKEN_FILE` | — | `api` token for the gateway internal listener (one line). Without it, agent RPC and `/files/*` return `503 agent_unavailable` |
+| `UMIAK_IDENTITY_FILE` | — | identity YAML: `teams`, `users`, `apiKeys` by sha256 (format in `packages/auth/src/seed.ts`); upserted into Payload (`seedPayloadIdentity`) on every start; without applied Payload migrations the start fails |
+| `UMIAK_OPERATOR_GROUPS` | — | operator IdP groups, comma-separated |
+| `UMIAK_OIDC_ISSUER` | — | Keycloak issuer (`https://<keycloak>/realms/umiak`); without it JWTs are not accepted, `/v1/meta` `oidc: null` |
+| `UMIAK_OIDC_DISCOVERY_URL` | `<issuer>/.well-known/openid-configuration` | discovery at an internal address |
+| `UMIAK_OIDC_JWKS_URL` | `jwks_uri` from discovery | JWKS at an internal address |
+| `UMIAK_OIDC_AUDIENCE` | `umiak-api` | required `aud` |
+| `UMIAK_OIDC_ALLOWED_CLIENTS` | `umiak-cli,umiak-mcp` | allowed `azp` |
+| `UMIAK_API_URL` | required | public API address (`/v1/meta` `apiUrl`) |
+| `UMIAK_APP_URL` | required | dashboard address (`/v1/meta` `appUrl`) |
+| `UMIAK_APP_ORIGIN` | origin of `UMIAK_APP_URL` | the `Origin` the proxied listener accepts |
+| `UMIAK_PREVIEW_DOMAIN` | required | port domain (`<slug>-<port>.<domain>`) |
+| `UMIAK_PREVIEW_SCHEME`, `UMIAK_PREVIEW_PORT` | `https`, `443` (for `http`: `80`) | scheme and external port of the preview URL; quickstart uses `http` and `8085` |
+| `UMIAK_SSH_HOST`, `UMIAK_SSH_PORT` | `ssh.<UMIAK_PREVIEW_DOMAIN>`, `22` | SSH gateway for `/v1/meta` and `/ssh` |
+| `UMIAK_DESKTOP_PATH_PREFIX` | — | owner mode: desktop links look like `<origin>/desktop/<slug>/?dataTransport=websocket` on the owner origin, without a ticket (the browser session authorizes); without it, hostname links `<slug>-desktop.<domain>` with a ticket; compose sets `/desktop` |
+| `UMIAK_SSH_HOST_KEYS_FILE` | — | gateway public host keys, one per line |
+| `UMIAK_SSH_LOGIN_CA_KEY_FILE` | — | private ed25519 SSH login CA without a passphrase (PKCS#8 PEM or OpenSSH); without it `ssh/certificate` is unavailable |
+| `UMIAK_API_TRUSTED_PROXY_CIDRS` | — | comma-separated CIDRs: `X-Forwarded-For` from them goes into the log `clientIp` |
+| `UMIAK_API_RATE_RPS`, `UMIAK_API_RATE_BURST` | `20`, `100` | request limit per principal: `burst` per `burst/rps` s |
+| `UMIAK_API_RATE_STARTS_PER_MIN` | `30` | create, fork, resume per minute per team |
+| `UMIAK_API_MAX_STREAMS` | `100` | open streams and PTYs per principal per process |
 | `UMIAK_MIN_CLI_VERSION`, `UMIAK_LATEST_CLI_VERSION` | — | `/v1/meta` |
 | `UMIAK_BUILD` | `dev` | `/v1/meta` `build` |
 | `UMIAK_LOG_LEVEL` | `info` | pino: `fatal` … `trace`, `silent` |
-| порты listener-ов | см. выше | `0` — любой свободный (тесты) |
+| listener ports | see above | `0` — any free port (tests) |
 
-## Внутренние ручки для gateway (S4)
+## Internal endpoints for the gateway (S4)
 
-Все — на internal listener-е с `Authorization: Bearer <токен из UMIAK_API_SERVICE_TOKENS_FILE>`. Ошибки кладут
-`code` и на верхний уровень тела (`{"code": "route_not_found", "error": {...}}`).
+All are on the internal listener with `Authorization: Bearer <token from UMIAK_API_SERVICE_TOKENS_FILE>`. Errors put
+`code` at the top level of the body too (`{"code": "route_not_found", "error": {...}}`).
 
-| Ручка | Что |
+| Endpoint | What |
 |---|---|
-| `GET /internal/v1/gateway/routes/{label}` | маршрут порта (S4 §6.1, spec §12.1), `kind: "port"`; нет маршрута — `404 route_not_found` |
-| `POST /internal/v1/gateway/ssh/authorize` | вход по SSH-ключу или login-сертификату; `recheck: true` — только проверка личности |
-| `POST /internal/v1/gateway/port-auth/exchange` | одноразовый код SSO порта → `{userId, email, label, authEpoch}` или `400 invalid_code` |
+| `GET /internal/v1/gateway/routes/{label}` | port route (S4 §6.1, spec §12.1), `kind: "port"`; no route — `404 route_not_found` |
+| `POST /internal/v1/gateway/ssh/authorize` | login by SSH key or login certificate; `recheck: true` — identity check only |
+| `POST /internal/v1/gateway/port-auth/exchange` | one-time port SSO code → `{userId, email, label, authEpoch}` or `400 invalid_code` |
 | `POST /internal/v1/agent-events` | binary protobuf `AgentEventsRequest` → `{ackedSeq}` |
 
-Изменения маршрутов gateway узнаёт по `NOTIFY umiak_routes '<slug>'` (триггеры миграций `0201` и `0204`, в том числе
-блокировки, `0206`), разрывы SSH-сессий — по `NOTIFY umiak_ssh_revoke`: личности, членства, ключи и команды — из хуков
-Payload (`@umiak/payload`, те же payload-ы, что у триггеров `0302`/`0303` на `identity`), блокировка sandbox —
-`''` из `SandboxService.block` (gateway перепроверяет все сессии через `ssh/authorize`).
+The gateway learns about route changes from `NOTIFY umiak_routes '<slug>'` (triggers of migrations `0201` and `0204`, including
+blocks, `0206`), and about SSH session drops from `NOTIFY umiak_ssh_revoke`: identities, memberships, keys and teams — from Payload
+hooks (`@umiak/payload`, the same payloads as the `0302`/`0303` triggers on `identity`), sandbox block —
+`''` from `SandboxService.block` (the gateway rechecks all sessions via `ssh/authorize`).
 
-## Агент: `AgentApi`
+## Agent: `AgentApi`
 
-`src/agent/types.ts` — всё, что `api` делает с агентом: `capabilities`, `requireCapability`, `start`, `attach`,
+`src/agent/types.ts` is everything `api` does with the agent: `capabilities`, `requireCapability`, `start`, `attach`,
 `sendInput`, `update`, `signal`, `kill`, `get`, `stat`, `list`, `makeDir`, `move`, `chmod`, `remove`, `listPorts`,
-`updateEnv`, `updateSecrets`, `files` (HTTP `/files*` агента). Ошибки — `AgentUnavailableError`, `AgentOutdatedError`
-(`@umiak/agent-client`) и `AgentCallError` (`src/agent/errors.ts`); отображение в HTTP — `src/agent/errors.ts`.
+`updateEnv`, `updateSecrets`, `files` (the agent's HTTP `/files*`). Errors are `AgentUnavailableError`, `AgentOutdatedError`
+(`@umiak/agent-client`) and `AgentCallError` (`src/agent/errors.ts`); the mapping to HTTP is in `src/agent/errors.ts`.
 
-- Тесты — `FakeAgent` из `@umiak/api/testing`: настоящие процессы, PTY без терминала, файлы во временном каталоге.
-- Процесс `api` — `ConnectAgentApi` (`src/agent/connect.ts`): RPC — клиенты `umiak.agent.v1` (`@umiak/proto/agent/v1`)
-  поверх `AgentClient.transport(machineId)` (поиск gateway, `421`, ожидание агента до 30 s), `files` — через
-  `AgentClient.fetch`, capabilities — из `tunnel.tunnel_sessions`. Без `UMIAK_API_GATEWAY_TOKEN_FILE` все вызовы —
-  `503 agent_unavailable`. `attach` — один поток `Process/Attach`; переподключение — `resumableAttach` в
+- Tests use `FakeAgent` from `@umiak/api/testing`: real processes, PTY without a terminal, files in a temporary directory.
+- The `api` process uses `ConnectAgentApi` (`src/agent/connect.ts`): RPC through `umiak.agent.v1` clients (`@umiak/proto/agent/v1`)
+  over `AgentClient.transport(machineId)` (gateway lookup, `421`, waiting for the agent up to 30 s), `files` through
+  `AgentClient.fetch`, capabilities from `tunnel.tunnel_sessions`. Without `UMIAK_API_GATEWAY_TOKEN_FILE` all calls return
+  `503 agent_unavailable`. `attach` is one `Process/Attach` stream; reconnection is `resumableAttach` in
   `src/commands/attach.ts`.
-- Ошибки — по таблице в doc-комментарии `agentErrorToHttp` (`src/agent/errors.ts`): Connect
-  `Unavailable`/`Canceled`/`DeadlineExceeded` остаются `ConnectError` (с любым detail), остальное —
-  `AgentCallError(<код ErrorDetail>)`, без detail — имя кода Connect (`failed_precondition`). Мутации без
-  идемпотентного ключа (`Start` без ключа, `input` без сессии, `signal`, файловые `mkdir`/`move`/`chmod`/`delete`)
-  при неизвестном исходе — `503 agent_unavailable`, `retryable: false`, `details.outcome: "unknown"`
+- Errors follow the table in the doc comment of `agentErrorToHttp` (`src/agent/errors.ts`): Connect
+  `Unavailable`/`Canceled`/`DeadlineExceeded` stay `ConnectError` (with any detail), everything else is
+  `AgentCallError(<ErrorDetail code>)`, without a detail — the Connect code name (`failed_precondition`). Mutations without
+  an idempotency key (`Start` without a key, `input` without a session, `signal`, file `mkdir`/`move`/`chmod`/`delete`)
+  with an unknown outcome return `503 agent_unavailable`, `retryable: false`, `details.outcome: "unknown"`
   (`agentMutationErrorToHttp`).
-- Интеграционные тесты против настоящего агента — `test/agent-real.test.ts`: Go-программа
-  `services/guest-agent/cmd/umiak-agent-harness` (собирается в global setup через `mise exec -- go build`) поднимает
-  в одном процессе gateway S2 и агента S3 с фейковыми зависимостями ОС; команды — процессы хоста под текущим
-  пользователем. Без `go` тесты пропускаются с причиной в выводе. Ограничения (нет cgroups, пользователя `user`,
-  claim) — в заголовке файла.
-- Не сделано: chaos стрима через туннель (spec §16) и E2E `umiak-bench s7` на `pve`.
+- Integration tests against a real agent are in `test/agent-real.test.ts`: the Go program
+  `services/guest-agent/cmd/umiak-agent-harness` (built in global setup via `mise exec -- go build`) runs
+  the S2 gateway and the S3 agent in one process with fake OS dependencies; commands are host processes under the current
+  user. Without `go` the tests are skipped with the reason in the output. Limitations (no cgroups, no `user` user,
+  no claim) are in the file header.
+- Not done: stream chaos through the tunnel (spec §16) and E2E `umiak-bench s7` on `pve`.
 
-### Wiring S3: адаптер proto ↔ `AgentApi`
+### S3 wiring: proto ↔ `AgentApi` adapter
 
-- Enum-ы: `*_UNSPECIFIED` — не значение. `CommandState`/`ExitStatus`/`ExitReason`/`Stream` без префикса в нижнем
-  регистре (`EXIT_REASON_PTY_IDLE` → `pty_idle`); `UNSPECIFIED` у `ExitReason` → `none`, у `ExitStatus` при
-  заданном `exit` → ошибка адаптера (не угадывать), у `Stream` — событие пропустить.
-- Нули proto → `null` в `AgentApi`: `pid = 0` → `null`, `signal = ""` → `null`, пустой `output_truncated` →
-  `null`, отсутствующий `exit` → `null`, `Timestamp` не задан → `null`, `StreamInfo.end` не задан → `null`.
-  `ExitInfo.code` — число всегда (0 — настоящий код).
-- `uint64` (смещения, размеры) приходят `bigint`: перевод в `number` только после проверки
-  `<= Number.MAX_SAFE_INTEGER`, иначе ошибка адаптера (не обрезать). Обратно — `BigInt(n)`.
-- `CommandInfo.streams` — список `StreamInfo` с полем `stream`; в `AgentApi` — объект по имени потока, только
-  потоки команды (у PTY — один `pty`).
-- `Umiak-Request-Id` (S2 §9.2) ставить на мутирующих вызовах: `Start` (`requestId` из `opts`, UUIDv5 ключа
-  идемпотентности), `MakeDir`/`Move`/`Chmod`/`Remove`, `UpdateEnv`/`UpdateSecrets`. Ответ `request_id_reused`
-  значит другой запрос под тем же id → `409 idempotency_key_reused` (у `Start` его не бывает: агент
-  проверяет `Start` по `commandId`, не по request id).
-- `SendInput.seq` начинается с 1: shim отбрасывает `seq <= last`, у новой сессии `last = 0`.
-- Ошибки `Start`: `failed_to_start` — только у отказов до запуска процесса (`invalid_argument`, `user_not_found`,
+- Enums: `*_UNSPECIFIED` is not a value. `CommandState`/`ExitStatus`/`ExitReason`/`Stream` without the prefix, in lower
+  case (`EXIT_REASON_PTY_IDLE` → `pty_idle`); `UNSPECIFIED` of `ExitReason` → `none`, of `ExitStatus` with
+  `exit` set → adapter error (do not guess), of `Stream` — skip the event.
+- Proto zeros → `null` in `AgentApi`: `pid = 0` → `null`, `signal = ""` → `null`, empty `output_truncated` →
+  `null`, missing `exit` → `null`, unset `Timestamp` → `null`, unset `StreamInfo.end` → `null`.
+  `ExitInfo.code` is always a number (0 is a real code).
+- `uint64` (offsets, sizes) arrive as `bigint`: convert to `number` only after checking
+  `<= Number.MAX_SAFE_INTEGER`, otherwise an adapter error (do not truncate). Back — `BigInt(n)`.
+- `CommandInfo.streams` is a list of `StreamInfo` with a `stream` field; in `AgentApi` it is an object keyed by stream name, only
+  the command's streams (a PTY has one, `pty`).
+- Set `Umiak-Request-Id` (S2 §9.2) on mutating calls: `Start` (`requestId` from `opts`, UUIDv5 of the idempotency
+  key), `MakeDir`/`Move`/`Chmod`/`Remove`, `UpdateEnv`/`UpdateSecrets`. A `request_id_reused` response
+  means a different request under the same id → `409 idempotency_key_reused` (`Start` never has it: the agent
+  checks `Start` by `commandId`, not by request id).
+- `SendInput.seq` starts at 1: the shim drops `seq <= last`, a new session has `last = 0`.
+- `Start` errors: `failed_to_start` only for rejections before the process starts (`invalid_argument`, `user_not_found`,
   `already_exists`, `too_many_commands`, `not_claimed`, `failed_precondition`, `shim_outdated`, `unimplemented`).
-  `request_id_reused` от `Start` не приходит: `Start` исключён из кэша request id агента (идемпотентен по
-  `commandId`). Повтор с ключом шлёт spec сохранённой строки; `already_exists` на повторе — подключиться к
-  команде агента (`Process/Get`), а не отказ. `internal` агент шлёт и после запуска процесса, поэтому
-  `internal`, `unknown` и незнакомые коды — исход неизвестен (`503`, строка остаётся `starting`;
+  `request_id_reused` does not come from `Start`: `Start` is excluded from the agent's request id cache (idempotent by
+  `commandId`). A retry with a key sends the spec of the stored row; `already_exists` on a retry means attach to the
+  agent's command (`Process/Get`), not a failure. The agent sends `internal` even after the process has started, so
+  `internal`, `unknown` and unfamiliar codes mean the outcome is unknown (`503`, the row stays `starting`;
   `commands/run.ts`).
-- `StreamInfo.size` — размер файла потока; после выхода оставшиеся процессы могут писать дальше `end`
-  (S3 §10). Смещения, `tailBytes` и `sizeBytes` считать от `streamSize()` = `min(size, end)`.
-- Известное ограничение: `AgentClient` (S2) повторяет унарные вызовы с тем же `Umiak-Request-Id`, а кэш ответов
-  агента (S3) пропускает `IDEMPOTENT`-методы, среди них `Signal`. Потерянный ответ — сигнал доставлен дважды
-  (безвредно для `TERM`/`KILL`/`INT`, не для счётных сигналов). Исправлять в S2 или S3 (S7 §23.9).
+- `StreamInfo.size` is the size of the stream file; after exit, remaining processes may keep writing past `end`
+  (S3 §10). Count offsets, `tailBytes` and `sizeBytes` from `streamSize()` = `min(size, end)`.
+- Known limitation: `AgentClient` (S2) retries unary calls with the same `Umiak-Request-Id`, while the agent's
+  response cache (S3) skips `IDEMPOTENT` methods, `Signal` among them. A lost response means the signal is delivered twice
+  (harmless for `TERM`/`KILL`/`INT`, not for counting signals). To be fixed in S2 or S3 (S7 §23.9).
 
 ## OpenAPI
 
-`openapi/v1.json` генерируется из zod-схем и коммитится:
+`openapi/v1.json` is generated from the zod schemas and committed:
 
 ```sh
 mise exec -- pnpm --filter @umiak/api openapi
 ```
 
-Тест `openapi-drift` падает, если документ устарел. После изменения схем — перегенерировать и SDK
+The `openapi-drift` test fails if the document is stale. After changing schemas, regenerate the SDKs too
 (`packages/sdk-ts`, `packages/sdk-py`).
 
-## Тесты
+## Tests
 
 ```sh
-mise exec -- pnpm --filter @umiak/api test        # vitest; Postgres — docker-контейнер из global setup
+mise exec -- pnpm --filter @umiak/api test        # vitest; Postgres is a docker container from global setup
 mise exec -- pnpm --filter @umiak/api typecheck
 ```
 
-- Postgres: без Docker — `UMIAK_TEST_DATABASE_URL`; `UMIAK_TEST_SKIP_PG=1` пропускает тесты с базой.
-- Запросы и ответы интеграционных тестов проверяются по `openapi/v1.json` (conformance).
-- Keycloak в тестах — свой OIDC-сервер с JWKS и device grant (`startTestOidcServer` из `@umiak/api/testing`);
-  настоящий Keycloak проверяется smoke-проверкой compose (`deploy/compose/README.md`).
+- Postgres: without Docker, use `UMIAK_TEST_DATABASE_URL`; `UMIAK_TEST_SKIP_PG=1` skips tests that need the database.
+- Integration test requests and responses are checked against `openapi/v1.json` (conformance).
+- Keycloak in tests is a custom OIDC server with JWKS and device grant (`startTestOidcServer` from `@umiak/api/testing`);
+  real Keycloak is checked by the compose smoke check (`deploy/compose/README.md`).

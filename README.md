@@ -1,11 +1,11 @@
 # Umiak
 
-Self-hosted платформа API-управляемых VM-sandbox для AI-агентов на Proxmox VE (аналог boat.dev). Guest templates: Linux (`linux`), Linux with desktop (`linux-desktop`), Windows 11 with desktop (`windows`). Windows Server Core is planned.
+Self-hosted platform of API-driven VM sandboxes for AI agents on Proxmox VE (a boat.dev alternative). Guest templates: Linux (`linux`), Linux with desktop (`linux-desktop`), Windows 11 with desktop (`windows`). Windows Server Core is planned.
 
-- С чего начать: [docs/getting-started.md](docs/getting-started.md)
-- Архитектура: [docs/architecture.md](docs/architecture.md)
-- Области работ и статус: [docs/roadmap.md](docs/roadmap.md)
-- Спецификации: `docs/specs/`
+- Getting started: [docs/getting-started.md](docs/getting-started.md)
+- Architecture: [docs/architecture.md](docs/architecture.md)
+- Scopes and status: [docs/roadmap.md](docs/roadmap.md)
+- Specs: `docs/specs/`
 
 ## Install on Proxmox (homelab)
 

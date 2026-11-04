@@ -1,4 +1,4 @@
-// The sandbox as the model sees it (S11 8.2 "Форма ответа") and the wait for
+// The sandbox as the model sees it (S11 8.2 "Response shape") and the wait for
 // a sandbox state by long-poll (S7 5.10, S11 7.5).
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import { type OperationData, type SandboxData, UmiakError } from "@umiak/sdk";

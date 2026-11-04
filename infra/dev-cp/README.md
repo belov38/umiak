@@ -102,7 +102,7 @@ Checked on CT 590 by `e2e.sh` (`docs/plans/e2e-devcp.md`): every service healthy
 - Keycloak runs with a fixed heap (`-Xmx512m`, `mem_limit: 1200m`): without a limit of its own the JVM sizes its heap from the host's RAM and starves the 3 GB CT.
 - The single gateway drains for 20 s (`UMIAK_GATEWAY_DRAIN_TIMEOUT`, `stop_grace_period: 30s`) instead of the product 950 s: there is no peer to drain to, and a recreated gateway would keep the stack down for 16 minutes.
 
-`compose.yaml` has the S7 services and includes `gateway.yaml`; `compose.dev-cp.yaml` publishes them on loopback for Serve and feeds them the `.env` values. The product compose takes the same public URLs as generic variables with localhost defaults (`deploy/compose/README.md`, «Публичные адреса»); the override repeats the ones from `.env` as required values (`${VAR:?}`) so the CT never runs with a localhost default, and adds what the base leaves neutral (Keycloak proxy headers, trusted proxies, the `__Host-` cookie, cross-site port cookies).
+`compose.yaml` has the S7 services and includes `gateway.yaml`; `compose.dev-cp.yaml` publishes them on loopback for Serve and feeds them the `.env` values. The product compose takes the same public URLs as generic variables with localhost defaults (`deploy/compose/README.md`, "Public addresses"); the override repeats the ones from `.env` as required values (`${VAR:?}`) so the CT never runs with a localhost default, and adds what the base leaves neutral (Keycloak proxy headers, trusted proxies, the `__Host-` cookie, cross-site port cookies).
 
 | Service | Publish (base compose) | Settings |
 |---|---|---|
