@@ -121,6 +121,8 @@ def _dispatch(runner: Runner, request: dict) -> dict:
         if not config.exists() and runner.path(prepare_host.NODE_BINARY).exists():
             raise InstallerError("Cannot prove ownership of node-agent without its config")
         _zone(runner, request["remaining_nodes"], remove=node)
+        from .day2 import _remove_zone_dnsmasq
+        _remove_zone_dnsmasq(runner)
         # The forced-command line is cluster-wide. Never remove it for one node.
         for name in (prepare_host.NODE_BINARY, prepare_host.NODE_CONFIG):
             runner.path(name).unlink(missing_ok=True)

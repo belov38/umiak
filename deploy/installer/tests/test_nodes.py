@@ -410,3 +410,23 @@ def test_root_transport_ignores_macos_archive_metadata(tmp_path, monkeypatch):
     runner.run = run
     nodes.HostConsole(runner).call("pve2", "remove")
     assert sent[0]["sources"] == {"nodes.py": "# source\n"}
+
+
+def test_remove_cleans_only_the_retired_nodes_umiak_dnsmasq_instance(tmp_path):
+    from umiak_installer.node_host import dispatch
+
+    runner = FakeRunner(tmp_path)
+    runner.objects["/nodes/pve/lxc"] = []
+    runner.objects["/cluster/sdn/zones/umiak"] = {"type": "simple", "dhcp": "dnsmasq", "nodes": "pve,pve2"}
+    own = runner.path("/etc/dnsmasq.d/umiak/umiak0.conf")
+    own.parent.mkdir(parents=True)
+    own.write_text("dhcp-range=10.88.0.100,10.88.0.250\n")
+    foreign = runner.path("/etc/dnsmasq.d/other.conf")
+    foreign.write_text("unrelated\n")
+    original = runner.run
+    runner.run = lambda argv, input=None: '{"report":[]}' if argv[0] == "lvs" else original(argv, input)
+    dispatch(runner, {"op": "remove", "node": "pve", "control_plane_id": 590, "remaining_nodes": ["pve2"]})
+    assert ["systemctl", "disable", "--now", "dnsmasq@umiak"] in runner.commands
+    assert not own.exists()
+    assert foreign.read_text() == "unrelated\n"
+    assert not runner.dnsmasq_enabled
