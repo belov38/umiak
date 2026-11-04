@@ -1,5 +1,5 @@
 // Auth header handling over every operation of the public document (S7
-// §2 anti-goal 4, §7.1, §7.4, §7.10, §16 "Безопасность"):
+// §2 anti-goal 4, §7.1, §7.4, §7.10, §16 "Security"):
 // - public: no bearer is 401 everywhere but the anonymous operations, and
 //   oauth2-proxy headers (X-Auth-Request-*, X-Forwarded-User/Email), the
 //   Tailscale-User-* headers of Tailscale Serve and

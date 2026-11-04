@@ -1,4 +1,4 @@
-// Global setup of OpenAPI conformance coverage (S7 §16 "Контракт"): every
+// Global setup of OpenAPI conformance coverage (S7 §16 "Contract"): every
 // operation of `openapi/v1.json` must have at least one JSON response that
 // passed the strict conformance check of the harness during a full run of
 // the apps/api tests. Operations whose success answers are not JSON need a

@@ -1,5 +1,5 @@
 // Sandbox lifecycle, catalog, snapshots and environments through the real
-// CLI against the api (S7 §14.2, §14.3, §16 "Контракт CLI"): waiting
+// CLI against the api (S7 §14.2, §14.3, §16 "CLI contract"): waiting
 // commands print JSON Lines ending in ready/stopped, rm needs a TTY or
 // --yes and sends Umiak-Confirm-Delete, create/fork/explicit <sb> set the
 // current sandbox.

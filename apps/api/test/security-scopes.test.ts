@@ -1,5 +1,5 @@
 // Scope and role matrix over every operation of the public document (S7 §6
-// scope column, §7.2, §7.3, §7.5, §16 "матрица ручка × scope"): a key
+// scope column, §7.2, §7.3, §7.5, §16 "endpoint × scope matrix"): a key
 // without the operation's scope is 403 with details.requiredScope, a key
 // with only that scope gets past the guards, person-only operations refuse
 // keys (user_required), owner-only operations refuse members (role), and

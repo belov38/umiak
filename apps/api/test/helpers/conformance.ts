@@ -307,7 +307,7 @@ function paramValue(schema: unknown, values: string[]): unknown {
  * Throws unless a request is described by the document: its path and query
  * parameters (documented ones; required ones present) match their schemas,
  * and a JSON body matches the operation's JSON request body (S7 §16
- * "Контракт"). A JSON body to an operation without one, or no body where the
+ * "Contract"). A JSON body to an operation without one, or no body where the
  * body is required, fails too. Non-JSON bodies are not inspected. Use it for
  * requests the server accepted (2xx). A request to an operation the document
  * does not have is left to the response check (`assertConforms` refuses an

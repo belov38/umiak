@@ -153,7 +153,6 @@ The tokens come from the realm client `umiak-mcp` (redirect URIs `http://127.0.0
 - `dev-users.sh` creates `ilia@example.com` (temporary password in `~/.config/umiak/dev-cp/ilia-initial-password` on the Mac, 0600) and `e2e@example.com` (permanent password in `~/.config/umiak/dev-cp/e2e-password`). The realm takes the email as the username; Keycloak 26 needs first and last name, or the login stops at the profile form. Each gets a personal team with the owner role at the first login.
 - `e2e.sh [--keep-going]` runs the whole scenario from the Mac with the real CLI and both SDKs, prints a PASS/FAIL table and checks that nothing is left on `pve`. It uses its own CLI config (mktemp), `kc-browser.py` for the Keycloak pages and `e2e-pty.py` for `umiak shell`. About 5 minutes, at most two 2 GB sandboxes at once. The work dir (tokens, SSH key) is deleted at the end; `UMIAK_E2E_KEEP_WORKDIR=1` keeps it.
 - Fresh dev Payload default team quota and new shared-team quota: RAM 8192 MB, equal to the sandbox node cap. This is stand data; the product default stays 6144 MB. Pool targets are empty.
-- `QUICKSTART.md`: the short guide for Ilia (Russian).
 
 ## Smoke test
 

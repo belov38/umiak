@@ -9,7 +9,7 @@ import (
 )
 
 // Rules of the Windows shim that need no Windows API, so they are tested on
-// every platform (S9 spec 12.6, "Сигналы и Kill" and "Exit").
+// every platform (S9 spec 12.6, "Signals and Kill" and "Exit").
 
 // errUnsupportedSignal rejects a signal Windows cannot deliver.
 var errUnsupportedSignal = errors.New("unsupported_signal")
