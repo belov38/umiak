@@ -177,6 +177,13 @@ ingress (`deploy/compose/quickstart/server.mjs`): backend принимает т�
 
 Вход только по tailnet HTTPS (`https://umiak.<tailnet>.ts.net`, Tailscale Serve → trusted ingress `quickstart` :4181). Режим `owner`: один владелец, claim по одноразовой ссылке `/claim#<code>`, cookie `__Host-umiak_owner`. Аварийный путь: SSH-туннель на :4180 (только Host `localhost`). Превью портов — `http://<slug>-<port>.<tailnet-ip-dashed>.sslip.io:8085` по tailnet, SSH — tailnet IP :2222. Рабочий стол встроен в дашборд на том же origin (`/desktop/<slug>/`): ingress отдаёт собственную доверенную копию фронтенда moonlight-web, а от гостя пропускает только JSON/SDP/NDJSON/binary, не HTML и JS. Браузерный мастер: Templates и Smoke test. Day 2 (Update, новый браузер, сброс владельца, Uninstall) — повторный запуск установщика. Спека: `docs/specs/s18-onboarding.md`.
 
+**Упаковка S20:** два опубликованных образа: `umiak-quickstart` (общий runtime
+API, worker, MCP, ingress, gateway, web-meta, offline bootstrap и renewal;
+разные команды, отдельные процессы и прежние mounts/networks) и `umiak-web`
+(Next standalone + Payload migrations). MCP не имеет секретов и обращается к
+публичному REST API; объединение образа не объединяет процессы. Postgres —
+upstream-образ. См. `docs/specs/s20-cp-consolidation.md`.
+
 **Control plane работает в Kubernetes:** `api`, `worker`, `web`, `gateway`, `mcp`, Keycloak (IdP, эксплуатация — S12). Postgres — в кластере (оператор) или внешний. Proxmox-ноды, VM и `umiak-node` остаются вне Kubernetes.
 
 **IdP — Keycloak** (решение Ильи 2026-10-29), один realm `umiak`. Позже он может брокерить корпоративный IdP (Google, Entra, LDAP); в MVP — нет. Роли и команды берутся из групп и claims Keycloak (S8 §5).

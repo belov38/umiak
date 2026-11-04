@@ -9,7 +9,7 @@ COPY services/gateway services/gateway
 WORKDIR /src/services/gateway
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build go build -trimpath -ldflags '-s -w' -o /out/umiak-gateway ./cmd/umiak-gateway
 
-FROM golang:1.27.3-trixie AS node-build
+FROM golang:1.27.3-trixie AS node-agent-build
 ENV GOWORK=off GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=amd64
 WORKDIR /src/services/node-agent
 COPY services/node-agent .
@@ -24,13 +24,52 @@ COPY services/guest-agent services/guest-agent
 WORKDIR /src/services/guest-agent
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build GOOS=linux GOARCH=amd64 go build -trimpath -ldflags '-s -w -X main.version=0.1.0+quickstart' -o /out/umiak-agent-linux-amd64 ./cmd/umiak-agent && GOOS=windows GOARCH=amd64 go build -trimpath -ldflags '-s -w -X main.version=0.1.0+quickstart' -o /out/umiak-agent-windows-amd64.exe ./cmd/umiak-agent && go build -trimpath -ldflags '-s -w' -o /out/umiak-release ./cmd/umiak-release
 
-FROM oven/bun:1.4.4 AS bun
-FROM node:26.13.0-bookworm-slim AS cli-build
+# A single manifest graph feeds production, compilation and CLI stages.
+FROM node:26.13.0-bookworm-slim AS manifests
 RUN npm install -g pnpm@12.16.1
-COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app
-COPY . .
-RUN pnpm install --frozen-lockfile --prod --filter-prod "@umiak/cli..."
+# Every workspace manifest (the lockfile covers all of them), first, so the
+# install layers are cached across source edits.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .pnpmfile.cjs tsconfig.base.json ./
+COPY packages/agent-client/package.json packages/agent-client/
+COPY packages/auth/package.json packages/auth/
+COPY packages/config/package.json packages/config/
+COPY packages/core/package.json packages/core/
+COPY packages/db/package.json packages/db/
+COPY packages/payload/package.json packages/payload/
+COPY packages/proto/package.json packages/proto/
+COPY packages/pve/package.json packages/pve/
+COPY packages/sdk-py/package.json packages/sdk-py/
+COPY packages/sdk-ts/package.json packages/sdk-ts/
+COPY apps/api/package.json apps/api/
+COPY apps/bench/package.json apps/bench/
+COPY apps/cli/package.json apps/cli/
+COPY apps/mcp/package.json apps/mcp/
+COPY apps/template-builder/package.json apps/template-builder/
+COPY apps/web/package.json apps/web/
+COPY apps/worker/package.json apps/worker/
+
+
+FROM manifests AS production-deps
+RUN pnpm install --frozen-lockfile --prod --filter-prod "@umiak/api..." --filter-prod "@umiak/worker..." --filter-prod "@umiak/mcp..." --filter-prod "@umiak/template-builder..." --filter-prod "@umiak/db..."
+
+FROM manifests AS node-build
+RUN pnpm install --frozen-lockfile --filter "@umiak/agent-client..." --filter-prod "@umiak/cli..." --filter "."
+COPY packages/proto/src packages/proto/src
+COPY packages/proto/tsconfig.json packages/proto/
+COPY packages/agent-client/src packages/agent-client/src
+COPY packages/agent-client/tsconfig.json packages/agent-client/tsconfig.build.json packages/agent-client/
+COPY packages/auth/src packages/auth/src
+COPY packages/sdk-ts/src packages/sdk-ts/src
+COPY apps/mcp/src apps/mcp/src
+COPY apps/cli/src apps/cli/src
+COPY apps/cli/scripts/build.ts apps/cli/scripts/build.ts
+COPY deploy/compose/canonical-fetch.mjs deploy/compose/canonical-fetch.mjs
+RUN pnpm --filter @umiak/proto --filter @umiak/agent-client run build
+
+FROM oven/bun:1.4.4 AS bun
+FROM node-build AS cli-build
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 RUN cd apps/cli && bun scripts/build.ts --all
 FROM node:26.13.0-bookworm-slim AS ui-fonts
 WORKDIR /fonts
@@ -61,13 +100,34 @@ RUN curl -fsSL -o moonlight-web.tar.gz "https://github.com/MrCreativ3001/moonlig
     "Tarball SHA256: ${MOONLIGHT_WEB_SHA256}" \
     "Changes: index.html and admin.html removed; files otherwise unmodified." \
     > /moonlight-web/SOURCE
-# Keep build dependencies and other workspace applications out of the shipped image.
+# Runtime contains production closures and explicit runtime sources only.
 FROM node:26.13.0-bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends openssl openssh-client ca-certificates xorriso gnupg git && apt-get clean
-RUN npm install -g pnpm@12.16.1
+RUN apt-get update && apt-get install -y --no-install-recommends openssl openssh-client ca-certificates xorriso gnupg git jq && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY . .
-RUN pnpm install --frozen-lockfile --prod --filter-prod "@umiak/template-builder..." --filter-prod "@umiak/db..."
+COPY --from=production-deps /app/ ./
+COPY packages/auth/src packages/auth/src
+COPY packages/config/src packages/config/src
+COPY packages/core/src packages/core/src
+COPY packages/db/src packages/db/src
+COPY packages/payload/src packages/payload/src
+COPY packages/pve/src packages/pve/src
+COPY packages/sdk-ts/src packages/sdk-ts/src
+COPY apps/api/src apps/api/src
+COPY apps/worker/src apps/worker/src
+COPY apps/mcp/src apps/mcp/src
+COPY apps/template-builder/src apps/template-builder/src
+COPY --from=node-build /app/packages/proto/dist packages/proto/dist
+COPY --from=node-build /app/packages/agent-client/dist packages/agent-client/dist
+COPY db/migrations db/migrations
+COPY infra/templates infra/templates
+COPY deploy/compose/quickstart/*.mjs deploy/compose/quickstart/
+COPY deploy/compose/quickstart/*.sh deploy/compose/quickstart/
+COPY deploy/compose/quickstart/THIRD_PARTY_NOTICES.md deploy/compose/quickstart/
+COPY deploy/compose/meta-proxy.mjs deploy/compose/canonical-fetch.mjs deploy/compose/
+COPY deploy/compose/secrets-init/init.sh /legacy-init.sh
+COPY deploy/compose/quickstart/bootstrap.sh /bootstrap.sh
+COPY apps/web/src/app/globals.css apps/web/src/app/globals.css
+COPY apps/web/public/brand/lockup-inter-light.svg apps/web/public/brand/lockup-inter-light.svg
 RUN mkdir -p /app/quickstart-assets && cp deploy/compose/quickstart/install.sh /app/quickstart-assets/install.sh && ln -s /app/packages/db/node_modules/pg /app/node_modules/pg
 COPY --from=cli-build /app/apps/cli/dist/ /app/quickstart-assets/
 COPY --from=ui-fonts /fonts/node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2 /app/quickstart-assets/inter.woff2
@@ -76,7 +136,7 @@ COPY --from=ui-fonts /fonts/node_modules/@fontsource-variable/inter/LICENSE /app
 COPY --from=ui-fonts /fonts/node_modules/@fontsource-variable/funnel-display/LICENSE /app/quickstart-assets/LICENSE-Funnel
 COPY --from=moonlight-assets /moonlight-web /app/quickstart-assets/moonlight-web
 COPY --from=gateway-build /out/umiak-gateway /umiak-gateway
-COPY --from=node-build /out/umiak-node-linux-amd64 /app/quickstart-assets/umiak-node-linux-amd64
+COPY --from=node-agent-build /out/umiak-node-linux-amd64 /app/quickstart-assets/umiak-node-linux-amd64
 COPY --from=guest-build /out/umiak-agent-linux-amd64 /app/quickstart-assets/umiak-agent-linux-amd64
 COPY --from=guest-build /out/umiak-agent-windows-amd64.exe /app/quickstart-assets/umiak-agent-windows-amd64.exe
 COPY --from=guest-build /out/umiak-release /umiak-release

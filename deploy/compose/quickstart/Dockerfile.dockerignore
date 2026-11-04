@@ -44,3 +44,6 @@ apps/web/e2e/.state
 **/dist
 **/__pycache__
 **/*.pyc
+
+# Runtime COPY globs select production modules only.
+**/*.test.mjs

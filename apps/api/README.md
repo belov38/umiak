@@ -18,7 +18,7 @@ mise exec -- node apps/api/src/main.ts                         # перемен�
 Миграции схемы `payload` `api` не применяет: это делает `node packages/payload/src/migrate.ts` (в compose —
 `web-migrate`) до старта; до тех пор `/readyz` отвечает `503`.
 
-В docker compose это сервис `api` (`deploy/compose/README.md`), образ — `apps/api/Dockerfile`. Неверное
+В docker compose это сервис `api` (`deploy/compose/README.md`), образ — `deploy/compose/quickstart/Dockerfile`. Неверное
 окружение — выход с кодом `1` и список всех ошибок. Битый файл (ключи, токены, CA, личности) роняет старт до
 первого подключения к Postgres. SIGTERM/SIGINT: readiness → false, стримам — кадр `reconnect`, PTY — `1012`,
 sync-командам — `503 server_shutting_down`, выход не позже чем через 10 s; второй сигнал — выход `1` сразу.

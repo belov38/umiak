@@ -40,7 +40,7 @@ def test_compose_is_pinned_and_pull_only(built):
     assert images
     assert all(image.endswith(":1.2.3") for image in images)
     names = {i.split(":")[0].removeprefix("ghcr.io/belov38/umiak-") for i in images}
-    assert names == {"quickstart", "api", "worker", "web", "mcp", "secrets-init"}
+    assert names == {"quickstart", "web"}
 
 
 def test_sha256sums_matches_bundle_and_release_parser(built):

@@ -28,8 +28,6 @@ ENV_KEYS = ("UMIAK_VERSION", "UMIAK_PUBLIC_URL", "UMIAK_PREVIEW_DOMAIN", "UMIAK_
 # compose.yaml and every repo-relative file it bind-mounts (a test keeps them equal).
 STACK_FILES = (
     "compose.yaml",
-    "deploy/compose/meta-proxy.mjs",
-    "deploy/compose/canonical-fetch.mjs",
     "deploy/compose/quickstart/run.mjs",
     "deploy/compose/config/identity.yaml",
 )

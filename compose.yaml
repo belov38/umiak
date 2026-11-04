@@ -39,51 +39,36 @@ x-restart: &restart
 
 services:
   web-meta:
-    image: node:26.13.0-bookworm-slim
+    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:?}
     user: "1000:1000"
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    command: [node, /meta-proxy.mjs]
+    entrypoint: [node]
+    command: [deploy/compose/meta-proxy.mjs]
     # Connects to api:8080 but presents the public API host, which owner mode requires.
     environment:
       UMIAK_API_URL: ${UMIAK_PUBLIC_URL:-http://localhost:4180}
-    volumes:
-      - ./deploy/compose/meta-proxy.mjs:/meta-proxy.mjs:ro
-      - ./deploy/compose/canonical-fetch.mjs:/canonical-fetch.mjs:ro
     networks: [control, web-internal]
     depends_on:
       api: { condition: service_healthy }
 
-  gateway-secrets:
+  secrets-init:
     image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:?}
     user: "0:0"
-    entrypoint: [node, deploy/compose/quickstart/gateway-init.mjs]
+    entrypoint: [sh, /app/deploy/compose/quickstart/init.sh]
     environment:
-      {
-        UMIAK_SECRETS_DIR: /pve-secrets,
-        UMIAK_QUICKSTART_NETWORK_FILE: /network-config/quickstart-network.json,
-      }
-    volumes:
-      - network-config:/network-config
-      - gateway-secrets:/gateway-secrets
-      - pve-secrets:/pve-secrets:ro
-    network_mode: none
-    restart: "no"
-
-  secrets-init:
-    image: ghcr.io/belov38/umiak-secrets-init:${UMIAK_VERSION:?}
-    user: "0:0"
-    environment: { UMIAK_SECRETS_ROOT: /secrets }
+      UMIAK_GATEWAY_SECRETS_DIR: /secrets/gateway
+      UMIAK_SECRETS_ROOT: /secrets
+      UMIAK_SECRETS_DIR: /secrets/pve
+      UMIAK_QUICKSTART_NETWORK_FILE: /network-config/quickstart-network.json
     volumes:
       - network-config:/network-config
       - secrets:/secrets
       - gateway-secrets:/secrets/gateway
       - database-secret:/secrets/database
       - pve-secrets:/secrets/pve
-    depends_on:
-      gateway-secrets: { condition: service_completed_successfully }
     network_mode: none
     restart: "no"
 
@@ -108,7 +93,7 @@ services:
       retries: 30
 
   migrate:
-    image: ghcr.io/belov38/umiak-worker:${UMIAK_VERSION:?}
+    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:?}
     entrypoint: [node, /quickstart/run.mjs]
     command: [node, apps/worker/src/admin/main.ts, migrate]
     environment: *app-env
@@ -144,7 +129,7 @@ services:
 
   worker:
     <<: *restart
-    image: ghcr.io/belov38/umiak-worker:${UMIAK_VERSION:?}
+    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:?}
     entrypoint: [node, /quickstart/run.mjs]
     command: [node, apps/worker/src/main.ts]
     environment:
@@ -184,7 +169,7 @@ services:
 
   api:
     <<: *restart
-    image: ghcr.io/belov38/umiak-api:${UMIAK_VERSION:?}
+    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:?}
     entrypoint: [node, /quickstart/run.mjs]
     command: [node, apps/api/src/main.ts]
     environment:
@@ -252,7 +237,9 @@ services:
 
   mcp:
     <<: *restart
-    image: ghcr.io/belov38/umiak-mcp:${UMIAK_VERSION:?}
+    entrypoint: [node]
+    command: [apps/mcp/src/main.ts]
+    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:?}
     environment:
       <<: *app-env
       UMIAK_MCP_API_URL: http://api:8080
@@ -328,7 +315,7 @@ services:
       - gateway-secrets:/gateway-secrets
     network_mode: none
     depends_on:
-      gateway-secrets: { condition: service_completed_successfully }
+      secrets-init: { condition: service_completed_successfully }
 
   quickstart:
     <<: *restart

@@ -339,3 +339,13 @@ and are capped at 10,000. At capacity, new sources are rejected with HTTP 429
 until the earliest bucket expires; existing sources keep their remaining attempts.
 A process restart clears these buckets. Durable global failure counters still
 invalidate each outstanding code after 20 wrong guesses across all sources.
+
+## Shared control-plane image (S20)
+
+The release publishes `umiak-quickstart` and `umiak-web`. API, worker, MCP,
+owner ingress, gateway and web-meta use the same CP image with different commands.
+MCP remains a separate secretless process; web-meta remains the GET-only private
+metadata bridge. The single offline `secrets-init` initializes the gateway before
+copying service secrets; renewal keeps its separate offline service. Existing
+volumes and the node-agent extraction path are preserved. Image sharing does not
+reduce the number of V8 heaps. Corporate OIDC keeps separate role commands.

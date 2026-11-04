@@ -419,7 +419,7 @@ UMIAK_PVE_SMOKE=1 mise exec -- pnpm --filter @umiak/worker exec vitest run test/
 
 ## MCP (S11)
 
-Сервис `mcp` (образ `umiak-mcp:dev`, `apps/mcp/Dockerfile`) отдаёт публичное API как инструменты MCP по Streamable HTTP. Состояния и секретов у него нет: он проверяет bearer вызовом `GET /v1/me` в `api` (`http://api:8080`) и передаёт тот же bearer во всех вызовах SDK, так что права решает `api`.
+Сервис `mcp` (образ `umiak-quickstart:dev`, `deploy/compose/quickstart/Dockerfile`) отдаёт публичное API как инструменты MCP по Streamable HTTP. Состояния и секретов у него нет: он проверяет bearer вызовом `GET /v1/me` в `api` (`http://api:8080`) и передаёт тот же bearer во всех вызовах SDK, так что права решает `api`.
 
 ```sh
 curl -s http://localhost:9092/readyz                                      # mcp: {"ready":true,...}
@@ -440,7 +440,7 @@ curl -s http://localhost:8090/.well-known/oauth-protected-resource/mcp    # auth
 2. Если сервису нужна схема БД, поставить `depends_on: migrate: condition: service_completed_successfully`.
 3. Секреты генерировать в `secrets-init/init.sh` в свой каталог `deploy/compose/secrets/<сервис>/` (git-ignored) и монтировать каталог, а не файл; в git — только `*.example`. Сервис ставит `depends_on: secrets-init: condition: service_completed_successfully`.
 4. Образ собирать из корня репозитория (`context: ../..`, `dockerfile: apps/<name>/Dockerfile`); `.dockerignore` лежит в корне.
-5. Новый пакет workspace (`packages/<name>` или `apps/<name>`) — добавить строку `COPY <dir>/package.json <dir>/` в блок манифестов стадии `base` **во всех** Dockerfile (`apps/worker/Dockerfile`, `apps/api/Dockerfile`), иначе `pnpm install --frozen-lockfile` не совпадёт с lockfile. Если пакет входит в зависимости сервиса, добавить и `COPY <dir>/src <dir>/src`; если он собирается в `dist` (как `@umiak/proto` и `@umiak/agent-client`), собрать его в стадии `build` и скопировать `dist` в итоговый образ.
+5. Новый пакет workspace (`packages/<name>` или `apps/<name>`) — добавить строку `COPY <dir>/package.json <dir>/` в блок манифестов стадии `base` в Dockerfile общего CP и web (`deploy/compose/quickstart/Dockerfile`, `deploy/compose/quickstart/Dockerfile`), иначе `pnpm install --frozen-lockfile` не совпадёт с lockfile. Если пакет входит в зависимости сервиса, добавить и `COPY <dir>/src <dir>/src`; если он собирается в `dist` (как `@umiak/proto` и `@umiak/agent-client`), собрать его в стадии `build` и скопировать `dist` в итоговый образ.
    Новый Dockerfile для пакета workspace копирует в стадии `base` вместе с `package.json`, `pnpm-lock.yaml` и `pnpm-workspace.yaml` ещё и корневой `.pnpmfile.cjs` (хук `readPackage` для `openapi-typescript`): без него `pnpm install --frozen-lockfile` не сходится с checksum pnpmfile в lockfile.
 
 ## Запуск worker и api без Docker
