@@ -38,6 +38,8 @@ class FakeUi:
 class Day2Fake(CtFake):
     def __init__(self, root, **kwargs):
         super().__init__(root, **kwargs)
+        self.destroy_error = None  # qm destroy fails with this stderr
+        self.stuck = set()  # vmids qm destroy reports success for but leaves behind
         self.lvs = []  # rows like `lvs --reportformat json` prints
         self.ct_net0 = "name=eth0,bridge=vmbr0,ip=192.168.68.50/22,gw=192.168.68.1"
 
@@ -51,16 +53,23 @@ class Day2Fake(CtFake):
             vg, name = argv[-1].split("/")
             self.lvs = [row for row in self.lvs if (row["vg_name"], row["lv_name"]) != (vg, name)]
             return ""
+        if argv[:2] == ["qm", "stop"]:
+            self.commands.append(argv)
+            return ""
+        if argv[:2] == ["qm", "destroy"]:
+            self.commands.append(argv)
+            if self.destroy_error:
+                raise CommandError(argv, 255, "", self.destroy_error)
+            vmid = int(argv[2])
+            if vmid not in self.stuck:
+                resources = self.objects["/cluster/resources"]
+                resources[:] = [row for row in resources if int(row["vmid"]) != vmid]
+                self.lvs = [row for row in self.lvs if not row["lv_name"].startswith(f"vm-{vmid}-disk-")]
+            return ""
         if argv[:2] == ["pct", "config"]:
             self.commands.append(argv)
             return f"arch: amd64\nhostname: umiak-cp\nnet0: {self.ct_net0}\nostype: debian\n"
-        out = super().run(argv, input)
-        if argv[:2] == ["pvesh", "delete"] and argv[2].startswith("/nodes/"):
-            vmid = int(argv[2].rsplit("/", 1)[1])
-            resources = self.objects["/cluster/resources"]
-            resources[:] = [row for row in resources if int(row["vmid"]) != vmid]
-            self.lvs = [row for row in self.lvs if not row["lv_name"].startswith(f"vm-{vmid}-disk-")]
-        return out
+        return super().run(argv, input)
 
     def _in_ct(self, argv, input):
         if argv[:2] == ["docker", "compose"] and "exec" in argv:
@@ -274,10 +283,11 @@ def test_full_uninstall_removes_only_umiak_objects(installed):
     day2.uninstall(runner, current, remove_pve_objects=True, remove_guests=True, ui=ui)
 
     # Guests: running one stopped first, both destroyed; the foreign VM 103 untouched.
-    assert ["pvesh", "create", "/nodes/pve/qemu/510/status/stop"] in runner.commands
-    assert not any(a[:3] == ["pvesh", "create", "/nodes/pve/qemu/600/status/stop"] for a in runner.commands)
-    destroyed = [a[2] for a in runner.commands if a[:2] == ["pvesh", "delete"] and a[2].startswith("/nodes/")]
-    assert destroyed == ["/nodes/pve/qemu/510", "/nodes/pve/qemu/600"]
+    assert ["qm", "stop", "510"] in runner.commands
+    assert ["qm", "stop", "600"] not in runner.commands
+    destroyed = [a for a in runner.commands if a[:2] == ["qm", "destroy"]]
+    assert destroyed == [["qm", "destroy", v, "--purge", "1", "--destroy-unreferenced-disks", "0"]
+                         for v in ("510", "600")]
     assert any(r["vmid"] == 103 for r in runner.objects["/cluster/resources"])
 
     # PVE objects gone, SDN applied after zone removal; foreign role and ACL kept.
@@ -395,9 +405,48 @@ def test_uninstall_stops_a_guest_that_started_after_the_plan(installed):
     add_pool_members(runner, (510, "qemu", "stopped"))
     runner.objects["/nodes/pve/qemu/510/status/current"] = {"status": "running"}
     day2.uninstall(runner, current, remove_pve_objects=False, remove_guests=True, ui=FakeUi(answers=["DELETE"]))
-    stop = runner.commands.index(["pvesh", "create", "/nodes/pve/qemu/510/status/stop"])
-    delete = next(n for n, a in enumerate(runner.commands) if a[:3] == ["pvesh", "delete", "/nodes/pve/qemu/510"])
+    stop = runner.commands.index(["qm", "stop", "510"])
+    delete = next(n for n, a in enumerate(runner.commands) if a[:3] == ["qm", "destroy", "510"])
     assert stop < delete
+
+
+def test_uninstall_surfaces_a_failed_destroy_and_keeps_the_pool(installed):
+    runner, current, _ = installed
+    add_pool_members(runner, (600, "qemu", "stopped"))
+    runner.destroy_error = "no such logical volume vmdata/data"
+    with pytest.raises(CommandError):
+        day2.uninstall(runner, current, remove_pve_objects=True, remove_guests=True, ui=FakeUi(answers=["DELETE"]))
+    assert not any(a[:3] == ["pveum", "pool", "delete"] for a in runner.commands)
+
+
+def test_uninstall_blocks_pool_removal_while_a_vm_remains(installed):
+    runner, current, _ = installed
+    add_pool_members(runner, (600, "qemu", "stopped"), (601, "qemu", "stopped"))
+    runner.stuck = {601}
+    with pytest.raises(InstallerError, match="601"):
+        day2.uninstall(runner, current, remove_pve_objects=True, remove_guests=True, ui=FakeUi(answers=["DELETE"]))
+    assert not any(a[:3] == ["pveum", "pool", "delete"] for a in runner.commands)
+    assert "/pools/umiak" in runner.objects
+
+
+def test_full_uninstall_removes_zone_dnsmasq_leftovers_after_sdn_apply(installed):
+    runner, current, _ = installed
+    for name in day2.DNSMASQ_FILES:
+        runner.path(name).parent.mkdir(parents=True, exist_ok=True)
+        runner.path(name).write_text("x")
+    other = runner.path("/etc/dnsmasq.d/home.conf")
+    other.parent.mkdir(parents=True, exist_ok=True)
+    other.write_text("keep")
+    (runner.path("/etc/dnsmasq.d/umiak")).mkdir(parents=True, exist_ok=True)
+    ui = FakeUi(answers=["DELETE"])
+    day2.uninstall(runner, current, remove_pve_objects=True, remove_guests=False, ui=ui)
+    assert not any(runner.path(n).exists() for n in day2.DNSMASQ_FILES + day2.DNSMASQ_DIRS)
+    assert other.read_text() == "keep"
+    apply = max(n for n, a in enumerate(runner.commands) if a == ["pvesh", "set", "/cluster/sdn"])
+    disable = runner.commands.index(["systemctl", "disable", "--now", "dnsmasq@umiak"])
+    reload = runner.commands.index(["systemctl", "reload", "dbus"])
+    assert apply < disable < reload
+    assert "dnsmasq.umiak.leases" in "\n".join(ui.said)
 
 
 def test_update_waits_for_tailscaled_after_starting_the_ct(installed):
