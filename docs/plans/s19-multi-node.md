@@ -77,9 +77,16 @@ Interfaces: build/register requests carry node ID; trusted DB resolves target st
 
 Files: spec evidence and roadmap S19 row; architecture locality note.
 
+Integration order changed by Ilia via coordinator: S20 (`cp-consolidate`) merges
+into main first. Its two-image compose/Dockerfile layout and unified init are
+the baseline for final S19 integration and live validation.
+
+- [ ] Wait for the coordinator's S20 merge signal; read the landed S20 spec/plan and merge `origin/main` into `s19-multi-node`. Resolve compose/Dockerfile/installer `stack.py`/release workflow overlap against the actual landed contracts. Preserve the MCP desktop_url compaction cherry-picked by S20 and the separate zero-wait replay fix.
+- [ ] Verify production dependency closure, migration/bootstrap ordering, node-console commands, node-agent extraction/checksum and per-node secret handling under the consolidated images/unified init. Rebuild the local live overlay for S20; do not use the previously prepared three-service image overlay.
+
 - [ ] Coordinate live window and exact test VMIDs with S18. Prepare pve2 through installer; build Linux on each node sequentially, create modest workloads on both and verify exec/tunnel/locality, removal refusal and successful empty-node retirement/re-add. Delete test sandboxes/artifacts; record exact results.
-- [x] Run `mise exec -- pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`; Node setup tests and Python installer tests. Run mise Go build/vet/test(-race)/golangci-lint for all go.work modules, Linux/Windows checks from CI where supported. Report unavailable checks; do not claim them passed.
-- [x] Fresh independent acceptance subagent gets spec and diff, not conclusions; fix blockers and recheck affected tests.
+- [ ] Run `mise exec -- pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`; Node setup tests and Python installer tests. Run mise Go build/vet/test(-race)/golangci-lint for all go.work modules, Linux/Windows checks from CI where supported. Report unavailable checks; do not claim them passed.
+- [ ] Fresh independent acceptance subagent gets the final post-S20 spec/diff, not conclusions; fix blockers and recheck affected tests.
 - [ ] Update roadmap and evidence; merge branch into main without squash, push, report SHA/live results/open items to coordinator.
 
 ## Implementation notes (2026-11-04)
@@ -112,3 +119,5 @@ Files: spec evidence and roadmap S19 row; architecture locality note.
 - Final local gate at runtime revision dc5711e2: pnpm build/lint/typecheck/test passed (core377, DB75, API1079, worker440+7skip, builder605, MCP716+1skip, CLI189, web289, TS SDK141/Python SDK81), quickstart186, installer207 and targeted Python lint passed. Go code is unchanged from the fully passing post-S18 gate (all five modules build/vet/race tests/lint, Windows builds/vet and Linux integration-tag lint); native Linux systemd/Windows runtime integration is not claimed.
 - Fresh independent acceptance of dc5711e2154a40532c08ceba8c36b31844de4e9b found no established blockers after 726 targeted local tests. It independently checked cross-component placement/admission/locality, SSH, build/lease/reconcile fencing, promotion, interrupted cleanup, durable retirement and installer/bootstrap lifecycles. No host changes were performed by this stage or its reviewers.
 - Pending: coordinator handoff after Ilia's fresh install. Planned live uses the retained pve Linux template/control-plane CT and a fresh local pve2 build; at most two 2 GiB test VMs simultaneously (CP default 4 GiB, <=8 GiB combined). Delete the second sandbox before the fork/locality test. Verify template absence blocks placement before build; verify occupied removal refusal, successful retirement/re-add, source-node locality and tunnel exec. Clean only recorded test artifacts, then merge/push main and report exact SHA/results. No main merge has occurred yet.
+
+- Coordinator update: S20 merges before S19 and cherry-picks MCP desktop_url compaction. S19 remains unmerged until the coordinator signals that main is ready; repeat the full gate against the integrated tree. The clean dc5711e2 review/gate above remains historical evidence, not acceptance of the future S20 integration. Live authorization still starts only after Ilia's fresh install and coordinator handoff; no host changes are authorized by this merge-order update.
