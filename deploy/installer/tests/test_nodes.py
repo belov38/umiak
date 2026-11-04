@@ -182,7 +182,14 @@ def test_added_node_prepares_idempotently_without_new_token_or_private_key(tmp_p
         "sha256": hashlib.sha256(AGENT).hexdigest(),
         "public_key": result.public_key,
     }
+    legacy = target.path(prepare_host.DNSMASQ_CONF_DIR)
+    legacy.mkdir(parents=True, mode=0o700)
+    conf = legacy / "umiak0.conf"
+    conf.write_text("dhcp-range=10.88.0.100,10.88.0.250")
+    conf.chmod(0o600)
     first = dispatch(target, request)
+    assert legacy.stat().st_mode & 0o777 == 0o755
+    assert conf.stat().st_mode & 0o777 == 0o644
     assert dispatch(target, request) == first
     assert first["sshHost"] == "192.168.68.11"
     assert target.token_counter == 0

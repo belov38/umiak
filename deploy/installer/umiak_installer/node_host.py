@@ -170,6 +170,8 @@ def _dispatch(runner: Runner, request: dict) -> dict:
     work.mkdir(parents=True, exist_ok=True, mode=0o700)
     write_secret(work / prepare_host.STAGED_NODE_CONFIG, prepare_host._node_config(cfg, facts))
     if request["op"] == "prepare":
+        # Repair old generated files before PVE starts the zone; the bridge may not exist yet.
+        prepare_host.repair_dnsmasq_modes(runner, restart=False)
         _zone(runner, request["members"])
         prepare_host._verify(runner, cfg, facts["media_name"])
         _verify_local_sdn(runner, cfg)

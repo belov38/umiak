@@ -430,7 +430,7 @@ def verify_dnsmasq_unit(runner: Runner) -> None:
     )
 
 
-def repair_dnsmasq_modes(runner: Runner) -> bool:
+def repair_dnsmasq_modes(runner: Runner, *, restart: bool = True) -> bool:
     """Undo configs PVE wrote as 0600 under a leaked umask 077 (messagebus cannot read them)."""
     paths = [runner.path(p) for p in DNSMASQ_PRIVATE_FILES]
     conf_dir = runner.path(DNSMASQ_CONF_DIR)
@@ -446,7 +446,8 @@ def repair_dnsmasq_modes(runner: Runner) -> bool:
             fixed = True
     if fixed:
         runner.run(["systemctl", "reload", "dbus"])
-        runner.run(["systemctl", "restart", DNSMASQ_UNIT])
+        if restart:
+            runner.run(["systemctl", "restart", DNSMASQ_UNIT])
     return fixed
 
 
