@@ -671,3 +671,23 @@ test("rechecking unchanged storage or networking preserves later verification", 
 		}
 	}
 });
+
+test("network accepts aligned /18 pools and rejects noncanonical or public pools", () => {
+	const base = { gatewayAddress: "192.168.1.2" };
+	assert.equal(
+		validateNetwork({ ...base, guestSubnet: "10.88.0.0/18" }).guestSubnet,
+		"10.88.0.0/18",
+	);
+	assert.equal(
+		validateNetwork({ ...base, guestSubnet: "10.88.64.0/18" }).guestSubnet,
+		"10.88.64.0/18",
+	);
+	for (const guestSubnet of [
+		"10.88.0.0/18/extra",
+		"10.88.1.0/18",
+		"8.8.0.0/18",
+		"10.88.0.0/17",
+		"10.88.0.0/25",
+	])
+		assert.throws(() => validateNetwork({ ...base, guestSubnet }));
+});

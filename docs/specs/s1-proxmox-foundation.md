@@ -180,6 +180,16 @@ Decision of the master session, 2026-10-30:
 
 | VMID | What |
 |---|---|
+New homelab installs use the following defaults (auto-pick another free block/subnet on conflict):
+
+| Resource | Default |
+|---|---|
+| Sandbox VMIDs | 10000–19999 (10,000 IDs) |
+| Template VMIDs | 20000–20099 |
+| Guest subnet | 10.88.0.0/18, gateway .1, DHCP 10.88.0.100–10.88.63.250 |
+
+Stopped VMs retain IPAM addresses until deletion. Existing installer state is preserved; missing keys use legacy 500–589 / 600–699 / 10.88.0.0/24. Extra nodes inherit the saved settings. The legacy development layout below is unchanged:
+
 | 500–589 | sandboxes: the range of the worker allocator, `umiak-bench`, and `deploy/compose` (`UMIAK_VMID_RANGE`, `vmidMin`/`vmidMax` in topology) |
 | 590–596 | dev infrastructure, not part of allocation; CT 590 is the dev control plane (`infra/dev-cp`) |
 | 597–599 | templates (`umiak-tpl`, `UMIAK_TEMPLATE_VMID_RANGE`): Linux (S5) — 597 and 599 (599 is still the PoC template), Windows (S9) — 598; the slots are set by the recipe (`vmids`) |

@@ -86,12 +86,12 @@ def test_non_interactive_install_end_to_end(env):
     assert install["connection"]["apiUrl"] == "https://192.168.68.10:8006"
     assert install["network"] == {"gatewayAddress": "192.168.68.50", "guestDns": "1.1.1.1",
                                   "previewDomain": "umiak.100-64-10-20.sslip.io", "sshHost": "100.64.10.20",
-                                  "guestSubnet": "10.88.0.0/24"}
+                                  "guestSubnet": "10.88.0.0/18"}
     assert install["limits"]["ramCapMb"] == 8192
     assert json.loads(pushed[stack.STAGING + "/host-report.json"])["nodeAgent"]["ok"] is True
     assert set(stack.SECRET_NAMES) <= {k.rsplit("/", 1)[1] for k in pushed if k.startswith(stack.STAGING)}
     assert pushed[stack.STAGING + "/quickstart-network.json"] == stack.network_json(
-        "192.168.68.50", "umiak.100-64-10-20.sslip.io", "1.1.1.1")
+        "192.168.68.50", "umiak.100-64-10-20.sslip.io", "1.1.1.1", "10.88.0.0/18")
     assert "UMIAK_PUBLIC_URL=https://umiak.tail0000.ts.net" in pushed["/opt/umiak/.env"].decode()
     # The token secret never appears in argv, stdin or printed output.
     token = runner.path("/var/lib/umiak-installer/secrets/pve-token").read_text()

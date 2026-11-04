@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import rollback
-from .allocation import DEFAULT_SUBNET, subnet_path
+from .allocation import subnet_path
 from .pve import (
     CommandError,
     InstallerError,
@@ -85,7 +85,7 @@ class PrepareConfig:
     storage: str
     gateway_ip: str
     guest_dns: str = "1.1.1.1"
-    guest_subnet: str = DEFAULT_SUBNET
+    guest_subnet: str = "10.88.0.0/24"
     vmid_min: int = 500
     vmid_max: int = 589
     tpl_min: int = 600
@@ -141,8 +141,8 @@ def _validate(cfg: PrepareConfig) -> None:
         raise InstallerError("Invalid node or storage name")
     try:
         subnet = ipaddress.IPv4Network(cfg.guest_subnet)
-        if subnet.prefixlen != 24:
-            raise ValueError("Guest subnet must be an IPv4 /24")
+        if not 18 <= subnet.prefixlen <= 24:
+            raise ValueError("Guest subnet must be an IPv4 /18 to /24")
         ipaddress.IPv4Address(cfg.gateway_ip)
         ipaddress.ip_address(cfg.guest_dns)
         if cfg.node_ip is not None:
@@ -385,7 +385,7 @@ def _apply(runner: Runner, cfg: PrepareConfig, facts: dict, out_dir: Path, journ
     network = ipaddress.IPv4Network(cfg.guest_subnet)
     sdn_changed |= journal.create("/cluster/sdn/vnets/umiak0/subnets", subnet_path(cfg.guest_subnet),
                    "--subnet", cfg.guest_subnet, "--type", "subnet", "--gateway", str(network[1]), "--snat", "1",
-                   "--dhcp-range", f"start-address={network[100]},end-address={network[250]}",
+                   "--dhcp-range", f"start-address={network[100]},end-address={network[network.num_addresses - 6]}",
                    "--dhcp-dns-server", str(ipaddress.ip_address(cfg.guest_dns)))
     journal.create("/cluster/firewall/ipset", "/cluster/firewall/ipset/umiak-gateway", "--name", "umiak-gateway")
     ipset = "/cluster/firewall/ipset/umiak-gateway"

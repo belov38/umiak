@@ -5,7 +5,7 @@ import json
 
 from .pve import InstallerError, get
 
-DEFAULT_SUBNET = "10.88.0.0/24"
+DEFAULT_SUBNET = "10.88.0.0/18"
 
 
 def free_block(start, size, occupied, excluded=()):
@@ -56,13 +56,10 @@ def occupied_networks(runner, *, resume=False):
 
 
 def subnet_candidates():
-    # Prefer adjacent second octets, then the remaining RFC1918 /24s.
+    # Walk aligned /18s in preference order; never expand a pool into host addresses.
     for space in ("10.88.0.0/13", "10.96.0.0/11", "10.128.0.0/9", "10.0.0.0/10",
                   "10.64.0.0/12", "10.80.0.0/13", "172.16.0.0/12", "192.168.0.0/16"):
-        net = ipaddress.IPv4Network(space)
-        # Try x.y.0.0 before x.y.1.0, etc.
-        blocks = list(net.subnets(new_prefix=24))
-        yield from sorted(blocks, key=lambda n: (int(n.network_address) & 0xff00, int(n.network_address)))
+        yield from ipaddress.IPv4Network(space).subnets(new_prefix=18)
 
 
 def choose_subnet(occupied):

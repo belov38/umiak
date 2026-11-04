@@ -140,6 +140,8 @@ export class Allocator {
 		const order = slots ? [...slots] : [];
 		if (!slots)
 			for (let vmid = range.max; vmid >= range.min; vmid--) order.push(vmid);
+		// Batch both inventories once; candidate checks below must stay in memory,
+		// even for a nearly full 10,000-ID range.
 		const occupied = await this.#o.occupied();
 		const taken = new Set((await store.list(clusterId)).map((l) => l.vmid));
 		for (const vmid of order) {
@@ -200,6 +202,8 @@ export class Allocator {
 			const own = await this.#findOwned(ownerId);
 			if (own) return { vmid: own.vmid, mac: own.mac, reused: true };
 		}
+		// Batch both inventories once; candidate checks below must stay in memory,
+		// even for a nearly full 10,000-ID range.
 		const occupied = await this.#o.occupied();
 		const taken = new Set((await store.list(clusterId)).map((l) => l.vmid));
 		for (let vmid = range.min; vmid <= range.max; vmid++) {

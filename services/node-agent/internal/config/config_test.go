@@ -106,3 +106,16 @@ func TestDevelopmentDesktopSlots(t *testing.T) {
 		}
 	}
 }
+
+func TestLargeInstallRanges(t *testing.T) {
+	c := Default()
+	c.VMIDMin, c.VMIDMax = 10000, 19999
+	c.TemplateMin, c.TemplateMax = 20000, 20099
+	c.GuestSubnet = "10.88.0.0/18"
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if !c.InRange(10000) || !c.InRange(19999) || c.InRange(20000) || !c.IsTemplateSlot(20099) {
+		t.Fatal("large ranges must preserve sandbox/template isolation")
+	}
+}

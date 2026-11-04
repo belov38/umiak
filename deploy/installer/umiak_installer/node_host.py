@@ -68,9 +68,9 @@ def _unused(runner, node, control_plane_id):
 def _verify_local_sdn(runner, cfg):
     network = ipaddress.IPv4Network(cfg.guest_subnet)
     bridge = json.loads(runner.run(["ip", "-j", "address", "show", "dev", "umiak0"]))
-    if not any(a.get("local") == str(network[1]) and a.get("prefixlen") == 24
+    if not any(a.get("local") == str(network[1]) and a.get("prefixlen") == network.prefixlen
                for row in bridge for a in row.get("addr_info", [])):
-        raise InstallerError(f"Verification failed: local umiak0 gateway {network[1]}/24 is missing")
+        raise InstallerError(f"Verification failed: local umiak0 gateway {network[1]}/{network.prefixlen} is missing")
     runner.run(["systemctl", "is-active", "dnsmasq@umiak.service"])
     subnet = get(runner, prepare_host.subnet_path(cfg.guest_subnet))
     if str(subnet.get("snat")) != "1" or subnet.get("gateway") != str(network[1]) or not subnet.get("dhcp-range"):

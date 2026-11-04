@@ -416,3 +416,35 @@ function bind(s: SqliteStateStore): AllocatorStore {
 		findByOwner: (c, o) => s.findByOwner(c, o),
 	};
 }
+
+it("allocates across 10,000 slots with one inventory read and one lease insert", async () => {
+	const store = new SqliteStateStore(":memory:");
+	let inventories = 0;
+	let inserts = 0;
+	const allocator = new Allocator({
+		store: {
+			get: (...args) => store.get(...args),
+			list: (...args) => store.list(...args),
+			setState: (...args) => store.setState(...args),
+			remove: (...args) => store.remove(...args),
+			tryInsert: (lease) => {
+				inserts++;
+				return store.tryInsert(lease);
+			},
+		},
+		clusterId: 1,
+		range: { min: 10000, max: 19999 },
+		templateVmid: 20000,
+		occupied: async () => {
+			inventories++;
+			return new Set(Array.from({ length: 9999 }, (_, i) => 10000 + i));
+		},
+	});
+	expect((await allocator.allocate()).vmid).toBe(19999);
+	expect(inventories).toBe(1);
+	expect(inserts).toBe(1);
+	expect(
+		new Set(Array.from({ length: 10000 }, (_, i) => macFor(1, 10000 + i))).size,
+	).toBe(10000);
+	store.close();
+});

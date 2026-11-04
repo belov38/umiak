@@ -62,9 +62,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bridge", help="LAN bridge for the control-plane CT (default: the bridge of the default route)")
     parser.add_argument("--gateway-cidr", help="LAN router and prefix, e.g. 192.168.1.1/24 (default: from the LAN bridge)")
     parser.add_argument("--guest-dns", help=f"DNS server(s) for sandboxes and the control-plane CT (default {GUEST_DNS})")
-    parser.add_argument("--vmid-range", help="sandbox VMIDs (default 500-589)")
-    parser.add_argument("--guest-subnet", help="isolated private guest IPv4 /24 (auto-selected if omitted)")
-    parser.add_argument("--template-range", help="template VMIDs (default 600-699)")
+    parser.add_argument("--vmid-range", help="sandbox VMIDs (default 10000-19999)")
+    parser.add_argument("--guest-subnet", help="isolated private guest IPv4 subnet (default /18) (auto-selected if omitted)")
+    parser.add_argument("--template-range", help="template VMIDs (default 20000-20099)")
     parser.add_argument("--ram-cap-mb", type=int, help=f"sandbox RAM cap in MiB, 2048-8192 (default {DEFAULT_RAM_CAP})")
     parser.add_argument("--hostname", help="tailnet hostname of the control plane (default umiak)")
     parser.add_argument("--action", choices=sorted(ACTIONS), help="day-2 action without the menu (non-interactive)")
@@ -226,16 +226,17 @@ def gather(runner: Runner, args, ui: Ui, saved: dict | None = None) -> dict:
     def automatic(flag, low_key, high_key, start, size, excluded=()):
         if flag:
             return flag
-        if low_key in saved:
-            return f"{saved[low_key]}-{saved[high_key]}"
+        if saved:
+            legacy = {"vmid_min": 500, "vmid_max": 589, "tpl_min": 600, "tpl_max": 699}
+            return f"{saved.get(low_key, legacy[low_key])}-{saved.get(high_key, legacy[high_key])}"
         low, high = allocation.free_block(start, size, occupied, excluded)
         return f"{low}-{high}"
 
     reserved_ct = ((args.ct_id, args.ct_id),) if args.ct_id is not None else ()
     reserved_templates = (_range(args.template_range, "--template-range"),) if args.template_range else ()
-    vmids = check_range(automatic(args.vmid_range, "vmid_min", "vmid_max", 500, 90,
+    vmids = check_range(automatic(args.vmid_range, "vmid_min", "vmid_max", 10000, 10000,
                                   reserved_ct + reserved_templates), "--vmid-range")
-    templates = check_range(automatic(args.template_range, "tpl_min", "tpl_max", 600, 100, (vmids,) + reserved_ct),
+    templates = check_range(automatic(args.template_range, "tpl_min", "tpl_max", 20000, 100, (vmids,) + reserved_ct),
                             "--template-range")
     if templates[0] <= vmids[1] and vmids[0] <= templates[1]:
         raise UsageError("Template VMIDs must not overlap the sandbox range")
@@ -245,12 +246,12 @@ def gather(runner: Runner, args, ui: Ui, saved: dict | None = None) -> dict:
     except (ValueError, KeyError, TypeError) as error:
         raise InstallerError(f"Cannot inspect cluster networks: {error}") from error
     subnet = args.guest_subnet or saved.get("guest_subnet") or (
-        allocation.DEFAULT_SUBNET if saved else allocation.choose_subnet(networks))
+        "10.88.0.0/24" if saved else allocation.choose_subnet(networks))
     try:
         net = ipaddress.IPv4Network(subnet)
-        if net.prefixlen != 24 or not any(net.subnet_of(ipaddress.IPv4Network(private))
+        if not 18 <= net.prefixlen <= 24 or not any(net.subnet_of(ipaddress.IPv4Network(private))
                                         for private in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")):
-            raise ValueError("use a private IPv4 /24")
+            raise ValueError("use a private IPv4 /18 to /24")
         if any(net.overlaps(other) for other in networks):
             raise ValueError("overlaps cluster addresses, routes or SDN subnets")
     except (ValueError, TypeError) as error:

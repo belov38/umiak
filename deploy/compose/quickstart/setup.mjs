@@ -161,12 +161,26 @@ export function validateNetwork(input) {
 		"Tunnel URL must use wss",
 	);
 	const guestSubnet = input.guestSubnet || "10.88.0.0/24";
+	const [address, prefixText] = guestSubnet.split("/");
+	const prefix = Number(prefixText);
+	const octets = address.split(".").map(Number);
+	const ip = octets.reduce((n, v) => n * 256 + v, 0);
+	const block = 2 ** (32 - prefix);
+	const privateIp =
+		octets[0] === 10 ||
+		(octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+		(octets[0] === 192 && octets[1] === 168);
 	requireValue(
-		/^(10\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+|192\.168\.\d+)\.0\/24$/.test(
-			guestSubnet,
-		) && isIP(guestSubnet.split("/")[0]) === 4,
-		"Invalid private guest /24",
+		guestSubnet === `${address}/${prefix}` &&
+			isIP(address) === 4 &&
+			Number.isInteger(prefix) &&
+			prefix >= 18 &&
+			prefix <= 24 &&
+			ip % block === 0 &&
+			privateIp,
+		"Invalid private guest /18 to /24",
 	);
+
 	return {
 		gatewayAddress: host,
 		previewDomain,
