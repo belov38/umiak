@@ -374,11 +374,15 @@ export class PveApi implements PveClient {
 		upid: string,
 		opts: { timeoutMs?: number; pollMs?: number } = {},
 	): Promise<void> {
+		// Uploads may copy to a remote node while imgcopy runs on the API entry
+		// node. The UPID identifies the task owner, independently of its target.
+		const taskNode =
+			/^UPID:([A-Za-z0-9][A-Za-z0-9.-]*):/.exec(upid)?.[1] ?? node;
 		const deadline = Date.now() + (opts.timeoutMs ?? 600_000);
 		const pollMs = opts.pollMs ?? 250;
 		for (;;) {
 			const st = await this.get<{ status: string; exitstatus?: string }>(
-				`/nodes/${node}/tasks/${encodeURIComponent(upid)}/status`,
+				`/nodes/${taskNode}/tasks/${encodeURIComponent(upid)}/status`,
 			);
 			if (st.status === "stopped") {
 				if (st.exitstatus !== "OK" && !st.exitstatus?.startsWith("WARNINGS"))

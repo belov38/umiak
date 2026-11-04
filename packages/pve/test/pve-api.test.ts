@@ -315,6 +315,22 @@ describe("PveApi", () => {
 		expect(counts.GET).toBe(2);
 	});
 
+	it("waitTask polls the UPID owner when an upload task runs on another cluster node", async () => {
+		const upid =
+			"UPID:pve:0007F31A:00CBC2F7:6AEAF945:imgcopy::umiak@pve!umiak:";
+		const paths: string[] = [];
+		const url = await serve((req, _body, res) => {
+			paths.push(req.url ?? "");
+			if (req.url?.startsWith("/api2/json/nodes/pve/tasks/"))
+				json(res, 200, { data: { status: "stopped", exitstatus: "OK" } });
+			else json(res, 404, { errors: { upid: "no such task" } });
+		});
+		await api(url).waitTask("pve2", upid, { pollMs: 1 });
+		expect(paths).toEqual([
+			`/api2/json/nodes/pve/tasks/${encodeURIComponent(upid)}/status`,
+		]);
+	});
+
 	it("waitTask polls until stopped and reports failures", async () => {
 		const states = [
 			{ status: "running" },
