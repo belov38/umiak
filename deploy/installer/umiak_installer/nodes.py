@@ -347,9 +347,12 @@ def refresh_agents(runner, current, bundle, *, ui):
         )
 
 
-def require_detached_others(runner, current):
+def other_sandbox_nodes(runner, current, console=None) -> list[dict]:
+    """Sandbox nodes besides this one (name, storage), from the control plane; the saved list if it is down."""
     if current.phase != "complete":
-        return
-    names = [n["name"] for n in NodeConsole(runner, current).call("list")["nodes"] if n["name"] != current.node]
-    if names:
-        raise InstallerError("Remove the other sandbox nodes before platform uninstall: " + ", ".join(names))
+        return []
+    try:
+        listed = (console or NodeConsole(runner, current)).call("list")["nodes"]
+        return [{"name": n["name"], "storage": n.get("storage")} for n in listed if n["name"] != current.node]
+    except (CommandError, ValueError, KeyError):
+        return [{"name": n, "storage": None} for n in current.sandbox_nodes if n != current.node]

@@ -433,7 +433,13 @@ def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: b
     progress = progress or ui.say
     _require_node(runner, current)
     from . import nodes
-    nodes.require_detached_others(runner, current)
+    others = nodes.other_sandbox_nodes(runner, current)
+    if others and not (remove_guests and remove_pve_objects):
+        names = ", ".join(n["name"] for n in others)
+        raise InstallerError(
+            f"Umiak also runs sandboxes on {names}. To uninstall from every node, also destroy the sandboxes and "
+            "templates and remove the Proxmox objects; or first remove those nodes with 'Add or remove sandbox "
+            "nodes'. Nothing was changed.")
     ct_id = current.ct_id
     ct_row = _umiak_ct(runner, ct_id)
 
@@ -474,6 +480,8 @@ def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: b
         plan += [f"destroy {row['type']} {row['vmid']} ({row.get('name', 'unnamed')}) on {row.get('node')}"
                  for row in guests]
         plan += [f"remove LV {lv_target[0]}/{name} if PVE leaves it (Umiak snapshot or guest disk)" for name in lv_names]
+    plan += [f"remove sandbox node {n['name']}: its node agent, leftover Umiak disks and Umiak network membership"
+             for n in others]
     if remove_pve_objects:
         plan += [f"remove {description}" for description, _ in pve_steps]
         if _sdn_removed(pve_steps):
@@ -504,16 +512,24 @@ def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: b
         if _running(runner, ct_id):
             runner.run(["pct", "stop", str(ct_id)])
     if remove_guests:
+        local = runner.hostname()
         for row in guests:
             path = f"/nodes/{row['node']}/{row['type']}/{int(row['vmid'])}"
             vmid = str(int(row["vmid"]))
-            progress(f"Destroying {row['type']} {row['vmid']}")
+            progress(f"Destroying {row['type']} {row['vmid']} on {row['node']}")
             # Re-read: the guest may have started since the plan was shown.
-            if get(runner, path + "/status/current").get("status") != "stopped":
-                runner.run(["qm", "stop", vmid])
+            stopped = get(runner, path + "/status/current").get("status") == "stopped"
             # Synchronous CLI: a failed destroy task is a non-zero exit. The unreferenced-disk scan is
             # skipped: it aborts on any inactive storage of the node (e.g. a stale lvmthin).
-            runner.run(["qm", "destroy", vmid, "--purge", "1", "--destroy-unreferenced-disks", "0"])
+            if row["node"] == local:
+                if not stopped:
+                    runner.run(["qm", "stop", vmid])
+                runner.run(["qm", "destroy", vmid, "--purge", "1", "--destroy-unreferenced-disks", "0"])
+            else:
+                # qm acts on this node only; pvesh reaches the guest's node and waits for the task.
+                if not stopped:
+                    runner.run(["pvesh", "create", path + "/status/stop"])
+                runner.run(["pvesh", "delete", path, "--purge", "1", "--destroy-unreferenced-disks", "0"])
         remaining = {int(r["vmid"]) for r in get(runner, "/cluster/resources", "--type", "vm") or []}
         left = [str(int(row["vmid"])) for row in guests if int(row["vmid"]) in remaining]
         if left:
@@ -525,6 +541,12 @@ def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: b
         for name in sorted(set(lv_names) & set(umiak_lvs(runner, *lv_target, ranges, _guest_ids(runner)))):
             progress(f"Removing LV {vg}/{name}")
             runner.run(["lvremove", "-y", f"{vg}/{name}"])
+    if others:
+        host = nodes.HostConsole(runner)
+        for other in others:
+            progress(f"Removing sandbox node {other['name']}")
+            host.call(other["name"], "remove", remaining_nodes=[runner.hostname()], control_plane_id=ct_id,
+                      purge_disks={"storage": other["storage"] or current.answers["storage"], "ranges": ranges})
     if ct_row is not None:
         progress(f"Destroying control-plane container {ct_id}")
         runner.run(["pct", "destroy", str(ct_id), "--purge", "1"])

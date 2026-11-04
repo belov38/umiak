@@ -117,6 +117,14 @@ def _dispatch(runner: Runner, request: dict) -> dict:
     node = request.get("node")
     _identity(runner, node)
     if request["op"] == "remove":
+        purge = request.get("purge_disks")
+        if purge:
+            # Platform uninstall: the guests are already destroyed; drop leftover Umiak snapshots/disks.
+            from .day2 import _guest_ids, _thin_pool, umiak_lvs
+            vg, pool = _thin_pool(runner, purge["storage"])
+            ranges = [tuple(r) for r in purge["ranges"]]
+            for name in umiak_lvs(runner, vg, pool, ranges, _guest_ids(runner)):
+                runner.run(["lvremove", "-y", f"{vg}/{name}"])
         _unused(runner, node, request["control_plane_id"])
         config = runner.path(prepare_host.NODE_CONFIG)
         if config.exists():

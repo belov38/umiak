@@ -575,3 +575,25 @@ def test_update_brings_up_the_stack_with_remove_orphans(installed):
     day2.update(runner, current, new_bundle(tmp_path), ui=FakeUi(), sleep=lambda _: None)
     ups = [a for a in runner.ct_commands() if a[:2] == ["docker", "compose"] and "up" in a]
     assert ups and all("--remove-orphans" in a for a in ups)
+
+
+def test_uninstall_with_other_sandbox_nodes_needs_full_removal(installed, monkeypatch):
+    from umiak_installer import nodes
+
+    runner, current, tmp_path = installed
+    monkeypatch.setattr(nodes, "other_sandbox_nodes", lambda runner, current: [{"name": "pve2", "storage": "local-lvm"}])
+    with pytest.raises(InstallerError, match="also runs sandboxes on pve2"):
+        day2.uninstall(runner, current, False, True, ui=FakeUi(yes=True), progress=lambda _: None)
+    assert runner.mutations() == []
+
+
+def test_full_uninstall_removes_the_other_sandbox_nodes(installed, monkeypatch):
+    from umiak_installer import nodes
+
+    runner, current, tmp_path = installed
+    monkeypatch.setattr(nodes, "other_sandbox_nodes", lambda runner, current: [{"name": "pve2", "storage": "local-lvm"}])
+    calls = []
+    monkeypatch.setattr(nodes.HostConsole, "call", lambda self, node, op, **data: calls.append((node, op, data)))
+    day2.uninstall(runner, current, True, True, ui=FakeUi(answers=["DELETE"]), progress=lambda _: None)
+    assert calls[0][:2] == ("pve2", "remove")
+    assert calls[0][2]["remaining_nodes"] == ["pve"] and calls[0][2]["purge_disks"]["storage"] == "local-lvm"
