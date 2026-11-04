@@ -454,3 +454,16 @@ def test_update_scopes_an_unscoped_zone_and_leaves_scoped_ones(installed):
     day2.update(runner, current, new_bundle(tmp_path), ui=FakeUi(), sleep=lambda _: None)
     assert zone["nodes"] == "pve"
     assert runner.commands.count(["pvesh", "set", "/cluster/sdn"]) == 1
+
+
+def test_update_does_not_restore_a_retired_control_plane_hosts_sandbox_role(installed, monkeypatch):
+    from umiak_installer import nodes
+
+    runner, current, tmp_path = installed
+    zone = runner.objects[prepare_host.ZONE]
+    zone["nodes"] = "pve2"
+    monkeypatch.setattr(nodes.NodeConsole, "call", lambda *_args, **_kwargs: {"nodes": []})
+    day2.update(runner, current, new_bundle(tmp_path), ui=FakeUi(), sleep=lambda _: None)
+    assert zone["nodes"] == "pve2"
+    assert not any(a[:3] == ["pvesh", "set", prepare_host.ZONE] for a in runner.commands)
+    assert not any(a[-1:] == ["--stdio"] for a in runner.commands)
