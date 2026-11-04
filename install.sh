@@ -9,6 +9,9 @@
 # /var/lib/umiak-installer/<version> and runs it with the terminal as stdin so
 # prompts work under `| sh`.
 set -eu
+# Restrictive only for our own downloads/extraction; reset to 022 before the Python
+# installer, because children (pvesh set /cluster/sdn, apt, systemctl) inherit it and
+# PVE would write dnsmasq/dbus configs as 0600, unreadable by messagebus.
 umask 077
 
 repo=belov38/umiak
@@ -100,6 +103,7 @@ rm -rf "$target"
 mv "$scratch/unpack" "$target"
 
 cd "$target"
+umask 022
 if [ "$interactive" -eq 1 ]; then
  exec python3 -m umiak_installer "$@" <"$tty"
 fi

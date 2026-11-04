@@ -59,6 +59,7 @@ function input(extra: Partial<BuildIsoInput> = {}): BuildIsoInput {
 		versions: loadVersions(r),
 		agentTar: AGENT,
 		agentVersion: "0.4.0+20261031.abc1234",
+		updateKeys: "ed25519 dGVzdA== install\n",
 		agentToml: '[user]\ndefault = "user"\n',
 		buildPassword: PASSWORD,
 		buildId: BUILD_ID,
@@ -259,6 +260,7 @@ describe("buildIsoFiles", () => {
 				"build/versions.json",
 				"build/agent.toml",
 				"build/umiak-agent-0.4.0+20261031.abc1234-windows-amd64.tar",
+				"build/update-keys.pub",
 				"build/ssh-user-ca.pub",
 				"build/umiak-unattend.xml",
 				// lib.ps1 and files/ of the shared _windows directory.
@@ -281,6 +283,7 @@ describe("buildIsoFiles", () => {
 			).equals(AGENT),
 		).toBe(true);
 		expect(text(files, "build/agent.toml")).toBe(i.agentToml);
+		expect(text(files, "build/update-keys.pub")).toBe(i.updateKeys);
 		expect(text(files, "build/ssh-user-ca.pub")).toBe("");
 		expect(text(files, "build/umiak-unattend.xml")).toBe(UMIAK_UNATTEND);
 		// Child recipe over the shared directory.

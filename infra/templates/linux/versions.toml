@@ -19,7 +19,7 @@ go = { version = "1.27.3", sha256 = "65efbc80fdc1fa2cd2631cad5b481777a68e8725f34
 bun = { version = "1.4.4", sha256 = "bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c" }
 uv = { version = "0.13.6", sha256 = "f29c3e94ffabd7e6f3ba521dba169a9b7ec12100bf3257087f0f24f6123f3645" }
 gh = { version = "2.103.3", sha256 = "4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d" }
-rust = { version = "1.99.1", rustup_init_sha256 = "5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4" }
+rust = { version = "1.99.1", rustup_version = "1.29.3", rustup_init_sha256 = "b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55" }
 
 [chrome]
 google_chrome_stable = { version = "156.0.8078.79-1", sha256 = "be1a1e161419f5c8272432f6860912550d8e29985e925913fa800493a0d0c955" }

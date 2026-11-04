@@ -503,6 +503,7 @@ export async function stageMedia(
 			versions,
 			agentTar,
 			agentVersion: st.m.agentVersion,
+			updateKeys: readFileSync(o.updateKeysFile),
 			agentToml: renderWindowsAgentToml(o.tunnelUrl, isDesktopRecipe(recipe)),
 			...(o.sshUserCa !== undefined
 				? { sshUserCa: readFileSync(o.sshUserCa, "utf8") }

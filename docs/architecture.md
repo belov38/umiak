@@ -179,6 +179,13 @@ ingress (`deploy/compose/quickstart/server.mjs`): backend принимает т�
 
 S19 добавляет sandbox-ноды через исходную root-консоль установщика. Источник истины — `runtime.nodes/storages/providers`, а список в install-state служит учёту установки. Токен PVE и forced-command SSH-ключ общие для кластера; SSH endpoint, pinned host key, LVM-thin и media storage — свои у каждой ноды. Подготовка сначала проверяет конфигурацию и сохраняет cordoned reservation, затем проверяет локальные DHCP/SNAT, guest listener и restricted RPC перед активацией. Сборка шаблона резервирует простаивающую ноду и использует общий PostgreSQL allocator; прерванная сборка продолжает блокировать старты. Удаление роли sandbox сохраняет topology/history и отказывает при оставшихся machines, snapshots, templates, build jobs или leases. Control-plane CT от этой роли не зависит. Подробности: `docs/specs/s19-multi-node.md`, `docs/operations-multi-node.md`.
 
+**Упаковка S20:** два опубликованных образа: `umiak-quickstart` (общий runtime
+API, worker, MCP, ingress, gateway, web-meta, offline bootstrap и renewal;
+разные команды, отдельные процессы и прежние mounts/networks) и `umiak-web`
+(Next standalone + Payload migrations). MCP не имеет секретов и обращается к
+публичному REST API; объединение образа не объединяет процессы. Postgres —
+upstream-образ. См. `docs/specs/s20-cp-consolidation.md`.
+
 **Control plane работает в Kubernetes:** `api`, `worker`, `web`, `gateway`, `mcp`, Keycloak (IdP, эксплуатация — S12). Postgres — в кластере (оператор) или внешний. Proxmox-ноды, VM и `umiak-node` остаются вне Kubernetes.
 
 **IdP — Keycloak** (решение Ильи 2026-10-29), один realm `umiak`. Позже он может брокерить корпоративный IdP (Google, Entra, LDAP); в MVP — нет. Роли и команды берутся из групп и claims Keycloak (S8 §5).

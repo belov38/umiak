@@ -4,6 +4,7 @@ import {
 	createReadStream,
 	mkdirSync,
 	mkdtempSync,
+	readFileSync,
 	rmSync,
 	statSync,
 } from "node:fs";
@@ -310,6 +311,7 @@ export async function stageSeed(
 		version: st.m.version,
 		agentPackage: o.agentPackage,
 		agentVersion: st.m.agentVersion,
+		updateKeys: readFileSync(o.updateKeysFile),
 		manifestBase: guestManifest(st.m),
 		...opt("umiakCli"),
 		...opt("apiUrl"),

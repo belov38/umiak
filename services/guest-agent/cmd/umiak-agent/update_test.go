@@ -123,6 +123,67 @@ func TestInstallPackageCLI(t *testing.T) {
 	}
 }
 
+// TestInstallPackageTrustKeys: the first install verifies with the keys of
+// --trust-keys instead of the embedded ones (a per-install signing key of a
+// homelab template build); updates refuse the flag and use current/trust.
+func TestInstallPackageTrustKeys(t *testing.T) {
+	embedded, embeddedPriv := genKey(t)
+	pubI, privI := genKey(t)
+	d, _ := updateDeps(t, embedded)
+	ctx := context.Background()
+	keysFile := filepath.Join(t.TempDir(), "update-keys.pub")
+	if err := os.WriteFile(keysFile, []byte(update.FormatKey(pubI, "install")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Without the flag the per-install signature matches no embedded key.
+	var out, errOut bytes.Buffer
+	if code := runWith(ctx, d, []string{"install-package", "--no-units", cliPack(t, "v1", privI, pubI)}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "signature") {
+		t.Fatalf("without --trust-keys: exit = %d, stderr = %q", code, errOut.String())
+	}
+	// The file replaces the embedded keys: a package signed by an embedded
+	// key is not trusted.
+	errOut.Reset()
+	if code := runWith(ctx, d, []string{"install-package", "--no-units", "--trust-keys", keysFile, cliPack(t, "v1", embeddedPriv, pubI)}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "signature") {
+		t.Fatalf("embedded-key package with --trust-keys: exit = %d, stderr = %q", code, errOut.String())
+	}
+	// A bad keys file is an error.
+	bad := filepath.Join(t.TempDir(), "bad.pub")
+	if err := os.WriteFile(bad, []byte("# nothing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	errOut.Reset()
+	if code := runWith(ctx, d, []string{"install-package", "--no-units", "--trust-keys", bad, cliPack(t, "v1", privI, pubI)}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "--trust-keys") {
+		t.Fatalf("empty keys file: exit = %d, stderr = %q", code, errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := runWith(ctx, d, []string{"install-package", "--no-units", "--trust-keys", keysFile, cliPack(t, "v1", privI, pubI)}, &out, &errOut); code != 0 {
+		t.Fatalf("first install: exit = %d: %s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "installed v1") || !strings.Contains(out.String(), "trust-keys file "+keysFile) {
+		t.Errorf("stdout = %q", out.String())
+	}
+
+	// With a current version the flag is refused, even with the right keys.
+	errOut.Reset()
+	if code := runWith(ctx, d, []string{"install-package", "--no-units", "--trust-keys", keysFile, cliPack(t, "v2", privI, pubI)}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "first install") {
+		t.Errorf("update with --trust-keys: exit = %d, stderr = %q", code, errOut.String())
+	}
+	// The update verifies with current/trust (the per-install key).
+	out.Reset()
+	if code := runWith(ctx, d, []string{"install-package", "--no-units", cliPack(t, "v2", privI, pubI)}, &out, &errOut); code != 0 {
+		t.Fatalf("update: exit = %d: %s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), filepath.Join(d.layout.CurrentLink, filepath.FromSlash(update.UpdateKeysName))) {
+		t.Errorf("update stdout = %q", out.String())
+	}
+	if cur, _ := update.LinkVersion(d.layout.CurrentLink); cur != "v2" {
+		t.Errorf("current = %q", cur)
+	}
+}
+
 func TestRollbackCLI(t *testing.T) {
 	pub, priv := genKey(t)
 	d, sc := updateDeps(t, pub)

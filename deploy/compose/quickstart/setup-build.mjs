@@ -69,11 +69,16 @@ export function buildInvocation(
 		UMIAK_TEMPLATE_REGISTRY: join(secretsDir, "template-registry"),
 		UMIAK_IMAGE_CACHE: join(secretsDir, "image-cache"),
 		UMIAK_TEMPLATE_LOG_DIR: join(directory, "logs"),
+		// Public keys: verify the package and become the first-install trust
+		// anchor of the agent in the template (update-keys.pub in the seed).
 		UMIAK_UPDATE_KEYS_FILE: join(
 			secretsDir,
 			"update-signing",
 			"update-keys.pub",
 		),
+		// The per-install private signing key: the raw-disk scan of verify
+		// looks for it on the template disk.
+		UMIAK_UPDATE_SIGNING_KEY: join(secretsDir, "update-signing", "ed25519.key"),
 	};
 	const args = [
 		"apps/template-builder/src/main.ts",

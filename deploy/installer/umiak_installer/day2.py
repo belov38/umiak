@@ -202,8 +202,12 @@ def update(runner: Runner, current: state.InstallState, bundle, *, ui, sleep=tim
     from . import nodes
     inventory = nodes.NodeConsole(runner, current).call("list")["nodes"]
     sandbox_host = any(n["name"] == current.node for n in inventory)
-    if sandbox_host and prepare_host.ensure_zone_nodes(runner, runner.hostname()):
-        progress("Scoped the SDN zone umiak to this node")
+    if sandbox_host:
+        if prepare_host.repair_dnsmasq_modes(runner):
+            progress("Fixed unreadable dnsmasq configs of the SDN zone umiak and restarted dnsmasq@umiak")
+        if prepare_host.ensure_zone_nodes(runner, runner.hostname()):
+            progress("Scoped the SDN zone umiak to this node")
+        prepare_host.verify_dnsmasq_unit(runner)
     progress(f"Updating the Umiak stack to {bundle.version}")
     if apply_stack(runner, ct_id, bundle, a, node_ip, public_key, identity, out_dir, sleep,
                    agent_only_if_changed=True, sandbox_host=sandbox_host):

@@ -17,7 +17,8 @@ from . import day2, node_host, prepare_host, stack, state
 from .ct import run_in
 from .pve import CommandError, InstallerError, get, write_secret
 
-BOOTSTRAP = """import json,tempfile,pathlib,sys
+BOOTSTRAP = """import json,tempfile,pathlib,sys,os
+os.umask(0o022)
 p=json.load(sys.stdin)
 with tempfile.TemporaryDirectory(prefix='umiak-node-') as d:
  root=pathlib.Path(d)/'umiak_installer';root.mkdir()

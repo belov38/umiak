@@ -146,7 +146,7 @@
     - bun: GitHub API `https://api.github.com/repos/oven-sh/bun/releases/latest` tag `bun-v<v>`, sha256 of `bun-linux-x64.zip` from that release's `SHASUMS256.txt`;
     - uv: GitHub `astral-sh/uv` latest, `uv-x86_64-unknown-linux-gnu.tar.gz.sha256`;
     - gh: GitHub `cli/cli` latest, `gh_<v>_checksums.txt` line for `gh_<v>_linux_amd64.tar.gz`;
-    - rust: `https://static.rust-lang.org/dist/channel-rust-stable.toml` `[pkg.rust] version` (first token); `https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init.sha256`;
+    - rust: `https://static.rust-lang.org/dist/channel-rust-stable.toml` `[pkg.rust] version` (first token); `https://static.rust-lang.org/rustup/archive/<rustup version>/x86_64-unknown-linux-gnu/rustup-init.sha256`;
     - docker: `https://download.docker.com/linux/ubuntu/dists/resolute/stable/binary-amd64/Packages` → highest version (Debian version compare) of `docker-ce`, `containerd.io`, `docker-compose-plugin`, `docker-buildx-plugin`;
     - chrome: `https://dl.google.com/linux/chrome/deb/dists/stable/main/binary-amd64/Packages` → `google-chrome-stable` `Version` and `SHA256`;
     - npm: `https://registry.npmjs.org/<name>/latest` → `version` for `@anthropic-ai/claude-code`, `@openai/codex`, `opencode-ai`, `@google/gemini-cli`, `pnpm`;

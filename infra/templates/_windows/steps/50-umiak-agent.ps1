@@ -11,6 +11,8 @@ $agentData = Join-Path $env:ProgramData 'umiak-agent'
 $versions = Get-BuildVersionInfo
 $tar = Join-Path $UmiakBuildDir $versions.agent.package
 if (-not (Test-Path -LiteralPath $tar)) { throw "$tar not found" }
+$trustKeys = Join-Path $UmiakBuildDir 'update-keys.pub'
+if (-not (Test-Path -LiteralPath $trustKeys)) { throw "$trustKeys not found" }
 
 # --- agent.toml first: --write-config keeps an existing file ---
 New-Item -ItemType Directory -Force -Path $agentData | Out-Null
@@ -22,11 +24,15 @@ Copy-Item -LiteralPath (Join-Path $UmiakBuildDir 'ssh-user-ca.pub') -Destination
 
 # --- The package installs itself: run umiak-agent.exe from the tar ---
 # The builder verified the package signature before the build (spec S9 7 p.1).
+# --trust-keys: the update keys the builder verified the package with, from the
+# build ISO, are the first-install trust anchor instead of the keys embedded in
+# the binary (a homelab install signs with its own key). The installed version's
+# trust\update-keys.pub verifies later updates.
 $unpack = Join-Path $UmiakWorkDir 'agent-installer'
 if (Test-Path -LiteralPath $unpack) { Remove-Item -LiteralPath $unpack -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $unpack | Out-Null
 Invoke-Native -FilePath (Join-Path $env:SystemRoot 'System32\tar.exe') -ArgumentList @('-xf', $tar, '-C', $unpack, 'umiak-agent.exe')
-Invoke-Native -FilePath (Join-Path $unpack 'umiak-agent.exe') -ArgumentList @('install-package', '--write-config', $tar)
+Invoke-Native -FilePath (Join-Path $unpack 'umiak-agent.exe') -ArgumentList @('install-package', '--write-config', '--trust-keys', $trustKeys, $tar)
 Remove-Item -LiteralPath $unpack -Recurse -Force
 if (-not (Test-Path -LiteralPath $UmiakAgentExe)) { throw "$UmiakAgentExe is missing after install-package" }
 Update-SessionPath

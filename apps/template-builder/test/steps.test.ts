@@ -161,6 +161,14 @@ describe("recipe scripts: spec items", () => {
 		);
 	});
 
+	it("50-umiak-agent trusts the keys the builder verified the package with", () => {
+		const s = code("steps/50-umiak-agent.sh");
+		expect(s).toContain("keys=$UMIAK_BUILD_DIR/update-keys.pub");
+		expect(s).toContain(
+			'"$installer" install-package --write-config --trust-keys "$keys" "$pkg"',
+		);
+	});
+
 	it("10-system removes all three .bash_logout files", () => {
 		const s = code("steps/10-system.sh");
 		for (const p of [
@@ -214,7 +222,7 @@ describe("recipe scripts: spec items", () => {
 			"https://github.com/oven-sh/bun/releases/download/",
 			"https://github.com/astral-sh/uv/releases/download/",
 			"https://github.com/cli/cli/releases/download/",
-			"https://static.rust-lang.org/rustup/dist/",
+			"https://static.rust-lang.org/rustup/archive/",
 			"https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/",
 		])
 			expect(s, url).toContain(url);
@@ -431,6 +439,7 @@ describe("renderSeed on the real linux recipe", () => {
 				version: "20261030.1",
 				agentPackage,
 				agentVersion: "1.2.3",
+				updateKeys: "",
 				manifestBase: {},
 			});
 		} finally {

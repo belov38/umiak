@@ -372,6 +372,7 @@ describe("loadVersions", () => {
 		const v = loadVersions(loadRecipe(fixtures, "linux-fixture", "linux"));
 		expect(v.base.serial).toBe("20261024");
 		expect(v.apt.snapshot).toBe("20261029T000000Z");
+		expect(v.tools.rust.rustup_version).toBe("1.29.3");
 		expect(v.tools.rust.rustup_init_sha256).toMatch(/^6+$/);
 		expect(v.chrome.google_chrome_stable.version).toBe("156.0.8078.73-1");
 		expect(v.npm.pnpm).toBe("12.16.1");

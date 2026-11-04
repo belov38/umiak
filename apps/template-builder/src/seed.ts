@@ -24,6 +24,8 @@ import { formatVersionsToml } from "./versions-update.ts";
 
 /** Seed path of the agent package (step 50-umiak-agent reads it). */
 export const SEED_AGENT_PACKAGE = "build/umiak-agent.tar";
+/** Seed path of the update keys that verified the package (first-install trust anchor). */
+export const SEED_UPDATE_KEYS = "build/update-keys.pub";
 export interface SeedInput {
 	recipe: Recipe;
 	versions: Versions;
@@ -33,6 +35,12 @@ export interface SeedInput {
 	/** Path of the signed agent package (.tar), already verified. */
 	agentPackage: string;
 	agentVersion: string;
+	/**
+	 * The update keys file the package was verified with. Step 50 passes it to
+	 * `install-package --trust-keys`: a per-install signing key (quickstart) is
+	 * not among the keys embedded in the agent binary.
+	 */
+	updateKeys: string | Buffer;
 	/** Path of the `umiak` CLI binary. */
 	umiakCli?: string;
 	apiUrl?: string;
@@ -188,6 +196,7 @@ export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 	);
 	// A fixed name; the version travels in build/env.
 	out.set(SEED_AGENT_PACKAGE, readFileSync(i.agentPackage));
+	out.set(SEED_UPDATE_KEYS, i.updateKeys);
 	out.set(
 		"build/agent.toml",
 		renderAgentToml(i.tunnelUrl, isDesktopRecipe(recipe)),

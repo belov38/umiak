@@ -38,6 +38,8 @@ afterEach(() => {
 const BUILD_ID = "0199c5a0-7b1e-7a3c-8d3e-5f2a9c1b4e60";
 const AGENT_BYTES = Buffer.from([1, 2, 3, 0, 255]);
 
+const UPDATE_KEYS = Buffer.from("ed25519 dGVzdA== install\n");
+
 function input(slug = "linux-fixture", extra: Partial<SeedInput> = {}) {
 	const recipe = loadRecipe(fixtures, slug, "linux");
 	const agentPackage = join(tmp(), "agent.tar");
@@ -49,6 +51,7 @@ function input(slug = "linux-fixture", extra: Partial<SeedInput> = {}) {
 		version: "20261030.1",
 		agentPackage,
 		agentVersion: "1.2.3",
+		updateKeys: UPDATE_KEYS,
 		manifestBase: { slug, version: "20261030.1" },
 		...extra,
 	};
@@ -299,6 +302,10 @@ describe("renderSeed build tree", () => {
 		const pkg = files.get("build/umiak-agent.tar");
 		expect(Buffer.isBuffer(pkg)).toBe(true);
 		expect((pkg as Buffer).equals(AGENT_BYTES)).toBe(true);
+		// The keys that verified the package: the first-install trust anchor.
+		expect(
+			(files.get("build/update-keys.pub") as Buffer).equals(UPDATE_KEYS),
+		).toBe(true);
 		expect(text(files, "build/agent.toml")).toBe(
 			renderAgentToml("wss://tunnel.example.com/v1/connect"),
 		);

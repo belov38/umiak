@@ -39,6 +39,7 @@ class FakeRunner(Runner):
         hostname="pve",
         version="9.0.11",
         quorate=1,
+        dnsmasq_unit_active=True,
         guests=None,
     ):
         super().__init__(root)
@@ -81,6 +82,7 @@ class FakeRunner(Runner):
         if dnsmasq:
             files["/usr/sbin/dnsmasq"] = "fake"
         self.ip_forward = ip_forward
+        self.dnsmasq_unit_active = dnsmasq_unit_active
         self.dnsmasq_enabled = dnsmasq_enabled
         # Like real pvesh/pveum: deleting a missing object exits non-zero.
         self.strict_deletes = strict_deletes
@@ -248,6 +250,12 @@ class FakeRunner(Runner):
             if not self.dnsmasq_enabled:
                 raise CommandError(argv, 1, "disabled", "")
             out = "enabled"
+        elif argv[:3] == ["systemctl", "is-active", "dnsmasq@umiak"]:
+            if not self.dnsmasq_unit_active:
+                raise CommandError(argv, 3, "failed", "")
+            out = "active"
+        elif argv[0] == "journalctl":
+            out = "dnsmasq@umiak: not allowed to own the service uk.org.thekelleys.dnsmasq.umiak"
         elif head == ["sysctl", "-n"]:
             out = self.ip_forward
         elif head == ["ifquery", "--check"]:

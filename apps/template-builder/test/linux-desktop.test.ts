@@ -43,6 +43,7 @@ it("desktop inherits Linux pins, uses only slot 596 and enables the desktop read
 			version: "test",
 			agentPackage,
 			agentVersion: "test",
+			updateKeys: "",
 			manifestBase: {},
 		});
 		const config = parse(String(files.get("build/agent.toml"))) as {

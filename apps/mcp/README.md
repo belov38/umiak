@@ -7,7 +7,7 @@ Two ways to run it:
 | | Transport | Credentials | Entry |
 |---|---|---|---|
 | local | stdio | `umiak login` (or `UMIAK_API_KEY`) | `umiak mcp` in the CLI binary (`apps/cli`) |
-| remote | Streamable HTTP, stateless | `Authorization: Bearer` team key `umiak_...` or Keycloak JWT | `node apps/mcp/src/main.ts`, image `umiak-mcp` |
+| remote | Streamable HTTP, stateless | `Authorization: Bearer` team key `umiak_...` or Keycloak JWT | `node apps/mcp/src/main.ts`, image `umiak-quickstart` |
 
 Server name in every client config below is `umiak`.
 
@@ -46,7 +46,7 @@ UMIAK_MCP_PORT=8090 mise exec -- node apps/mcp/src/main.ts
 
 - A request without a bearer gets `401` with `WWW-Authenticate: Bearer resource_metadata="<public origin>/.well-known/oauth-protected-resource/mcp"`. A person in several teams picks one with the header `Umiak-Team: team_...` or `?team=team_...` in the URL.
 - SIGTERM stops within 25 s: readiness goes false and new requests get `503` with `Retry-After`, calls in flight get the rest of the grace period. A request (headers and body) must arrive within 60 s (headers within 15 s), else `408`.
-- Image: `docker build -f apps/mcp/Dockerfile -t umiak-mcp:dev .` (context is the repo root). Local stack: the `mcp` service of `deploy/compose` listens on `http://localhost:8090/mcp` (README of `deploy/compose`, section MCP). Dev control plane: `infra/dev-cp/README.md`, section S11 MCP behind Tailscale Serve.
+- Image (override its ingress entrypoint with `--entrypoint node` and command `apps/mcp/src/main.ts` when running MCP): `docker build -f deploy/compose/quickstart/Dockerfile -t umiak-quickstart:dev .` (context is the repo root). Local stack: the `mcp` service of `deploy/compose` listens on `http://localhost:8090/mcp` (README of `deploy/compose`, section MCP). Dev control plane: `infra/dev-cp/README.md`, section S11 MCP behind Tailscale Serve.
 
 ## Client configs
 

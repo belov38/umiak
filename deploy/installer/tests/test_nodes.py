@@ -297,3 +297,27 @@ def test_zone_membership_appends_and_removes_one_comma_separated_node(tmp_path):
     _zone(runner, [], remove="pve2")
     assert runner.objects["/cluster/sdn/zones/umiak"]["nodes"] == "pve2"
     assert all(a[-1] for a in runner.commands if a[:3] == ["pvesh", "set", "/cluster/sdn/zones/umiak"])
+
+
+def test_remote_helper_does_not_pass_a_private_umask_to_pve_sdn(tmp_path):
+    import json
+    import subprocess
+    import sys
+
+    output = tmp_path / "dhcp.conf"
+    sources = {
+        "__init__.py": "",
+        "pve.py": "class Runner: pass\n",
+        "node_host.py": (
+            "from pathlib import Path\n"
+            "def dispatch(runner, request):\n"
+            " p=Path(request['output']);p.write_text('dhcp')\n"
+            " return {'mode':p.stat().st_mode & 0o777}\n"
+        ),
+    }
+    result = subprocess.run(
+        [sys.executable, "-c", nodes.BOOTSTRAP],
+        input=json.dumps({"sources": sources, "request": {"output": str(output)}}),
+        text=True, capture_output=True, check=True, umask=0o077,
+    )
+    assert json.loads(result.stdout)["mode"] == 0o644

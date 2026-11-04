@@ -27,7 +27,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from .pve import InstallerError
+from .pve import InstallerError, private_dir
 
 REPO = "belov38/umiak"
 # Strict semver (optional pre-release suffix); no "+" because Docker tags cannot contain it.
@@ -124,7 +124,7 @@ def download(version: str, dest_root: Path, fetch=_fetch) -> Release:
     if hashlib.sha256(data).hexdigest() != expected_sha(sums, name):
         raise ReleaseError("Checksum verification failed for " + name)
     dest_root = Path(dest_root)
-    dest_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    private_dir(dest_root)
     staging = Path(tempfile.mkdtemp(dir=dest_root, prefix=".unpack-"))
     try:
         _extract(data, staging)

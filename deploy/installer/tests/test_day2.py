@@ -467,3 +467,22 @@ def test_update_does_not_restore_a_retired_control_plane_hosts_sandbox_role(inst
     assert zone["nodes"] == "pve2"
     assert not any(a[:3] == ["pvesh", "set", prepare_host.ZONE] for a in runner.commands)
     assert not any(a[-1:] == ["--stdio"] for a in runner.commands)
+
+def test_update_repairs_private_dnsmasq_configs_and_verifies_the_unit(installed):
+    runner, current, tmp_path = installed
+    conf = runner.path("/etc/dnsmasq.d/umiak/umiak0.conf")
+    conf.parent.mkdir(parents=True)
+    conf.write_text("x")
+    conf.chmod(0o600)
+    day2.update(runner, current, new_bundle(tmp_path), ui=FakeUi(), sleep=lambda _: None)
+    assert conf.stat().st_mode & 0o777 == 0o644
+    for argv in (["systemctl", "reload", "dbus"], ["systemctl", "restart", "dnsmasq@umiak"],
+                 ["systemctl", "is-active", "dnsmasq@umiak"]):
+        assert argv in runner.commands
+
+
+def test_update_fails_when_dnsmasq_unit_is_down(installed):
+    runner, current, tmp_path = installed
+    runner.dnsmasq_unit_active = False
+    with pytest.raises(InstallerError, match="dnsmasq@umiak"):
+        day2.update(runner, current, new_bundle(tmp_path), ui=FakeUi(), sleep=lambda _: None)

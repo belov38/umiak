@@ -84,6 +84,13 @@ def pending_sdn(runner: Runner) -> bool:
     return False
 
 
+def private_dir(path: Path) -> None:
+    """Create a directory with an explicit 0700 mode (independent of the umask)."""
+    path = Path(path)
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.chmod(0o700)
+
+
 def write_secret(path: Path, data: str | bytes) -> None:
     """Write a file readable only by its owner, never exposing it at a wider mode."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)

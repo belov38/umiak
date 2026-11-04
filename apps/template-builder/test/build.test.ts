@@ -443,6 +443,10 @@ describe("buildTemplate: happy path", () => {
 		expect(String(seed?.get("build/agent.toml"))).toContain(
 			"wss://tunnel.example.test/v1/connect",
 		);
+		// The keys that verified the package, for install-package --trust-keys.
+		expect(seed?.get("build/update-keys.pub")).toEqual(
+			readFileSync(join(agentFixtures, "update-keys.pub")),
+		);
 		expect(s.verifyCalls[0]?.status).toBe("building");
 		expect(s.verifyCalls[0]?.packages).toEqual(m.packages);
 	});
@@ -601,7 +605,7 @@ describe("buildTemplate: failures", () => {
 			"ram:release 597",
 		]);
 		const del = s.pve.calls.find((c) => c.method === "DELETE" && c.path === vm);
-		expect(del?.params).toEqual({ purge: 1, "destroy-unreferenced-disks": 1 });
+		expect(del?.params).toEqual({ purge: 1, "destroy-unreferenced-disks": 0 });
 		const removed = s.node.calls.find((c) => c.op === "media.remove");
 		expect(removed?.args).toEqual({ names: [seedName(m)] });
 		expect(s.pve.vms.has(597)).toBe(false);

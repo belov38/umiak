@@ -7,39 +7,29 @@ x-quickstart-build: &quickstart-build
   dockerfile: deploy/compose/quickstart/Dockerfile
 
 services:
-  gateway-secrets:
-    build: *quickstart-build
   secrets-init:
-    build:
-      context: .
-      dockerfile: deploy/compose/secrets-init/Dockerfile
+    build: *quickstart-build
   migrate:
-    build:
-      context: .
-      dockerfile: apps/worker/Dockerfile
+    build: *quickstart-build
   worker:
-    build:
-      context: .
-      dockerfile: apps/worker/Dockerfile
-  web-migrate:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
-  web:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
+    build: *quickstart-build
   api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
+    build: *quickstart-build
   mcp:
-    build:
-      context: .
-      dockerfile: apps/mcp/Dockerfile
+    build: *quickstart-build
+  web-meta:
+    build: *quickstart-build
   gateway:
     build: *quickstart-build
   gateway-renewal:
     build: *quickstart-build
   quickstart:
     build: *quickstart-build
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+  web-migrate:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile

@@ -26,7 +26,7 @@ x-db-env: &db-env
 # Worker image: used by `migrate` and `worker`.
 x-worker-build: &worker-build
   context: ../..
-  dockerfile: apps/worker/Dockerfile
+  dockerfile: deploy/compose/quickstart/Dockerfile
 
 # Public URLs of the stack (deploy/compose/.env). The defaults are the fixed
 # localhost ports below; the dependent ones follow UMIAK_KEYCLOAK_URL and
@@ -64,16 +64,15 @@ volumes:
 
 services:
   web-meta:
-    image: node:26.13.0-bookworm-slim
+    image: umiak-quickstart:dev
+    build: *worker-build
+    entrypoint: []
     user: "1000:1000"
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    command: [node, /meta-proxy.mjs]
-    volumes:
-      - ./meta-proxy.mjs:/meta-proxy.mjs:ro
-      - ./canonical-fetch.mjs:/canonical-fetch.mjs:ro
+    command: [node, deploy/compose/meta-proxy.mjs]
     networks: [umiak, web-internal]
     depends_on:
       api: { condition: service_healthy }
@@ -131,8 +130,9 @@ services:
   # One-shot: apply migrations, then load topology and template builds from
   # config/umiak.yaml. Idempotent, so it is safe to re-run on every `up`.
   migrate:
+    entrypoint: []
     <<: *service-defaults
-    image: umiak-worker:dev
+    image: umiak-quickstart:dev
     build: *worker-build
     command:
       - sh
@@ -186,8 +186,9 @@ services:
     restart: "no"
 
   worker:
+    entrypoint: []
     <<: *service-defaults
-    image: umiak-worker:dev
+    image: umiak-quickstart:dev
     build: *worker-build
     # PAYLOAD_SECRET is an environment value; read it from its secret file.
     command:
@@ -353,11 +354,12 @@ services:
   # reach it: accepted for dev, NetworkPolicy in S12), internal :8082
   # (gateway, not published), ops :9090.
   api:
+    entrypoint: []
     <<: *service-defaults
-    image: umiak-api:dev
+    image: umiak-quickstart:dev
     build:
       context: ../..
-      dockerfile: apps/api/Dockerfile
+      dockerfile: deploy/compose/quickstart/Dockerfile
     # The cursor key and PAYLOAD_SECRET are environment values; read them
     # from their secret files.
     command:
@@ -535,11 +537,13 @@ services:
   # /.well-known/oauth-protected-resource/mcp go to this service (S11 §6.2);
   # locally it has its own port.
   mcp:
+    entrypoint: []
+    command: [node, apps/mcp/src/main.ts]
     <<: *service-defaults
-    image: umiak-mcp:dev
+    image: umiak-quickstart:dev
     build:
       context: ../..
-      dockerfile: apps/mcp/Dockerfile
+      dockerfile: deploy/compose/quickstart/Dockerfile
     environment:
       UMIAK_MCP_API_URL: http://api:8080
       # The URL clients use; its host must match the Host header they send.

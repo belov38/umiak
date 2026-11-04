@@ -74,8 +74,8 @@ describe("product compose: service mcp", () => {
 	withDocker("has the documented environment and loopback ports", () => {
 		const mcp = resolve([COMPOSE]).mcp;
 		expect(mcp, "service mcp").toBeDefined();
-		expect(mcp?.image).toBe("umiak-mcp:dev");
-		expect(mcp?.build?.dockerfile).toBe("apps/mcp/Dockerfile");
+		expect(mcp?.image).toBe("umiak-quickstart:dev");
+		expect(mcp?.build?.dockerfile).toBe("deploy/compose/quickstart/Dockerfile");
 		const env = mcp?.environment ?? {};
 		expect(env.UMIAK_MCP_API_URL).toBe("http://api:8080");
 		expect(env.UMIAK_MCP_PUBLIC_URL).toBe("http://localhost:8090/mcp");
