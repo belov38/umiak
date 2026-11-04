@@ -17,6 +17,7 @@ const state = {
 		},
 		limits: {
 			data: {
+				providerId: "provider",
 				vmidMin: 500,
 				vmidMax: 589,
 				storage: "local-lvm",
@@ -39,6 +40,9 @@ test("build invocation binds exact recipe slot, existing credentials and isolate
 	);
 	assert.equal(invocation.env.UMIAK_TEMPLATE_VMID_RANGE, "702-702");
 	assert.equal(invocation.env.UMIAK_VMID_RANGE, "500-589");
+	assert.equal(invocation.env.UMIAK_TEMPLATE_PROVIDER_ID, "provider");
+	assert.equal(invocation.env.UMIAK_TEMPLATE_BUILD_JOB_ID, "build");
+	assert.equal(invocation.env.UMIAK_TEMPLATE_VMID, "0");
 	assert.equal(invocation.env.UMIAK_PVE_MEDIA_STORAGE, "images");
 	assert.equal(
 		invocation.env.UMIAK_PVE_TOKEN_SECRET_FILE,

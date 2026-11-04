@@ -225,3 +225,60 @@ describe.skipIf(skipPg())("PgAllocatorStore", () => {
 		expect(after?.updatedAt).toBeGreaterThan(lease.updatedAt);
 	});
 });
+
+describe("builder-scoped provider leases (S19)", () => {
+	let t: TestDatabase;
+	beforeAll(async () => {
+		t = await createTestDatabase();
+	});
+	afterAll(async () => {
+		await t?.drop();
+	});
+	it("shares VMID uniqueness with worker before either VM appears and never releases a foreign lease", async () => {
+		const provider = randomUUID(),
+			node = randomUUID(),
+			job = "builder-lease-test";
+		await t.pool.query(
+			"INSERT INTO runtime.providers(id,kind,name,cluster_mac_id,vmid_min,vmid_max,api_url,secret_ref) VALUES($1,'proxmox','builder-test',42,500,589,'https://pve:8006','pve')",
+			[provider],
+		);
+		await t.pool.query(
+			"INSERT INTO runtime.nodes(id,provider_id,name,ram_cap_mb,node_agent_ref) VALUES($1,$2,'pve2',4096,'pve2')",
+			[node, provider],
+		);
+		await t.pool.query(
+			"INSERT INTO runtime.node_build_jobs(id,node_id,template_slug) VALUES($1,$2,'linux')",
+			[job, node],
+		);
+		const worker = new Allocator({
+			store: new PgAllocatorStore(t.pool, provider),
+			clusterId: 1,
+			range: { min: 500, max: 589 },
+			templateVmid: 0,
+			occupied: async () => new Set(),
+		});
+		const scoped = new PgAllocatorStore(t.pool, provider, { buildJobId: job });
+		const builder = new Allocator({
+			store: scoped,
+			clusterId: 1,
+			range: { min: 500, max: 589 },
+			templateVmid: 0,
+			occupied: async () => new Set(),
+		});
+		const [a, b] = await Promise.all([
+			worker.allocate(randomUUID()),
+			builder.allocate(randomUUID()),
+		]);
+		expect(a.vmid).not.toBe(b.vmid);
+		expect((await builder.list()).map((l) => l.vmid)).toEqual([b.vmid]);
+		await builder.release(a.vmid);
+		expect(await worker.get(a.vmid)).toBeDefined();
+		await t.pool.query(
+			"UPDATE runtime.node_build_jobs SET status='interrupted' WHERE id=$1",
+			[job],
+		);
+		await expect(builder.allocate(randomUUID())).rejects.toThrow(
+			/vmid_exhausted/,
+		);
+	});
+});

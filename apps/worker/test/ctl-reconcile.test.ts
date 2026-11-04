@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { DELETE_RETRY_LIMIT } from "@umiak/core";
+import { beginNodeBuild, DELETE_RETRY_LIMIT } from "@umiak/core";
+import { withTx } from "@umiak/db";
 import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { PgBoss } from "pg-boss";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -1029,5 +1030,65 @@ describe("ctl-reconcile with real pg-boss jobs", () => {
 
 		const actions = await reconcile(w);
 		expect(kinds(actions)).toEqual([["requeue_op", `operation:${without}`]]);
+	});
+});
+
+describe("S19 build ownership", () => {
+	it.each(["running", "interrupted"])(
+		"protects VM and local verification snapshots during a %s build",
+		async (status) => {
+			const w = await createWorld(db);
+			w.infra.addVm({ vmid: 550 });
+			const lv = "umiak-snap-0123456789abcdef0123456789abcdef-scsi0";
+			w.infra.addLv(lv, ["umiak"]);
+			await seenLongAgo(w);
+			await w.pool.query(
+				"INSERT INTO runtime.node_build_jobs(id,node_id,template_slug,status) VALUES($1,$2,'linux',$3)",
+				[randomUUID(), w.topo.nodeId, status],
+			);
+			expect(await reconcile(w)).toEqual([]);
+			expect(w.infra.vms.has(550)).toBe(true);
+			expect(w.infra.lvs.has(lv)).toBe(true);
+		},
+	);
+	it("rechecks a reservation admitted after planning began before orphan deletion", async () => {
+		const w = await createWorld(db);
+		w.infra.addVm({ vmid: 550 });
+		await seenLongAgo(w);
+		hookInfra(w, {
+			listLvs: async (_call, next) => {
+				const result = await next();
+				await withTx(w.pool, (tx) =>
+					beginNodeBuild(tx, {
+						nodeId: w.topo.nodeId,
+						jobId: randomUUID(),
+						templateSlug: "linux",
+					}),
+				);
+				return result;
+			},
+		});
+		const actions = await reconcile(w);
+		expect(actions).toHaveLength(1);
+		expect(actions[0]?.applied).toBe(false);
+		expect(w.infra.vms.has(550)).toBe(true);
+	});
+
+	it("protects retained builder leases after the reservation closes", async () => {
+		const w = await createWorld(db);
+		const job = randomUUID();
+		await w.pool.query(
+			"INSERT INTO runtime.node_build_jobs(id,node_id,template_slug,status) VALUES($1,$2,'linux','failed')",
+			[job, w.topo.nodeId],
+		);
+		w.infra.addVm({ vmid: 550 });
+		await insertLease(w, 550, "releasing", null, 700);
+		await w.pool.query(
+			"UPDATE runtime.vmid_leases SET build_job_id=$1 WHERE provider_id=$2 AND vmid=550",
+			[job, w.topo.providerId],
+		);
+		await seenLongAgo(w);
+		expect(await reconcile(w)).toEqual([]);
+		expect(w.infra.vms.has(550)).toBe(true);
 	});
 });

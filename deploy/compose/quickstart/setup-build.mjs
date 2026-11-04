@@ -55,7 +55,9 @@ export function buildInvocation(
 		UMIAK_NODE_SSH_KNOWN_HOSTS: join(secretsDir, "known_hosts"),
 		UMIAK_VMID_RANGE: `${limits.vmidMin}-${limits.vmidMax}`,
 		UMIAK_TEMPLATE_VMID_RANGE: `${slot}-${slot}`,
-		UMIAK_TEMPLATE_VMID: "599",
+		UMIAK_TEMPLATE_VMID: "0",
+		UMIAK_TEMPLATE_PROVIDER_ID: limits.providerId,
+		UMIAK_TEMPLATE_BUILD_JOB_ID: jobId,
 		UMIAK_CLUSTER_ID: "1",
 		UMIAK_PVE_STORAGE: limits.storage,
 		UMIAK_TEMPLATE_RAM_CAP_MB: String(limits.ramCapMb ?? 8192),
@@ -99,7 +101,8 @@ export function buildInvocation(
 		const [storage, name] = input.iso.includes(":iso/")
 			? input.iso.split(":iso/")
 			: [null, input.iso];
-		if (storage) env.UMIAK_PVE_MEDIA_STORAGE = storage;
+		if (storage && storage !== env.UMIAK_PVE_MEDIA_STORAGE)
+			throw Error("Use the selected node configured media storage");
 		args.push("--iso", name, "--iso-sha256", input.isoSha256);
 		if (input.virtioIso)
 			args.push(

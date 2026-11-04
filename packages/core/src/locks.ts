@@ -17,3 +17,19 @@ export async function lockNode(tx: Tx, nodeId: string): Promise<void> {
 		[nodeId],
 	);
 }
+
+/** Build admission excludes destructive reconcile work without holding node locks
+ * while waiting for the worker power lock. Build callers hold node first; cleanup
+ * takes this shared barrier only and never acquires a node lock inside it. */
+export async function lockNodeBuildCleanup(
+	tx: Tx,
+	nodeId: string,
+	mode: "build" | "cleanup",
+): Promise<void> {
+	const fn =
+		mode === "build" ? "pg_advisory_xact_lock" : "pg_advisory_xact_lock_shared";
+	await tx.client.query(
+		`SELECT ${fn}(hashtextextended('node-build-cleanup:' || $1::text,0))`,
+		[nodeId],
+	);
+}

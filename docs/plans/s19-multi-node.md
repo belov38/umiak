@@ -66,19 +66,19 @@ Files: `deploy/compose/quickstart/{setup,setup-build,setup-ui,bootstrap}.mjs` an
 
 Interfaces: build/register requests carry node ID; trusted DB resolves target storage/SSH/RAM/media. Reserve node before any build host action; on interruption retain reservation until cleanup verified. Registration promotes only selected node and requires matching job/node/VMID verified manifest. Installer uses runtime node inventory as authoritative and preserves cluster secrets/SDN.
 
-- [ ] Fetch/merge main only after coordinator reports S18 implementation merged; inspect actual interfaces before edits.
-- [ ] Add failing tests for node selection, node-local ISO, independent promotion, durable interruption, original bootstrap preserving added nodes.
-- [ ] Implement setup node selection/status and selected-node smoke via operator-only path, build reservation lifecycle and cleanup verification.
-- [ ] Add failing installer tests for idempotent add/re-add, partial preparation, pinned identity failure, occupied removal, last-node/control-plane-host handling, common SSH authorization preservation and SDN refusal on unrelated pending changes.
-- [ ] Implement Add/remove menu using S18 checklist, restricted-agent distribution and root-console transport; mark retired under DB lock before scoped host cleanup. Never revert global forwarding/dnsmasq on removal.
-- [ ] Run Node setup and Python installer suites plus regression tests, commit.
+- [x] Fetch/merge main only after coordinator reports S18 implementation merged; inspect actual interfaces before edits.
+- [x] Add failing tests for node selection, node-local ISO, independent promotion, durable interruption, original bootstrap preserving added nodes.
+- [x] Implement setup node selection/status and selected-node smoke via operator-only path, build reservation lifecycle and cleanup verification.
+- [x] Add failing installer tests for idempotent add/re-add, partial preparation, pinned identity failure, occupied removal, last-node/control-plane-host handling, common SSH authorization preservation and SDN refusal on unrelated pending changes.
+- [x] Implement Add/remove menu using S18 checklist, restricted-agent distribution and root-console transport; mark retired under DB lock before scoped host cleanup. Never revert global forwarding/dnsmasq on removal.
+- [x] Run Node setup and Python installer suites plus regression tests, commit.
 
 ### Task 5: Full verification, live acceptance and integration
 
 Files: spec evidence and roadmap S19 row; architecture locality note.
 
 - [ ] Coordinate live window and exact test VMIDs with S18. Prepare pve2 through installer; build Linux on each node sequentially, create modest workloads on both and verify exec/tunnel/locality, removal refusal and successful empty-node retirement/re-add. Delete test sandboxes/artifacts; record exact results.
-- [ ] Run `mise exec -- pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`; Node setup tests and Python installer tests. Run mise Go build/vet/test(-race)/golangci-lint for all go.work modules, Linux/Windows checks from CI where supported. Report unavailable checks; do not claim them passed.
+- [x] Run `mise exec -- pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`; Node setup tests and Python installer tests. Run mise Go build/vet/test(-race)/golangci-lint for all go.work modules, Linux/Windows checks from CI where supported. Report unavailable checks; do not claim them passed.
 - [ ] Fresh independent acceptance subagent gets spec and diff, not conclusions; fix blockers and recheck affected tests.
 - [ ] Update roadmap and evidence; merge branch into main without squash, push, report SHA/live results/open items to coordinator.
 
@@ -91,4 +91,10 @@ Files: spec evidence and roadmap S19 row; architecture locality note.
 - Full pnpm build passed again after the final inventory addition.
 - All five Go modules: build/vet/lint passed. Race tests passed for proto/tunnel/node-agent/gateway. Initial full guest-agent race run failed timing checks TestRecoverNeverAttachedPTY (307ms vs300ms) and TestQuiesceBudget (50ms); isolated packages passed. Full guest-agent race repeat retained QuiesceBudget failure; full `go test -race -p 1 ./...` then passed. No Go code changed.
 - Windows builds for proto/tunnel/guest-agent and Windows vet for proto/tunnel passed; Linux guest-agent integration-tag golangci-lint passed. Linux runtime systemd integration was not run on this macOS host.
-- Installer integration/live/final independent acceptance remain outstanding until S18 implementation merges. No PVE host or guest mutations were performed. Do not merge the partial stage to main.
+- S18 implementation merged into this branch from main 0a7b43a6. Setup and installer integration is implemented, including per-node Templates/Smoke, additive bootstrap, root-console node enrollment and guarded retirement.
+- First independent acceptance reviewed 0a7b43a6..40e1ee21 and found blockers: SQLite/PG lease collision, reconcile deleting builder artifacts, cleanup of a live runner, re-add host mutation preceding DB validation, missing private Smoke Origin and missing post-SDN verification. Fixes add shared job-scoped PostgreSQL leases (0602), runner/cleanup fencing, reconcile cleanup barrier, durable cordoned preparation and local SDN checks. Regression tests reproduced the allocator, reconcile and Origin failures before changes.
+- Build admission takes an exclusive node-build-cleanup barrier under the existing node lock. Destructive reconcile takes its shared side without a node lock while waiting for the existing worker power lock; no transaction lasts across a template build.
+- Coordinator/Ilia approved the checklist persistence fix: live forwarding alone is insufficient; require the Umiak persistent sysctl file as well. Added regression coverage.
+- No PVE host or guest mutations have been performed. S18 live acceptance currently owns pve; wait for coordinator window before pve2 preparation or control-plane overlay. Live acceptance, final fresh independent review and merge remain outstanding.
+
+- Post-review local gate passed: workspace build/lint/typecheck/tests (DB75, core377, API1079, worker435+7skip, builder602, MCP715+1skip, CLI189, web289, TS SDK141/Python SDK81), quickstart184, installer180 and targeted Python lint. Full Go build/vet/race tests (`-p 1`)/lint passed in all five modules; Windows build/vet and Linux integration-tag lint passed. Linux systemd runtime integration still requires a Linux environment/live window.

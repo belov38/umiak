@@ -112,3 +112,110 @@ it("console explicitly retires only a verified idle Umiak template, enabling nod
 		await rm(dir, { recursive: true, force: true });
 	}
 });
+
+it("cleanup refuses running jobs and surviving interrupted runners before host inventory", async () => {
+	const a = await createTopology(db.pool);
+	await db.pool.query("UPDATE quickstart.setup SET state=$1 WHERE id=true", [
+		{
+			steps: {
+				limits: { data: { providerId: a.providerId } },
+				connection: { data: { node: "pve" } },
+			},
+		},
+	]);
+	const job = "cleanup-" + a.nodeId;
+	await db.pool.query(
+		"INSERT INTO runtime.node_build_jobs(id,node_id,template_slug) VALUES($1,$2,'linux')",
+		[job, a.nodeId],
+	);
+	await expect(
+		nodeCommand(db.pool, { op: "cleanup-build", nodeId: a.nodeId, jobId: job }),
+	).rejects.toThrow(/interrupted/);
+	await db.pool.query(
+		"UPDATE runtime.node_build_jobs SET status='interrupted' WHERE id=$1",
+		[job],
+	);
+	const runner = await db.pool.connect();
+	try {
+		await runner.query(
+			"SELECT pg_advisory_lock(hashtextextended('template-runner:' || $1::text,0))",
+			[job],
+		);
+		await expect(
+			nodeCommand(db.pool, {
+				op: "cleanup-build",
+				nodeId: a.nodeId,
+				jobId: job,
+			}),
+		).rejects.toThrow(/still alive/);
+	} finally {
+		runner.release(true);
+	}
+	expect(
+		(
+			await db.pool.query(
+				"SELECT status FROM runtime.node_build_jobs WHERE id=$1",
+				[job],
+			)
+		).rows[0].status,
+	).toBe("interrupted");
+});
+
+it("prevalidates a re-add before host preparation and keeps failed preparation fenced", async () => {
+	const a = await createTopology(db.pool);
+	await db.pool.query("UPDATE quickstart.setup SET state=$1 WHERE id=true", [
+		{
+			steps: {
+				limits: { data: { providerId: a.providerId } },
+				connection: { data: { node: "pve" } },
+			},
+		},
+	]);
+	const existing = (await nodeService(db.pool).list(a.providerId))[0];
+	const cfg = {
+		name: existing.name,
+		sshHost: existing.sshHost,
+		storage: existing.storage,
+		mediaStorage: existing.mediaStorage,
+		ramCapMb: existing.ramCapMb,
+	};
+	await expect(
+		nodeCommand(db.pool, {
+			op: "prepare-add",
+			node: { ...cfg, storage: "other" },
+		}),
+	).rejects.toThrow(/storage migration/);
+	expect(
+		(
+			await db.pool.query("SELECT state FROM runtime.nodes WHERE id=$1", [
+				a.nodeId,
+			])
+		).rows[0].state,
+	).toBe("active");
+	const prep = await nodeCommand(db.pool, { op: "prepare-add", node: cfg });
+	expect(prep.preparationId).toMatch(/^prepare-/);
+	expect(
+		(
+			await db.pool.query("SELECT state FROM runtime.nodes WHERE id=$1", [
+				a.nodeId,
+			])
+		).rows[0].state,
+	).toBe("cordoned");
+	const retry = await nodeCommand(db.pool, { op: "prepare-add", node: cfg });
+	expect(retry.preparationId).toBe(prep.preparationId);
+	await expect(
+		nodeCommand(db.pool, {
+			op: "prepare-add",
+			node: { ...cfg, ramCapMb: 4096 },
+		}),
+	).rejects.toThrow(/same node configuration/);
+	const blockers = await nodeCommand(db.pool, {
+		op: "retire",
+		nodeId: a.nodeId,
+	});
+	expect(blockers.ok).toBe(false);
+	expect(blockers.blockers).toContainEqual({
+		kind: "build",
+		id: prep.preparationId,
+	});
+});

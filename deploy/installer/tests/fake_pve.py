@@ -76,6 +76,8 @@ class FakeRunner(Runner):
             "/etc/pve/priv/authorized_keys": "ssh-rsa AAAA existing-management-key\n",
             "/etc/ssh/ssh_host_ed25519_key.pub": HOST_KEY + "\n",
         }
+        if ip_forward == "1":
+            files["/etc/sysctl.d/99-umiak.conf"] = "net.ipv4.ip_forward = 1\n"
         if dnsmasq:
             files["/usr/sbin/dnsmasq"] = "fake"
         self.ip_forward = ip_forward
@@ -220,6 +222,10 @@ class FakeRunner(Runner):
         elif head == ["pvesh", "set"]:
             values = dict(zip(argv[3::2], argv[4::2], strict=True))
             self.objects[argv[2]].update({k.removeprefix("--"): (int(v) if v.isdigit() else v) for k, v in values.items()})
+        elif argv == ["iptables", "-t", "nat", "-S", "POSTROUTING"]:
+            out = "-A POSTROUTING -s 10.88.0.0/24 -o vmbr0 -j SNAT --to-source 192.168.68.11"
+        elif argv == ["ip", "-j", "address", "show", "dev", "umiak0"]:
+            out = json.dumps([{"addr_info": [{"local": "10.88.0.1", "prefixlen": 24}]}])
         elif argv[:3] == ["ip", "link", "set"]:
             self.path("/sys/class/net/vmbr0/bridge/mcast_hash_max").write_text(argv[-1])
         elif argv[:3] == ["systemctl", "is-enabled", "dnsmasq"]:

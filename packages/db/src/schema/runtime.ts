@@ -210,6 +210,7 @@ export const vmidLeases = runtime.table(
 		state: text("state", { enum: LEASE_STATES }).notNull(),
 		purpose: text("purpose", { enum: LEASE_PURPOSES }).notNull(),
 		machineId: uuid("machine_id"),
+		buildJobId: text("build_job_id").references(() => nodeBuildJobs.id),
 		createdAt: createdAt(),
 		updatedAt: updatedAt(),
 	},

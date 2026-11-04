@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createPool, PgAllocatorStore } from "@umiak/db";
 import {
 	Allocator,
 	type Config,
@@ -53,62 +54,113 @@ export interface Ctx {
 	node: SshNodeOps;
 	store: SqliteStateStore;
 	allocator: Allocator;
-	close(): void;
+	close(): Promise<void>;
+}
+
+/** Partial production scope must fail closed instead of silently using local leases. */
+export function buildLeaseScope(
+	env: Env = process.env,
+): { url: string; providerId: string; buildJobId: string } | undefined {
+	const providerId = env.UMIAK_TEMPLATE_PROVIDER_ID;
+	const buildJobId = env.UMIAK_TEMPLATE_BUILD_JOB_ID;
+	if (!providerId && !buildJobId) return undefined;
+	if (!providerId || !buildJobId || !env.DATABASE_URL)
+		throw new Error(
+			"Template build requires DATABASE_URL, provider and build job scope",
+		);
+	return { url: env.DATABASE_URL, providerId, buildJobId };
 }
 
 export async function makeContext(over: { node?: string } = {}): Promise<Ctx> {
+	const scope = buildLeaseScope();
 	const base = loadConfig();
 	const cfg = over.node !== undefined ? { ...base, node: over.node } : base;
-	const api = new PveApi({
-		url: cfg.pveUrl,
-		tokenId: cfg.tokenId,
-		tokenSecret: readSecretFile(cfg.tokenSecretFile),
-		ca: readFileSync(cfg.caFile),
-		tlsName: cfg.tlsName,
-	});
-	const node = new SshNodeOps({
-		host: cfg.nodeSshHost,
-		privateKey: readFileSync(cfg.nodeSshKeyFile),
-		knownHosts: readFileSync(cfg.nodeSshKnownHosts, "utf8"),
-		// lv.scan reads a whole 64 GiB disk.
-		callTimeoutMs: 15 * 60_000,
-	});
-	const store = new SqliteStateStore(cfg.stateDb);
-	let machines: Machines | undefined;
-	const allocator = new Allocator({
-		store,
-		clusterId: cfg.clusterId,
-		range: cfg.vmidRange,
-		templateRange: cfg.templateVmidRange,
-		templateVmid: cfg.templateVmid,
-		occupied: () => (machines as Machines).occupiedVmids(),
-	});
-	await allocator.ensureTemplate();
-	// Only for occupiedVmids: umiak-tpl never creates machines through it.
-	machines = new Machines({
-		api,
-		node,
-		driver: new LvmThinDriver({
+	const pool = scope ? createPool(scope.url, 2) : undefined;
+	const runner = pool ? await pool.connect() : undefined;
+	const disposers: (() => void)[] = [];
+	try {
+		if (runner && scope) {
+			const locked = await runner.query<{ ok: boolean }>(
+				"SELECT pg_try_advisory_lock(hashtextextended('template-runner:' || $1::text,0)) AS ok",
+				[scope.buildJobId],
+			);
+			if (!locked.rows[0]?.ok)
+				throw new Error("Template build runner is already alive");
+			const job = await runner.query(
+				"SELECT 1 FROM runtime.node_build_jobs b JOIN runtime.nodes n ON n.id=b.node_id WHERE b.id=$1 AND b.status='running' AND n.provider_id=$2 AND n.name=$3",
+				[scope.buildJobId, scope.providerId, cfg.node],
+			);
+			if (!job.rowCount)
+				throw new Error("Template build reservation is no longer running");
+			// Losing the session lock must stop this process before cleanup can proceed.
+			runner.on("error", () => process.kill(process.pid, "SIGKILL"));
+		}
+		const api = new PveApi({
+			url: cfg.pveUrl,
+			tokenId: cfg.tokenId,
+			tokenSecret: readSecretFile(cfg.tokenSecretFile),
+			ca: readFileSync(cfg.caFile),
+			tlsName: cfg.tlsName,
+		});
+		disposers.push(() => api.close());
+		const node = new SshNodeOps({
+			host: cfg.nodeSshHost,
+			privateKey: readFileSync(cfg.nodeSshKeyFile),
+			knownHosts: readFileSync(cfg.nodeSshKnownHosts, "utf8"),
+			// lv.scan reads a whole 64 GiB disk.
+			callTimeoutMs: 15 * 60_000,
+		});
+		disposers.push(() => node.close());
+		const store = new SqliteStateStore(cfg.stateDb);
+		disposers.push(() => store.close());
+		let machines: Machines | undefined;
+		const allocator = new Allocator({
+			store:
+				pool && scope
+					? new PgAllocatorStore(pool, scope.providerId, {
+							buildJobId: scope.buildJobId,
+						})
+					: store,
+			clusterId: cfg.clusterId,
+			range: cfg.vmidRange,
+			templateRange: cfg.templateVmidRange,
+			templateVmid: cfg.templateVmid,
+			occupied: () => (machines as Machines).occupiedVmids(),
+		});
+		if (!scope) await allocator.ensureTemplate();
+		// Only for occupiedVmids: umiak-tpl never creates machines through it.
+		machines = new Machines({
+			api,
 			node,
-			vcpu: pveVcpuControl(api, cfg.node),
-			storage: cfg.storage,
-		}),
-		allocator,
-		snapshots: store,
-		cfg,
-	});
-	return {
-		cfg,
-		api,
-		node,
-		store,
-		allocator,
-		close() {
-			node.close();
-			api.close();
-			store.close();
-		},
-	};
+			driver: new LvmThinDriver({
+				node,
+				vcpu: pveVcpuControl(api, cfg.node),
+				storage: cfg.storage,
+			}),
+			allocator,
+			snapshots: store,
+			cfg,
+		});
+		return {
+			cfg,
+			api,
+			node,
+			store,
+			allocator,
+			async close() {
+				node.close();
+				api.close();
+				store.close();
+				runner?.release(true);
+				await pool?.end();
+			},
+		};
+	} catch (error) {
+		for (const close of disposers.reverse()) close();
+		runner?.release(true);
+		await pool?.end();
+		throw error;
+	}
 }
 
 /**

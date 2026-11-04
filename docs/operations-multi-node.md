@@ -13,6 +13,9 @@ before confirmation. It installs dnsmasq with the global service disabled,
 enables forwarding persistently if needed, prepares only Umiak ACLs/SDN, and
 installs the restricted node-agent. The cluster token/private key are reused;
 only the new host's pinned public SSH key is added to `known_hosts`.
+Before host changes, the database validates the requested storage/cap and
+cordons the target with a durable preparation reservation. A failed attempt
+stays unschedulable; rerun with the same configuration to resume safely.
 
 `runtime.nodes` is authoritative. `/etc/pve/umiak/install-state.json` keeps a
 bookkeeping list; editing it does not enroll, cordon or remove a sandbox node.
@@ -76,9 +79,12 @@ through the same bridge. It refuses non-template guests, protected/out-of-range
 VMIDs, machine/snapshot references and an existing build reservation. A failed
 PVE delete retains a reservation for inspection.
 
-After inspecting and stopping/removing interrupted build and verification VMs,
+After stopping the old builder process and removing its build/verification VMs,
 send `{"op":"cleanup-build","nodeId":"<node UUID>","jobId":"<job ID>"}`.
-It rechecks PVE power state before releasing the reservation. Stopped orphan
-VMs/disks are not deleted implicitly and still block final host removal.
+It accepts interrupted jobs only, refuses a surviving builder process or
+active Umiak PVE task, and requires all VMIDs leased by that job to be absent.
+It releases only that job's leases. Local orphan disks are not deleted
+implicitly and still block final host removal. Node preparation reservations
+are recovered by rerunning Add with the same configuration.
 If inventory cannot be read or ownership cannot be proved, repair the cause
 and retry; do not bypass the guard by deleting topology rows or resetting keys.

@@ -1,7 +1,7 @@
 import type { Tx } from "@umiak/db";
 import { POWERED_SQL, RESERVED_SQL } from "./capacity.ts";
 import { notFound } from "./errors.ts";
-import { lockNode } from "./locks.ts";
+import { lockNode, lockNodeBuildCleanup } from "./locks.ts";
 
 /** Alias n is runtime.nodes; interrupted jobs deliberately keep the reservation. */
 export const NODE_NOT_BUILDING_SQL = `NOT EXISTS (SELECT 1 FROM runtime.node_build_jobs nb
@@ -25,6 +25,7 @@ export async function beginNodeBuild(
 	input: { nodeId: string; jobId: string; templateSlug: string },
 ): Promise<void> {
 	await lockNode(tx, input.nodeId);
+	await lockNodeBuildCleanup(tx, input.nodeId, "build");
 	const n = await tx.client.query<{ eligible: boolean }>(
 		`SELECT (n.state='active' AND n.retired_at IS NULL AND p.state='active') AS eligible FROM runtime.nodes n JOIN runtime.providers p ON p.id=n.provider_id WHERE n.id=$1`,
 		[input.nodeId],
@@ -74,7 +75,14 @@ export async function finishNodeBuild(
 }
 
 export interface NodeRemovalBlocker {
-	kind: "machine" | "sandbox" | "snapshot" | "template" | "build" | "disk";
+	kind:
+		| "machine"
+		| "sandbox"
+		| "snapshot"
+		| "template"
+		| "build"
+		| "disk"
+		| "lease";
 	id: string;
 }
 
@@ -90,6 +98,7 @@ export async function nodeRemovalBlockers(
  UNION ALL SELECT 'snapshot',id::text FROM runtime.snapshots WHERE node_id=$1 AND state <> 'deleted'
  UNION ALL SELECT 'template',id::text FROM runtime.template_builds WHERE node_id=$1 AND status <> 'retired'
  UNION ALL SELECT 'build',id FROM runtime.node_build_jobs WHERE node_id=$1 AND status IN ('running','interrupted')
+ UNION ALL SELECT 'lease',l.vmid::text FROM runtime.vmid_leases l JOIN runtime.node_build_jobs b ON b.id=l.build_job_id WHERE b.node_id=$1
  UNION ALL SELECT 'disk',d.id::text FROM runtime.disks d
  LEFT JOIN runtime.machines m ON m.id=d.machine_id
  LEFT JOIN runtime.snapshots s ON s.id=d.snapshot_id

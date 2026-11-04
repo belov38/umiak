@@ -133,6 +133,7 @@ def test_non_interactive_requires_ct_ip(env):
 def test_failing_check_without_yes_is_not_fixed_non_interactive(env):
     runner, run, printed = env
     runner.ip_forward = "0"
+    runner.path("/etc/sysctl.d/99-umiak.conf").unlink(missing_ok=True)
     assert run([f for f in FLAGS if f != "--yes"]) == 2
     assert not runner.path("/etc/sysctl.d/99-umiak.conf").exists()
     assert any("ip-forward" in line or "forwarding" in line for line in printed)

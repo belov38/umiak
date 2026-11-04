@@ -585,6 +585,7 @@ export function createSetupHandler({
 						headers: {
 							"Content-Type": "application/json",
 							"X-Forwarded-For": context.clientIp || "127.0.0.1",
+							...(path === "/v1/setup/smoke" ? { Origin: context.origin } : {}),
 							...options.headers,
 						},
 					},

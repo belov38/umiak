@@ -1,7 +1,10 @@
 import {
 	DELETE_RETRY_LIMIT,
 	lockNode,
+	lockNodeBuildCleanup,
 	lockTeam,
+	NODE_NOT_BUILDING_SQL,
+	nodeAcceptsStarts,
 	requestSystemResume,
 } from "@umiak/core";
 import { type Tx, withTx } from "@umiak/db";
@@ -166,7 +169,7 @@ export async function runReconcile(
 	const parts: [string, () => Promise<Plan[]>][] = [];
 	for (const provider of p.rows) {
 		const nodes = await ctx.pool.query<{ id: string }>(
-			`SELECT id FROM runtime.nodes WHERE provider_id = $1 AND state <> 'down' AND retired_at IS NULL ORDER BY id`,
+			`SELECT n.id FROM runtime.nodes n WHERE provider_id = $1 AND state <> 'down' AND retired_at IS NULL AND ${NODE_NOT_BUILDING_SQL} ORDER BY id`,
 			[provider.id],
 		);
 		for (const { id } of nodes.rows) {
@@ -303,7 +306,7 @@ async function loadEvidence(
 		owner_alive: boolean;
 	}>(
 		`SELECT l.vmid, l.state, l.purpose, l.machine_id,
-		        COALESCE(m.state <> 'deleted', false) AS owner_alive
+		        (l.build_job_id IS NOT NULL OR COALESCE(m.state <> 'deleted', false)) AS owner_alive
 		 FROM runtime.vmid_leases l
 		 LEFT JOIN runtime.machines m ON m.id = l.machine_id
 		 WHERE l.provider_id = $1`,
@@ -484,11 +487,26 @@ async function forgetSeen(
 	);
 }
 
+/** Serialize destructive orphan cleanup against the build reservation. */
+async function withIdleNode(
+	ctx: WorkerCtx,
+	nodeId: string,
+	fn: () => Promise<boolean>,
+): Promise<boolean> {
+	return withTx(ctx.pool, async (tx) => {
+		await lockNodeBuildCleanup(tx, nodeId, "cleanup");
+		if (!(await nodeAcceptsStarts(tx, nodeId))) return false;
+		return fn();
+	});
+}
+
 async function planNode(
 	ctx: WorkerCtx,
 	provider: ProviderRow,
 	nodeId: string,
 ): Promise<Plan[]> {
+	if (!(await withTx(ctx.pool, (tx) => nodeAcceptsStarts(tx, nodeId))))
+		return [];
 	const infra = await ctx.infra.forNode(nodeId);
 	// Machine rows first, then the lists (see the header).
 	const ms = await ctx.pool.query<MachineSnap>(
@@ -572,20 +590,21 @@ async function planNode(
 		if (!oldVms.has(name)) continue;
 		plans.push({
 			action: { ...base, kind: "orphan_vm", target: `vm:${vm.vmid}` },
-			apply: async () => {
-				// Infra first, evidence last: a row written meanwhile is seen.
-				if ((await infra.status(vm.vmid)) === "missing") return false;
-				const fresh = await loadEvidence(ctx.pool, provider.id, infra);
-				if (vmidClaimed(fresh, vm.vmid)) return false;
-				// S1 re-checks under the power lock that the lease is still the
-				// one seen here (a dead owner's, or none): a VMID leased to a new
-				// machine meanwhile is refused.
-				const owner = fresh.leases.get(vm.vmid)?.owner ?? null;
-				if (!(await ownerCheckedDelete(ctx, infra, vm.vmid, owner)))
-					return false;
-				await forgetSeen(ctx.pool, provider.id, "vm", name);
-				return true;
-			},
+			apply: () =>
+				withIdleNode(ctx, nodeId, async () => {
+					// Infra first, evidence last: a row written meanwhile is seen.
+					if ((await infra.status(vm.vmid)) === "missing") return false;
+					const fresh = await loadEvidence(ctx.pool, provider.id, infra);
+					if (vmidClaimed(fresh, vm.vmid)) return false;
+					// S1 re-checks under the power lock that the lease is still the
+					// one seen here (a dead owner's, or none): a VMID leased to a new
+					// machine meanwhile is refused.
+					const owner = fresh.leases.get(vm.vmid)?.owner ?? null;
+					if (!(await ownerCheckedDelete(ctx, infra, vm.vmid, owner)))
+						return false;
+					await forgetSeen(ctx.pool, provider.id, "vm", name);
+					return true;
+				}),
 		});
 	}
 
@@ -613,18 +632,20 @@ async function planNode(
 				target: `lv:${lv.name}`,
 				detail: reason,
 			},
-			apply: async () => {
-				// Infra first, evidence last: a row written meanwhile is seen.
-				const nowVmids = new Set((await infra.listVms()).map((v) => v.vmid));
-				const fresh = await loadEvidence(ctx.pool, provider.id, infra);
-				if (
-					(await lvOrphanReason(ctx.pool, lv, fresh, nowVmids, range)) === null
-				)
-					return false;
-				await infra.removeLvs([lv.name]);
-				await forgetSeen(ctx.pool, provider.id, "lv", name);
-				return true;
-			},
+			apply: () =>
+				withIdleNode(ctx, nodeId, async () => {
+					// Infra first, evidence last: a row written meanwhile is seen.
+					const nowVmids = new Set((await infra.listVms()).map((v) => v.vmid));
+					const fresh = await loadEvidence(ctx.pool, provider.id, infra);
+					if (
+						(await lvOrphanReason(ctx.pool, lv, fresh, nowVmids, range)) ===
+						null
+					)
+						return false;
+					await infra.removeLvs([lv.name]);
+					await forgetSeen(ctx.pool, provider.id, "lv", name);
+					return true;
+				}),
 		});
 	}
 	return plans;
@@ -915,11 +936,17 @@ async function planLeases(
 	ctx: WorkerCtx,
 	provider: ProviderRow,
 ): Promise<Plan[]> {
+	// Ownerless leases cannot be located safely while any node is reserved.
+	const building = await ctx.pool.query(
+		"SELECT 1 FROM runtime.node_build_jobs b JOIN runtime.nodes n ON n.id=b.node_id WHERE n.provider_id=$1 AND b.status IN ('running','interrupted') LIMIT 1",
+		[provider.id],
+	);
+	if (building.rowCount) return [];
 	const r = await ctx.pool.query<{ vmid: number; node_id: string | null }>(
 		`SELECT l.vmid, m.node_id
 		 FROM runtime.vmid_leases l
 		 LEFT JOIN runtime.machines m ON m.id = l.machine_id
-		 WHERE l.provider_id = $1 AND l.state = 'releasing' AND l.purpose = 'machine'
+		 WHERE l.provider_id = $1 AND l.state = 'releasing' AND l.purpose = 'machine' AND l.build_job_id IS NULL
 		   AND l.updated_at < now() - make_interval(secs => $2)
 		 ORDER BY l.vmid`,
 		[provider.id, RECONCILE_GRACE_S],
@@ -989,23 +1016,28 @@ async function planLeases(
 				providerId: provider.id,
 				nodeId: node_id,
 			},
-			apply: async () => {
-				const vms = await infra.listVms();
-				const ev = await loadEvidence(ctx.pool, provider.id, infra);
-				const why = leaseVmUnsafe(vms, vmid, ev.templates);
-				if (why !== null) {
-					countSkip(ctx, why, { kind: "lease_release", vmid, nodeId: node_id });
-					return false;
-				}
-				const still = await ctx.pool.query<{ machine_id: string | null }>(
-					`SELECT machine_id FROM runtime.vmid_leases
-					 WHERE provider_id = $1 AND vmid = $2 AND state = 'releasing'`,
-					[provider.id, vmid],
-				);
-				const lease = still.rows[0];
-				if (lease === undefined) return false;
-				return ownerCheckedDelete(ctx, infra, vmid, lease.machine_id);
-			},
+			apply: () =>
+				withIdleNode(ctx, node_id, async () => {
+					const vms = await infra.listVms();
+					const ev = await loadEvidence(ctx.pool, provider.id, infra);
+					const why = leaseVmUnsafe(vms, vmid, ev.templates);
+					if (why !== null) {
+						countSkip(ctx, why, {
+							kind: "lease_release",
+							vmid,
+							nodeId: node_id,
+						});
+						return false;
+					}
+					const still = await ctx.pool.query<{ machine_id: string | null }>(
+						`SELECT machine_id FROM runtime.vmid_leases
+					 WHERE provider_id = $1 AND vmid = $2 AND state = 'releasing' AND build_job_id IS NULL`,
+						[provider.id, vmid],
+					);
+					const lease = still.rows[0];
+					if (lease === undefined) return false;
+					return ownerCheckedDelete(ctx, infra, vmid, lease.machine_id);
+				}),
 		});
 	}
 	return plans;

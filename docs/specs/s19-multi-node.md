@@ -93,6 +93,11 @@ lock. Resume/recover keep existing semantics on a cordoned node with local
 disks; such machines block final removal. No operation redirects a recorded
 VM to another node when its home node is unavailable. VMIDs remain unique
 cluster-wide through the provider allocator, including template VMIDs.
+Production template and verification VMs use that same PostgreSQL allocator,
+scoped to their durable node build job. Reconcile must protect both unfinished
+jobs and retained builder leases; local SQLite holds builder snapshot metadata
+only. Cleanup requires an interrupted job, proof the runner has exited, no
+active Umiak PVE task and absence of the job's leased VMs before releasing leases.
 
 Template build start, promotion and removal use the same node serialization
 as placement. A build must be durably recorded before host work begins;
@@ -153,8 +158,12 @@ the restricted node-agent with arbitrary command execution.
 Add: verify cluster membership and pinned target identity; check/fix
 dnsmasq (system service disabled), persistent forwarding, local storage and
 agent; add pinned host key; verify restricted RPC and SDN; only then register
-the node for scheduling. Failed preparation leaves it unschedulable and
-reports any partial changes for retry. Rerun is idempotent.
+the node for scheduling. Before host changes, validate the requested configuration under the node lock
+and persist a cordoned preparation reservation. Failed preparation leaves it
+unschedulable and reports partial changes for retry. Resume requires identical
+staged configuration; root actions and target helpers serialize concurrent
+attempts. Activate only after host, restricted RPC and SDN verification succeeds.
+Rerun is idempotent.
 
 SDN Simple zone/VNet/subnet, IPSet and firewall groups are cluster-wide,
 with local NAT/DHCP bridges on selected nodes (architecture §7). Extend

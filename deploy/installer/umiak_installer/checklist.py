@@ -99,7 +99,15 @@ def _dnsmasq(runner):
 
 def _forward(runner):
     value = runner.run(["sysctl", "-n", "net.ipv4.ip_forward"])
-    return _check("ip-forward", value == "1", f"net.ipv4.ip_forward = {value}", FORWARD_FIX)
+    path = runner.path("/etc/sysctl.d/99-umiak.conf")
+    settings = {}
+    for line in path.read_text().splitlines() if path.exists() else []:
+        setting = line.split("#", 1)[0].split("=", 1)
+        if len(setting) == 2:
+            settings[setting[0].strip()] = setting[1].strip()
+    persistent = settings.get("net.ipv4.ip_forward") == "1"
+    detail = f"net.ipv4.ip_forward = {value}; Umiak persistent config " + ("present" if persistent else "missing or disabled")
+    return _check("ip-forward", value == "1" and persistent, detail, FORWARD_FIX)
 
 
 def _firewall(runner):

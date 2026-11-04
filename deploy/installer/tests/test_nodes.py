@@ -3,7 +3,7 @@ import pytest
 from fake_pve import FakeRunner, is_mutation
 from test_day2 import FakeUi
 from umiak_installer import nodes, state
-from umiak_installer.pve import InstallerError
+from umiak_installer.pve import CommandError, InstallerError
 
 
 class Console:
@@ -189,3 +189,96 @@ def test_added_node_prepares_idempotently_without_new_token_or_private_key(tmp_p
     assert not any(a[0] == "ssh-keygen" for a in target.commands)
     assert target.path(prepare_host.AUTHORIZED_KEYS).read_text() == common
     assert not target.path("/var/lib/umiak-installer/secrets/umiak-node_ed25519").exists()
+
+
+def test_storage_mismatch_is_rejected_before_extracting_or_preparing_host(tmp_path):
+    runner = FakeRunner(tmp_path)
+    secrets = runner.path("/var/lib/umiak-installer/secrets")
+    secrets.mkdir(parents=True)
+    (secrets / "known_hosts").write_text("")
+    cp, host = Console(), Host()
+    host.call = lambda node, op, **data: {
+        "checks": [],
+        "sshHost": "192.168.68.11",
+        "hostKey": "ssh-ed25519 new",
+        "mediaStorage": "local",
+    }
+    original = cp.call
+
+    def reject(op, **data):
+        if op == "prepare-add":
+            raise InstallerError("Changing local storage requires storage migration")
+        return original(op, **data)
+
+    cp.call = reject
+    with pytest.raises(InstallerError, match="storage migration"):
+        nodes.add_node(runner, installed(), None, "pve2", storage="other", ui=FakeUi(yes=True), console=cp, host=host)
+    assert not any(is_mutation(a) for a in runner.commands)
+
+
+def test_local_sdn_verification_requires_bridge_gateway_and_tunnel_reachability(tmp_path):
+    import json
+
+    from test_prepare_host import config
+    from umiak_installer import node_host, prepare_host
+
+    runner = FakeRunner(tmp_path)
+    runner.objects[prepare_host.SUBNET] = {
+        "gateway": "10.88.0.1",
+        "snat": 1,
+        "dhcp-range": "start-address=10.88.0.100,end-address=10.88.0.250",
+    }
+    node_host._verify_local_sdn(runner, config())
+    assert ["systemctl", "is-active", "dnsmasq@umiak.service"] in runner.commands
+    assert any(a[0] == "python3" and a[-1] == config().gateway_ip for a in runner.commands)
+    original = runner.run
+    runner.run = lambda argv, input=None: json.dumps([]) if argv[:2] == ["ip", "-j"] else original(argv, input)
+    with pytest.raises(InstallerError, match="gateway.*missing"):
+        node_host._verify_local_sdn(runner, config())
+
+
+def test_missing_cluster_vnet_fails_post_prepare_verification_before_agent_install(tmp_path):
+    import base64
+    import copy
+    import hashlib
+
+    from test_prepare_host import AGENT, config
+    from umiak_installer import node_host, prepare_host
+
+    primary = FakeRunner(tmp_path / "primary")
+    result = prepare_host.prepare(primary, config(), tmp_path / "secrets")
+    target = FakeRunner(tmp_path / "target", hostname="pve2")
+    target.objects = copy.deepcopy(primary.objects)
+    target.users, target.roles, target.tokens, target.acls = copy.deepcopy(
+        (primary.users, primary.roles, primary.tokens, primary.acls)
+    )
+    target.objects["/access/acl"] = target.acls
+    del target.objects["/cluster/sdn/vnets/umiak0"]
+    with pytest.raises(CommandError, match="pvesh failed"):
+        node_host.dispatch(
+            target,
+            {
+                "op": "prepare",
+                "node": "pve2",
+                "config": {"storage": "local-lvm", "gateway_ip": "192.168.68.90"},
+                "members": ["pve", "pve2"],
+                "binary": base64.b64encode(AGENT).decode(),
+                "sha256": hashlib.sha256(AGENT).hexdigest(),
+                "public_key": result.public_key,
+            },
+        )
+    assert not target.path(prepare_host.NODE_BINARY).exists()
+    assert not target.path(prepare_host.NODE_CONFIG).exists()
+
+
+def test_sdn_config_without_local_snat_rule_refuses_activation(tmp_path):
+
+    from test_prepare_host import config
+    from umiak_installer import node_host, prepare_host
+
+    runner = FakeRunner(tmp_path)
+    runner.objects[prepare_host.SUBNET] = {"gateway": "10.88.0.1", "snat": 1, "dhcp-range": "range"}
+    original = runner.run
+    runner.run = lambda argv, input=None: "" if argv[0] == "iptables" else original(argv, input)
+    with pytest.raises(InstallerError, match="SNAT rule is missing"):
+        node_host._verify_local_sdn(runner, config())

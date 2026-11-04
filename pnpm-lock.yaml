@@ -345,6 +345,9 @@ importers:
 
   apps/template-builder:
     dependencies:
+      '@umiak/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@umiak/pve':
         specifier: workspace:*
         version: link:../../packages/pve

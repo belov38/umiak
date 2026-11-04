@@ -6,6 +6,8 @@ gets inventory requests and the restricted node-agent key, never root SSH keys.
 
 import base64
 import dataclasses
+import fcntl
+import functools
 import hashlib
 import json
 import shlex
@@ -114,6 +116,22 @@ def _pinned(content, node, address, key):
     return content if line in content.splitlines() else content.rstrip() + "\n" + line + "\n"
 
 
+def _serialized(action):
+    @functools.wraps(action)
+    def run(runner, *args, **kwargs):
+        path = runner.path("/var/lock/umiak-node-actions.lock")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise InstallerError("Another sandbox node action is still running") from error
+            return action(runner, *args, **kwargs)
+
+    return run
+
+
+@_serialized
 def add_node(runner, current, bundle, node, *, ui, storage=None, ram_cap_mb=None, console=None, host=None):
     day2._require_node(runner, current)
     day2._require_complete(current)
@@ -156,6 +174,16 @@ def add_node(runner, current, bundle, node, *, ui, storage=None, ram_cap_mb=None
     )
     if not ui.confirm("Apply these node changes?"):
         raise InstallerError("Cancelled; no sandbox node changes were applied")
+    staged_node = {
+        "name": node,
+        "sshHost": report["sshHost"],
+        "storage": storage,
+        "mediaStorage": report["mediaStorage"],
+        "ramCapMb": ram_cap_mb,
+    }
+    reservation = console.call("prepare-add", node=staged_node)
+    if not reservation.get("ok") or not reservation.get("preparationId"):
+        raise InstallerError("Node preparation reservation failed; no host changes applied")
     work = runner.path(prepare_host.STATE_DIR) / "work"
     binary = stack.extract_node_agent(
         runner, current.ct_id, stack.quickstart_image(current.release), work / "umiak-node-linux-amd64"
@@ -179,6 +207,7 @@ def add_node(runner, current, bundle, node, *, ui, storage=None, ram_cap_mb=None
     stack.push_secrets(runner, current.ct_id, {"known_hosts": known}, stack.quickstart_image(current.release))
     registered = console.call(
         "register",
+        preparationId=reservation["preparationId"],
         node={
             "name": node,
             "sshHost": result["sshHost"],
@@ -192,6 +221,7 @@ def add_node(runner, current, bundle, node, *, ui, storage=None, ram_cap_mb=None
     return registered
 
 
+@_serialized
 def remove_node(runner, current, node, *, ui, console=None, host=None):
     day2._require_node(runner, current)
     day2._require_complete(current)

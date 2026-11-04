@@ -3,8 +3,11 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import {
+	beginNodeBuild,
 	finishNodeBuild,
 	lockNode,
+	lockNodeBuildCleanup,
+	registerSandboxNode,
 	retireNode,
 } from "../../../packages/core/src/index.ts";
 import pg from "../../../packages/db/node_modules/pg/lib/index.js";
@@ -34,7 +37,7 @@ export async function nodeCommand(
 	if (request.op === "capabilities") {
 		const schema = (
 			await pool.query(
-				"SELECT to_regclass('runtime.node_build_jobs') IS NOT NULL AND (SELECT count(*)=2 FROM information_schema.columns WHERE table_schema='runtime' AND table_name='nodes' AND column_name IN ('retired_at','media_storage')) AS ready",
+				"SELECT to_regclass('runtime.node_build_jobs') IS NOT NULL AND (SELECT count(*)=2 FROM information_schema.columns WHERE table_schema='runtime' AND table_name='nodes' AND column_name IN ('retired_at','media_storage')) AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='runtime' AND table_name='vmid_leases' AND column_name='build_job_id') AS ready",
 			)
 		).rows[0];
 		return { multiNode: Boolean(schema?.ready) };
@@ -56,6 +59,58 @@ export async function nodeCommand(
 			).rows,
 			limits,
 		};
+	if (request.op === "prepare-add") {
+		const cfg = { ...request.node, providerId: limits.providerId };
+		return service.transact(async (tx) => {
+			// register validates storage changes and capacity before any host mutation.
+			const existing = (
+				await tx.client.query(
+					"SELECT id FROM runtime.nodes WHERE provider_id=$1 AND name=$2",
+					[cfg.providerId, cfg.name],
+				)
+			).rows[0];
+			if (existing) {
+				await lockNode(tx, existing.id);
+				const open = (
+					await tx.client.query(
+						"SELECT id,template_slug FROM runtime.node_build_jobs WHERE node_id=$1 AND status IN ('running','interrupted')",
+						[existing.id],
+					)
+				).rows[0];
+				if (open) {
+					const staged = (
+						await tx.client.query(
+							"SELECT n.node_agent_ref,n.ram_cap_mb,n.media_storage,s.name AS storage FROM runtime.nodes n JOIN runtime.storages s ON s.node_id=n.id AND s.driver='lvmthin' WHERE n.id=$1",
+							[existing.id],
+						)
+					).rows[0];
+					if (
+						open.template_slug !== "node-prepare" ||
+						staged.node_agent_ref !== cfg.sshHost ||
+						staged.ram_cap_mb !== cfg.ramCapMb ||
+						staged.media_storage !== cfg.mediaStorage ||
+						staged.storage !== cfg.storage
+					)
+						throw Error(
+							"Unfinished preparation/build exists; retry the same node configuration",
+						);
+					return { ok: true, nodeId: existing.id, preparationId: open.id };
+				}
+			}
+			const registered = await registerSandboxNode(tx, cfg);
+			const id = `prepare-${randomUUID()}`;
+			await beginNodeBuild(tx, {
+				nodeId: registered.nodeId,
+				jobId: id,
+				templateSlug: "node-prepare",
+			});
+			await tx.client.query(
+				"UPDATE runtime.nodes SET state='cordoned' WHERE id=$1",
+				[registered.nodeId],
+			);
+			return { ok: true, ...registered, preparationId: id };
+		});
+	}
 	if (request.op === "register") {
 		const cfg = { ...request.node, providerId: limits.providerId };
 		const members = await (await api()).get("/nodes");
@@ -83,7 +138,43 @@ export async function nodeCommand(
 		);
 		if (st.type !== "lvmthin" || Number(st.active ?? 1) !== 1)
 			throw Error("Node storage is not active LVM-thin");
-		return { ok: true, ...(await service.register(cfg)) };
+		return service.transact(async (tx) => {
+			const existing = (
+				await tx.client.query(
+					"SELECT id FROM runtime.nodes WHERE provider_id=$1 AND name=$2",
+					[cfg.providerId, cfg.name],
+				)
+			).rows[0];
+			if (!existing)
+				throw Error("Reserve node preparation before registration");
+			await lockNode(tx, existing.id);
+			const job = (
+				await tx.client.query(
+					"SELECT id FROM runtime.node_build_jobs WHERE id=$1 AND node_id=$2 AND template_slug='node-prepare' AND status IN ('running','interrupted')",
+					[request.preparationId, existing.id],
+				)
+			).rows[0];
+			if (!job) throw Error("Missing matching node preparation reservation");
+			const staged = (
+				await tx.client.query(
+					"SELECT n.node_agent_ref,n.ram_cap_mb,n.media_storage,s.name AS storage FROM runtime.nodes n JOIN runtime.storages s ON s.node_id=n.id AND s.driver='lvmthin' WHERE n.id=$1",
+					[existing.id],
+				)
+			).rows[0];
+			if (
+				staged.node_agent_ref !== cfg.sshHost ||
+				staged.ram_cap_mb !== cfg.ramCapMb ||
+				staged.media_storage !== cfg.mediaStorage ||
+				staged.storage !== cfg.storage
+			)
+				throw Error("Prepared node configuration differs from its reservation");
+			await finishNodeBuild(tx, {
+				nodeId: existing.id,
+				jobId: job.id,
+				status: "succeeded",
+			});
+			return { ok: true, ...(await registerSandboxNode(tx, cfg)) };
+		});
 	}
 	const inventory = await service.list(limits.providerId);
 	const node = inventory.find((n) => n.nodeId === request.nodeId);
@@ -136,6 +227,7 @@ export async function nodeCommand(
 			);
 			if (refs.rowCount)
 				throw Error("Template still has machine or snapshot references");
+			await lockNodeBuildCleanup(tx, node.nodeId, "build");
 			// Nested transaction helper is intentionally avoided: admission and promotion
 			// share this exact node lock through the reservation insert below.
 			await tx.client.query(
@@ -175,6 +267,10 @@ export async function nodeCommand(
 					"UPDATE runtime.template_builds SET status='retired' WHERE id=$1",
 					[build.id],
 				);
+				await tx.client.query(
+					"DELETE FROM runtime.vmid_leases WHERE provider_id=$1 AND vmid=$2 AND purpose='template' AND machine_id IS NULL",
+					[limits.providerId, build.pve_vmid],
+				);
 				await finishNodeBuild(tx, {
 					nodeId: node.nodeId,
 					jobId: job.id,
@@ -188,28 +284,69 @@ export async function nodeCommand(
 		}
 	}
 	if (request.op === "cleanup-build") {
-		const vms = await (await api()).get(`/nodes/${node.name}/qemu`);
-		if (
-			vms.some(
-				(vm) =>
-					((vm.vmid >= limits.vmidMin && vm.vmid <= limits.vmidMax) ||
-						(vm.vmid >= limits.templateVmidMin &&
-							vm.vmid <= limits.templateVmidMax)) &&
-					vm.status !== "stopped",
+		await service.transact(async (tx) => {
+			await lockNode(tx, node.nodeId);
+			const job = (
+				await tx.client.query(
+					"SELECT status,template_slug FROM runtime.node_build_jobs WHERE id=$1 AND node_id=$2",
+					[request.jobId, node.nodeId],
+				)
+			).rows[0];
+			if (job?.status !== "interrupted" || job.template_slug === "node-prepare")
+				throw Error(
+					"Only an interrupted template build can be cleaned up; a running runner or node preparation must finish first",
+				);
+			const runner = (
+				await tx.client.query(
+					"SELECT pg_try_advisory_xact_lock(hashtextextended('template-runner:' || $1::text,0)) AS ok",
+					[request.jobId],
+				)
+			).rows[0];
+			if (!runner?.ok)
+				throw Error(
+					"Template builder process is still alive; stop it before cleanup",
+				);
+			const pve = await api();
+			const tasks = await pve.get(`/nodes/${node.name}/tasks`, {
+				source: "active",
+			});
+			if (tasks.some((t) => String(t.user || "").startsWith("umiak@pve")))
+				throw Error(
+					"Umiak PVE tasks are still running; wait for completion before cleanup",
+				);
+			const vms = await pve.get(`/nodes/${node.name}/qemu`);
+			const leases = (
+				await tx.client.query(
+					"SELECT vmid FROM runtime.vmid_leases WHERE build_job_id=$1",
+					[request.jobId],
+				)
+			).rows;
+			if (
+				vms.some(
+					(vm) =>
+						leases.some((l) => l.vmid === vm.vmid) ||
+						(((vm.vmid >= limits.vmidMin && vm.vmid <= limits.vmidMax) ||
+							(vm.vmid >= limits.templateVmidMin &&
+								vm.vmid <= limits.templateVmidMax)) &&
+							vm.status !== "stopped"),
+				)
 			)
-		)
-			throw Error(
-				"Stop and inspect build/verification VMs before releasing the reservation",
+				throw Error(
+					"Inspect and remove build/verification VMs before releasing the reservation",
+				);
+			await tx.client.query(
+				"DELETE FROM runtime.vmid_leases WHERE build_job_id=$1",
+				[request.jobId],
 			);
-		await service.transact((tx) =>
-			finishNodeBuild(tx, {
+			await finishNodeBuild(tx, {
 				nodeId: node.nodeId,
 				jobId: request.jobId,
 				status: "failed",
-			}),
-		);
+			});
+		});
 		return { ok: true };
 	}
+
 	throw Error("Unknown node console operation");
 }
 if (

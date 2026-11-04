@@ -79,3 +79,19 @@ def test_custom_pveproxy_certificate_is_refused_without_fix(tmp_path):
         "This node serves a custom certificate (pveproxy-ssl.pem). Umiak 0.1 needs the default Proxmox "
         "certificate on port 8006; custom/ACME certificates are not supported yet."
     )
+
+
+def test_live_forwarding_without_persistent_umiak_file_requires_fix(tmp_path):
+    runner = FakeRunner(tmp_path, ip_forward="1")
+    runner.path("/etc/sysctl.d/99-umiak.conf").unlink(missing_ok=True)
+    check = by_name(checklist.inspect(runner))["ip-forward"]
+    assert not check.ok
+    assert check.fix == checklist.FORWARD_FIX
+    checklist.apply_fix(runner, check.fix)
+    assert by_name(checklist.inspect(runner))["ip-forward"].ok
+
+
+def test_forwarding_file_with_disabled_final_assignment_requires_fix(tmp_path):
+    runner = FakeRunner(tmp_path)
+    runner.path("/etc/sysctl.d/99-umiak.conf").write_text("net.ipv4.ip_forward=1\nnet.ipv4.ip_forward=0\n")
+    assert not by_name(checklist.inspect(runner))["ip-forward"].ok

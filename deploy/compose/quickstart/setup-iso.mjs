@@ -118,6 +118,14 @@ export async function auditDownloadLog(lines, initialUrl, options = {}) {
 	}
 }
 export async function validateWindowsMedia(input, options = {}) {
+	for (const key of ["iso", "virtioIso"]) {
+		if (
+			input.mediaStorage &&
+			input[key]?.includes(":iso/") &&
+			input[key].split(":iso/")[0] !== input.mediaStorage
+		)
+			throw Error("Use the selected node configured media storage");
+	}
 	if (input.isoUrl)
 		await validateMediaUrl(input.isoUrl, input.isoSha256, {
 			...options,

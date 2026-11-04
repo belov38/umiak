@@ -82,3 +82,45 @@ test("successful build releases reservation only after registration and cleanup 
 	assert.deepEqual(events, ["reserve", "register", "verified-cleanup"]);
 	assert.equal(state.buildJob.status, "ready");
 });
+
+test("selected smoke forwards the owner Origin required by the proxied API", async () => {
+	const { createSetupHandler } = await import("./setup.mjs");
+	const { testNodes } = await import("./test-nodes.mjs");
+	let deleted = false;
+	const calls = [];
+	const handler = createSetupHandler({
+		pool: {},
+		nodes: testNodes,
+		store: { read: async () => ({}) },
+		makePve: () => ({ get: async () => [] }),
+		fetcher: async (url, init) => {
+			calls.push([url, init]);
+			const path = new URL(url).pathname;
+			if (path === "/v1/setup/smoke") {
+				assert.equal(init.headers.Origin, "https://umiak.ts.net");
+				return Response.json({ sandbox: { id: "sb_test" } });
+			}
+			if (path.endsWith("/commands"))
+				return Response.json({
+					command: { exitCode: 0 },
+					stdout: "umiak-quickstart-ok",
+				});
+			if (init.method === "DELETE") {
+				deleted = true;
+				return Response.json({});
+			}
+			return Response.json({ state: deleted ? "deleted" : "ready" });
+		},
+	});
+	await handler.wizard.steps.smoke(
+		{ nodeId: "target" },
+		{
+			steps: {
+				connection: { data: { node: "pve2" } },
+				limits: { data: { nodeId: "target", ramCapMb: 4096 } },
+			},
+		},
+		{ origin: "https://umiak.ts.net" },
+	);
+	assert.equal(calls[0][0], "http://api:8081/v1/setup/smoke");
+});

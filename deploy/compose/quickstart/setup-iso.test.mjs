@@ -317,3 +317,16 @@ test("download refuses a partial cluster-options view without root Sys.Audit", a
 	);
 	assert.equal(api.posts.length, 0);
 });
+
+test("registered node media storage cannot be overridden by an uploaded ISO volume", async () => {
+	const api = fake();
+	await assert.rejects(
+		prepareWindowsMedia(api, "pve", {
+			iso: "other:iso/windows.iso",
+			isoSha256: sha,
+			mediaStorage: "local",
+		}),
+		/configured media storage/,
+	);
+	assert.deepEqual(api.posts, []);
+});

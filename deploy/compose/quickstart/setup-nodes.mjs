@@ -3,6 +3,7 @@ import {
 	finishNodeBuild,
 	interruptNodeBuild,
 	lockNode,
+	lockNodeBuildCleanup,
 	promoteNodeTemplate,
 	registerSandboxNode,
 	sandboxNodeInventory,
@@ -91,6 +92,7 @@ export function nodeService(pool) {
 				if (!job.nodeId) {
 					job.nodeId = state.steps.limits.data.nodeId;
 					await lockNode(tx, job.nodeId);
+					await lockNodeBuildCleanup(tx, job.nodeId, "build");
 					await tx.client.query(
 						"INSERT INTO runtime.node_build_jobs(id,node_id,template_slug,status) VALUES($1,$2,$3,'interrupted') ON CONFLICT(id) DO NOTHING",
 						[job.id, job.nodeId, job.slug],

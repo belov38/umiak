@@ -94,3 +94,20 @@ describe("node build RAM cap", () => {
 		).toThrow(/RAM/);
 	});
 });
+
+describe("production build leases", () => {
+	it("requires the complete trusted provider/job scope", async () => {
+		const { buildLeaseScope } = await import("../src/context.ts");
+		expect(buildLeaseScope({})).toBeUndefined();
+		expect(() =>
+			buildLeaseScope({ UMIAK_TEMPLATE_BUILD_JOB_ID: "job" }),
+		).toThrow(/scope/);
+		expect(
+			buildLeaseScope({
+				DATABASE_URL: "postgres://db",
+				UMIAK_TEMPLATE_PROVIDER_ID: "p",
+				UMIAK_TEMPLATE_BUILD_JOB_ID: "job",
+			}),
+		).toEqual({ url: "postgres://db", providerId: "p", buildJobId: "job" });
+	});
+});

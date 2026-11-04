@@ -2,8 +2,10 @@
 
 import base64
 import dataclasses
+import fcntl
 import hashlib
 import json
+import shlex
 import tempfile
 import tomllib
 from pathlib import Path
@@ -54,7 +56,52 @@ def _unused(runner, node, control_plane_id):
                 raise InstallerError("Node still has Umiak local disks: " + lv["lv_name"])
 
 
+def _verify_local_sdn(runner, cfg):
+    bridge = json.loads(runner.run(["ip", "-j", "address", "show", "dev", "umiak0"]))
+    if not any(a.get("local") == "10.88.0.1" and a.get("prefixlen") == 24 for row in bridge for a in row.get("addr_info", [])):
+        raise InstallerError("Verification failed: local umiak0 gateway 10.88.0.1/24 is missing")
+    runner.run(["systemctl", "is-active", "dnsmasq@umiak.service"])
+    subnet = get(runner, prepare_host.SUBNET)
+    if str(subnet.get("snat")) != "1" or subnet.get("gateway") != "10.88.0.1" or not subnet.get("dhcp-range"):
+        raise InstallerError("Verification failed: Umiak subnet gateway, DHCP or SNAT")
+    # PVE SimplePlugin installs this subnet's SNAT in POSTROUTING on each node.
+    rules = runner.run(["iptables", "-t", "nat", "-S", "POSTROUTING"])
+
+    def snat(line):
+        fields = shlex.split(line)
+
+        def value(key):
+            return fields[fields.index(key) + 1] if key in fields and fields.index(key) + 1 < len(fields) else None
+
+        return (
+            fields[:2] == ["-A", "POSTROUTING"]
+            and value("-s") == "10.88.0.0/24"
+            and value("-j") == "SNAT"
+            and value("--to-source")
+        )
+
+    if not any(snat(line) for line in rules.splitlines()):
+        raise InstallerError("Verification failed: local Umiak subnet SNAT rule is missing")
+    # Reach the guest listener from this node before advertising it to placement.
+    runner.run(["python3", "-c", "import socket,sys; socket.create_connection((sys.argv[1],443),10).close()", cfg.gateway_ip])
+
+
 def dispatch(runner: Runner, request: dict) -> dict:
+    _identity(runner, request.get("node"))
+    # A disconnected SSH client may leave its helper alive. Serialize on the target too.
+    if request.get("op") == "inspect":
+        return _dispatch(runner, request)
+    path = runner.path("/var/lock/umiak-node-helper.lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise InstallerError("A node helper is still running; wait before retrying") from error
+        return _dispatch(runner, request)
+
+
+def _dispatch(runner: Runner, request: dict) -> dict:
     node = request.get("node")
     _identity(runner, node)
     if request["op"] == "remove":
@@ -93,6 +140,7 @@ def dispatch(runner: Runner, request: dict) -> dict:
             "checks": [dataclasses.asdict(c) for c in checks],
             "sshHost": prepare_host.node_address(runner, node),
             "hostKey": key,
+            "mediaStorage": next(iter(prepare_host.media_storages(runner, node)), {}).get("storage", ""),
         }
     for check in checks:
         if not check.ok:
@@ -116,6 +164,8 @@ def dispatch(runner: Runner, request: dict) -> dict:
     write_secret(work / prepare_host.STAGED_NODE_CONFIG, prepare_host._node_config(cfg, facts))
     if request["op"] == "prepare":
         _zone(runner, request["members"])
+        prepare_host._verify(runner, cfg, facts["media_name"])
+        _verify_local_sdn(runner, cfg)
     installed = runner.path(prepare_host.NODE_BINARY)
     if (
         request["op"] == "update"

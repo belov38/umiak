@@ -200,7 +200,7 @@ async function cmdIsoUpload(
 		);
 		return 0;
 	} finally {
-		ctx.close();
+		await ctx.close();
 	}
 }
 
@@ -374,7 +374,7 @@ async function cmdBuild(
 		return interrupt.signal.aborted ? interrupt.exitCode() : 1;
 	} finally {
 		interrupt.release();
-		ctx.close();
+		await ctx.close();
 	}
 }
 
@@ -497,7 +497,7 @@ async function main(argv: string[]): Promise<number> {
 				return interrupt.exitCode();
 			} finally {
 				interrupt.release();
-				ctx.close();
+				await ctx.close();
 			}
 		}
 		case "iso": {
@@ -532,7 +532,7 @@ async function main(argv: string[]): Promise<number> {
 					);
 				return checks.every((c) => c.ok) ? 0 : 1;
 			} finally {
-				ctx.close();
+				await ctx.close();
 			}
 		}
 		case "cleanup": {
@@ -550,7 +550,7 @@ async function main(argv: string[]): Promise<number> {
 				out(report.length > 0 ? report.join("\n") : "nothing to clean");
 				return 0;
 			} finally {
-				ctx.close();
+				await ctx.close();
 			}
 		}
 		case "retire": {
@@ -588,7 +588,7 @@ async function main(argv: string[]): Promise<number> {
 				out(report.join("\n"));
 				return 0;
 			} finally {
-				ctx.close();
+				await ctx.close();
 			}
 		}
 	}
