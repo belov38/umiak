@@ -42,7 +42,9 @@ if (existsSync(networkFile)) {
 			.hostname;
 		env.UMIAK_GATEWAY_TUNNEL_HOST = host;
 		env.UMIAK_GATEWAY_SSH_HOST = host;
-		env.UMIAK_SSH_HOST = host;
+		// Sandbox SSH uses the tailnet address the installer sets; fall back to
+		// the gateway host only when none is configured.
+		if (!env.UMIAK_SSH_HOST) env.UMIAK_SSH_HOST = host;
 	}
 }
 const [cmd, ...args] = process.argv.slice(2);

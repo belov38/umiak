@@ -4,11 +4,13 @@ import dataclasses
 import json
 import os
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_PATH = Path("/etc/pve/umiak/install-state.json")
-PHASES = ("prepared", "ct-created", "stack-up", "tailnet-up", "complete")
+# In install order: the tailnet identity (origin, preview domain, SSH host) is
+# needed before the stack's .env and install.json can be written.
+PHASES = ("prepared", "ct-created", "tailnet-up", "stack-up", "complete")
 
 
 @dataclass(frozen=True)
@@ -20,6 +22,8 @@ class InstallState:
     release: str
     tailnet_host: str | None
     phase: str
+    # Install answers (storage, ranges, addresses, hostname) so Resume needs no questions.
+    answers: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if self.phase not in PHASES:

@@ -1,6 +1,8 @@
 # Zero-config S16 entry point: docker compose up --build
 # The corporate OIDC deployment remains at deploy/compose/compose.yaml.
-name: umiak-quickstart
+# Project `umiak`: named volumes are umiak_<name> (the installer writes
+# umiak_pve-secrets and umiak_network-config before the first start).
+name: umiak
 
 # api and mcp accept the socket peer of the trusted owner ingress only
 # (gateway and worker only read UMIAK_AUTH_MODE); the ingress itself and the
@@ -12,11 +14,14 @@ x-app-env: &app-env
   UMIAK_QUICKSTART: "1"
   UMIAK_LOCAL_ALLOWED_CIDRS: 127.0.0.0/8,::1/128,172.29.116.0/24
   UMIAK_LOCAL_DENIED_CIDRS: ${UMIAK_LOCAL_DENIED_CIDRS:-10.88.0.0/24}
-  UMIAK_APP_ORIGIN: http://localhost:4180
-  UMIAK_APP_URL: http://localhost:4180
-  UMIAK_API_URL: http://localhost:4180
-  UMIAK_API_PUBLIC_URL: http://localhost:4180
-  UMIAK_PREVIEW_DOMAIN: umiak.localhost
+  # The installer's .env sets the tailnet origin, preview domain and SSH host;
+  # the fallbacks keep a contributor's local `docker compose up --build` working.
+  UMIAK_APP_ORIGIN: ${UMIAK_PUBLIC_URL:-http://localhost:4180}
+  UMIAK_APP_URL: ${UMIAK_PUBLIC_URL:-http://localhost:4180}
+  UMIAK_API_URL: ${UMIAK_PUBLIC_URL:-http://localhost:4180}
+  UMIAK_API_PUBLIC_URL: ${UMIAK_PUBLIC_URL:-http://localhost:4180}
+  UMIAK_PREVIEW_DOMAIN: ${UMIAK_PREVIEW_DOMAIN:-umiak.localhost}
+  UMIAK_SSH_HOST: ${UMIAK_SSH_HOST:-}
   UMIAK_PREVIEW_SCHEME: http
   UMIAK_PREVIEW_PORT: ${UMIAK_PREVIEW_PORT:-8085}
   UMIAK_OPERATOR_GROUPS: umiak-local-operator
@@ -61,7 +66,7 @@ services:
       api: { condition: service_healthy }
 
   gateway-secrets:
-    image: umiak-quickstart:dev
+    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:-dev}
     build: *quickstart-build
     user: "0:0"
     entrypoint: [node, deploy/compose/quickstart/gateway-init.mjs]
@@ -120,7 +125,7 @@ services:
       retries: 30
 
   migrate:
-    image: umiak-worker:quickstart
+    image: ghcr.io/belov38/umiak-worker:${UMIAK_VERSION:-dev}
     build: *worker-build
     entrypoint: [node, /quickstart/run.mjs]
     command: [node, apps/worker/src/admin/main.ts, migrate]
@@ -134,7 +139,7 @@ services:
     restart: "no"
 
   web-migrate:
-    image: umiak-web:quickstart
+    image: ghcr.io/belov38/umiak-web:${UMIAK_VERSION:-dev}
     build: *web-build
     working_dir: /app/migrate
     entrypoint: [node, /quickstart/run.mjs]
@@ -158,7 +163,7 @@ services:
 
   worker:
     <<: *restart
-    image: umiak-worker:quickstart
+    image: ghcr.io/belov38/umiak-worker:${UMIAK_VERSION:-dev}
     build: *worker-build
     entrypoint: [node, /quickstart/run.mjs]
     command: [node, apps/worker/src/main.ts]
@@ -199,7 +204,7 @@ services:
 
   api:
     <<: *restart
-    image: umiak-api:quickstart
+    image: ghcr.io/belov38/umiak-api:${UMIAK_VERSION:-dev}
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -216,7 +221,6 @@ services:
       UMIAK_SSH_LOGIN_CA_KEY_FILE: /all-secrets/ssh-login-ca
       UMIAK_SSH_HOST_KEYS_FILE: /all-secrets/ssh-host-keys.pub
       UMIAK_API_TRUSTED_PROXY_CIDRS: 172.29.116.10/32,172.29.116.11/32
-      UMIAK_SSH_HOST: localhost
       UMIAK_SSH_PORT: "2222"
     volumes:
       - network-config:/network-config:ro
@@ -246,7 +250,7 @@ services:
 
   web:
     <<: *restart
-    image: umiak-web:quickstart
+    image: ghcr.io/belov38/umiak-web:${UMIAK_VERSION:-dev}
     build: *web-build
     entrypoint: [node, /quickstart/run.mjs]
     command: [node, server.js]
@@ -271,7 +275,7 @@ services:
 
   mcp:
     <<: *restart
-    image: umiak-mcp:quickstart
+    image: ghcr.io/belov38/umiak-mcp:${UMIAK_VERSION:-dev}
     build:
       context: .
       dockerfile: apps/mcp/Dockerfile
@@ -289,7 +293,7 @@ services:
 
   gateway:
     <<: *restart
-    image: umiak-quickstart:dev
+    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:-dev}
     build: *quickstart-build
     command: [/umiak-gateway, serve]
     environment:
@@ -339,7 +343,7 @@ services:
 
   gateway-renewal:
     <<: *restart
-    image: umiak-quickstart:dev
+    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:-dev}
     build: *quickstart-build
     user: "0:0"
     entrypoint: [node, deploy/compose/quickstart/gateway-init.mjs]
@@ -355,7 +359,7 @@ services:
 
   quickstart:
     <<: *restart
-    image: umiak-quickstart:dev
+    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:-dev}
     build: *quickstart-build
     environment:
       <<: *app-env
@@ -370,6 +374,9 @@ services:
       - database-secret:/quickstart-db:ro
       - pve-secrets:/pve-secrets
       - gateway-secrets:/gateway-secrets:ro
+    # 4180 binds all interfaces so a tailnet address change needs no restart;
+    # in the installer's CT, DOCKER-USER rules (umiak-ports.service) drop it,
+    # 8085 and 2222 on eth0 except from the Proxmox node (emergency ssh -L).
     ports:
       - "${UMIAK_QUICKSTART_BIND:-0.0.0.0}:${UMIAK_QUICKSTART_PORT:-4180}:4180"
       - "127.0.0.1:${UMIAK_QUICKSTART_PROXY_PORT:-4181}:4181"

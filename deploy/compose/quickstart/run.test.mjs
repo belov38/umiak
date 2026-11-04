@@ -108,3 +108,45 @@ test("network settings load from a public config volume with no PVE secrets moun
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+test("installer SSH host (tailnet address) wins over the gateway tunnel host", () => {
+	const dir = mkdtempSync(join(tmpdir(), "umiak-run-test-"));
+	writeFileSync(join(dir, "password"), "a".repeat(64));
+	writeFileSync(
+		join(dir, "quickstart-network.json"),
+		JSON.stringify({
+			gatewayAddress: "192.168.68.50",
+			previewDomain: "umiak.100-64-10-20.sslip.io",
+			tunnelUrl: "wss://tunnel.192-168-68-50.sslip.io/v1/connect",
+			guestDns: "1.1.1.1",
+		}),
+	);
+	const run = (extra) =>
+		spawnSync(
+			process.execPath,
+			[
+				launcher,
+				process.execPath,
+				"-e",
+				"console.log(JSON.stringify({ssh:process.env.UMIAK_SSH_HOST,gatewaySsh:process.env.UMIAK_GATEWAY_SSH_HOST}))",
+			],
+			{
+				env: {
+					...process.env,
+					UMIAK_DATABASE_PASSWORD_FILE: join(dir, "password"),
+					UMIAK_SECRETS_DIR: dir,
+					UMIAK_QUICKSTART_NETWORK_FILE: join(dir, "quickstart-network.json"),
+					...extra,
+				},
+				encoding: "utf8",
+			},
+		);
+	const set = run({ UMIAK_SSH_HOST: "100.64.10.20" });
+	assert.equal(set.status, 0, set.stderr);
+	assert.deepEqual(JSON.parse(set.stdout), {
+		ssh: "100.64.10.20",
+		gatewaySsh: "tunnel.192-168-68-50.sslip.io",
+	});
+	const unset = run({ UMIAK_SSH_HOST: "" });
+	assert.equal(JSON.parse(unset.stdout).ssh, "tunnel.192-168-68-50.sslip.io");
+});
