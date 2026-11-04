@@ -28,7 +28,7 @@ import time
 import urllib.parse
 from pathlib import Path
 
-from . import checklist, ct, day2, prepare_host, release, stack, state, tailnet
+from . import checklist, ct, day2, prepare_host, release, stack, state, style, tailnet
 from .pve import CommandError, InstallerError, Runner, lvmthin_storages
 
 SECRETS_DIR = day2.SECRETS_DIR
@@ -283,8 +283,8 @@ def gather(runner: Runner, args, ui: Ui, saved: dict | None = None) -> dict:
             ui.say("Looking for a free address…")
             ip_default = ct.suggest_ip(runner, gw, cidr)
             if ip_default:
-                ui.say(f"Suggested {ip_default}: nothing on the LAN answers there and no Proxmox guest uses it. "
-                       "Check that it is outside your router's DHCP range.")
+                ui.say(f"Suggested {style.bold(ip_default)}: nothing on the LAN answers there and no Proxmox guest "
+                       "uses it. Check that it is outside your router's DHCP range.")
     ct_ip = field(args.ct_ip, "Control-plane static IPv4 address", ip_default, "--ct-ip", check_ip)
 
     def check_hostname(value):
@@ -336,7 +336,8 @@ class Flow:
 
     def progress(self, step: str) -> None:
         self.step = step
-        self.ui.say(step + "…")
+        self.ui.say("")
+        self.ui.say(style.step(step + "…"))
 
     def reached(self, phase: str) -> bool:
         return self.current is not None and state.PHASES.index(self.current.phase) >= state.PHASES.index(phase)
@@ -352,7 +353,8 @@ class Flow:
         state.save(self.current, self.state_path)
 
     def plan(self, a: dict) -> None:
-        self.ui.say("The installer will:")
+        self.ui.say("")
+        self.ui.say(style.step("The installer will:"))
         for line in [
             f"create or verify Umiak-only PVE objects (user umiak@pve, token, roles, pool, SDN zone umiak, "
             f"IPSet umiak-gateway with {a['ct_ip']}, group umiak-egress); vmbr0 and other guests are not touched",
@@ -374,6 +376,9 @@ class Flow:
         if saved and self.reached("ct-created"):
             a = saved  # The CT exists with these answers; they are fixed from here on.
         else:
+            if self.ui.interactive:
+                self.ui.say("")
+                self.ui.say(style.step("Questions") + style.dim("  (Enter keeps the value in brackets)"))
             a = gather(self.runner, args, self.ui, saved)
         self.plan(a)
         runner, ct_id = self.runner, a["ct_id"]
@@ -400,10 +405,10 @@ class Flow:
             try:
                 tailnet.require_https(info)
                 break
-            except tailnet.TailnetNotReady as error:
+            except tailnet.TailnetNotReady:
                 if not self.ui.interactive:
                     raise
-                self.ui.say(str(error))
+                style.action(self.ui.say, "Enable MagicDNS and HTTPS certificates in Tailscale:", tailnet.ADMIN_DNS_URL)
                 self.ui.wait_enter("Press Enter after enabling them to check again… ")
         identity = tailnet.parse(info)
         self.save("tailnet-up", a, identity.dns_name)
@@ -446,14 +451,15 @@ class Flow:
             ui.say(f"Umiak is updated to {bundle.version}.")
         elif action == "Sign in a new browser":
             link = day2.signin(self.runner, current, **common)
-            ui.say("The link below signs in one browser within 10 minutes; other sessions stay valid. Do not share it.")
-            ui.say(f"Open {link}")
+            style.action(ui.say, "Open this link in the new browser:", link,
+                         "It works once within 10 minutes; other sessions stay valid. Do not share it.")
         elif action == "Reset owner access":
             link = day2.reset_owner(self.runner, current, **common)
             if link is None:
                 return 1
-            ui.say("Owner access was reset. The link below is a one-time owner claim; do not share it.")
-            ui.say(f"Open {link}")
+            ui.say(style.ok("Owner access was reset."))
+            style.action(ui.say, "Open this link to claim owner access again:", link,
+                         "It is a one-time owner claim; do not share it.")
         elif action == "Add or remove sandbox nodes":
             from . import nodes
             self.step = "Managing sandbox nodes"
@@ -517,7 +523,7 @@ def main(argv=None, runner: Runner | None = None, bundle: release.Release | None
             if action not in options:
                 raise UsageError(f"{action} is not available now; available: {', '.join(options)}")
         elif ui.interactive:
-            out(f"Umiak installer {bundle.version}")
+            out(style.bold(f"Umiak installer {bundle.version}"))
             action = ui.choose(options) if len(options) > 1 else options[0]
         elif options[0] in ("Install", "Resume install"):
             action = options[0]
@@ -526,21 +532,24 @@ def main(argv=None, runner: Runner | None = None, bundle: release.Release | None
         if action not in ("Install", "Resume install"):
             return flow.day2(action, args, download, latest)
         link = flow.run(args)
-        out(tailnet.key_expiry_hint(urllib.parse.urlsplit(link).hostname))
-        out("Umiak is ready. The link below is a one-time owner claim; do not share it.")
-        out(f"Open {link}")
+        out("")
+        out(style.ok("✓ Umiak is ready."))
+        out("")
+        out("Recommended: " + tailnet.key_expiry_hint(urllib.parse.urlsplit(link).hostname))
+        style.action(out, "Open this link on any device in your tailnet to finish setup:", link,
+                     "It is a one-time owner claim; do not share it.")
         return 0
     except UsageError as error:
-        out(f"Error: {error}")
+        out(style.error(f"Error: {error}"))
         return 2
     except tailnet.TailnetNotReady as error:
         out(f"{error}\nThen rerun the installer to resume.")
         return 3
     except InstallerError as error:
-        out(f"Error during '{step()}': {error}")
+        out(style.error(f"Error during '{step()}': {error}"))
         return 1
     except CommandError as error:
-        out(describe_failure(step(), error))
+        out(style.error(describe_failure(step(), error)))
         return 1
     except KeyboardInterrupt:
         out("Interrupted. Rerun the installer to resume.")

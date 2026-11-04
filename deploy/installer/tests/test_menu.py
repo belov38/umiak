@@ -47,9 +47,12 @@ def saved(runner):
 def test_non_interactive_install_end_to_end(env):
     runner, run, printed = env
     assert run(FLAGS) == 0
-    assert printed[-1] == f"Open https://umiak.tail0000.ts.net/claim#{CODE}"
+    # The claim link stands alone near the end, set off by blank lines.
+    assert printed[-3:] == ["▶ Open this link on any device in your tailnet to finish setup:",
+                            f"  https://umiak.tail0000.ts.net/claim#{CODE}",
+                            "  It is a one-time owner claim; do not share it."]
     assert (
-        "Disable key expiry for the machine 'umiak' in the Tailscale admin console (Machines → … → Disable key "
+        "Recommended: Disable key expiry for the machine 'umiak' in the Tailscale admin console (Machines → … → Disable key "
         "expiry), otherwise it drops off your tailnet after ~180 days. https://login.tailscale.com/admin/machines"
     ) in printed
     final = saved(runner)

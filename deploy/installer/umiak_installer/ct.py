@@ -14,6 +14,7 @@ import re
 import time
 from dataclasses import dataclass
 
+from . import style
 from .prepare_host import NAME
 from .pve import CommandError, InstallerError, Runner, get
 
@@ -220,7 +221,7 @@ def _wait_network(runner: Runner, ct_id: int, sleep, say=lambda _: None, attempt
             return
         except CommandError:
             if n % 5 == 1:
-                say(f"Waiting for DNS in container {ct_id} (attempt {n}/{attempts})")
+                say(style.dim(f"  Waiting for DNS in container {ct_id} (attempt {n}/{attempts})"))
             sleep(2)
     try:
         resolv = run_in(runner, ct_id, "cat", "/etc/resolv.conf").strip()

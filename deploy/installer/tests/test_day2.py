@@ -339,7 +339,7 @@ def test_menu_dispatches_signin_non_interactively(installed, capsys):
     code = main.main(["--non-interactive", "--action", "signin"], runner=runner, bundle=new_bundle(tmp_path),
                      out=printed.append, sleep=lambda _: None)
     assert code == 0
-    assert printed[-1] == f"Open https://umiak.tail0000.ts.net/signin#{SIGNIN}"
+    assert f"  https://umiak.tail0000.ts.net/signin#{SIGNIN}" in printed
 
 
 def test_menu_uninstall_non_interactive_needs_yes(installed):

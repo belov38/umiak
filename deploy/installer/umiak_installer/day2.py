@@ -20,7 +20,7 @@ import shutil
 import time
 from pathlib import Path
 
-from . import ct, host_report, prepare_host, rollback, stack, state, tailnet
+from . import ct, host_report, prepare_host, rollback, stack, state, style, tailnet
 from .ct import run_in
 from .pve import CommandError, InstallerError, Runner, exists, get, media_storages, pending_sdn
 
@@ -540,4 +540,5 @@ def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: b
         shutil.rmtree(runner.path(STATE_DIR_ON_PVE), ignore_errors=True)
         shutil.rmtree(runner.path(prepare_host.STATE_DIR), ignore_errors=True)
     (state_path or runner.path(str(state.DEFAULT_PATH))).unlink(missing_ok=True)
-    ui.say(f"Remove the device {current.answers.get('hostname', 'umiak')} from your tailnet: {tailnet.MACHINES_URL}")
+    style.action(ui.say, f"Remove the device {current.answers.get('hostname', 'umiak')} from your tailnet:",
+                 tailnet.MACHINES_URL)

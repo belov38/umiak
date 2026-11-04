@@ -13,6 +13,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 
+from . import style
 from .ct import run_in
 from .pve import CommandError, InstallerError, Runner
 
@@ -71,10 +72,10 @@ def up(runner: Runner, ct_id: int, hostname: str, out=print, sleep=time.sleep, t
             return parse(info)
         url = info.get("AuthURL")
         if url and url != shown:
-            out(f"To connect Umiak to your tailnet, open: {url}")
+            style.action(out, "Open this link to connect Umiak to your tailnet:", url)
             shown = url
         if info.get("BackendState") == "NeedsMachineAuth" and shown != MACHINES_URL:
-            out(f"Approve this device in the Tailscale admin console: {MACHINES_URL}")
+            style.action(out, "Approve this device in the Tailscale admin console:", MACHINES_URL)
             shown = MACHINES_URL
         if clock() >= deadline:
             raise InstallerError("Tailscale login did not complete in time; rerun the installer to resume")

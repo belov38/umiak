@@ -78,8 +78,8 @@ def test_up_asks_for_device_approval(runner):
     printed = []
     runner.ts_states = [{"BackendState": "NeedsMachineAuth"}, {"BackendState": "NeedsMachineAuth"}, TS_STATUS]
     tailnet.up(runner, 591, "umiak", out=printed.append, sleep=lambda _: None)
-    line = "Approve this device in the Tailscale admin console: https://login.tailscale.com/admin/machines"
-    assert printed.count(line) == 1
+    assert printed.count("▶ Approve this device in the Tailscale admin console:") == 1
+    assert printed.count("  https://login.tailscale.com/admin/machines") == 1
 
 
 def test_key_expiry_hint_names_the_machine():
