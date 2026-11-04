@@ -103,7 +103,8 @@ A `--non-interactive` mode with flags for every answer exists for tests.
    disabled, enable forwarding persistently, enable cluster firewall). It
    never touches `vmbr0` or existing guests.
 2. **Questions** (with defaults): storage, sandbox and template
-   VMID ranges, RAM cap, control-plane CT ID, its IP (DHCP default).
+   VMID ranges, RAM cap, control-plane CT ID, its IP (static, no DHCP
+   default; see Builder rulings).
 3. **PVE objects.** Creates or verifies, scoped to Umiak only: `umiak@pve`
    user, role(s), API token (secret captured once from `pveum`), pool,
    SDN zone/VNet/subnet with DHCP and SNAT, `umiak-gateway` IPSet,
@@ -212,9 +213,12 @@ A `--non-interactive` mode with flags for every answer exists for tests.
   binding all interfaces so a tailnet IP change needs no restart.
 - **Static control-plane address.** The LAN address is baked into the
   `umiak-gateway` IPSet, guest tunnel URL and gateway certificate SAN, so it
-  must not change. The installer asks for a static IPv4 (suggesting the
-  address DHCP gave on first boot, with a hint to reserve it on the router)
-  and writes it into the CT config. Update re-verifies all three places.
+  must not change. The installer asks for a static IPv4 with no DHCP
+  default: the CT is created directly with that address (`ip=<addr>/<prefix>,gw=...`),
+  never boots on DHCP, and `--ct-ip` is mandatory for non-interactive runs
+  (the prompt only reuses a previously saved answer). This deviates from step 2
+  above ("its IP (DHCP default)"); the user picks a free LAN address and should
+  exclude it from the router's DHCP pool. Update re-verifies all three places.
 - **Current state of `pve` (checked 2026-11-04):** no Umiak objects remain
   (only `root@pam`, no pools, SDN zones, VNets or IPSets; CT 590 dev stand is
   gone). The installer may assume a clean host there; adopting a previous

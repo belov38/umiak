@@ -9,7 +9,7 @@ Self-hosted платформа API-управляемых VM-sandbox для AI-�
 
 ## Install on Proxmox (homelab)
 
-Prerequisites: Proxmox VE 9.x, a root shell on the node, and a Tailscale account with MagicDNS and HTTPS certificates enabled. Tailscale runs inside the control plane container, not on the PVE host.
+Prerequisites: Proxmox VE 9.x serving its default certificate on port 8006 (a custom or ACME `pveproxy-ssl.pem` is not supported yet), a root shell on the node, a free static LAN IPv4 address for the control plane container, and a Tailscale account with MagicDNS and HTTPS certificates enabled. Tailscale runs inside the control plane container, not on the PVE host. After the install, disable key expiry for the `umiak` machine in the Tailscale admin console.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/belov38/umiak/main/install.sh | sh

@@ -3,19 +3,23 @@
 Umiak gives you throwaway Proxmox virtual machines for code, tools and AI agents.
 Open **Getting started** in the dashboard sidebar at `/app/getting-started` for this deployment’s real URLs and copy buttons. `/app/help` redirects there.
 
-Quickstart owner and local deployments show a single-owner dashboard without teams. OIDC deployments retain teams. Both the CLI and dashboard use the explicit `/v1/meta` tenancy field; older deployments without it retain team support.
+Owner deployments (the Proxmox installer) show a single-owner dashboard without teams. OIDC deployments retain teams. Both the CLI and dashboard use the explicit `/v1/meta` tenancy field; older deployments without it retain team support.
 
 The examples below use `https://api.example.com`, `https://app.example.com` and `preview.example.com`. Replace them with the URLs shown in your dashboard. Commands are checked against the in-app guide by `apps/web/test/getting-started.test.ts`.
 
 ## Install on Proxmox
 
-Prerequisites: a Proxmox VE 9.x node, a root shell on it, and a Tailscale account with MagicDNS and HTTPS certificates enabled (the installer checks both). Tailscale runs inside the control plane container, not on the Proxmox host.
+Prerequisites: a Proxmox VE 9.x node, a root shell on it, and a Tailscale account with MagicDNS and HTTPS certificates enabled (the installer checks both). Tailscale runs inside the control plane container, not on the Proxmox host. You also need a free static IPv4 address on the node's LAN for the control plane container (the installer has no DHCP option).
+
+The node must serve the default Proxmox certificate on port 8006. A custom or ACME certificate (`/etc/pve/nodes/<node>/pveproxy-ssl.pem`) is not supported in Umiak 0.1; the installer checklist stops with a message if it finds one.
 
 On the node, as root, run the installer:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/belov38/umiak/main/install.sh | sh
 ```
+
+To install a specific release, including a pre-release, set `UMIAK_VERSION` (for example `curl -fsSL https://raw.githubusercontent.com/belov38/umiak/main/install.sh | UMIAK_VERSION=0.1.0-rc.1 sh`). Without it the installer resolves GitHub's `/releases/latest`, which never points to a pre-release.
 
 It downloads the latest release bundle, verifies it against `SHA256SUMS`, then creates the Umiak objects in Proxmox (the `umiak@pve` user and token, roles, pool `umiak`, SDN zone `umiak` with VNet `umiak0` on `10.88.0.0/24`, IPSet `umiak-gateway`, group `umiak-egress`), a restricted node-agent, and an unprivileged Debian 13 container with Docker and Tailscale. It pulls the release images from GHCR and prints a one-time claim link:
 
@@ -24,6 +28,8 @@ https://umiak.<tailnet>.ts.net/claim#<code>
 ```
 
 Open it from a device on your tailnet, claim the deployment, then finish the browser wizard (Templates and a Smoke test). The same address serves the dashboard, API and MCP; there is no plain HTTP or LAN access. For emergencies use `ssh -L 4180:<ct-ip>:4180 root@<pve-node>` and open `http://localhost:4180` in Chrome or Firefox. Operator notes for the stack inside the container are in [deploy/compose/quickstart/README.md](../deploy/compose/quickstart/README.md).
+
+After the install, disable key expiry for the machine `umiak` in the Tailscale admin console (Machines → … → Disable key expiry). Otherwise the node key expires after about 180 days and the control plane drops off your tailnet. The installer prints the same reminder.
 
 Day 2: run the same command again. It shows a menu for the current state: Install, Resume install, Update, Sign in a new browser, Reset owner access, or Uninstall. For scripted runs use `--non-interactive --yes` with flags (`--action`, `--version`, `--storage`, `--ct-id`, `--ct-ip`, ...); `sh -s -- --help` lists them.
 
@@ -131,7 +137,7 @@ umiak port 3000
 umiak port 3000 --public
 ```
 
-Quickstart previews default to `http://<slug>-<port>.<gateway-IP>.sslip.io:8085`. The exact scheme, domain and port come from deployment metadata. Token access is still the default; `--public` allows anyone who can reach the preview. Serve cannot cover wildcard preview hostnames. Configured HTTPS previews use the guest gateway certificate; ask the operator for its verified CA if needed.
+Owner deployment previews default to `http://<slug>-<port>.umiak.<tailnet-IP>.sslip.io:8085`, where `<tailnet-IP>` is the control plane's Tailscale IPv4 address with dashes (for example `umiak.100-64-10-20.sslip.io`). They are reachable only from your tailnet, and Tailscale encrypts the traffic. The exact scheme, domain and port come from deployment metadata. Token access is still the default; `--public` allows anyone on your tailnet who has the URL. Tailscale Serve cannot cover wildcard preview hostnames, so previews are not on the tailnet HTTPS address. Configured HTTPS previews use the guest gateway certificate; ask the operator for its verified CA if needed.
 
 ## Desktops
 
