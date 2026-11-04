@@ -87,7 +87,7 @@ the baseline for final S19 integration and live validation.
 - [ ] Coordinate live window and exact test VMIDs with S18. Prepare pve2 through installer; build Linux on each node sequentially, create modest workloads on both and verify exec/tunnel/locality, removal refusal and successful empty-node retirement/re-add. Delete test sandboxes/artifacts; record exact results.
 - [x] Run `mise exec -- pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`; Node setup tests and Python installer tests. Run mise Go build/vet/test(-race)/golangci-lint for all go.work modules, Linux/Windows checks from CI where supported. Report unavailable checks; do not claim them passed.
 - [x] Fresh independent acceptance subagent gets the final post-S20 spec/diff, not conclusions; fix blockers and recheck affected tests.
-- [ ] Update roadmap and evidence; merge branch into main without squash, push, report SHA/live results/open items to coordinator.
+- [x] Prepare roadmap and evidence for the authorized main integration without squash. Publish the verified tree and report its SHA; retain live acceptance as a follow-up task below.
 
 ## Implementation notes (2026-11-04)
 
@@ -143,3 +143,10 @@ the baseline for final S19 integration and live validation.
 - Rebuilt the full linux/amd64 CP image including changed guest-agent/gateway binaries; offline init/production-content tests2/2 and production node-console/builder/worker imports passed. Installer220/220, compose/quickstart192/192, shell checks, targeted Python lint and buf lint (from `proto/`) passed.
 - Live ruling: old overlay is invalid after changed Go binaries. Any replacement overlay must use the actual installed release containing a435a204 (0.2.1 or later), or a full image built from this tree. `infra/homelab-dev/stand-build.sh` is available for an explicitly coordinated stand build; it has not been run. Desktop tests must use a template rebuilt with the updated guest agent. No SSH/PVE/guest actions; live still waits for the coordinator after Ilia's fresh installation.
 - Full post-merge pnpm build/lint/typecheck/tests passed (worker441+7skip; other suite totals unchanged from the preceding gate). All five Go modules passed build/vet/race tests(-p1)/golangci-lint; Windows amd64 build/vet and arm64 build, plus Linux integration-tag lint passed. Native Windows/privileged Linux runtime results are not claimed. Lint retains only the existing informational String.raw diagnostic. No new S19 implementation or review-fix pass was introduced by this upstream merge.
+
+## Immediate main integration ruling
+
+- Ilia, via coordinator, changed the order: merge S19 into main before the live window so no implementation remains outside main. This supersedes the earlier live-before-merge requirement. Do not dispatch a release. Live acceptance follows Ilia's fresh 0.2.2 installation; any resulting fixes are follow-up main commits.
+- Integrated main through 34483bf2 in dead4c52, preserving the upstream uninstall/dnsmasq fixes. Resolved architecture/roadmap conflicts in English while retaining the S19 topology, placement/locality and installer safety descriptions. No S19 code changes were needed.
+- Remove the remote `s19-multi-node` branch after a successful main push; retain the local branch/worktree until live acceptance and cleanup finish. No PVE/SSH/guest actions have occurred.
+- Immediate-integration gate on dead4c52 passed: full pnpm build/lint/typecheck/tests (including core377, DB75, API1079, worker441+7skip, builder606, MCP716+1skip, CLI189, web289 and both SDK suites), installer223/223, compose/quickstart192/192, installer shell checks, targeted Python lint and buf lint. All five Go modules passed build/vet/race tests(-p1)/golangci-lint, Windows amd64 build/vet and arm64 build, and Linux integration-tag lint. Native Windows and privileged Linux systemd runtime remain untested here. Only this documentation record changed after verification.
