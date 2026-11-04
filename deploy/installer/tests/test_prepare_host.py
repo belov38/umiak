@@ -486,3 +486,48 @@ def test_interrupt_after_forward_keeps_its_undo(host):
     assert "/pools/umiak" not in runner.objects
     assert runner.roles == []
     assert not runner.path("/var/lib/umiak-installer/active").exists()
+
+
+GROUP = "/cluster/firewall/groups/umiak-egress"
+
+
+def _stored(rules):
+    return [{k: str(v) for k, v in rule.items()} | {"pos": i} for i, rule in enumerate(rules)]
+
+
+def _order(runner):
+    return [{k: v for k, v in row.items() if k != "pos"} for row in runner.objects[GROUP]]
+
+
+def _expected():
+    return [{k: str(v) for k, v in rule.items()} for rule in prepare_host.EGRESS_RULES]
+
+
+def test_all_egress_rules_end_up_in_order_on_pve_that_prepends(host):
+    runner, out = host
+    prepare_host.prepare(runner, config(), out)
+    assert len(prepare_host.EGRESS_RULES) == 9
+    assert _order(runner) == _expected()
+    assert [row["pos"] for row in runner.objects[GROUP]] == list(range(9))
+
+
+def test_missing_rules_are_inserted_mid_list(host):
+    runner, out = host
+    present = prepare_host.EGRESS_RULES[:2] + prepare_host.EGRESS_RULES[5:]
+    runner.objects[GROUP] = _stored(present)
+    prepare_host.prepare(runner, config(), out)
+    assert _order(runner) == _expected()
+
+
+def test_failed_move_undoes_the_rule_at_index_zero(host):
+    runner, out = host
+    present = prepare_host.EGRESS_RULES[:2] + prepare_host.EGRESS_RULES[5:]
+    runner.objects[GROUP] = _stored(present)
+    before = snapshot(runner)
+    runner.fail_on = lambda argv: argv[:2] == ["pvesh", "set"] and "--moveto" in argv
+    with pytest.raises(CommandError):
+        prepare_host.prepare(runner, config(), out)
+    assert snapshot(runner) == before
+    runner.fail_on = None
+    prepare_host.prepare(runner, config(), out)
+    assert _order(runner) == _expected()

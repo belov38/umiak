@@ -260,6 +260,22 @@ class _Journal:
         self.record(["command", list(reverse)])
         return self._forward(argv)
 
+    def insert_rule(self, group, args, position):
+        # PVE ignores --pos on create and always prepends, so the new rule lands
+        # at index 0 and is then moved: `--moveto K` leaves it at index K-1.
+        # Until the move succeeds the rule sits at 0, so that is what the undo
+        # must delete; afterwards the undo is retargeted to its final index.
+        self.mutate(["pvesh", "create", group, *args], ["pvesh", "delete", f"{group}/0"])
+        if position == 0:
+            return
+        self._forward_keep(["pvesh", "set", f"{group}/0", "--moveto", str(position + 1)])
+        self.actions[-1] = ["command", ["pvesh", "delete", f"{group}/{position}"]]
+        rollback.write_journal(self.state, self.actions)
+
+    def _forward_keep(self, argv):
+        # A failed move leaves the rule at 0 with its undo (delete at 0) journaled.
+        return self.runner.run(argv)
+
     def create(self, path, child, *args) -> bool:
         if exists(self.runner, child):
             return False
@@ -349,7 +365,7 @@ def _apply(runner: Runner, cfg: PrepareConfig, facts: dict, out_dir: Path, journ
         if position < len(rules) and _rule_matches(rules[position], rule):
             continue
         args = [part for key, value in rule.items() for part in ["--" + key, str(value)]]
-        journal.mutate(["pvesh", "create", group, *args, "--pos", str(position)], ["pvesh", "delete", f"{group}/{position}"])
+        journal.insert_rule(group, args, position)
         rules.insert(position, rule)
 
     # Only zone/VNet/subnet changes need an SDN apply (firewall objects and

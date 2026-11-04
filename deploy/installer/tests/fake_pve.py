@@ -188,7 +188,8 @@ class FakeRunner(Runner):
                         raise CommandError(argv, 2, "", "exists")
                     self.objects[path].append(row)
                 else:
-                    self.objects[path].insert(int(values.get("--pos", 0)), row)
+                    # Real PVE ignores --pos on create and always prepends.
+                    self.objects[path].insert(0, row)
                     for pos, item in enumerate(self.objects[path]):
                         item["pos"] = pos
             out = "{}"
@@ -217,6 +218,15 @@ class FakeRunner(Runner):
                 self.objects[parent] = kept
         elif argv[:3] == ["pvesh", "set", "/cluster/sdn"]:
             self.path("/sys/class/net/vmbr0/bridge/mcast_hash_max").write_text("8192")
+        elif head == ["pvesh", "set"] and "--moveto" in argv and isinstance(
+            self.objects.get(argv[2].rsplit("/", 1)[0]), list
+        ):
+            rows = self.objects[argv[2].rsplit("/", 1)[0]]
+            at, target = int(argv[2].rsplit("/", 1)[1]), int(argv[argv.index("--moveto") + 1])
+            row = rows.pop(at)
+            rows.insert(min(target - 1 if target > at else target, len(rows)), row)
+            for pos, item in enumerate(rows):
+                item["pos"] = pos
         elif head == ["pvesh", "set"]:
             values = dict(zip(argv[3::2], argv[4::2], strict=True))
             self.objects[argv[2]].update({k.removeprefix("--"): int(v) for k, v in values.items()})
