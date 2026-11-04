@@ -187,7 +187,7 @@ export const desktopUrl = defineTool({
 	name: "desktop_url",
 	title: "Desktop link",
 	description:
-		"One-time link (10 minutes) that opens the live desktop in a browser. Give it to the user. To act on the desktop yourself use computer_* tools.",
+		"Link that opens the live desktop in the owner's signed-in browser (owner mode), or a single-use link valid for 10 minutes (corporate OIDC). Give it to the user: an agent cannot open it itself. To act on the desktop yourself use computer_* tools.",
 	toolset: "desktop",
 	scopes: ["desktop"],
 	annotations: {

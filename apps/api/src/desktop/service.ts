@@ -125,8 +125,11 @@ export async function issueDesktopLink(
 	const p = authOf(c).principal;
 	const policy = await desktopPolicy(deps, s.id);
 	const pathMode = deps.settings.desktopPathPrefix !== null;
-	// Path mode needs no ticket: the owner browser session authorizes at the ingress.
-	const ticket = `umiakd_${randomBytes(32).toString("base64url")}`;
+	// Path mode needs no ticket: the owner browser session authorizes at the
+	// ingress, so expiresAt is advisory there and not enforced anywhere.
+	const ticket = pathMode
+		? ""
+		: `umiakd_${randomBytes(32).toString("base64url")}`;
 	const result = pathMode
 		? {
 				rows: [{ expires_at: new Date(Date.now() + 10 * 60 * 1000) }],

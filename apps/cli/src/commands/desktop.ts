@@ -66,7 +66,9 @@ export function register(program: Command, run: Runner): void {
 
 	desktop
 		.command("open", { isDefault: true })
-		.description("open a one-time desktop link in the browser")
+		.description(
+			"open the desktop in the browser (owner mode: signed-in session; corporate: single-use link, 10 minutes)",
+		)
 		.argument("[sb]", "sandbox ID or slug")
 		.option("--fps <n>", "30 or 60")
 		.option("--bitrate <kbps>", "1000..20000")
