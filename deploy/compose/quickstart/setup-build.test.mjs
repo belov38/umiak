@@ -43,6 +43,14 @@ test("build invocation binds exact recipe slot, existing credentials and isolate
 		invocation.env.UMIAK_PVE_TOKEN_SECRET_FILE,
 		"/secrets/pve-token",
 	);
+	assert.equal(
+		invocation.env.UMIAK_UPDATE_KEYS_FILE,
+		"/secrets/update-signing/update-keys.pub",
+	);
+	assert.equal(
+		invocation.env.UMIAK_UPDATE_SIGNING_KEY,
+		"/secrets/update-signing/ed25519.key",
+	);
 	assert.ok(invocation.args.includes("--tunnel-url"));
 	assert.ok(invocation.args.includes("--agent-package"));
 	assert.throws(() =>

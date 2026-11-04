@@ -306,7 +306,7 @@ TS CLI, использует `packages/pve` (PVE API, `umiak-node`, аллока
 ### 8.10 Агент (`50-umiak-agent`) и очистка (`90-cleanup`)
 
 `50-umiak-agent`:
-- `umiak-agent install-package /mnt/seed/build/umiak-agent-<v>-linux-amd64.tar` (S3 §17.1): проверка подписи, раскладка в `versions/<v>`, symlink-и `current`, `/usr/local/bin/umiak-agent`.
+- `umiak-agent install-package --trust-keys /mnt/seed/build/update-keys.pub /mnt/seed/build/umiak-agent-<v>-linux-amd64.tar` (S3 §17.1): проверка подписи ключами, которыми сборщик проверил пакет (`update-keys.pub` в seed), раскладка в `versions/<v>`, symlink-и `current`, `/usr/local/bin/umiak-agent`.
 - `/etc/umiak-agent/agent.toml` (S3 §5) из шаблона рецепта: `[tunnel] url` — URL туннеля по умолчанию (`--tunnel-url`, §14), `[user] default = "user"`, `[docker] enabled = true`, остальное — дефолты S3.
 - Unit-ы S3 §17.2 и §7.2 (`umiak-identity.service`, `umiak-agent.service`, `umiak-agent-rollback.service`, `umiak-cmd.slice`) включены.
 - `qemu-guest-agent` включён (запасной канал S1/S3).

@@ -688,6 +688,9 @@ describe("iso-install build: happy path", () => {
 		expect(
 			files?.get("build/umiak-agent-0.4.0-test-windows-amd64.tar"),
 		).toEqual(readFileSync(s.opts.agentPackage));
+		expect(files?.get("build/update-keys.pub")).toEqual(
+			readFileSync(s.opts.updateKeysFile),
+		);
 		expect(String(files?.get("autounattend.xml"))).toContain(
 			"<Key>VK7JG-NPHTM-C97JM-9MPGT-3V66T</Key>",
 		);

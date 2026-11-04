@@ -38,7 +38,7 @@ commands:
   env [--format pwsh|cmd|sh]
                     the sandbox env for a session shell (Windows)
   logs [-n <lines>] the last lines of the agent log (Windows)
-  install-package [--no-activate] [--no-units] [--write-config] <tar>
+  install-package [--no-activate] [--no-units] [--write-config] [--trust-keys <file>] <tar>
                     install a signed agent package
   seal              prepare a VM for use as a template
   selftest --schema <n> [--shim-protos 1,2]

@@ -69,6 +69,7 @@ it("the Windows build ISO carries the streamer installer", () => {
 			versions: loadVersions(recipe),
 			agentTar: Buffer.from("agent"),
 			agentVersion: "0.1.0+test",
+			updateKeys: "",
 			agentToml: renderWindowsAgentToml(undefined, isDesktopRecipe(recipe)),
 			buildPassword: "Passw0rd!Passw0rd!",
 			buildId: "test",

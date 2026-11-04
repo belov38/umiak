@@ -86,6 +86,12 @@ export interface BuildIsoInput {
 	/** The verified agent package (.tar). */
 	agentTar: Buffer;
 	agentVersion: string;
+	/**
+	 * The update keys file the package was verified with; 50-umiak-agent passes
+	 * it to `install-package --trust-keys` (a per-install signing key is not
+	 * among the keys embedded in the agent binary).
+	 */
+	updateKeys: string | Buffer;
 	/** Content of `C:\ProgramData\umiak-agent\agent.toml`. */
 	agentToml: string;
 	/** Content of the template SSH user CA public keys. */
@@ -175,6 +181,7 @@ export function buildIsoFiles(i: BuildIsoInput): Map<string, string | Buffer> {
 	out.set("build/versions.json", versionsJson(i));
 	out.set("build/agent.toml", i.agentToml);
 	out.set(`build/${agentTarName}`, i.agentTar);
+	out.set("build/update-keys.pub", i.updateKeys);
 	// Always present, empty without a CA, so 50-umiak-agent copies it unconditionally.
 	out.set("build/ssh-user-ca.pub", i.sshUserCa ?? "");
 	out.set("build/umiak-unattend.xml", read("umiak-unattend.xml"));

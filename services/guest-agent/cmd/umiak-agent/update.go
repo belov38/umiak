@@ -13,20 +13,37 @@ import (
 )
 
 // installKeys returns the keys that verify a package: those of the current
-// version for an update, the keys embedded in this binary for the first
-// install (spec 17.1).
-func installKeys(d deps) ([]ed25519.PublicKey, string, error) {
+// version for an update; for the first install, the keys of trustKeys when
+// set, else the keys embedded in this binary (spec 17.1).
+//
+// trustKeys is the first-install trust anchor the template builder supplies
+// over its build channel: a homelab install signs its packages with its own
+// key, which no released binary embeds. The file replaces the embedded keys,
+// so a dev key embedded by mistake is not trusted by a template built with
+// it. After the first install the verified package's trust/update-keys.pub is
+// the trust store, so an update cannot bring its own anchor.
+func installKeys(d deps, trustKeys string) ([]ed25519.PublicKey, string, error) {
 	cur, err := update.LinkVersion(d.layout.CurrentLink)
 	if err != nil {
 		return nil, "", err
 	}
 	if cur != "" {
+		if trustKeys != "" {
+			return nil, "", fmt.Errorf("--trust-keys is only for the first install; version %s is installed, its keys verify updates", cur)
+		}
 		p := filepath.Join(d.layout.CurrentLink, filepath.FromSlash(update.UpdateKeysName))
 		keys, err := update.ReadKeys(p)
 		if err != nil {
 			return nil, "", fmt.Errorf("keys of the current version %s: %w", cur, err)
 		}
 		return keys, p, nil
+	}
+	if trustKeys != "" {
+		keys, err := update.ReadKeys(trustKeys)
+		if err != nil {
+			return nil, "", fmt.Errorf("--trust-keys: %w", err)
+		}
+		return keys, "trust-keys file " + trustKeys, nil
 	}
 	keys, err := update.ParseKeys(d.embeddedKeys)
 	return keys, "embedded keys", err
@@ -40,12 +57,13 @@ func installPackage(d deps, args []string, stdout, stderr io.Writer) int {
 	noActivate := fs.Bool("no-activate", false, "only place the version, do not switch current")
 	noUnits := fs.Bool("no-units", false, "do not install the service (systemd units, Windows service)")
 	writeConfig := fs.Bool("write-config", false, "write the agent.toml template if absent")
+	trustKeys := fs.String("trust-keys", "", "first install only: verify with the update keys of this file instead of the embedded keys")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 1 {
-		_, _ = io.WriteString(stderr, "usage: umiak-agent install-package [--no-activate] [--no-units] [--write-config] <package.tar>\n")
+		_, _ = io.WriteString(stderr, "usage: umiak-agent install-package [--no-activate] [--no-units] [--write-config] [--trust-keys <update-keys.pub>] <package.tar>\n")
 		return 2
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(stderr, nil)))
-	keys, source, err := installKeys(d)
+	keys, source, err := installKeys(d, *trustKeys)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "umiak-agent install-package: %v\n", err)
 		return 1

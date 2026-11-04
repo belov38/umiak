@@ -441,6 +441,10 @@ describe("buildTemplate: happy path", () => {
 		expect(String(seed?.get("build/agent.toml"))).toContain(
 			"wss://tunnel.example.test/v1/connect",
 		);
+		// The keys that verified the package, for install-package --trust-keys.
+		expect(seed?.get("build/update-keys.pub")).toEqual(
+			readFileSync(join(agentFixtures, "update-keys.pub")),
+		);
 		expect(s.verifyCalls[0]?.status).toBe("building");
 		expect(s.verifyCalls[0]?.packages).toEqual(m.packages);
 	});

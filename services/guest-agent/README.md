@@ -61,6 +61,11 @@ This places the version under `/usr/local/lib/umiak-agent`, switches `current`, 
 the switch and the units. Check with `umiak-agent doctor [--json]`; `umiak-agent rollback` undoes an
 unfinished update.
 
+The first install verifies the package with the update keys embedded in the binary.
+`--trust-keys <update-keys.pub>` replaces them for the first install only (with a current version it
+is an error): the template builder passes the keys that signed the package, e.g. the per-install key
+of a homelab quickstart. Updates always verify with `current/trust/update-keys.pub`.
+
 On Windows, as an administrator (the image step extracts the installer first with
 `tar -xf <tar> umiak-agent.exe`):
 

@@ -161,6 +161,14 @@ describe("recipe scripts: spec items", () => {
 		);
 	});
 
+	it("50-umiak-agent trusts the keys the builder verified the package with", () => {
+		const s = code("steps/50-umiak-agent.sh");
+		expect(s).toContain("keys=$UMIAK_BUILD_DIR/update-keys.pub");
+		expect(s).toContain(
+			'"$installer" install-package --write-config --trust-keys "$keys" "$pkg"',
+		);
+	});
+
 	it("10-system removes all three .bash_logout files", () => {
 		const s = code("steps/10-system.sh");
 		for (const p of [
@@ -431,6 +439,7 @@ describe("renderSeed on the real linux recipe", () => {
 				version: "20261030.1",
 				agentPackage,
 				agentVersion: "1.2.3",
+				updateKeys: "",
 				manifestBase: {},
 			});
 		} finally {

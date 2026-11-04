@@ -374,7 +374,13 @@ describe("windows steps: step content", () => {
 
 	it("50-umiak-agent installs the package, the startup script and the sysprep answers", () => {
 		const s = code(read("steps/50-umiak-agent.ps1"));
-		expect(s).toMatch(/'install-package', '--write-config', \$tar/);
+		// First-install trust anchor: the keys the builder verified the package with.
+		expect(s).toMatch(
+			/'install-package', '--write-config', '--trust-keys', \$trustKeys, \$tar/,
+		);
+		expect(s).toMatch(
+			/\$trustKeys = Join-Path \$UmiakBuildDir 'update-keys\.pub'/,
+		);
 		// The installer comes out of the package itself (Windows tar.exe).
 		expect(s).toMatch(
 			/tar\.exe'\) -ArgumentList @\('-xf', \$tar, '-C', \$unpack, 'umiak-agent\.exe'\)/,
@@ -539,6 +545,7 @@ describe("windows steps: build ISO", () => {
 			versions: loadVersions(r),
 			agentTar: Buffer.from("tar"),
 			agentVersion: "0.4.0",
+			updateKeys: "",
 			agentToml: "",
 			buildPassword: "pw",
 			buildId: "0199c5a0-7b1e-7a3c-8d3e-5f2a9c1b4e60",
