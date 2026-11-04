@@ -166,7 +166,7 @@ def replay(state: Path, run=_subprocess_run) -> None:
 
 
 def restore_bridge(state: Path, run=_subprocess_run) -> None:
-    # Proxmox SDN reload may reset ifupdown2's multicast hash default on vmbr0.
+    # Proxmox SDN reload may reset ifupdown2's multicast hash default on the LAN bridge.
     # Restore only the value saved before our change; never rewrite bridge config.
     saved = Path(state) / BRIDGE
     if not saved.exists():
@@ -176,7 +176,8 @@ def restore_bridge(state: Path, run=_subprocess_run) -> None:
         return
     current = Path(bridge["path"])
     if not current.exists() or current.read_text().strip() != bridge["value"]:
-        run(["ip", "link", "set", "dev", "vmbr0", "type", "bridge", "mcast_hash_max", bridge["value"]])
+        run(["ip", "link", "set", "dev", bridge.get("name", "vmbr0"), "type", "bridge", "mcast_hash_max",
+             bridge["value"]])
 
 
 def main(state: str, run=_subprocess_run) -> None:

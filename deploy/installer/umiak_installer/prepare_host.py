@@ -3,7 +3,7 @@
 Creates or verifies only Umiak-scoped objects: umiak@pve, its roles, token and
 ACLs, pool `umiak`, SDN zone `umiak` / VNet `umiak0` / subnet 10.88.0.0/24,
 IPSet `umiak-gateway` and security group `umiak-egress`. It never touches
-vmbr0's configuration, other guests or non-Umiak objects, and refuses to run
+the LAN bridge's configuration, other guests or non-Umiak objects, and refuses to run
 while foreign SDN changes are pending (applying SDN would commit them).
 
 Every check runs before the first change. Changes are journaled and a systemd
@@ -30,6 +30,7 @@ from .pve import (
     Runner,
     exists,
     get,
+    lan_bridge,
     media_storages,
     pending_sdn,
     private_dir,
@@ -90,6 +91,8 @@ class PrepareConfig:
     # Address the control plane uses for SSH to this node; default: the node's
     # cluster address from /cluster/status.
     node_ip: str | None = None
+    # LAN bridge whose multicast hash setting an SDN reload may reset; default: the default route's bridge.
+    bridge: str | None = None
 
 
 @dataclass(frozen=True)
@@ -221,7 +224,10 @@ def _preflight(runner: Runner, cfg: PrepareConfig) -> dict:
     users = json.loads(runner.run(["pveum", "user", "list", "--output-format", "json"]))
     user_exists = any(row["userid"] == USER_ID for row in users)
     tokens = json.loads(runner.run(["pveum", "user", "token", "list", USER_ID, "--output-format", "json"])) if user_exists else []
-    bridge = runner.path("/sys/class/net/vmbr0/bridge/mcast_hash_max")
+    name = cfg.bridge or lan_bridge(runner) or "vmbr0"
+    if not NAME.fullmatch(name):
+        raise InstallerError("Invalid bridge name")
+    bridge = runner.path(f"/sys/class/net/{name}/bridge/mcast_hash_max")
     return {
         "media_name": media_name,
         "media_path": media_path,
@@ -232,7 +238,8 @@ def _preflight(runner: Runner, cfg: PrepareConfig) -> dict:
         "user_exists": user_exists,
         "token_exists": any(row["tokenid"] == TOKEN_NAME for row in tokens),
         "acls": get(runner, "/access/acl"),
-        "bridge": {"path": str(bridge), "value": bridge.read_text().strip() if bridge.exists() else None},
+        "bridge": {"name": name, "path": str(bridge),
+                   "value": bridge.read_text().strip() if bridge.exists() else None},
     }
 
 

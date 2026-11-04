@@ -406,3 +406,34 @@ def test_candidates_are_online_members_that_are_not_sandbox_nodes(tmp_path):
             return {"nodes": [{"name": "pve"}]}
 
     assert nodes.candidates(runner, sample("complete"), console=Console()) == ["pve2"]
+
+
+def test_lan_bridge_is_the_default_routes_bridge_and_reaches_the_ct(env, monkeypatch):
+    from umiak_installer import pve
+
+    runner, run, printed = env
+    assert pve.lan_bridge(runner) == "vmbr0"
+    runner.path("/sys/class/net/vmbr1/bridge").mkdir(parents=True)
+    original = runner.run
+
+    def routes_on_vmbr1(argv, input=None):
+        if argv[:4] == ["ip", "-j", "route", "show"]:
+            return json.dumps([{"dst": "default", "gateway": "192.168.68.1", "dev": "vmbr1"}])
+        if argv[:5] == ["ip", "-j", "-4", "addr", "show"]:
+            return json.dumps([{"ifname": "vmbr1", "addr_info": [{"local": "192.168.68.10", "prefixlen": 22}]}])
+        return original(argv, input=input)
+
+    monkeypatch.setattr(runner, "run", routes_on_vmbr1)
+    assert pve.lan_bridge(runner) == "vmbr1"
+    flags = [f for f in FLAGS if f not in ("--gateway-cidr", "192.168.68.1/22")]
+    assert run(flags) == 0
+    create = next(a for a in runner.commands if a[:2] == ["pct", "create"])
+    assert "name=eth0,bridge=vmbr1,ip=192.168.68.50/22,gw=192.168.68.1" in create
+    assert saved(runner).answers["bridge"] == "vmbr1"
+
+
+def test_unknown_bridge_flag_is_a_usage_error(env):
+    runner, run, printed = env
+    assert run(FLAGS + ["--bridge", "vmbr9"]) == 2
+    assert any("No Linux bridge named vmbr9" in line for line in printed)
+    assert runner.mutations() == []

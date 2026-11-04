@@ -119,5 +119,21 @@ def media_storages(runner: Runner, node: str) -> list[dict]:
     return sorted(rows, key=lambda row: (row["storage"] != "local", row["storage"]))
 
 
+def bridges(runner: Runner) -> list[str]:
+    """Linux bridges on this host (vmbr0, vmbr1, …)."""
+    net = runner.path("/sys/class/net")
+    return sorted(p.name for p in net.iterdir() if (p / "bridge").is_dir()) if net.is_dir() else []
+
+
+def lan_bridge(runner: Runner) -> str | None:
+    """The bridge that carries this host's default route: the LAN the node itself is on."""
+    try:
+        routes = json.loads(runner.run(["ip", "-j", "route", "show", "default"]))
+    except (CommandError, ValueError):
+        return None
+    found = bridges(runner)
+    return next((row["dev"] for row in routes if row.get("dev") in found), None)
+
+
 def lvmthin_storages(runner: Runner, node: str) -> list[dict]:
     return [row for row in get(runner, "/storage") if row.get("type") == "lvmthin" and _on_node(row, node)]

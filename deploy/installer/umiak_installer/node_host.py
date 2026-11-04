@@ -12,7 +12,7 @@ import tomllib
 from pathlib import Path
 
 from . import checklist, prepare_host
-from .pve import InstallerError, Runner, get, pending_sdn, write_secret
+from .pve import InstallerError, Runner, get, lan_bridge, pending_sdn, write_secret
 
 
 def _identity(runner, node):
@@ -28,7 +28,7 @@ def _zone(runner, members, *, remove=None):
         raise InstallerError("Unexpected Umiak SDN zone")
     # Empty `nodes` means ALL nodes in PVE. Keep a passive last zone until
     # explicit platform uninstall rather than accidentally enabling it everywhere.
-    bridge = runner.path("/sys/class/net/vmbr0/bridge/mcast_hash_max")
+    bridge = runner.path(f"/sys/class/net/{lan_bridge(runner) or 'vmbr0'}/bridge/mcast_hash_max")
     previous = bridge.read_text() if bridge.exists() else None
     try:
         current = {name.strip() for name in str(zone.get("nodes", "")).split(",") if name.strip()}

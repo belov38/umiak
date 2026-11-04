@@ -29,7 +29,7 @@ import urllib.parse
 from pathlib import Path
 
 from . import checklist, ct, day2, prepare_host, release, stack, state, style, tailnet
-from .pve import CommandError, InstallerError, Runner, lvmthin_storages
+from .pve import CommandError, InstallerError, Runner, bridges, lan_bridge, lvmthin_storages
 
 SECRETS_DIR = day2.SECRETS_DIR
 GUEST_DNS = "1.1.1.1"
@@ -61,7 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--storage", help="LVM-thin storage for sandboxes and the control-plane CT")
     parser.add_argument("--ct-id", type=int, help=f"control-plane CT ID (default {DEFAULT_CT_ID})")
     parser.add_argument("--ct-ip", help="static LAN IPv4 address of the control-plane CT")
-    parser.add_argument("--gateway-cidr", help="LAN router and prefix, e.g. 192.168.1.1/24 (default: from vmbr0)")
+    parser.add_argument("--bridge", help="LAN bridge for the control-plane CT (default: the bridge of the default route)")
+    parser.add_argument("--gateway-cidr", help="LAN router and prefix, e.g. 192.168.1.1/24 (default: from the LAN bridge)")
     parser.add_argument("--guest-dns", help=f"DNS server(s) for sandboxes and the control-plane CT (default {GUEST_DNS})")
     parser.add_argument("--vmid-range", help="sandbox VMIDs (default 500-589)")
     parser.add_argument("--template-range", help="template VMIDs (default 600-699)")
@@ -171,13 +172,13 @@ def _int(text: str, flag: str) -> int:
         raise UsageError(f"{flag} must be a number") from error
 
 
-def _lan_defaults(runner: Runner) -> str | None:
-    """Router and prefix of vmbr0, e.g. 192.168.68.1/22; None when undetectable."""
+def _lan_defaults(runner: Runner, bridge: str) -> str | None:
+    """Router and prefix of the LAN bridge, e.g. 192.168.68.1/22; None when undetectable."""
     try:
-        addrs = json.loads(runner.run(["ip", "-j", "-4", "addr", "show", "dev", "vmbr0"]))
+        addrs = json.loads(runner.run(["ip", "-j", "-4", "addr", "show", "dev", bridge]))
         routes = json.loads(runner.run(["ip", "-j", "route", "show", "default"]))
         prefix = addrs[0]["addr_info"][0]["prefixlen"]
-        gateway = next(row["gateway"] for row in routes if row.get("dev") == "vmbr0" and row.get("gateway"))
+        gateway = next(row["gateway"] for row in routes if row.get("dev") == bridge and row.get("gateway"))
         return f"{gateway}/{prefix}"
     except (CommandError, ValueError, KeyError, IndexError, StopIteration):
         return None
@@ -263,7 +264,23 @@ def gather(runner: Runner, args, ui: Ui, saved: dict | None = None) -> dict:
             raise UsageError("The LAN prefix length must be 8-30")
         return gw, cidr
 
-    lan_default = f"{saved['gw']}/{saved['cidr']}" if "gw" in saved else _lan_defaults(runner)
+    known = bridges(runner)
+
+    def check_bridge(value):
+        if value not in known:
+            raise UsageError(f"No Linux bridge named {value} on this node; bridges: {', '.join(known) or 'none'}")
+        return value
+
+    detected = saved.get("bridge") or lan_bridge(runner)
+    if args.bridge:
+        bridge = check_bridge(args.bridge)
+    elif detected:
+        bridge = detected  # The bridge of the default route: no question needed.
+    else:
+        ui.say("Could not tell which bridge is your LAN (no default route on a bridge).")
+        bridge = ui.ask("LAN bridge for the control plane" + (f" ({', '.join(known)})" if known else ""),
+                        known[0] if len(known) == 1 else None, "--bridge", check_bridge)
+    lan_default = f"{saved['gw']}/{saved['cidr']}" if "gw" in saved else _lan_defaults(runner, bridge)
     gw, cidr = field(args.gateway_cidr, "LAN router and prefix", lan_default, "--gateway-cidr", check_lan)
     network = ipaddress.IPv4Network(f"{gw}/{cidr}", strict=False)
     ct_exists = ct.existing(runner, ct_id) is not None
@@ -275,7 +292,7 @@ def gather(runner: Runner, args, ui: Ui, saved: dict | None = None) -> dict:
             raise UsageError(f"Invalid address: {error}") from error
         if ip not in network or str(ip) == gw or ip in (network.network_address, network.broadcast_address):
             raise UsageError(f"The address must be a host address in {network} other than the router")
-        if not ct_exists and ct.address_in_use(runner, str(ip)):
+        if not ct_exists and ct.address_in_use(runner, str(ip), bridge):
             raise UsageError(f"Address {ip} is already in use on the LAN; choose a free static address")
         return str(ip)
 
@@ -285,7 +302,7 @@ def gather(runner: Runner, args, ui: Ui, saved: dict | None = None) -> dict:
                "(it must never be handed to another device); guests reach the gateway there.")
         if ui.interactive:
             ui.say("Looking for a free address…")
-            ip_default = ct.suggest_ip(runner, gw, cidr)
+            ip_default = ct.suggest_ip(runner, gw, cidr, bridge)
             if ip_default:
                 ui.say(f"Suggested {style.bold(ip_default)}: nothing on the LAN answers there and no Proxmox guest "
                        "uses it. Check that it is outside your router's DHCP range.")
@@ -298,14 +315,14 @@ def gather(runner: Runner, args, ui: Ui, saved: dict | None = None) -> dict:
 
     hostname = field(args.hostname, "Tailnet hostname", default("hostname", "umiak"), "--hostname", check_hostname)
     dns = args.guest_dns or saved.get("guest_dns") or GUEST_DNS
-    spec = ct.CtSpec(id=ct_id, ip=ct_ip, cidr=cidr, gw=gw, storage=storage, dns=dns)
+    spec = ct.CtSpec(id=ct_id, ip=ct_ip, cidr=cidr, gw=gw, storage=storage, dns=dns, bridge=bridge)
     try:
         ct.validate(spec)
     except InstallerError as error:
         raise UsageError(str(error)) from error
     return {"storage": storage, "vmid_min": vmids[0], "vmid_max": vmids[1], "tpl_min": templates[0],
             "tpl_max": templates[1], "ram_cap_mb": ram, "ct_id": ct_id, "ct_ip": spec.ip, "gw": spec.gw,
-            "cidr": spec.cidr, "hostname": hostname, "guest_dns": dns}
+            "cidr": spec.cidr, "hostname": hostname, "guest_dns": dns, "bridge": bridge}
 
 
 def run_checklist(runner: Runner, ui: Ui, storage: str | None) -> None:
@@ -393,8 +410,10 @@ class Flow:
         self.ui.say(style.step("The installer will:"))
         for line in [
             f"create or verify Umiak-only PVE objects (user umiak@pve, token, roles, pool, SDN zone umiak, "
-            f"IPSet umiak-gateway with {a['ct_ip']}, group umiak-egress); vmbr0 and other guests are not touched",
-            f"create CT {a['ct_id']} umiak-cp ({a['ct_ip']}/{a['cidr']} via {a['gw']}, storage {a['storage']}) "
+            f"IPSet umiak-gateway with {a['ct_ip']}, group umiak-egress); bridge {a.get('bridge', 'vmbr0')} and other "
+            "guests are not touched",
+            f"create CT {a['ct_id']} umiak-cp ({a['ct_ip']}/{a['cidr']} via {a['gw']} on {a.get('bridge', 'vmbr0')}, "
+            f"storage {a['storage']}) "
             "with Docker and Tailscale from their signed apt repositories",
             f"install /usr/local/bin/umiak-node and {prepare_host.NODE_CONFIG}, add one forced-command key line "
             f"to {prepare_host.AUTHORIZED_KEYS}",
@@ -422,7 +441,7 @@ class Flow:
 
         cfg = prepare_host.PrepareConfig(node=node, storage=a["storage"], gateway_ip=a["ct_ip"], guest_dns=a["guest_dns"],
                                          vmid_min=a["vmid_min"], vmid_max=a["vmid_max"], tpl_min=a["tpl_min"],
-                                         tpl_max=a["tpl_max"])
+                                         tpl_max=a["tpl_max"], bridge=a.get("bridge", "vmbr0"))
         out_dir = runner.path(SECRETS_DIR)
         self.progress("Preparing Proxmox objects")
         result = prepare_host.prepare(runner, cfg, out_dir)
@@ -430,7 +449,7 @@ class Flow:
 
         self.progress(f"Creating control-plane container {ct_id}")
         ct.create(runner, ct.CtSpec(id=ct_id, ip=a["ct_ip"], cidr=a["cidr"], gw=a["gw"], storage=a["storage"],
-                                  dns=a["guest_dns"]),
+                                  dns=a["guest_dns"], bridge=a.get("bridge", "vmbr0")),
                   sleep=self.sleep, say=self.ui.say)
         self.save("ct-created", a)
 

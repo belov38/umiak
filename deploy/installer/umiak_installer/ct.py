@@ -1,7 +1,7 @@
 """The control-plane LXC: create (or resume) it and install Docker and Tailscale.
 
 The CT is unprivileged Debian 13 with nesting and keyctl for Docker and
-/dev/net/tun for Tailscale, on vmbr0 with a static address. Packages come only
+/dev/net/tun for Tailscale, on the LAN bridge with a static address. Packages come only
 from Docker's and Tailscale's signed apt repositories; each repository key's
 fingerprint is checked before apt trusts it. Nothing is piped into a shell.
 
