@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import json
 import shlex
+import shutil
 import tempfile
 import tomllib
 from pathlib import Path
@@ -105,7 +106,11 @@ def dispatch(runner: Runner, request: dict) -> dict:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise InstallerError("A node helper is still running; wait before retrying") from error
-        return _dispatch(runner, request)
+        result = _dispatch(runner, request)
+    if request.get("op") == "remove":
+        # The lock file lives in the state dir: delete it only after the lock is released.
+        shutil.rmtree(runner.path(prepare_host.STATE_DIR), ignore_errors=True)
+    return result
 
 
 def _dispatch(runner: Runner, request: dict) -> dict:
