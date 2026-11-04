@@ -1,7 +1,7 @@
 """The compose stack inside the control-plane CT.
 
 Layout in the CT: /opt/umiak/compose.yaml (+ the files it mounts) and
-/opt/umiak/.env with exactly four public values. Compose project `umiak`, so
+/opt/umiak/.env with exactly five public values. Compose project `umiak`, so
 named volumes are `umiak_<name>`. Secrets travel only as files: `pct push
 --perms 0600` into a root-only staging directory, then a throwaway container
 copies them into the `umiak_pve-secrets` volume; staging is always removed.
@@ -23,7 +23,8 @@ from .release import Release
 DIR = "/opt/umiak"
 PROJECT = "umiak"
 STAGING = "/root/.umiak-staging"
-ENV_KEYS = ("UMIAK_VERSION", "UMIAK_PUBLIC_URL", "UMIAK_PREVIEW_DOMAIN", "UMIAK_SSH_HOST")
+ENV_KEYS = ("UMIAK_VERSION", "UMIAK_PUBLIC_URL", "UMIAK_PREVIEW_DOMAIN", "UMIAK_SSH_HOST",
+            "UMIAK_GATEWAY_TLS_BIND")
 # compose.yaml and every repo-relative file it bind-mounts (a test keeps them equal).
 STACK_FILES = (
     "compose.yaml",

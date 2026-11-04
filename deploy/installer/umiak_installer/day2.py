@@ -88,6 +88,7 @@ def apply_stack(runner: Runner, ct_id: int, bundle, a: dict, node_ip: str, publi
         "UMIAK_PUBLIC_URL": f"https://{identity.dns_name}",
         "UMIAK_PREVIEW_DOMAIN": preview,
         "UMIAK_SSH_HOST": identity.ipv4,
+        "UMIAK_GATEWAY_TLS_BIND": a["ct_ip"],
     }, work)
     stack.write_firewall(runner, ct_id, node_ip)
     stack.pull(runner, ct_id)

@@ -301,7 +301,7 @@ services:
       - database-secret:/quickstart-db:ro
       - gateway-secrets:/gateway-secrets:ro
     ports:
-      - "${UMIAK_GATEWAY_BIND:-0.0.0.0}:${UMIAK_GATEWAY_HTTPS_PORT:-443}:8443"
+      - "${UMIAK_GATEWAY_TLS_BIND:-0.0.0.0}:${UMIAK_GATEWAY_HTTPS_PORT:-443}:8443"
       - "${UMIAK_GATEWAY_BIND:-0.0.0.0}:${UMIAK_PREVIEW_PORT:-8085}:8085"
       - "${UMIAK_GATEWAY_BIND:-0.0.0.0}:${UMIAK_GATEWAY_SSH_PORT:-2222}:2222"
     networks: [control]
