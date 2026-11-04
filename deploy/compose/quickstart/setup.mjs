@@ -9,6 +9,7 @@ import { randomBytes, X509Certificate } from "node:crypto";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { basename, dirname, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
 	buildInvocation,
 	runTemplateBuild,
@@ -230,13 +231,44 @@ export class SetupWizard {
 					);
 			}
 			try {
-				const data = await this.steps[name](input, state, context);
+				const previous = state.steps[name];
+				const data = await this.steps[name](
+					input,
+					state,
+					name === "smoke"
+						? {
+								...context,
+								onSmokeProgress: async (stage) => {
+									state.smokeProgress = stage;
+									try {
+										await this.store.write(state);
+									} catch {}
+								},
+							}
+						: context,
+				);
+				// Inventory changes after a build are observations, not settings changes.
+				const settings = (value) =>
+					name === "limits" && value
+						? Object.fromEntries(
+								Object.entries(value).filter(
+									([key]) =>
+										!["occupiedTemplateVmids", "freeTemplateVmids"].includes(
+											key,
+										),
+								),
+							)
+						: value;
+				const unchanged =
+					["limits", "network"].includes(name) &&
+					previous?.status === "ready" &&
+					isDeepStrictEqual(settings(previous.data), settings(data));
 				state.steps[name] = {
 					status: "ready",
 					data,
 					updatedAt: new Date().toISOString(),
 				};
-				for (const next of preserveCompletion
+				for (const next of preserveCompletion || unchanged
 					? []
 					: STEPS.slice(STEPS.indexOf(name) + 1))
 					if (state.steps[next]) state.steps[next].status = "stale";
@@ -449,7 +481,7 @@ export function createSetupHandler({
 						String(config.tags || "")
 							.split(";")
 							.includes("umiak-tpl"),
-					`VM ${build.pveVmid} is not a tagged Umiak template`,
+					`VM ${build.pveVmid} is not recognized as a Umiak template`,
 				);
 				// PVE always reports ostype for our templates; absent means unknown.
 				requireValue(
@@ -620,6 +652,7 @@ export function createSetupHandler({
 					);
 				return data;
 			};
+			await context.onSmokeProgress?.("Creating");
 			const created = await call(
 				input.nodeId ? "/v1/setup/smoke" : "/v1/sandboxes",
 				{
@@ -639,6 +672,7 @@ export function createSetupHandler({
 			const id = created.sandbox?.id || created.id;
 			requireValue(id, "Smoke create returned no sandbox ID");
 			try {
+				await context.onSmokeProgress?.("Starting");
 				const deadline = Date.now() + 300000;
 				let ready = false;
 				while (Date.now() < deadline) {
@@ -653,6 +687,7 @@ export function createSetupHandler({
 					await new Promise((resolve) => setTimeout(resolve, 1500));
 				}
 				requireValue(ready, "Smoke sandbox boot timed out");
+				await context.onSmokeProgress?.("Running command");
 				const exec = await call(`/v1/sandboxes/${id}/commands`, {
 					method: "POST",
 					body: JSON.stringify({
@@ -666,6 +701,7 @@ export function createSetupHandler({
 				);
 				return { sandboxId: id, exec: "passed", deleted: true };
 			} finally {
+				await context.onSmokeProgress?.("Cleaning up");
 				await call(`/v1/sandboxes/${id}`, {
 					method: "DELETE",
 					headers: { "Umiak-Confirm-Delete": id },
@@ -735,7 +771,7 @@ export function createSetupHandler({
 				requireValue(
 					input.templateVmid >= node.config?.templateVmidMin &&
 						input.templateVmid <= node.config?.templateVmidMax,
-					"The node-agent template VMID range does not include the selected slot. Update templateVmidMin/templateVmidMax in /etc/umiak-node.toml to match Setup before building; adoption never rewrites host configuration.",
+					"The node-agent template VMID range does not include the selected VMID. Update templateVmidMin/templateVmidMax in /etc/umiak-node.toml to match Setup before building; adoption never rewrites host configuration.",
 				);
 			}
 			const invocation = buildInvocation(
@@ -752,7 +788,7 @@ export function createSetupHandler({
 			);
 			requireValue(
 				!vms.some((vm) => Number(vm.vmid) === invocation.slot),
-				"Template slot became occupied; retry to allocate a different free VMID.",
+				"The selected VMID is now in use. Retry to allocate a different free VMID.",
 			);
 			const used = vms
 				.filter(

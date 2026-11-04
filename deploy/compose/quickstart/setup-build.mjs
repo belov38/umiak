@@ -22,7 +22,7 @@ export function buildInvocation(
 ) {
 	if (slug === "windows-desktop") slug = "windows";
 	if (!["linux", "linux-desktop", "windows"].includes(slug))
-		throw new Error("Unknown template recipe");
+		throw new Error("Unknown operating system");
 	const slot = input.templateVmid;
 	const range = templateRange(state);
 	validateTemplateRange({ ...state.steps.limits.data, ...range });
@@ -300,7 +300,7 @@ export class TemplateBuildJobs {
 					...state.buildJob,
 					status: "error",
 					error:
-						"Build interrupted by restart. Inspect its S5 registry and outstanding build VM before retrying; no broad cleanup is performed.",
+						"Build interrupted by restart. Check the build details and any unfinished template VM before retrying. Existing VMs have been kept.",
 				};
 			}
 		});

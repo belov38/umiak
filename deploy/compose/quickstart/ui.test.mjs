@@ -48,12 +48,12 @@ test("only fixed font asset paths are public and both fonts are available", () =
 	assert.equal(uiAsset("/quickstart/ui/../../../etc/passwd", {}), false);
 });
 
-test("setup auxiliary controls are secondary and side effects ask for confirmation", () => {
+test("setup auxiliary controls are secondary and duplicate builds are blocked", () => {
 	const html = renderSetup({ steps: {} });
 	assert.match(html, /class="outline" type="button" id="validate-media"/);
 	assert.doesNotMatch(html, /id="prepare"/);
-	assert.match(html, /confirm\("Build this template/);
-	assert.match(html, /confirm\('Run the smoke test/);
+	assert.match(html, /if \(building\) return/);
+	assert.match(html, /button.disabled = true/);
 });
 
 test("owner navigation and progress follow dashboard composition", () => {

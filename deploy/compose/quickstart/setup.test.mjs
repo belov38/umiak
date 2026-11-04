@@ -407,7 +407,7 @@ test("wizard UI has themes, progress and template selections without raw JSON", 
 		"https://stack.example",
 	);
 	assert.match(html, /Templates/);
-	assert.match(html, /Smoke test/);
+	assert.match(html, /Test your installation/);
 	assert.doesNotMatch(
 		html,
 		/Connect Proxmox|Prepare or adopt|chrome:\/\/flags|Funnel(?! Display)|docker compose/,
@@ -560,6 +560,7 @@ test("smoke calls the API with the public API host, not api:8080", async () => {
 	const { join } = await import("node:path");
 	const { createSetupHandler } = await import("./setup.mjs");
 	const hosts = new Set();
+	const stages = [];
 	let deleted = false;
 	const api = http.createServer((req, res) => {
 		hosts.add(req.headers.host);
@@ -606,13 +607,67 @@ test("smoke calls the API with the public API host, not api:8080", async () => {
 					limits: { data: { ramCapMb: 8192 } },
 				},
 			},
-			{},
+			{
+				onSmokeProgress: async (stage) => {
+					stages.push(stage);
+				},
+			},
 		);
 		assert.equal(result.exec, "passed");
+		assert.deepEqual(stages, [
+			"Creating",
+			"Starting",
+			"Running command",
+			"Cleaning up",
+		]);
+		assert.equal(deleted, true);
 		assert.deepEqual([...hosts], ["umiak.tail0000.ts.net"]);
 	} finally {
 		if (saved === undefined) delete process.env.UMIAK_API_URL;
 		else process.env.UMIAK_API_URL = saved;
 		await new Promise((resolve) => api.close(resolve));
+	}
+});
+
+test("rechecking unchanged storage or networking preserves later verification", async () => {
+	for (const name of ["limits", "network"]) {
+		for (const changed of [false, true]) {
+			let state = {
+				complete: true,
+				steps: Object.fromEntries(
+					["connection", "host", "limits", "network", "templates", "smoke"].map(
+						(step) => [
+							step,
+							{
+								status: "ready",
+								data: {
+									value: 1,
+									occupiedTemplateVmids: [],
+									freeTemplateVmids: 10,
+								},
+							},
+						],
+					),
+				),
+			};
+			const wizard = new SetupWizard({
+				store: {
+					read: async () => structuredClone(state),
+					write: async (next) => {
+						state = next;
+					},
+				},
+				steps: {
+					[name]: async () => ({
+						value: changed ? 2 : 1,
+						occupiedTemplateVmids: name === "limits" ? [600] : [],
+						freeTemplateVmids: name === "limits" ? 9 : 10,
+					}),
+				},
+			});
+			await wizard.run(name, {});
+			assert.equal(state.steps.smoke.status, changed ? "stale" : "ready");
+			assert.equal(state.complete, !changed);
+		}
 	}
 });

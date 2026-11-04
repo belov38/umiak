@@ -7,14 +7,14 @@ test("wizard expands the current step and marks completed steps", () => {
 	const html = renderSetup({
 		steps: { limits: { status: "ready" }, network: { status: "ready" } },
 	});
-	assert.equal((html.match(/<details /g) || []).length, 4);
+	assert.equal((html.match(/<details name="setup-step"/g) || []).length, 4);
 	assert.equal(
-		(html.match(/<details name="setup-step" open>/g) || []).length,
+		(html.match(/<details name="setup-step" id="[^"]+" open>/g) || []).length,
 		1,
 	);
-	assert.match(html, /<h1>Templates and smoke test<\/h1>/);
+	assert.match(html, /<h1>Finish setting up Umiak<\/h1>/);
 	assert.match(html, /<summary>✓ 1\. Storage/);
-	assert.match(html, /open><summary>3\. Template builds/);
+	assert.match(html, /open><summary>3\. Prepare your first sandbox image/);
 	assert.doesNotMatch(html, /github\.com\/belov38/);
 	assert.doesNotMatch(
 		html,
@@ -98,9 +98,11 @@ test("setup displays current gateway CA and leaf certificate expiry status", asy
 	)?.[1];
 	assert.ok(script, "setup includes certificate status loader");
 	const status = { textContent: "" };
+	const warning = { textContent: "" };
 	const context = {
 		document: {
 			querySelector: (selector) => {
+				if (selector === "#certificate-warning") return warning;
 				assert.equal(selector, "#certificate-status");
 				return status;
 			},
@@ -120,10 +122,16 @@ test("setup displays current gateway CA and leaf certificate expiry status", asy
 	};
 	runInNewContext(script, context);
 	await context.showCertificateStatus();
-	assert.match(status.textContent, /Guest CA expires: 2027-01-01/);
-	assert.match(status.textContent, /Tunnel certificate expires: 2026-12-01/);
-	assert.match(status.textContent, /Preview certificate expires: 2026-12-02/);
-	assert.match(status.textContent, /rebuilding agent packages and templates/);
+	assert.ok(
+		status.textContent.includes(new Date("2027-01-01").toLocaleString()),
+	);
+	assert.ok(
+		status.textContent.includes(new Date("2026-12-01").toLocaleString()),
+	);
+	assert.ok(
+		status.textContent.includes(new Date("2026-12-02").toLocaleString()),
+	);
+	assert.match(warning.textContent, /rebuilding agent packages and templates/);
 });
 
 test("setup offers three recipes and one Windows desktop with ISO URL inputs", () => {
@@ -139,7 +147,7 @@ test("progress counts only visible steps and warns until the installer has boots
 	const ready = { status: "ready" };
 	const boot = { connection: ready, host: ready };
 	const none = renderSetup({ steps: boot });
-	assert.match(none, /0 of 4 steps verified/);
+	assert.match(none, /0 of 4 complete/);
 	assert.match(none, /aria-valuenow="0"/);
 	assert.doesNotMatch(none, /installer has not finished/);
 	const all = renderSetup({
@@ -151,7 +159,7 @@ test("progress counts only visible steps and warns until the installer has boots
 			smoke: ready,
 		},
 	});
-	assert.match(all, /4 of 4 steps verified/);
+	assert.match(all, /4 of 4 complete/);
 	assert.match(all, /aria-valuenow="4"/);
 	assert.match(all, /width:100%/);
 	assert.match(
@@ -169,4 +177,135 @@ test("setup page shows a recorded installer import failure", () => {
 		html,
 		/Installer data could not be imported: fingerprint &lt;mismatch&gt;/,
 	);
+});
+
+test("first-run Linux action precedes optional controls and single node needs no selector", () => {
+	const html = renderSetup({
+		steps: { limits: { status: "ready" }, network: { status: "ready" } },
+		sandboxNodes: [
+			{ nodeId: "node_1", name: "lab", state: "ready", templates: [] },
+		],
+	});
+	assert.match(html, /3\. Prepare your first sandbox image/);
+	assert.match(html, /Build on: lab/);
+	assert.doesNotMatch(html, /<select id="build-node"/);
+	assert.ok(
+		html.indexOf('id="build-linux"') < html.indexOf("Other operating systems"),
+	);
+	assert.match(html, /id="windows-media" hidden/);
+	assert.doesNotMatch(
+		html,
+		/New template recipe|empty slot|Not configured|S5 builder|For a rebuild/,
+	);
+	assert.match(
+		html,
+		/2 of 4 complete · Next: Prepare your first sandbox image/,
+	);
+	assert.match(html, /<summary>Technical details<\/summary>/);
+	assert.match(html, /<summary>Use an existing template<\/summary>/);
+});
+
+function setupBrowser(respond) {
+	const html = renderSetup({ steps: {} });
+	const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].find(
+		(match) => match[1].includes("function setupInteractions"),
+	)[1];
+	const elements = new Map();
+	const element = (id) => {
+		if (!elements.has(id))
+			elements.set(id, {
+				value: "",
+				disabled: false,
+				hidden: true,
+				textContent: "",
+				addEventListener(event, listener) {
+					this[event] = listener;
+				},
+			});
+		return elements.get(id);
+	};
+	const timers = [];
+	let reloads = 0;
+	runInNewContext(script, {
+		document: { querySelector: element, querySelectorAll: () => [] },
+		fetch: respond,
+		setTimeout: (callback) => {
+			timers.push(callback);
+		},
+		clearTimeout: () => {},
+		location: {
+			reload: () => {
+				reloads++;
+			},
+		},
+	});
+	return { element, timers, reloads: () => reloads };
+}
+
+test("build polls current activity and elapsed time, blocks duplicates and advances after registration", async () => {
+	const requests = [];
+	let finish = false;
+	const browser = setupBrowser(async (url, options) => {
+		requests.push({ url, options });
+		const job = {
+			status: finish ? "ready" : "running",
+			startedAt: new Date(Date.now() - 65000).toISOString(),
+			log: "Downloading Linux",
+		};
+		return {
+			ok: true,
+			json: async () => (options?.method === "POST" ? job : { buildJob: job }),
+		};
+	});
+	await browser.element("#build-linux").click();
+	assert.equal(browser.element("#build-linux").disabled, true);
+	assert.equal(browser.element("#build-template").disabled, true);
+	assert.match(
+		browser.element("#build-progress").textContent,
+		/Downloading Linux · Elapsed: 1m/,
+	);
+	assert.equal(browser.element("#build-log").textContent, "Downloading Linux");
+	await browser.element("#build-linux").click();
+	assert.equal(
+		requests.filter((request) => request.options?.method === "POST").length,
+		1,
+	);
+	assert.equal(JSON.parse(requests[0].options.body).slug, "linux");
+	finish = true;
+	await browser.timers.shift()();
+	assert.equal(browser.reloads(), 1);
+});
+
+test("failed build request shows an error at the build action and allows retry", async () => {
+	const browser = setupBrowser(async () => ({
+		ok: false,
+		json: async () => ({ error: "Storage unavailable" }),
+	}));
+	await browser.element("#build-linux").click();
+	assert.equal(
+		browser.element("#build-error").textContent,
+		"Storage unavailable",
+	);
+	assert.equal(browser.element("#build-linux").disabled, false);
+	assert.equal(browser.element("#build-template").disabled, false);
+});
+
+test("Windows media fields only appear when Windows is selected", () => {
+	const browser = setupBrowser(async () => {});
+	browser.element("#build-slug").value = "windows";
+	browser.element("#build-slug").change();
+	assert.equal(browser.element("#windows-media").hidden, false);
+	browser.element("#build-slug").value = "linux-desktop";
+	browser.element("#build-slug").change();
+	assert.equal(browser.element("#windows-media").hidden, true);
+});
+
+test("completed setup leads directly to browser sandbox creation and uses friendly invalidation copy", () => {
+	const html = renderSetup({
+		complete: true,
+		steps: { templates: { status: "stale" } },
+	});
+	assert.match(html, /href="\/app\/sandboxes\/new">Create your first sandbox/);
+	assert.match(html, /Needs checking after settings changed/);
+	assert.doesNotMatch(html, />stale</);
 });

@@ -44,10 +44,11 @@ async function showCertificateStatus() {
 			["previewExpiresAt", "Preview certificate expires"],
 		]) {
 			if (typeof status[key] === "string")
-				lines.push(`${label}: ${status[key]}`);
+				lines.push(`${label}: ${new Date(status[key]).toLocaleString()}`);
 		}
 		if (typeof status.warning === "string" && status.warning)
-			lines.push(status.warning);
+			document.querySelector("#certificate-warning").textContent =
+				status.warning;
 		document.querySelector("#certificate-status").textContent =
 			lines.join(" · ");
 	} catch {}
@@ -68,53 +69,268 @@ export function renderHelp(origin) {
 <section><h2>Install the CLI</h2><p>Download the installer from your Umiak address.</p>${block(`curl -fsSL ${origin}/install.sh -o umiak-install.sh && sh ./umiak-install.sh`)}<p>The installer verifies SHA256SUMS and installs to <code>~/.local/bin</code>. Add that directory to PATH. Pair the CLI in your claimed owner browser.</p>${block(`umiak login --api-url ${origin}\numiak create --template linux --size 2gb\numiak exec <sandbox> -- echo hello\numiak rm <sandbox> --yes`)}</section>
 <section><h2>MCP for Claude Code</h2><p>The stdio server uses your paired CLI profile. Only approve tools you intend your coding agent to use.</p>${block("claude mcp add umiak -- umiak mcp")}<h2>MCP for Codex</h2>${block("codex mcp add umiak -- umiak mcp")}<p>Remote Streamable HTTP endpoint: <code>${escapeHtml(origin)}/mcp</code>. Configure your client with a paired bearer credential. </p></section>
 <section><h2>SDK</h2><p>Use a paired credential from your CLI profile. Keep credentials out of source control and agent prompts.</p>${block(`import { Umiak } from '@umiak/sdk';\nconst umiak = new Umiak({ baseUrl: '${origin}', accessToken: process.env.UMIAK_TOKEN });`)}${block(`from umiak_sdk import Umiak\nimport os\nclient = Umiak(base_url="${origin}", access_token=os.environ["UMIAK_TOKEN"])`)}</section>
-<section><h2>Desktops and optional templates</h2><p>Linux is the default. Linux desktop and Windows 11 (with desktop) templates can be registered in Setup after building with the S5 template builder. Supply your own licensed Windows ISO and the VirtIO ISO; existing templates are adopted without rebuilding. Open a desktop-capable sandbox in the dashboard and select Desktop. The embedded viewer needs a secure browser context for WebCodecs, which the tailnet HTTPS address provides.</p></section>
+<section><h2>Desktops and optional templates</h2><p>Linux is the default. Linux desktop and Windows 11 (with desktop) templates can be registered in Setup after building them. Supply your own licensed Windows ISO and the VirtIO ISO; existing templates are adopted without rebuilding. Open a desktop-capable sandbox in the dashboard and select Desktop. The embedded viewer needs a secure browser context for WebCodecs, which the tailnet HTTPS address provides.</p></section>
 <section><h2>Troubleshooting</h2><ul><li><strong>Certificate error:</strong> check the guest gateway certificate. Verify any required CA through a trusted operator channel.</li><li><strong>Owner required:</strong> claim with the one-time link printed by the installer, or approve your CLI pairing from an existing owner session.</li><li><strong>PVE pin mismatch:</strong> inspect the fingerprint at the Proxmox console before updating it; do not blindly accept a changed pin.</li><li><strong>Node-agent SSH fails:</strong> check the restricted private key, pinned SSH host key and reachability from the control plane.</li><li><strong>Sandbox does not become ready:</strong> guests must reach the configured gateway on port 443 and trust the tunnel CA embedded in the template.</li><li><strong>Capacity exhausted:</strong> stop or delete your own sandboxes; the total RAM cap and VMID range are enforced.</li><li><strong>Tailnet address does not open:</strong> check that Tailscale is connected on this device and that MagicDNS and HTTPS certificates are enabled for your tailnet.</li></ul></section>`,
 	);
 }
 const field = (name, label, value = "", type = "text") =>
 	`<label>${label}<input name="${name}" type="${type}" value="${escapeHtml(value)}"></label>`;
+// Serialized into the page so the server's CSP hashes cover the exact script.
+function setupInteractions() {
+	const $ = (selector) => document.querySelector(selector);
+	let building = false;
+	let polling = false;
+	const value = (id) => $(id)?.value || "";
+	const post = async (path, data) => {
+		const response = await fetch(`/quickstart/setup/${path}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(data),
+		});
+		const result = await response.json();
+		if (!response.ok)
+			throw new Error(result.error || "Request failed. Try again.");
+		return result;
+	};
+	const disableBuilds = (disabled) => {
+		building = disabled;
+		$("#build-linux").disabled = disabled;
+		$("#build-template").disabled = disabled;
+	};
+	const showJob = (job) => {
+		if (!job) return;
+		disableBuilds(job.status === "running");
+		$("#build-log").textContent = job.log || "";
+		$("#build-error").textContent = job.error || "";
+		const elapsed = Math.max(
+			0,
+			Math.floor(
+				((job.finishedAt ? Date.parse(job.finishedAt) : Date.now()) -
+					Date.parse(job.startedAt)) /
+					1000,
+			),
+		);
+		const activity =
+			(job.log || "").trim().split("\n").at(-1) || "Preparing the build";
+		$("#build-progress").textContent =
+			job.status === "running"
+				? activity +
+					" · Elapsed: " +
+					Math.floor(elapsed / 60) +
+					"m " +
+					(elapsed % 60) +
+					"s"
+				: job.status === "ready"
+					? "Template build complete."
+					: "Build stopped. Check the error and build details.";
+	};
+	const pollBuild = async () => {
+		if (polling) return;
+		polling = true;
+		try {
+			const response = await fetch("/quickstart/setup/build");
+			if (!response.ok)
+				throw new Error("Could not check build progress. Retrying…");
+			const result = await response.json();
+			showJob(result.buildJob);
+			if (result.buildJob?.status === "ready") {
+				// Registration has finished before the job becomes ready.
+				location.reload();
+				return;
+			}
+			if (result.buildJob?.status === "running") setTimeout(pollBuild, 2000);
+		} catch (error) {
+			$("#build-error").textContent = error.message;
+			setTimeout(pollBuild, 3000);
+		} finally {
+			polling = false;
+		}
+	};
+	const build = async (slug) => {
+		if (building) return;
+		disableBuilds(true);
+		$("#build-error").textContent = "";
+		$("#build-progress").textContent = "Starting template build…";
+		try {
+			const input = {
+				slug,
+				nodeId: value("#build-node"),
+				confirmRebuild: value("#build-confirm"),
+			};
+			if (slug === "windows") Object.assign(input, media());
+			const job = await post("build", input);
+			showJob(job);
+			await pollBuild();
+		} catch (error) {
+			$("#build-error").textContent = error.message;
+			disableBuilds(false);
+		}
+	};
+	const media = () => ({
+		iso: value("#build-iso"),
+		isoUrl: value("#build-iso-url"),
+		isoSha256: value("#build-iso-sha"),
+		mediaStorage: value("#build-media-storage"),
+		virtioUrl: value("#build-virtio-url"),
+		virtioSha256: value("#build-virtio-sha"),
+		allowInternalIsoUrls: $("#build-internal-urls").checked,
+	});
+	$("#build-linux").addEventListener("click", () => build("linux"));
+	$("#build-template").addEventListener("click", () =>
+		build(value("#build-slug")),
+	);
+	$("#build-slug").addEventListener("change", () => {
+		$("#windows-media").hidden = value("#build-slug") !== "windows";
+	});
+	$("#validate-media").addEventListener("click", async () => {
+		const button = $("#validate-media");
+		button.disabled = true;
+		try {
+			$("#media-result").textContent = (
+				await post("media/validate", media())
+			).message;
+		} catch (error) {
+			$("#media-result").textContent = error.message;
+		} finally {
+			button.disabled = false;
+		}
+	});
+	$("#continue-test")?.addEventListener("click", () => {
+		$("#step-smoke").open = true;
+	});
+	for (const form of document.querySelectorAll("form[data-step]")) {
+		form.addEventListener("submit", async (event) => {
+			event.preventDefault();
+			const button = form.querySelector('button[type="submit"]');
+			const result = form.querySelector("[data-result]");
+			button.disabled = true;
+			result.textContent =
+				form.dataset.step === "smoke"
+					? "Running installation test. This can take several minutes…"
+					: "Checking…";
+			const data = Object.fromEntries(new FormData(form));
+			for (const key of [
+				"vmidMin",
+				"vmidMax",
+				"templateVmidMin",
+				"templateVmidMax",
+				"ramCapMb",
+			])
+				if (key in data) data[key] = Number(data[key]);
+			if (form.dataset.step === "templates")
+				data.builds = Array.from(
+					form.querySelectorAll('input[name="template"]:checked'),
+				).map((input) => ({
+					templateSlug: input.dataset.slug,
+					nodeId: input.dataset.nodeId,
+					pveVmid: Number(input.value),
+				}));
+			let testing = form.dataset.step === "smoke";
+			let timer;
+			const pollTest = async () => {
+				try {
+					const response = await fetch("/quickstart/setup/state");
+					if (response.ok) {
+						const state = await response.json();
+						if (testing && state.smokeProgress)
+							result.textContent = `${state.smokeProgress}…`;
+					}
+				} catch {}
+				if (testing) timer = setTimeout(pollTest, 1500);
+			};
+			if (testing) timer = setTimeout(pollTest, 1500);
+			try {
+				await post(form.dataset.step, data);
+				location.reload();
+			} catch (error) {
+				result.textContent = error.message;
+				result.className = "error";
+			} finally {
+				testing = false;
+				clearTimeout(timer);
+				button.disabled = false;
+			}
+		});
+	}
+	// Only resume polling an active job; completed jobs must not cause reload loops.
+	if ($("#build-linux").disabled) void pollBuild();
+}
+
 export function renderSetup(state) {
 	const steps = state.steps || {};
 	const limits = { ...templateRange(state), ...steps.limits?.data };
-	const nodeOptions = (state.sandboxNodes || [])
-		.map(
-			(n) =>
-				`<option value="${escapeHtml(n.nodeId)}">${escapeHtml(n.name)} (${escapeHtml(n.state)})</option>`,
-		)
-		.join("");
-	const nodeStatus = (state.sandboxNodes || [])
-		.map(
-			(n) =>
-				`<li><strong>${escapeHtml(n.name)}</strong> · ${escapeHtml(n.state)}<ul>${(n.templates || []).map((t) => `<li>${escapeHtml(t.templateSlug)} · ${escapeHtml(t.version)} · VM ${escapeHtml(t.pveVmid)}</li>`).join("")}${!(n.templates || []).some((t) => t.templateSlug === "linux") ? "<li>Linux template needed</li>" : ""}${n.buildJobId ? `<li>Unfinished reservation: <code>${escapeHtml(n.buildJobId)}</code></li>` : ""}</ul></li>`,
-		)
-		.join("");
-	const nodeSelect = (id) =>
-		`<label>Sandbox node<select id="${id}" name="nodeId">${nodeOptions}</select></label>`;
 	const network = steps.network?.data || {};
-	const status = (name) =>
-		`<p class="${steps[name]?.status === "error" ? "error" : steps[name]?.status === "ready" ? "ready" : "pending"}">${escapeHtml(steps[name]?.status || "Not configured")}${steps[name]?.error ? `: ${escapeHtml(steps[name].error)}` : ""}</p>`;
-	const buildStatus = state.buildJob
-		? `<p class="${state.buildJob.status === "error" ? "error" : "ready"}">Build ${escapeHtml(state.buildJob.slug)}: ${escapeHtml(state.buildJob.status)} ${escapeHtml(state.buildJob.error || "")}</p><pre>${escapeHtml(state.buildJob.log || "")}</pre>`
-		: "";
+	const nodes = state.sandboxNodes || [];
+	const nodeSelect = (id) =>
+		nodes.length === 1
+			? `<p>Build on: ${escapeHtml(nodes[0].name)}</p><input type="hidden" id="${id}" name="nodeId" value="${escapeHtml(nodes[0].nodeId)}">`
+			: `<label>Sandbox node<select id="${id}" name="nodeId">${nodes.map((n) => `<option value="${escapeHtml(n.nodeId)}">${escapeHtml(n.name)}</option>`).join("")}</select></label>`;
+	const status = (name) => {
+		const step = steps[name];
+		if (step?.status === "stale")
+			return '<p class="pending">Needs checking after settings changed</p>';
+		if (step?.error)
+			return `<p class="error" role="alert">${escapeHtml(step.error)}</p>`;
+		return "";
+	};
 	const order = ["limits", "network", "templates", "smoke"];
+	const titles = [
+		"Storage and capacity",
+		"Sandbox networking",
+		"Prepare your first sandbox image",
+		"Test your installation",
+	];
+	const current = order.find((name) => steps[name]?.status !== "ready");
 	const verified = order.filter(
 		(name) => steps[name]?.status === "ready",
 	).length;
-	const bootstrapped = ["connection", "host"].every(
-		(name) => steps[name]?.status === "ready",
-	);
-	const current = order.find((name) => steps[name]?.status !== "ready");
-	const section = (name, title, fields) =>
-		`<details name="setup-step"${name === current ? " open" : ""}><summary>${steps[name]?.status === "ready" ? "✓ " : ""}${title}</summary>${status(name)}<form data-step="${name}">${fields}<button${name === "templates" ? ' class="outline"' : ""}>Verify and save</button></form></details>`;
+	const section = (name, summary, body) =>
+		`<details name="setup-step" id="step-${name}"${name === current ? " open" : ""}><summary>${steps[name]?.status === "ready" ? "✓ " : ""}${summary}</summary>${body}</details>`;
+	const form = (name, fields, button = "Verify and save") =>
+		`<form data-step="${name}">${fields}<button type="submit">${button}</button><div data-result role="status">${status(name)}</div></form>`;
+	const linuxReady = steps.templates?.status === "ready";
+	const running = state.buildJob?.status === "running";
+	const hasTemplates =
+		(steps.templates?.data?.builds || []).length > 0 ||
+		nodes.some((n) => n.templates?.length);
+	const buildProgress = `<p id="build-progress" role="status" aria-live="polite"></p><p id="build-error" class="error" role="alert">${escapeHtml(state.buildJob?.error || "")}</p><details><summary>Build details</summary><pre id="build-log">${escapeHtml(state.buildJob?.log || "")}</pre></details>`;
+	const continueLink =
+		'<p><a href="#step-smoke" id="continue-test">Continue to installation test</a></p>';
 	return page(
 		"Setup",
-		`<h1>Templates and smoke test</h1>${state.bootstrapError ? `<p class="error" role="status">Installer data could not be imported: ${escapeHtml(state.bootstrapError.message)}</p>` : bootstrapped ? "" : '<p class="error" role="status">The installer has not finished setting up this deployment. Re-run the installer on your Proxmox node.</p>'}<p id="certificate-status" role="status"></p><script>${showCertificateStatus.toString()};void showCertificateStatus();</script><p>${verified} of 4 steps verified</p><div class="progress" role="progressbar" aria-label="Setup progress" aria-valuemin="0" aria-valuemax="4" aria-valuenow="${verified}"><span style="width:${(verified / 4) * 100}%"></span></div><p>Each step is saved. Re-run a step to verify it again. Existing PVE objects and templates are adopted without creating a parallel setup.</p>${state.complete ? '<p class="ready">You are ready. Setup and smoke test passed. <a href="/app/getting-started">Get started with Umiak</a> · <a href="/app">Open your sandboxes</a></p>' : ""}
-${section("limits", "1. Storage and capacity", `${field("storage", "LVM-thin storage", limits.storage || "local-lvm") + field("vmidMin", "First sandbox VMID", limits.vmidMin || 500, "number") + field("vmidMax", "Last sandbox VMID", limits.vmidMax || 589, "number") + field("templateVmidMin", "First template VMID (separate from sandboxes)", limits.templateVmidMin, "number") + field("templateVmidMax", "Last template VMID", limits.templateVmidMax, "number")}<p>New builds allocate a free VMID in this range. Existing adopted templates keep their VMIDs: ${escapeHtml((steps.templates?.data?.builds || []).map((build) => build.pveVmid).join(", ") || "none")}. Occupied IDs are skipped; no existing VM is replaced.</p>${field("ramCapMb", "Total sandbox RAM cap (MiB)", limits.ramCapMb || 8192, "number")}`)}
-${section("network", "2. Gateway and previews", `${field("gatewayAddress", "Gateway address reachable from guests", network.gatewayAddress) + field("tunnelUrl", "Guest tunnel URL (wss://gateway/v1/connect)", network.tunnelUrl) + field("previewDomain", "Preview domain (defaults to IP-derived sslip.io)", network.previewDomain) + field("guestDns", "Guest DNS resolver", network.guestDns || "1.1.1.1")}<p>Keep the gateway certificate and CA trusted by your existing templates. The default preview and tunnel names use external sslip.io DNS. Use your own wildcard DNS domain to replace it. Guests default to the external DNS resolver 1.1.1.1; choose another resolver during fresh preparation if needed. Saving here does not change an existing PVE DHCP configuration.</p>`)}
-${section("templates", "3. Template builds", `<p>Register existing tagged templates or build Linux from scratch in its empty slot. Linux is required; desktop and Windows are optional. Existing template slots are never rebuilt.</p>${buildStatus}<ul aria-label="Sandbox node template availability">${nodeStatus}</ul>${nodeSelect("build-node")}<label>New template recipe<select id="build-slug"><option value="linux">Linux (default)</option><option value="linux-desktop">Linux desktop</option><option value="windows">Windows 11 (with desktop)</option></select></label><label>For a rebuild, type the recipe name<input id="build-confirm"></label><label>Uploaded Windows ISO file name<input id="build-iso" placeholder="Windows.iso"></label><label>Or Windows ISO HTTPS URL<input id="build-iso-url" type="url" placeholder="https://…/Windows.iso"></label><label>Windows ISO SHA256 (optional)<input id="build-iso-sha" pattern="[a-fA-F0-9]{64}"></label><label>ISO storage (blank selects first with iso content)<input id="build-media-storage"></label><label>VirtIO ISO URL<input id="build-virtio-url" type="url" value="${VIRTIO_STABLE_URL}"></label><label>VirtIO SHA256 (optional; pinned archive checksum)<input id="build-virtio-sha" value="${VIRTIO_SHA256}" pattern="[a-fA-F0-9]{64}"></label><label><input id="build-internal-urls" type="checkbox">I explicitly allow internal or loopback ISO URLs</label><p>Not verified: the ISO will be used as downloaded when SHA256 is omitted.</p><p>Umiak never ships or hosts Windows media. Supply your own licensed Windows ISO URL. Obtain its SHA256 from your Microsoft download portal. For VirtIO, download the official ISO to your workstation and run <code>sha256sum virtio-win.iso</code>; the Fedora CHECKSUM currently lists RPM MD5s, not the ISO SHA256. Changing the versioned ISO requires a new confirmed SHA256.</p><button class="outline" type="button" id="validate-media">Validate ISO inputs only</button><button type="button" id="build-template">Build and verify template</button><p>Builds run one at a time and record their status. Refresh this page to see progress. Windows requires your licensed ISO; additional VirtIO/desktop recipe prerequisites are checked by the S5 builder.</p><fieldset><legend>Detected templates</legend>${state.templateDetectionError ? `<p class="error">${escapeHtml(state.templateDetectionError)}</p>` : ""}${(state.detectedTemplates || []).map((build) => `<label><input type="checkbox" name="template" value="${build.pveVmid}" data-node-id="${escapeHtml(build.nodeId || "")}" data-slug="${escapeHtml(build.templateSlug)}" ${(steps.templates?.data?.builds || []).some((saved) => saved.pveVmid === build.pveVmid) ? "checked" : ""}>${escapeHtml(build.name || build.templateSlug)} · ${escapeHtml(build.node || "")} · VM ${build.pveVmid} · ${escapeHtml(build.templateSlug)}</label>`).join("") || '<p class="pending">No tagged templates detected. Build a Linux template using the button above, then refresh this page.</p>'}</fieldset><p>For a manual build, read <code>apps/template-builder/README.md</code> in the Umiak repository. Existing templates are never rebuilt by this wizard.</p>`)}
-${section("smoke", "4. Smoke test", `${nodeSelect("smoke-node")}<p>This creates one 2 GiB Linux sandbox, waits for readiness, executes a command, then deletes it. It checks existing sandbox RAM first and runs sequentially.</p>`)}
-<p id="result" aria-live="polite"></p><p><a href="/app/getting-started">Getting started: CLI, MCP, SDK and troubleshooting</a></p>
-<script>for(const form of document.querySelectorAll('form'))form.addEventListener('submit',async event=>{event.preventDefault();if(form.dataset.step==='smoke'&&!confirm('Run the smoke test? This creates a sandbox, executes a command and deletes it.'))return;const button=form.querySelector('button:last-child');button.disabled=true;const data=Object.fromEntries(new FormData(form));for(const key of ['vmidMin','vmidMax','templateVmidMin','templateVmidMax','ramCapMb'])if(key in data)data[key]=Number(data[key]);try{if(form.dataset.step==='templates')data.builds=Array.from(form.querySelectorAll('input[name=template]:checked')).map(input=>({templateSlug:input.dataset.slug,nodeId:input.dataset.nodeId,pveVmid:Number(input.value)}));const response=await fetch('/quickstart/setup/'+form.dataset.step,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const result=await response.json();if(!response.ok)throw new Error(result.error);location.reload();}catch(error){document.querySelector('#result').textContent=error.message;}finally{button.disabled=false;}});document.querySelector('#build-template').addEventListener('click',async()=>{try{if(!confirm("Build this template? This creates a VM and downloads required media on your Proxmox host."))return;const response=await fetch('/quickstart/setup/build',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug:document.querySelector('#build-slug').value,confirmRebuild:document.querySelector('#build-confirm').value,nodeId:document.querySelector('#build-node').value,iso:document.querySelector('#build-iso').value,isoSha256:document.querySelector('#build-iso-sha').value,isoUrl:document.querySelector('#build-iso-url').value,mediaStorage:document.querySelector('#build-media-storage').value,virtioUrl:document.querySelector('#build-virtio-url').value,virtioSha256:document.querySelector('#build-virtio-sha').value,allowInternalIsoUrls:document.querySelector('#build-internal-urls').checked})});const result=await response.json();if(!response.ok)throw new Error(result.error);location.reload();}catch(error){document.querySelector('#result').textContent=error.message;}});document.querySelector('#validate-media').addEventListener('click',async()=>{const response=await fetch('/quickstart/setup/media/validate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({iso:document.querySelector('#build-iso').value,isoUrl:document.querySelector('#build-iso-url').value,isoSha256:document.querySelector('#build-iso-sha').value,virtioUrl:document.querySelector('#build-virtio-url').value,virtioSha256:document.querySelector('#build-virtio-sha').value,allowInternalIsoUrls:document.querySelector('#build-internal-urls').checked})});const result=await response.json();document.querySelector('#result').textContent=result.error||result.message;});</script>`,
+		`<h1>Finish setting up Umiak</h1>
+<p>${steps.limits?.status === "ready" && steps.network?.status === "ready" ? "Storage and networking are ready. Next, build a Linux template and test that sandboxes work." : "Prepare storage and networking, then build a Linux template and test that sandboxes work."}</p>
+${state.bootstrapError ? `<p class="error" role="alert">Installer data could not be imported: ${escapeHtml(state.bootstrapError.message)}</p>` : ["connection", "host"].every((name) => steps[name]?.status === "ready") ? "" : '<p class="error">The installer has not finished setting up this deployment. Re-run the installer on your Proxmox node.</p>'}
+<p>${verified} of 4 complete · ${current ? `Next: ${titles[order.indexOf(current)]}` : "Setup complete"}</p>
+<div class="progress" role="progressbar" aria-label="Setup progress" aria-valuemin="0" aria-valuemax="4" aria-valuenow="${verified}"><span style="width:${(verified / 4) * 100}%"></span></div>
+${linuxReady && !state.complete ? `<div id="linux-ready"><p class="ready">Linux template ready. Next, test your installation.</p>${continueLink}</div>` : ""}
+${state.complete ? '<section><h2>You are ready</h2><p><a class="primary-action" href="/app/sandboxes/new">Create your first sandbox</a></p></section>' : ""}
+${section("limits", `1. Storage: ${escapeHtml(limits.storage || "local-lvm")} · Sandbox memory limit: ${Number(limits.ramCapMb || 8192) / 1024} GiB`, form("limits", `<details><summary>Advanced settings</summary>${field("storage", "LVM-thin storage", limits.storage || "local-lvm") + field("vmidMin", "First sandbox VMID", limits.vmidMin || 500, "number") + field("vmidMax", "Last sandbox VMID", limits.vmidMax || 589, "number") + field("templateVmidMin", "First template VMID (separate from sandboxes)", limits.templateVmidMin, "number") + field("templateVmidMax", "Last template VMID", limits.templateVmidMax, "number")}<p>New builds allocate a free VMID in this range. Existing adopted templates keep their VMIDs: ${escapeHtml((steps.templates?.data?.builds || []).map((build) => build.pveVmid).join(", ") || "none")}. Occupied IDs are skipped; no existing VM is replaced.</p>${field("ramCapMb", "Total sandbox RAM cap (MiB)", limits.ramCapMb || 8192, "number")}</details>`))}
+${section("network", steps.network?.status === "ready" ? "2. Sandbox networking configured" : "2. Sandbox networking", form("network", `<details><summary>Advanced settings</summary>${field("gatewayAddress", "Gateway address reachable from guests", network.gatewayAddress) + field("tunnelUrl", "Guest tunnel URL (wss://gateway/v1/connect)", network.tunnelUrl) + field("previewDomain", "Preview domain (defaults to IP-derived sslip.io)", network.previewDomain) + field("guestDns", "Guest DNS resolver", network.guestDns || "1.1.1.1")}<p>Keep the gateway certificate and CA trusted by your existing templates. The default preview and tunnel names use external sslip.io DNS. Use your own wildcard DNS domain to replace it. Guests default to the external DNS resolver 1.1.1.1; choose another resolver during fresh preparation if needed. Saving here does not change an existing PVE DHCP configuration.</p></details>`))}
+${section(
+	"templates",
+	"3. Prepare your first sandbox image",
+	`
+${status("templates")}
+<p>A template is the reusable VM image your sandboxes start from. Build the Linux template to continue. Desktop and Windows templates can be added later.</p>
+<button type="button" id="build-linux"${running ? " disabled" : ""}>Build Linux template</button>
+<p>Allow about 10 minutes; download speed and hardware affect the time.</p>
+${nodeSelect("build-node")}
+${buildProgress}
+
+<ul aria-label="Sandbox node template availability">${nodes.map((n) => `<li>${escapeHtml(n.name)} · ${escapeHtml(n.state)} · ${escapeHtml((n.templates || []).map((t) => `${t.templateSlug} · ${t.version} · VM ${t.pveVmid}`).join(", ") || "Linux template needed")}${n.buildJobId ? ` · Unfinished reservation: <code>${escapeHtml(n.buildJobId)}</code>` : ""}</li>`).join("")}</ul>
+<details><summary>Other operating systems</summary>
+<label>Operating system<select id="build-slug"><option value="linux">Linux</option><option value="linux-desktop">Linux desktop</option><option value="windows">Windows 11 (with desktop)</option></select></label>
+<div id="windows-media" hidden><label>Uploaded Windows ISO file name<input id="build-iso" placeholder="Windows.iso"></label><label>Or Windows ISO HTTPS URL<input id="build-iso-url" type="url" placeholder="https://…/Windows.iso"></label><label>Windows ISO SHA256 (optional)<input id="build-iso-sha" pattern="[a-fA-F0-9]{64}"></label><label>ISO storage (blank selects first with iso content)<input id="build-media-storage"></label><label>VirtIO ISO URL<input id="build-virtio-url" type="url" value="${VIRTIO_STABLE_URL}"></label><label>VirtIO SHA256 (optional; pinned archive checksum)<input id="build-virtio-sha" value="${VIRTIO_SHA256}" pattern="[a-fA-F0-9]{64}"></label><label><input id="build-internal-urls" type="checkbox">I explicitly allow internal or loopback ISO URLs</label><p>Not verified: the ISO will be used as downloaded when SHA256 is omitted.</p><p>Umiak never ships or hosts Windows media. Supply your own licensed Windows ISO URL. Obtain its SHA256 from your Microsoft download portal. For VirtIO, download the official ISO to your workstation and run <code>sha256sum virtio-win.iso</code>; the Fedora CHECKSUM currently lists RPM MD5s, not the ISO SHA256. Changing the versioned ISO requires a new confirmed SHA256.</p><button class="outline" type="button" id="validate-media">Validate ISO inputs only</button><p id="media-result" role="status"></p></div>
+<button type="button" id="build-template"${running ? " disabled" : ""}>Build selected template</button></details>
+${hasTemplates ? '<details><summary>Rebuild a template</summary><p>Choose the operating system above. A new image will be built; existing templates are kept.</p><label>Confirm the operating system name<input id="build-confirm" placeholder="linux, linux-desktop or windows"></label></details>' : ""}
+<details><summary>Use an existing template</summary>${form("templates", `<fieldset><legend>Detected templates</legend>${state.templateDetectionError ? `<p class="error">${escapeHtml(state.templateDetectionError)}</p>` : ""}${(state.detectedTemplates || []).map((build) => `<label><input type="checkbox" name="template" value="${build.pveVmid}" data-node-id="${escapeHtml(build.nodeId || "")}" data-slug="${escapeHtml(build.templateSlug)}" ${(steps.templates?.data?.builds || []).some((saved) => saved.pveVmid === build.pveVmid) ? "checked" : ""}>${escapeHtml(build.name || build.templateSlug)} · ${escapeHtml(build.node || "")} · VM ${build.pveVmid} · ${escapeHtml(build.templateSlug)}</label>`).join("") || '<p class="pending">No existing templates detected. Build a Linux template above.</p>'}</fieldset>`)}</details>`,
+)}
+${section("smoke", "4. Test your installation", `${steps.smoke?.status === "ready" ? '<p class="ready">Sandbox creation and command execution passed. The temporary VM was deleted.</p>' : ""}${form("smoke", `${nodeSelect("smoke-node").replace("Build on:", "Test on:")}<p>Creates a temporary Linux VM using 2 GiB RAM, runs a command, then deletes it.</p>`, "Run installation test")}`)}
+<p id="certificate-warning" class="error" role="status"></p>
+<details><summary>Technical details</summary><p id="certificate-status"></p></details>
+<p><a href="/app/getting-started">CLI, agent connections and help</a></p>
+<script>${showCertificateStatus.toString()};void showCertificateStatus();</script>
+<script>${setupInteractions.toString()};setupInteractions();</script>`,
 	);
 }

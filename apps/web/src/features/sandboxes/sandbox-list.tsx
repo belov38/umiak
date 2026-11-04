@@ -233,13 +233,13 @@ function EmptyState({
 					<ol className="onboarding-checklist">
 						<li>
 							<span className="onboarding-number">1</span>
-							<Link href="/app/getting-started#install">Install the CLI</Link>
-						</li>
-						<li>
-							<span className="onboarding-number">2</span>
 							<Link href={teamPath(teamId, "sandboxes/new")}>
 								Create a sandbox
 							</Link>
+						</li>
+						<li>
+							<span className="onboarding-number">2</span>
+							<Link href="/app/getting-started#install">Install the CLI</Link>
 						</li>
 						<li>
 							<span className="onboarding-number">3</span>
