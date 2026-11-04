@@ -1,0 +1,113 @@
+name: release
+
+# Manual only (project rule: no push/PR triggers during development).
+# Publishes the Umiak images to GHCR and the installer bundle to the GitHub release v<version>.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the leading v (for example 0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io/belov38
+  VERSION: ${{ inputs.version }}
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { name: quickstart, dockerfile: deploy/compose/quickstart/Dockerfile }
+          - { name: secrets-init, dockerfile: deploy/compose/secrets-init/Dockerfile }
+          - { name: api, dockerfile: apps/api/Dockerfile }
+          - { name: worker, dockerfile: apps/worker/Dockerfile }
+          - { name: web, dockerfile: apps/web/Dockerfile }
+          - { name: mcp, dockerfile: apps/mcp/Dockerfile }
+    steps:
+      - name: Validate the version
+        run: |
+          case "$VERSION" in
+            [0-9]*) ;;
+            *) echo "Invalid version: $VERSION" >&2; exit 1 ;;
+          esac
+          case "$VERSION" in
+            *[!0-9A-Za-z.+-]*|*..*|latest) echo "Invalid version: $VERSION" >&2; exit 1 ;;
+          esac
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/umiak-${{ matrix.name }}:${{ inputs.version }}
+            ${{ env.REGISTRY }}/umiak-${{ matrix.name }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/belov38/umiak
+            org.opencontainers.image.version=${{ inputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max
+
+  bundle:
+    needs: images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: python uv
+      - name: Installer tests
+        working-directory: deploy/installer
+        run: uv run pytest -q
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checksum of the published node-agent
+        # The installer refuses a node-agent whose SHA256 differs from node-agent.sha256, so the
+        # value comes from the pushed quickstart image itself, not from a separate build.
+        run: |
+          image="$REGISTRY/umiak-quickstart:$VERSION"
+          docker pull "$image"
+          container=$(docker create "$image")
+          docker cp "$container:/app/quickstart-assets/umiak-node-linux-amd64" "$RUNNER_TEMP/umiak-node-linux-amd64"
+          docker rm "$container"
+          sha256sum "$RUNNER_TEMP/umiak-node-linux-amd64" | cut -d ' ' -f 1 > "$RUNNER_TEMP/node-agent.sha256"
+          cat "$RUNNER_TEMP/node-agent.sha256"
+      - name: Build the installer bundle
+        run: |
+          mkdir -p dist
+          python deploy/installer/build_bundle.py "$VERSION" dist --node-agent-sha256 "$(cat "$RUNNER_TEMP/node-agent.sha256")"
+          (cd dist && sha256sum -c SHA256SUMS)
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" "dist/umiak-installer-$VERSION.tar.gz" dist/SHA256SUMS \
+            --title "Umiak $VERSION" --generate-notes --target "$GITHUB_SHA"

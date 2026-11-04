@@ -1,4 +1,6 @@
-# Zero-config S16 entry point: docker compose up --build
+# Pull-only product stack: every image is a published GHCR image pinned by
+# UMIAK_VERSION (the installer writes it to .env). Contributors build locally with
+#   docker compose -f compose.yaml -f compose.dev.yaml up --build
 # The corporate OIDC deployment remains at deploy/compose/compose.yaml.
 # Project `umiak`: named volumes are umiak_<name> (the installer writes
 # umiak_pve-secrets and umiak_network-config before the first start).
@@ -15,7 +17,7 @@ x-app-env: &app-env
   UMIAK_LOCAL_ALLOWED_CIDRS: 127.0.0.0/8,::1/128,172.29.116.0/24
   UMIAK_LOCAL_DENIED_CIDRS: ${UMIAK_LOCAL_DENIED_CIDRS:-10.88.0.0/24}
   # The installer's .env sets the tailnet origin, preview domain and SSH host;
-  # the fallbacks keep a contributor's local `docker compose up --build` working.
+  # the fallbacks keep a contributor's local `docker compose -f compose.yaml -f compose.dev.yaml up --build` working.
   UMIAK_APP_ORIGIN: ${UMIAK_PUBLIC_URL:-http://localhost:4180}
   UMIAK_APP_URL: ${UMIAK_PUBLIC_URL:-http://localhost:4180}
   UMIAK_API_URL: ${UMIAK_PUBLIC_URL:-http://localhost:4180}
@@ -34,18 +36,6 @@ x-restart: &restart
   logging:
     driver: json-file
     options: { max-size: 10m, max-file: "3" }
-
-x-quickstart-build: &quickstart-build
-  context: .
-  dockerfile: deploy/compose/quickstart/Dockerfile
-
-x-worker-build: &worker-build
-  context: .
-  dockerfile: apps/worker/Dockerfile
-
-x-web-build: &web-build
-  context: .
-  dockerfile: apps/web/Dockerfile
 
 services:
   web-meta:
@@ -66,8 +56,7 @@ services:
       api: { condition: service_healthy }
 
   gateway-secrets:
-    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:-dev}
-    build: *quickstart-build
+    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:?}
     user: "0:0"
     entrypoint: [node, deploy/compose/quickstart/gateway-init.mjs]
     environment:
@@ -83,14 +72,7 @@ services:
     restart: "no"
 
   secrets-init:
-    build:
-      context: .
-      dockerfile_inline: |
-        FROM alpine:3.24.3
-        RUN apk add --no-cache openssh-keygen jq openssl
-        COPY deploy/compose/secrets-init/init.sh /legacy-init.sh
-        COPY deploy/compose/quickstart/bootstrap.sh /bootstrap.sh
-        ENTRYPOINT ["sh", "/bootstrap.sh"]
+    image: ghcr.io/belov38/umiak-secrets-init:${UMIAK_VERSION:?}
     user: "0:0"
     environment: { UMIAK_SECRETS_ROOT: /secrets }
     volumes:
@@ -125,8 +107,7 @@ services:
       retries: 30
 
   migrate:
-    image: ghcr.io/belov38/umiak-worker:${UMIAK_VERSION:-dev}
-    build: *worker-build
+    image: ghcr.io/belov38/umiak-worker:${UMIAK_VERSION:?}
     entrypoint: [node, /quickstart/run.mjs]
     command: [node, apps/worker/src/admin/main.ts, migrate]
     environment: *app-env
@@ -139,8 +120,7 @@ services:
     restart: "no"
 
   web-migrate:
-    image: ghcr.io/belov38/umiak-web:${UMIAK_VERSION:-dev}
-    build: *web-build
+    image: ghcr.io/belov38/umiak-web:${UMIAK_VERSION:?}
     working_dir: /app/migrate
     entrypoint: [node, /quickstart/run.mjs]
     command: [node, packages/payload/src/migrate.ts]
@@ -163,8 +143,7 @@ services:
 
   worker:
     <<: *restart
-    image: ghcr.io/belov38/umiak-worker:${UMIAK_VERSION:-dev}
-    build: *worker-build
+    image: ghcr.io/belov38/umiak-worker:${UMIAK_VERSION:?}
     entrypoint: [node, /quickstart/run.mjs]
     command: [node, apps/worker/src/main.ts]
     environment:
@@ -204,10 +183,7 @@ services:
 
   api:
     <<: *restart
-    image: ghcr.io/belov38/umiak-api:${UMIAK_VERSION:-dev}
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
+    image: ghcr.io/belov38/umiak-api:${UMIAK_VERSION:?}
     entrypoint: [node, /quickstart/run.mjs]
     command: [node, apps/api/src/main.ts]
     environment:
@@ -251,8 +227,7 @@ services:
 
   web:
     <<: *restart
-    image: ghcr.io/belov38/umiak-web:${UMIAK_VERSION:-dev}
-    build: *web-build
+    image: ghcr.io/belov38/umiak-web:${UMIAK_VERSION:?}
     entrypoint: [node, /quickstart/run.mjs]
     command: [node, server.js]
     environment:
@@ -276,10 +251,7 @@ services:
 
   mcp:
     <<: *restart
-    image: ghcr.io/belov38/umiak-mcp:${UMIAK_VERSION:-dev}
-    build:
-      context: .
-      dockerfile: apps/mcp/Dockerfile
+    image: ghcr.io/belov38/umiak-mcp:${UMIAK_VERSION:?}
     environment:
       <<: *app-env
       UMIAK_MCP_API_URL: http://api:8080
@@ -294,8 +266,7 @@ services:
 
   gateway:
     <<: *restart
-    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:-dev}
-    build: *quickstart-build
+    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:?}
     command: [/umiak-gateway, serve]
     environment:
       <<: *app-env
@@ -345,8 +316,7 @@ services:
 
   gateway-renewal:
     <<: *restart
-    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:-dev}
-    build: *quickstart-build
+    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:?}
     user: "0:0"
     entrypoint: [node, deploy/compose/quickstart/gateway-init.mjs]
     command: [--watch]
@@ -361,8 +331,7 @@ services:
 
   quickstart:
     <<: *restart
-    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:-dev}
-    build: *quickstart-build
+    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:?}
     environment:
       <<: *app-env
       UMIAK_LOCAL_ALLOWED_CIDRS: *client-cidrs
