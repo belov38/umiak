@@ -84,16 +84,57 @@ def test_node_host_refuses_other_host_identity_before_mutation(tmp_path):
     assert not runner.commands
 
 
-def test_root_transport_keeps_strict_pinning_and_never_sends_private_key(tmp_path):
+@pytest.mark.parametrize("per_node", [True, False])
+def test_root_transport_uses_pve_cluster_ip_alias_and_known_hosts(tmp_path, per_node):
     runner = FakeRunner(tmp_path)
-    sent = []
-    runner.run = lambda argv, input=None: sent.append((argv, input)) or "{}"
+    known = "/etc/pve/nodes/pve2/ssh_known_hosts" if per_node else "/etc/pve/priv/known_hosts"
+    pin = runner.path(known)
+    pin.parent.mkdir(parents=True, exist_ok=True)
+    pin.write_text("pve2 ssh-rsa cluster-key\n")
+    original, sent = runner.run, []
+
+    def run(argv, input=None):
+        if argv[0] == "ssh":
+            sent.append((argv, input))
+            return "{}"
+        return original(argv, input)
+
+    runner.run = run
     nodes.HostConsole(runner).call("pve2", "inspect", storage="local-lvm")
     argv, payload = sent[0]
     assert argv[:2] == ["ssh", "-T"]
     assert "StrictHostKeyChecking=yes" in argv
-    assert "root@pve2" in argv
+    assert "BatchMode=yes" in argv
+    assert "HostKeyAlias=pve2" in argv
+    assert "UserKnownHostsFile=" + known in argv
+    assert "GlobalKnownHostsFile=none" in argv
+    assert "root@192.168.68.11" in argv
     assert "PRIVATE KEY" not in payload
+
+
+def test_root_transport_missing_cluster_trust_refuses_with_repair_guidance(tmp_path):
+    runner = FakeRunner(tmp_path)
+    with pytest.raises(InstallerError, match="pvecm updatecerts.*pve2"):
+        nodes.HostConsole(runner).call("pve2", "inspect")
+    assert not any(a[0] == "ssh" for a in runner.commands)
+
+
+def test_root_transport_bad_cluster_pin_keeps_strict_checking_and_explains_repair(tmp_path):
+    runner = FakeRunner(tmp_path)
+    pin = runner.path("/etc/pve/priv/known_hosts")
+    pin.write_text("pve2 ssh-rsa stale-key\n")
+    original = runner.run
+
+    def run(argv, input=None):
+        if argv[0] == "ssh":
+            runner.commands.append(argv)
+            raise CommandError(argv, 255, stderr="Host key verification failed")
+        return original(argv, input)
+
+    runner.run = run
+    with pytest.raises(InstallerError, match="pvecm updatecerts.*pve2"):
+        nodes.HostConsole(runner).call("pve2", "inspect")
+    assert "StrictHostKeyChecking=yes" in runner.commands[-1]
 
 
 def test_add_cancellation_does_not_install_or_hand_off_secrets(tmp_path):

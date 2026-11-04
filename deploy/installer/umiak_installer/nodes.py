@@ -9,6 +9,7 @@ import dataclasses
 import fcntl
 import functools
 import hashlib
+import ipaddress
 import json
 import shlex
 from pathlib import Path
@@ -42,6 +43,19 @@ class HostConsole:
         request = dict(data, node=node, op=op)
         if node == self.runner.hostname():
             return node_host.dispatch(self.runner, request)
+        member = _target(self.runner, node)
+        try:
+            address = str(ipaddress.ip_address(member.get("ip", "")))
+        except ValueError as error:
+            raise InstallerError(f"Cluster IP is missing or invalid for {node}") from error
+        # Match PVE::SSHInfo on PVE 9: per-node trust takes precedence. Never
+        # import network-scanned keys or use a workstation's unrelated pins.
+        known = f"/etc/pve/nodes/{node}/ssh_known_hosts"
+        if not self.runner.path(known).is_file():
+            known = "/etc/pve/priv/known_hosts"
+        repair = f"Verify cluster SSH trust and run `pvecm updatecerts` on target {node}, then retry"
+        if not self.runner.path(known).is_file():
+            raise InstallerError(repair)
         sources = {p.name: p.read_text() for p in Path(__file__).parent.glob("*.py")}
         command = [
             "ssh",
@@ -51,11 +65,23 @@ class HostConsole:
             "-o",
             "StrictHostKeyChecking=yes",
             "-o",
+            f"HostKeyAlias={node}",
+            "-o",
+            f"UserKnownHostsFile={known}",
+            "-o",
+            "GlobalKnownHostsFile=none",
+            "-o",
             "ConnectTimeout=10",
-            "root@" + node,
+            "root@" + address,
             shlex.join(["python3", "-c", BOOTSTRAP]),
         ]
-        return json.loads(self.runner.run(command, input=json.dumps({"sources": sources, "request": request})))
+        try:
+            result = self.runner.run(command, input=json.dumps({"sources": sources, "request": request}))
+        except CommandError as error:
+            if error.returncode == 255:
+                raise InstallerError(f"Cluster SSH to {node} failed. {repair}") from error
+            raise
+        return json.loads(result)
 
 
 READ_INVENTORY = """// Umiak node inventory; works before the S19 quickstart image is pulled.
@@ -102,8 +128,10 @@ def _target(runner, node):
     if not prepare_host.NAME.fullmatch(node or ""):
         raise InstallerError("Invalid cluster node name")
     members = [n for n in get(runner, "/cluster/status") if n.get("type") == "node"]
-    if not any(n.get("name") == node and n.get("online") == 1 for n in members):
+    member = next((n for n in members if n.get("name") == node and n.get("online") == 1), None)
+    if not member:
         raise InstallerError("Choose an online node from this Proxmox cluster")
+    return member
 
 
 def _pinned(content, node, address, key):
