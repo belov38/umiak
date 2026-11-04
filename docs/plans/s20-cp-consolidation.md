@@ -45,12 +45,12 @@ Consumes: Task 1 shared runtime and init.sh.
 ### Task 3: gates, measurement and independent acceptance
 
 Produces: evidence in this plan and reviewable pushed branch.
-- [ ] Run full pnpm gates, Go gates per workflow and installer tests; investigate failures.
-- [ ] Run isolated local compose up --build smoke; verify readiness, owner claim, MCP, web-meta,
+- [x] Run full pnpm gates, Go gates per workflow and installer tests; investigate failures.
+- [x] Run isolated local compose up --build smoke; verify readiness, owner claim, MCP, web-meta,
       restart idempotency and network/secret mounts. Capture platform and memory.
-- [ ] Export built amd64 OCI layers and compute unique compressed union; record baseline caveats.
-- [ ] Fresh acceptance review against spec+diff; resolve important findings, rerun relevant gates.
-- [ ] Push branch, send coordinator evidence; do not merge without confirmation.
+- [x] Export built amd64 OCI layers and compute unique compressed union; record baseline caveats.
+- [x] Fresh acceptance review against spec+diff; resolve important findings, rerun relevant gates.
+- [x] Push branch, send coordinator evidence; do not merge without confirmation.
 
 ## Evidence
 
@@ -117,3 +117,71 @@ mcp 241.2, web 140.0, secrets-init 4.5 MiB compressed; union 1304.7 MiB
 Installer scope: only `umiak_installer/stack.py` STACK_FILES (remove two scripts
 now shipped in the image) and the bundle image-set test. No host logic, live
 PVE/PVE2 access or DB migrations changed.
+
+
+### Final merge gate (supersedes the pending S19 gate above)
+
+Ilia/coordinator explicitly authorized merging S20 before S19, 2026-11-04.
+Rebased on `680ba0c9`; cherry-picked S19 compaction `40e1ee21` as `40e525a5`.
+Preserved all upstream umask/dnsmasq, qmdestroy, pinned rustup and first-install
+agent trust-anchor changes. SOURCE_COMMIT ARG/ENV and release build-arg retained;
+image provenance checked by executing Node in a release-like build. Bundled agent
+install-package help confirms --trust-keys. TLS_BIND controls 443 separately from
+preview/SSH; installer ENV_KEYS retains TLS_BIND, and STACK_FILES keeps precisely
+its remaining bind-mounted files.
+
+Fresh full gate on this rebased code: pnpm install/build/typecheck/lint PASS;
+pnpm test PASS (4643 TS tests, 81 Python SDK tests; documented platform opt-ins
+remain skipped). Installer 198 PASS plus install.sh shell tests. Compose/quickstart
+Node 186 PASS, two image opt-ins exercised separately: image acceptance 2/2 PASS.
+Go race (-p 1), vet and golangci-lint PASS across proto/tunnel/node-agent/guest-agent/
+gateway; Windows amd64 build+vet and arm64 build PASS for portable modules;
+Linux integration-tag lint, buf lint and privileged guest integration PASS.
+Local systemd-binfmt mask used for that integration test as explained above.
+
+Fresh linux/amd64 up --build smoke PASS using the documented isolated loopback
+ports: owner claim/sign-in and CSRF, API, setup redirect/page, genuine CLI pairing
+and MCP initialize, metadata GET-only bridge, web-to-API isolation, absent MCP
+secret paths, session after ingress restart and repeated volume bootstrap.
+CP 660.09 MiB, web140.03 MiB, unique compressed OCI layer union719.93 MiB.
+No release dispatch or live-host operations. Independent acceptance from the
+previous section still applies; its only minor was fixed and retested. Only
+upstream fixes and the coordinator-approved MCP description compaction were
+added since that review. Main integration is an authorized fast-forward push.
+
+### Runtime consolidation follow-up (measurements, no implementation)
+
+Fresh smoke snapshot: API369.3, worker324.9, MCP140.3, ingress113.9, web201.9,
+web-meta46.22, renewal33.52, gateway90.09, Postgres382.0 MiB; nine-service total
+1702.13 MiB. A disposable idle Node in the same amd64 image measured28.54 MiB.
+Emulated Docker on ARM Mac, not a production LXC or peak-load measurement.
+
+- Eliminating only container boundaries while retaining processes does not remove
+  their V8 heaps; no material RAM saving was measured from that approach.
+- API+worker+MCP in one process removes two V8 runtimes and the worker wrapper;
+  about90 MiB of process overhead is a hypothesis from the measured idle runtime
+  and wrapper, with additional unmeasured Payload/module/pool deduplication.
+  MCP's140.3 MiB and worker's324.9 MiB are standalone footprints, NOT measured
+  savings: their functionality and heap remain in the merged process. This makes
+  MCP share API secrets and worker PVE credentials, event loop, OOM and restarts.
+  A genuine merged-process benchmark was not implemented or claimed.
+- Folding web-meta into an ingress GET-only private listener could remove its
+  46.22 MiB process minus the unmeasured added listener heap. Preserve the private
+  network and fixed metadata target; lose the separate secretless/read-only/
+  cap-dropped bridge sandbox and independent failure domain.
+- Replacing the permanent renewal process with an offline scheduled job removes
+  its33.52 MiB while idle, retaining scoped root/RW key access only during the job.
+  Folding it directly into the gateway would instead grant the network-facing
+  gateway RW key/CA access and weaken the existing boundary; avoid that trade.
+- Lower-risk first optimization: the credential wrapper currently stays as a
+  second Node process in API, worker, web, ingress and gateway. Measured private
+  memory of those five PID1 wrappers is29.88/31.82/29.86/30.04/32.08 MiB,
+  total153.67 MiB. Replacing spawn with a true exec (preserving UID/GID drop,
+  signal and credential handling) could reclaim that private memory without
+  merging secrets/networks. This is measured reclaimable process memory, not an
+  implemented before/after saving; container count would stay nine.
+
+Backend merging plus removing bridge and permanent renewal could reduce nine
+steady containers to five, but the memory delta needs a separate approved spike.
+Recommend exec-wrapper removal and scheduled offline renewal before merging
+backend trust boundaries. No follow-up implementation is included in S20.
