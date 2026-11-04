@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -75,6 +76,19 @@ func service(t *testing.T, id string, dir string, session *fakeSession, stream *
 		t.Fatal(e)
 	}
 	return s
+}
+
+// TestConfigureEmptyICEPersistsEmptyList covers the no-TURN (WebSocket only) mode.
+func TestConfigureEmptyICEPersistsEmptyList(t *testing.T) {
+	dir := t.TempDir()
+	s := service(t, "machine-a", dir, &fakeSession{}, &fakeStreamer{}, &events.Recorder{})
+	if _, e := s.Configure(context.Background(), connect.NewRequest(&v1.DesktopConfigureRequest{AuthEpoch: 1})); e != nil {
+		t.Fatal(e)
+	}
+	b, e := os.ReadFile(filepath.Join(dir, "ice-servers.json"))
+	if e != nil || strings.TrimSpace(string(b)) != "[]" {
+		t.Fatalf("ice-servers.json = %q, %v", b, e)
+	}
 }
 
 // TestIdentityCredentialsAndEpoch implements the desktop adapter boundary.

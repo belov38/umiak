@@ -235,17 +235,20 @@ func (s *Service) Configure(ctx context.Context, r *connect.Request[v1.DesktopCo
 			return nil, failure(connect.CodeInvalidArgument, "invalid_argument")
 		}
 	}
-	b, err := json.Marshal(r.Msg.IceServers)
+	// An empty list (no TURN, WebSocket transport only) must persist as [] and
+	// never as null: moonlight-web reads this file through its ice-server script.
+	ice := make([]*v1.DesktopIceServer, len(r.Msg.IceServers))
+	for i, srv := range r.Msg.IceServers {
+		ice[i] = proto.Clone(srv).(*v1.DesktopIceServer)
+	}
+	b, err := json.Marshal(ice)
 	if err != nil {
 		return nil, err
 	}
 	if err = fsutil.WriteFileAtomic(filepath.Join(s.opts.Dir, "ice-servers.json"), b, 0600); err != nil {
 		return nil, err
 	}
-	s.ice = make([]*v1.DesktopIceServer, len(r.Msg.IceServers))
-	for i, ice := range r.Msg.IceServers {
-		s.ice[i] = proto.Clone(ice).(*v1.DesktopIceServer)
-	}
+	s.ice = ice
 	s.state.AuthEpoch = r.Msg.AuthEpoch
 	s.state.Stopped = false
 	if adapter, ok := s.opts.Streamer.(interface {

@@ -127,6 +127,10 @@ async function main(): Promise<void> {
 			gateway = new UnconfiguredGatewayPort();
 			agent = new UnavailableAgentPort();
 		}
+		if (!(env.turnSecretFile && env.turnUrls))
+			log.info(
+				"desktop runs without TURN: WebRTC is unavailable, streaming uses WebSocket via the gateway",
+			);
 		worker = createWorker({
 			...(env.turnSecretFile && env.turnUrls
 				? {

@@ -1,11 +1,7 @@
 import { createHmac } from "node:crypto";
 import { stepRequestId } from "@umiak/core";
 import type { WorkerCtx } from "./context.ts";
-import {
-	AgentRejected,
-	AgentUnavailable,
-	type DesktopConfiguration,
-} from "./ports.ts";
+import { AgentUnavailable, type DesktopConfiguration } from "./ports.ts";
 import type { StepFence } from "./steps.ts";
 import { waitUntil } from "./wait.ts";
 
@@ -49,7 +45,6 @@ export async function configureDesktop(
 	if (!slug) return;
 	if (!(await ctx.config.template(slug))?.capabilities.includes("desktop"))
 		return;
-	if (!ctx.turn) throw new AgentRejected("desktop_turn_unconfigured");
 	await ctx.pool.query(
 		"INSERT INTO runtime.sandbox_desktops(sandbox_id) VALUES($1) ON CONFLICT DO NOTHING",
 		[sandboxId],
@@ -62,7 +57,11 @@ export async function configureDesktop(
 	if (authEpoch === undefined) throw new Error("desktop policy missing");
 	await ctx.agent.configureDesktop(
 		machineId,
-		{ authEpoch, iceServers: [issueTurnCredentials(ctx.turn, sandboxId)] },
+		{
+			authEpoch,
+			// Without TURN the desktop runs on the WebSocket transport only.
+			iceServers: ctx.turn ? [issueTurnCredentials(ctx.turn, sandboxId)] : [],
+		},
 		requestId,
 	);
 	await ctx.pool.query(
