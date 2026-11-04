@@ -251,8 +251,8 @@ def wait_healthy(runner: Runner, ct_id: int, sleep=time.sleep, clock=time.monoto
 
 
 def start(runner: Runner, ct_id: int, sleep=time.sleep, clock=time.monotonic, timeout: float = 300) -> None:
-    """`docker compose up -d`, then wait (≤ timeout) until services are healthy."""
-    run_in(runner, ct_id, *compose("up", "-d"))
+    """`docker compose up -d --remove-orphans` (drops removed services), then wait for health."""
+    run_in(runner, ct_id, *compose("up", "-d", "--remove-orphans"))
     wait_healthy(runner, ct_id, sleep=sleep, clock=clock, timeout=timeout)
 
 

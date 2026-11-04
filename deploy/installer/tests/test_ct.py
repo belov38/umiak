@@ -8,7 +8,7 @@ SPEC = ct.CtSpec(id=591, ip="192.168.68.50", cidr=22, gw="192.168.68.1", storage
 CREATE = [
     "pct", "create", "591", "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst",
     "--unprivileged", "1", "--features", "nesting=1,keyctl=1", "--dev0", "/dev/net/tun",
-    "--memory", "4096", "--cores", "2", "--rootfs", "local-lvm:32",
+    "--memory", "4096", "--cores", "2", "--rootfs", "local-lvm:48",
     "--net0", "name=eth0,bridge=vmbr0,ip=192.168.68.50/22,gw=192.168.68.1",
     "--nameserver", "1.1.1.1",
     "--onboot", "1", "--tags", "umiak", "--hostname", "umiak-cp",

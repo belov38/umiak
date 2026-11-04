@@ -48,6 +48,8 @@ class CtFake(FakeRunner):
         self.ps_payloads = []  # successive `docker compose ps` row lists, last one repeats
         self.logs = (f"Umiak one-time setup code: {CODE}\n"
                      "Umiak owner HTTP ingress ready on :4180\n")
+        self.images = []  # `repo:tag` rows for `docker image ls`
+        self.images_in_use = set()
         self.pushed = {}  # CT path -> bytes at push time
         self.objects["/cluster/resources"].append({"vmid": 110, "type": "lxc", "name": "ilia-ct", "tags": "home"})
         pem = "-----BEGIN CERTIFICATE-----\n" + base64.b64encode(CERT_DER).decode() + "\n-----END CERTIFICATE-----\n"
@@ -128,6 +130,13 @@ class CtFake(FakeRunner):
                 return "\n".join(json.dumps(row) for row in rows)
             if rest[:1] == ["logs"]:
                 return self.logs
+            return ""
+        if argv[:3] == ["docker", "image", "ls"]:
+            return "\n".join(self.images)
+        if argv[:2] == ["docker", "rmi"]:
+            if argv[2] in self.images_in_use:
+                raise CommandError(argv, 1, "", "image is being used by running container")
+            self.images.remove(argv[2])
             return ""
         if argv[:2] == ["docker", "inspect"]:
             return "2026-11-04T10:00:00.000000000Z"
