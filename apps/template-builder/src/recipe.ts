@@ -530,7 +530,11 @@ export const versionsSchema = z.strictObject({
 		bun: versionSha,
 		uv: versionSha,
 		gh: versionSha,
-		rust: z.strictObject({ version: nonEmpty, rustup_init_sha256: hex64 }),
+		rust: z.strictObject({
+			version: nonEmpty,
+			rustup_version: nonEmpty,
+			rustup_init_sha256: hex64,
+		}),
 	}),
 	chrome: z.strictObject({ google_chrome_stable: versionSha }),
 	npm: z.record(z.string(), nonEmpty),

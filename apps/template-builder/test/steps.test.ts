@@ -214,7 +214,7 @@ describe("recipe scripts: spec items", () => {
 			"https://github.com/oven-sh/bun/releases/download/",
 			"https://github.com/astral-sh/uv/releases/download/",
 			"https://github.com/cli/cli/releases/download/",
-			"https://static.rust-lang.org/rustup/dist/",
+			"https://static.rust-lang.org/rustup/archive/",
 			"https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/",
 		])
 			expect(s, url).toContain(url);

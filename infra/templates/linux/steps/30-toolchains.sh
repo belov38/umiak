@@ -53,10 +53,12 @@ tar -xzf "$f" -C "$dl/gh" --no-same-owner
 install -m 0755 "$dl/gh/gh_${v}_linux_amd64/bin/gh" /usr/local/bin/gh
 
 # Rust: rustup as `user` (~/.rustup, ~/.cargo), proxies linked into
-# /usr/local/bin. rustup-init of the pinned sha256 is the latest rustup.
+# /usr/local/bin. rustup-init comes from the versioned archive URL: the
+# unversioned dist/ URL is replaced on every rustup release.
 v=$(toml_get tools.rust.version)
+rv=$(toml_get tools.rust.rustup_version)
 f=$dl/rustup-init
-fetch_verify "https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init" "$(toml_get tools.rust.rustup_init_sha256)" "$f"
+fetch_verify "https://static.rust-lang.org/rustup/archive/$rv/x86_64-unknown-linux-gnu/rustup-init" "$(toml_get tools.rust.rustup_init_sha256)" "$f"
 chmod 0755 "$f"
 as_user "$f" -y --no-modify-path --default-toolchain "$v" --profile minimal -c rustfmt -c clippy
 for t in cargo rustc rustup rustfmt cargo-clippy clippy-driver; do

@@ -48,7 +48,9 @@ const FIXTURE_BY_URL: Record<string, string> = {
 		"gh-checksums.txt",
 	"https://static.rust-lang.org/dist/channel-rust-stable.toml":
 		"rust-channel-stable.toml",
-	"https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init.sha256":
+	"https://static.rust-lang.org/rustup/release-stable.toml":
+		"rustup-release-stable.toml",
+	"https://static.rust-lang.org/rustup/archive/1.29.3/x86_64-unknown-linux-gnu/rustup-init.sha256":
 		"rustup-init.sha256",
 	"https://download.docker.com/linux/ubuntu/dists/resolute/stable/binary-amd64/Packages":
 		"docker-Packages",
@@ -125,8 +127,9 @@ describe("resolveLatest", () => {
 				},
 				rust: {
 					version: "1.99.1",
+					rustup_version: "1.29.3",
 					rustup_init_sha256:
-						"5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4",
+						"b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55",
 				},
 			},
 			chrome: {

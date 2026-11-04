@@ -223,10 +223,18 @@ async function resolveRust(fetch: Fetch): Promise<Versions["tools"]["rust"]> {
 		manifest.data.pkg.rust.version.split(" ")[0] ?? "",
 		url,
 	);
-	const sums =
-		"https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init.sha256";
+	// rustup-init is pinned by its versioned archive URL: the unversioned
+	// dist/ file is replaced on every rustup release, breaking the checksum.
+	const relUrl = "https://static.rust-lang.org/rustup/release-stable.toml";
+	const rel = z
+		.object({ version: z.string() })
+		.safeParse(parseToml(await get(fetch, relUrl)));
+	if (!rel.success) throw new Error(`${relUrl}: no version`);
+	const rustupVersion = assertSemver(rel.data.version, relUrl);
+	const sums = `https://static.rust-lang.org/rustup/archive/${rustupVersion}/x86_64-unknown-linux-gnu/rustup-init.sha256`;
 	return {
 		version,
+		rustup_version: rustupVersion,
 		rustup_init_sha256: findChecksum(
 			await get(fetch, sums),
 			"rustup-init",
