@@ -9,7 +9,6 @@ Templates: `linux`, `linux-desktop`, `windows` (Windows 11, bring your own ISO).
 You need:
 
 - Proxmox VE 9 and a root shell on a node
-- a free static IP on your LAN, outside your router's DHCP range
 - a Tailscale account with MagicDNS and HTTPS enabled
 
 On the Proxmox node:
