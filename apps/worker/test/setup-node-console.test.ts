@@ -125,7 +125,7 @@ it("cleanup refuses running jobs and surviving interrupted runners before host i
 			},
 		},
 	]);
-	const job = "cleanup-" + a.nodeId;
+	const job = `cleanup-${a.nodeId}`;
 	await db.pool.query(
 		"INSERT INTO runtime.node_build_jobs(id,node_id,template_slug) VALUES($1,$2,'linux')",
 		[job, a.nodeId],
@@ -224,7 +224,7 @@ it("prevalidates a re-add before host preparation and keeps failed preparation f
 
 it("a new verified artifact may reuse the VMID of a physically retired template", async () => {
 	const a = await createTopology(db.pool);
-	const job = "reuse-" + a.nodeId;
+	const job = `reuse-${a.nodeId}`;
 	await db.pool.query(
 		"UPDATE runtime.template_builds SET status='retired',pve_vmid=600,version='retired-old' WHERE id=$1",
 		[a.templateBuildId],

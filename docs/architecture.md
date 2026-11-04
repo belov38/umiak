@@ -63,7 +63,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 - **Sandbox** — логическая сущность для пользователя: `id`, `slug` (для URL и hostname), `template`, `size`, `state`, `health`, `activity`, TTL и idle-stop, labels, текущая `machineId`. Env и секреты — в отдельной таблице, зашифрованы (AES-256-GCM).
 - **Machine** — конкретная VM: `id` (= `machineId` в smbios), `vmid`, `node`, `provider` (кластер), MAC, `state` (provisioning / booting / warm / claiming / running / stopped / deleting …). Привязка к sandbox ставится один раз и не меняется; у sandbox может быть несколько machine по истории (задел на перенос).
-- **Provider / Node / Storage** — топология: кластер Proxmox, нода, хранилище с драйвером. Модель рассчитана на несколько кластеров и нод, PoC — одна нода.
+- **Provider / Node / Storage** — топология: кластер Proxmox, нода, хранилище с драйвером. Модель рассчитана на несколько кластеров и нод; S19 включает несколько sandbox-нод одного кластера, PoC использовал одну ноду.
 - **TemplateBuild** — сборка шаблона на ноде (VMID шаблона, раскладка дисков, версия агента, манифест), пишет S5: `building → ready → active → deprecated → retired` (или `failed`), подробно `docs/specs/s5-linux-template.md` §11–§12.
 - **Disk** — LV на ноде: принадлежит machine или снапшоту.
 - **Snapshot** — набор LV-снимков всех дисков machine: `kind` (saved / fork_source; `auto` зарезервирован на фазу 2), `name` для saved.
@@ -119,7 +119,7 @@ API-платформа, которая выдаёт AI-агентам и люд�
 - **Fork** = snapshot + новая machine из этих LV. Thin-снимки не зависят от оригинала, его можно удалить.
 - **Stop** = shutdown VM, LV остаются на ноде. **Resume** = старт той же VM.
 - **Saved snapshot / пользовательский шаблон** = именованный snapshot, из которого создаются новые sandbox.
-- **Ограничение фазы 1:** всё на одной ноде, где лежат LV. Перенос и архив — позже, через Proxmox Backup Server.
+- **Локальность дисков:** LV, snapshots, fork и resume остаются на домашней ноде machine. S19 размещает новые sandbox на разных нодах одного кластера по свободной RAM при наличии активной локальной сборки шаблона. Межнодовой перенос и архив — позже, через Proxmox Backup Server.
 
 ## 6. Warm pool
 
@@ -176,6 +176,8 @@ ingress (`deploy/compose/quickstart/server.mjs`): backend принимает т�
 Домашний вариант ставится одной командой на узле Proxmox VE 9 (`install.sh` → Python-установщик `deploy/installer`, релизный bundle из GitHub с проверкой `SHA256SUMS`). Установщик создаёт объекты Umiak в PVE (пользователь и токен `umiak@pve`, роли, pool `umiak`, SDN zone `umiak` / VNet `umiak0` `10.88.0.0/24`, IPSet `umiak-gateway`, группа `umiak-egress`) и ограниченный `node-agent`. Control plane — непривилегированный LXC Debian 13 с Docker и Tailscale; корневой `compose.yaml` тянет опубликованные образы GHCR (`UMIAK_VERSION`) в `/opt/umiak`. Tailscale работает внутри CT, не на хосте PVE.
 
 Вход только по tailnet HTTPS (`https://umiak.<tailnet>.ts.net`, Tailscale Serve → trusted ingress `quickstart` :4181). Режим `owner`: один владелец, claim по одноразовой ссылке `/claim#<code>`, cookie `__Host-umiak_owner`. Аварийный путь: SSH-туннель на :4180 (только Host `localhost`). Превью портов — `http://<slug>-<port>.<tailnet-ip-dashed>.sslip.io:8085` по tailnet, SSH — tailnet IP :2222. Рабочий стол встроен в дашборд на том же origin (`/desktop/<slug>/`): ingress отдаёт собственную доверенную копию фронтенда moonlight-web, а от гостя пропускает только JSON/SDP/NDJSON/binary, не HTML и JS. Браузерный мастер: Templates и Smoke test. Day 2 (Update, новый браузер, сброс владельца, Uninstall) — повторный запуск установщика. Спека: `docs/specs/s18-onboarding.md`.
+
+S19 добавляет sandbox-ноды через исходную root-консоль установщика. Источник истины — `runtime.nodes/storages/providers`, а список в install-state служит учёту установки. Токен PVE и forced-command SSH-ключ общие для кластера; SSH endpoint, pinned host key, LVM-thin и media storage — свои у каждой ноды. Подготовка сначала проверяет конфигурацию и сохраняет cordoned reservation, затем проверяет локальные DHCP/SNAT, guest listener и restricted RPC перед активацией. Сборка шаблона резервирует простаивающую ноду и использует общий PostgreSQL allocator; прерванная сборка продолжает блокировать старты. Удаление роли sandbox сохраняет topology/history и отказывает при оставшихся machines, snapshots, templates, build jobs или leases. Control-plane CT от этой роли не зависит. Подробности: `docs/specs/s19-multi-node.md`, `docs/operations-multi-node.md`.
 
 **Control plane работает в Kubernetes:** `api`, `worker`, `web`, `gateway`, `mcp`, Keycloak (IdP, эксплуатация — S12). Postgres — в кластере (оператор) или внешний. Proxmox-ноды, VM и `umiak-node` остаются вне Kubernetes.
 
