@@ -26,6 +26,11 @@ set -eu
 pct config $ct | grep -q '^tags:.*umiak' || { echo "CT $ct is not a Umiak CT" >&2; exit 1; }
 pct push $ct /root/umiak-stand-src.tgz /root/umiak-stand-src.tgz
 rm -f /root/umiak-stand-src.tgz
+# The web build (Next.js) sees every host CPU and OOMs in the CT's normal 2 cores/4 GiB:
+# give the CT room for the build and restore its limits afterwards, whatever happens.
+mem=\$(pct config $ct | sed -n 's/^memory: //p'); cores=\$(pct config $ct | sed -n 's/^cores: //p')
+trap 'pct set $ct --memory "\$mem" --cores "\$cores"' EXIT
+pct set $ct --memory 16384 --cores 8
 pct exec $ct -- sh -euc '
   rm -rf /opt/umiak-src && mkdir -p /opt/umiak-src
   tar -xzf /root/umiak-stand-src.tgz -C /opt/umiak-src && rm -f /root/umiak-stand-src.tgz
