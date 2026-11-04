@@ -377,7 +377,7 @@ export async function verifyFirewall(api, connection) {
 	const vms = await api.get(`/nodes/${connection.node}/qemu`);
 	for (const vm of Array.isArray(vms) ? vms : []) {
 		const id = Number(vm.vmid);
-		if (id < 500 || id > 589 || Number(vm.template) === 1) continue;
+		if (Number(vm.template) === 1) continue;
 		const config = await api.get(`/nodes/${connection.node}/qemu/${id}/config`);
 		if (
 			!String(vm.name || "").startsWith("umiak-") &&
@@ -508,12 +508,14 @@ export async function verifyAdoption(api, connection, nodeCheck) {
 	const node = await nodeCheck();
 	if (
 		!node.version ||
-		node.config?.vmidMin !== 500 ||
-		node.config?.vmidMax !== 589 ||
+		!Number.isInteger(node.config?.vmidMin) ||
+		node.config.vmidMin < 100 ||
+		!Number.isInteger(node.config?.vmidMax) ||
+		node.config.vmidMax < node.config.vmidMin ||
 		node.config?.vnet !== "umiak0"
 	)
 		throw new Error(
-			"Node-agent configuration must use VMIDs 500–589 and VNet umiak0",
+			"Node-agent configuration must use a valid VMID range and VNet umiak0",
 		);
 	checks.push({ name: "restricted node-agent", ok: true });
 	return { checks, nodeVersion: node.version, ipset, rules, denySets };

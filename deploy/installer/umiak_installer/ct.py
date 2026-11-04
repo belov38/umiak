@@ -18,7 +18,6 @@ from . import style
 from .prepare_host import NAME
 from .pve import CommandError, InstallerError, Runner, get
 
-TEMPLATE_STORAGE = "local"
 # Any Debian 13 point release Proxmox publishes; the newest one wins.
 TEMPLATE_RE = re.compile(r"debian-13-standard_(\d+(?:\.\d+)*-\d+)_amd64\.tar\.zst")
 TAG = "umiak"
@@ -182,14 +181,23 @@ def _newest(names) -> str | None:
     return max(found)[1] if found else None
 
 
-def ensure_template(runner: Runner) -> str:
+def template_storage(runner: Runner) -> str:
+    rows = get(runner, f"/nodes/{runner.hostname()}/storage", "--content", "vztmpl")
+    names = sorted(row["storage"] for row in rows if not row.get("disabled") and row.get("active", 1)
+                   and "vztmpl" in str(row.get("content", "")).split(","))
+    if not names:
+        raise InstallerError("No enabled storage with vztmpl content on this node")
+    return "local" if "local" in names else names[0]
+
+
+def ensure_template(runner: Runner, storage: str = "local") -> str:
     """Newest Debian 13 template already on `local`, else the newest available one (downloaded)."""
     try:
         runner.run(["pveam", "update"])
     except CommandError:
         pass  # A stale index still lists templates; a local one may already exist.
-    prefix = f"{TEMPLATE_STORAGE}:vztmpl/"
-    local = [word[len(prefix):] for word in runner.run(["pveam", "list", TEMPLATE_STORAGE]).split()
+    prefix = f"{storage}:vztmpl/"
+    local = [word[len(prefix):] for word in runner.run(["pveam", "list", storage]).split()
              if word.startswith(prefix)]
     name = _newest(local)
     if name is None:
@@ -198,13 +206,13 @@ def ensure_template(runner: Runner) -> str:
         name = _newest(available)
         if name is None:
             raise InstallerError("No Debian 13 container template is available from Proxmox (pveam available)")
-        runner.run(["pveam", "download", TEMPLATE_STORAGE, name])
+        runner.run(["pveam", "download", storage, name])
     return name
 
 
-def create_argv(spec: CtSpec, template: str) -> list[str]:
+def create_argv(spec: CtSpec, template: str, storage: str = "local") -> list[str]:
     return [
-        "pct", "create", str(spec.id), f"{TEMPLATE_STORAGE}:vztmpl/{template}",
+        "pct", "create", str(spec.id), f"{storage}:vztmpl/{template}",
         "--unprivileged", "1", "--features", "nesting=1,keyctl=1", "--dev0", "/dev/net/tun",
         "--memory", str(spec.memory), "--cores", str(spec.cores), "--rootfs", f"{spec.storage}:{spec.disk_gb}",
         "--net0", f"name=eth0,bridge={spec.bridge},ip={spec.ip}/{spec.cidr},gw={spec.gw}",
@@ -262,7 +270,8 @@ def create(runner: Runner, spec: CtSpec, sleep=time.sleep, say=lambda _: None) -
     """Create and start the CT (or resume an existing Umiak CT), then install packages. Idempotent."""
     validate(spec)
     if check_target(runner, spec) is None:
-        runner.run(create_argv(spec, ensure_template(runner)))
+        storage = template_storage(runner)
+        runner.run(create_argv(spec, ensure_template(runner, storage), storage))
     status = runner.run(["pct", "status", str(spec.id)])
     if "running" not in status:
         runner.run(["pct", "start", str(spec.id)])

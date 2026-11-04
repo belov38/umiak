@@ -109,8 +109,10 @@ export async function bootstrapFromInstall({
 		if (
 			!retired &&
 			(!node?.version ||
-				node.config?.vmidMin !== 500 ||
-				node.config?.vmidMax !== 589 ||
+				node.config?.vmidMin !== install.limits?.vmidMin ||
+				node.config?.vmidMax !== install.limits?.vmidMax ||
+				(node.config?.guestSubnet ?? "10.88.0.0/24") !==
+					(network.guestSubnet ?? "10.88.0.0/24") ||
 				node.config?.vnet !== "umiak0")
 		)
 			fail("Restricted node-agent configuration mismatch");
@@ -134,7 +136,9 @@ export async function bootstrapFromInstall({
 		next.steps.limits = ready(
 			await steps.limits(install.limits ?? {}, next, { bootstrap: true }),
 		);
-		next.steps.network = ready(await steps.network(network, next));
+		next.steps.network = ready(
+			await steps.network(network, next, { bootstrap: true }),
+		);
 		// Compare installer facts only: step outputs include live PVE inventory
 		// (occupied template VMIDs) that changes after every template build.
 		const { deniedAddresses: _denied, ...connectionFacts } = connection;

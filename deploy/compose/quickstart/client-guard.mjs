@@ -16,7 +16,9 @@ function nodeAddresses(env) {
 
 export function clientGuard(
 	raw,
-	denied = process.env.UMIAK_LOCAL_DENIED_CIDRS ?? "10.88.0.0/24",
+	denied = process.env.UMIAK_LOCAL_DENIED_CIDRS ??
+		process.env.UMIAK_GUEST_SUBNET ??
+		"10.88.0.0/24",
 	env = process.env,
 ) {
 	const list = new net.BlockList();

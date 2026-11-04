@@ -110,10 +110,10 @@ export function validateLimits(input) {
 	requireValue(
 		Number.isInteger(vmidMin) &&
 			Number.isInteger(vmidMax) &&
-			vmidMin >= 500 &&
-			vmidMax <= 589 &&
+			vmidMin >= 100 &&
+			vmidMax <= 999999999 &&
 			vmidMin <= vmidMax,
-		"Sandbox VMIDs must stay within 500–589",
+		"Invalid sandbox VMID range",
 	);
 	requireValue(
 		Number.isInteger(ramCapMb) && ramCapMb >= 2048 && ramCapMb <= 8192,
@@ -160,7 +160,20 @@ export function validateNetwork(input) {
 		url.protocol === "wss:" && !url.username && !url.password,
 		"Tunnel URL must use wss",
 	);
-	return { gatewayAddress: host, previewDomain, tunnelUrl, guestDns };
+	const guestSubnet = input.guestSubnet || "10.88.0.0/24";
+	requireValue(
+		/^(10\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+|192\.168\.\d+)\.0\/24$/.test(
+			guestSubnet,
+		) && isIP(guestSubnet.split("/")[0]) === 4,
+		"Invalid private guest /24",
+	);
+	return {
+		gatewayAddress: host,
+		previewDomain,
+		tunnelUrl,
+		guestDns,
+		guestSubnet,
+	};
 }
 export class PgSetupStore {
 	constructor(pool) {
@@ -378,7 +391,10 @@ export function createSetupHandler({
 				const running = await api.get(`/nodes/${connection.node}/qemu`);
 				const used = running
 					.filter(
-						(x) => x.vmid >= 500 && x.vmid <= 589 && x.status === "running",
+						(x) =>
+							x.vmid >= limits.vmidMin &&
+							x.vmid <= limits.vmidMax &&
+							x.status === "running",
 					)
 					.reduce((sum, x) => sum + Number(x.maxmem || 0) / 1048576, 0);
 				requireValue(
@@ -413,8 +429,15 @@ export function createSetupHandler({
 			const storageId = registered.storageId;
 			return { ...limits, providerId: provider, nodeId: node, storageId };
 		},
-		async network(input, state) {
-			const network = validateNetwork(input);
+		async network(input, state, context = {}) {
+			const network = validateNetwork({
+				...input,
+				guestSubnet: context.bootstrap
+					? input.guestSubnet
+					: state.bootstrap?.facts?.network?.guestSubnet ||
+						state.steps.network?.data?.guestSubnet ||
+						input.guestSubnet,
+			});
 			const report = state.steps.host.data;
 			verifyIsolation(
 				report.rules,
@@ -463,11 +486,7 @@ export function createSetupHandler({
 				);
 				requireValue(
 					Number.isInteger(build.pveVmid) &&
-						build.pveVmid >= 500 &&
-						build.pveVmid !== 590 &&
-						build.pveVmid !== 599 &&
-						build.pveVmid !== 9000 &&
-						build.pveVmid !== 9001 &&
+						build.pveVmid >= 100 &&
 						!(
 							build.pveVmid >= limits.vmidMin && build.pveVmid <= limits.vmidMax
 						),
@@ -618,7 +637,12 @@ export function createSetupHandler({
 			const pve = await pveOf(state);
 			const vms = await pve.get(`/nodes/${connection.node}/qemu`);
 			const reserved = vms
-				.filter((x) => x.vmid >= 500 && x.vmid <= 589 && x.status === "running")
+				.filter(
+					(x) =>
+						x.vmid >= state.steps.limits.data.vmidMin &&
+						x.vmid <= state.steps.limits.data.vmidMax &&
+						x.status === "running",
+				)
 				.reduce((sum, x) => sum + Number(x.maxmem || 0) / 1048576, 0);
 			requireValue(
 				reserved + 2048 <= state.steps.limits.data.ramCapMb,
@@ -792,7 +816,10 @@ export function createSetupHandler({
 			);
 			const used = vms
 				.filter(
-					(vm) => vm.status === "running" && vm.vmid >= 500 && vm.vmid <= 589,
+					(vm) =>
+						vm.status === "running" &&
+						vm.vmid >= state.steps.limits.data.vmidMin &&
+						vm.vmid <= state.steps.limits.data.vmidMax,
 				)
 				.reduce((sum, vm) => sum + Number(vm.maxmem || 0) / 1048576, 0);
 			requireValue(
@@ -809,7 +836,10 @@ export function createSetupHandler({
 			);
 			requireValue(
 				!vms.some(
-					(vm) => vm.vmid >= 500 && vm.vmid <= 589 && vm.status !== "stopped",
+					(vm) =>
+						vm.vmid >= selected.steps.limits.data.vmidMin &&
+						vm.vmid <= selected.steps.limits.data.vmidMax &&
+						vm.status !== "stopped",
 				),
 				"Build verification VMs are not confirmed stopped; reservation retained",
 			);
@@ -822,7 +852,10 @@ export function createSetupHandler({
 			);
 			requireValue(
 				!vms.some(
-					(vm) => vm.vmid >= 500 && vm.vmid <= 589 && vm.status !== "stopped",
+					(vm) =>
+						vm.vmid >= state.steps.limits.data.vmidMin &&
+						vm.vmid <= state.steps.limits.data.vmidMax &&
+						vm.status !== "stopped",
 				),
 				"Stop sandbox VMs before a template build",
 			);
@@ -931,11 +964,7 @@ export function createSetupHandler({
 						for (const vm of vms) {
 							if (
 								Number(vm.template) !== 1 ||
-								vm.vmid < 500 ||
-								vm.vmid === 590 ||
-								vm.vmid === 599 ||
-								vm.vmid === 9000 ||
-								vm.vmid === 9001 ||
+								vm.vmid < 100 ||
 								!String(vm.tags || "")
 									.split(";")
 									.includes("umiak-tpl")

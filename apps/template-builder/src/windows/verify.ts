@@ -8,6 +8,7 @@ import {
 	type SnapshotRef,
 	s2SerialPayload,
 } from "@umiak/pve";
+import { guestSubnet } from "../guest-subnet.ts";
 import type {
 	BootTimes,
 	CheckResult,
@@ -35,7 +36,6 @@ export const PWSH_EXE = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
 /** Written with Qga.fileWriteWindows, whose paths allow no spaces. */
 export const GUEST_SCRIPT = "C:\\Windows\\Temp\\umiak-verify.ps1";
 const SIZE = { cores: 2, memoryMb: 4096 };
-const EXPECT_SUBNET = "10.88.0.0/24";
 const USER = "user";
 const SECRET_NAME = "umiak-verify";
 const SECRET_PATH = `C:\\ProgramData\\umiak\\secrets\\files\\${SECRET_NAME}`;
@@ -905,7 +905,7 @@ export async function verifyWindows(
 			A,
 			[
 				["MachineId", A.uuid],
-				["ExpectSubnet", EXPECT_SUBNET],
+				["ExpectSubnet", guestSubnet()],
 				["EditionId", m.windows?.editionId ?? ""],
 				["Build", m.windows?.build ?? ""],
 				["Tools", Object.keys(m.tools).join(",")],

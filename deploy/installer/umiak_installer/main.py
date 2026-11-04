@@ -28,13 +28,11 @@ import time
 import urllib.parse
 from pathlib import Path
 
-from . import checklist, ct, day2, prepare_host, release, stack, state, style, tailnet
-from .pve import CommandError, InstallerError, Runner, bridges, lan_bridge, lvmthin_storages
+from . import allocation, checklist, ct, day2, prepare_host, release, stack, state, style, tailnet
+from .pve import CommandError, InstallerError, Runner, bridges, get, lan_bridge, lvmthin_storages
 
 SECRETS_DIR = day2.SECRETS_DIR
 GUEST_DNS = "1.1.1.1"
-SANDBOX_RANGE = (500, 589)
-PROTECTED_VMIDS = (590, 599, 9000, 9001)
 DEFAULT_CT_ID = 590
 DEFAULT_RAM_CAP = 8192
 
@@ -65,6 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gateway-cidr", help="LAN router and prefix, e.g. 192.168.1.1/24 (default: from the LAN bridge)")
     parser.add_argument("--guest-dns", help=f"DNS server(s) for sandboxes and the control-plane CT (default {GUEST_DNS})")
     parser.add_argument("--vmid-range", help="sandbox VMIDs (default 500-589)")
+    parser.add_argument("--guest-subnet", help="isolated private guest IPv4 /24 (auto-selected if omitted)")
     parser.add_argument("--template-range", help="template VMIDs (default 600-699)")
     parser.add_argument("--ram-cap-mb", type=int, help=f"sandbox RAM cap in MiB, 2048-8192 (default {DEFAULT_RAM_CAP})")
     parser.add_argument("--hostname", help="tailnet hostname of the control plane (default umiak)")
@@ -209,27 +208,53 @@ def gather(runner: Runner, args, ui: Ui, saved: dict | None = None) -> dict:
         return value
 
     storage_prompt = "LVM-thin storage for sandboxes" + (f" ({', '.join(lvm)})" if len(lvm) > 1 else "")
-    storage = field(args.storage, storage_prompt, default("storage", lvm[0] if lvm else None), "--storage",
+    storage = field(args.storage or (lvm[0] if len(lvm) == 1 else None), storage_prompt,
+                    default("storage", lvm[0] if lvm else None), "--storage",
                     check_storage)
 
-    def check_vmids(value):
-        vmids = _range(value, "--vmid-range")
-        if vmids != SANDBOX_RANGE:
-            raise UsageError("This release supports only the sandbox VMID range 500-589")
-        return vmids
+    ct.template_storage(runner)  # Fail before host changes if no CT template storage exists.
+    guests = get(runner, "/cluster/resources", "--type", "vm")
+    occupied = {int(g["vmid"]) for g in guests if not checklist._is_umiak(g)}
 
-    vmids = field(args.vmid_range, "Sandbox VMID range", "500-589", "--vmid-range", check_vmids)
+    def check_range(value, flag):
+        span = _range(value, flag)
+        taken = sorted(v for v in occupied if span[0] <= v <= span[1])
+        if taken:
+            raise UsageError(f"{flag} contains existing non-Umiak guests: {taken}")
+        return span
 
-    def check_templates(value):
-        templates = _range(value, "--template-range")
-        if templates[0] < 500 or (templates[0] <= vmids[1] and vmids[0] <= templates[1]):
-            raise UsageError("Template VMIDs must start at 500 or above and not overlap the sandbox range")
-        if any(templates[0] <= vmid <= templates[1] for vmid in PROTECTED_VMIDS):
-            raise UsageError("Template VMID range contains a protected VMID (590, 599, 9000, 9001)")
-        return templates
+    def automatic(flag, low_key, high_key, start, size, excluded=()):
+        if flag:
+            return flag
+        if low_key in saved:
+            return f"{saved[low_key]}-{saved[high_key]}"
+        low, high = allocation.free_block(start, size, occupied, excluded)
+        return f"{low}-{high}"
 
-    tpl_default = f"{saved['tpl_min']}-{saved['tpl_max']}" if "tpl_min" in saved else "600-699"
-    templates = field(args.template_range, "Template VMID range", tpl_default, "--template-range", check_templates)
+    reserved_ct = ((args.ct_id, args.ct_id),) if args.ct_id is not None else ()
+    reserved_templates = (_range(args.template_range, "--template-range"),) if args.template_range else ()
+    vmids = check_range(automatic(args.vmid_range, "vmid_min", "vmid_max", 500, 90,
+                                  reserved_ct + reserved_templates), "--vmid-range")
+    templates = check_range(automatic(args.template_range, "tpl_min", "tpl_max", 600, 100, (vmids,) + reserved_ct),
+                            "--template-range")
+    if templates[0] <= vmids[1] and vmids[0] <= templates[1]:
+        raise UsageError("Template VMIDs must not overlap the sandbox range")
+
+    try:
+        networks = allocation.occupied_networks(runner, resume=bool(saved))
+    except (ValueError, KeyError, TypeError) as error:
+        raise InstallerError(f"Cannot inspect cluster networks: {error}") from error
+    subnet = args.guest_subnet or saved.get("guest_subnet") or (
+        allocation.DEFAULT_SUBNET if saved else allocation.choose_subnet(networks))
+    try:
+        net = ipaddress.IPv4Network(subnet)
+        if net.prefixlen != 24 or not any(net.subnet_of(ipaddress.IPv4Network(private))
+                                        for private in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")):
+            raise ValueError("use a private IPv4 /24")
+        if any(net.overlaps(other) for other in networks):
+            raise ValueError("overlaps cluster addresses, routes or SDN subnets")
+    except (ValueError, TypeError) as error:
+        raise UsageError(f"Invalid --guest-subnet: {error}") from error
 
     def check_ram(value):
         ram = _int(value, "--ram-cap-mb")
@@ -237,8 +262,8 @@ def gather(runner: Runner, args, ui: Ui, saved: dict | None = None) -> dict:
             raise UsageError("Sandbox RAM cap must be 2048-8192 MiB")
         return ram
 
-    ram = field(args.ram_cap_mb, "Sandbox RAM cap (MiB)", default("ram_cap_mb", str(DEFAULT_RAM_CAP)),
-                "--ram-cap-mb", check_ram)
+    ram = check_ram(str(args.ram_cap_mb if args.ram_cap_mb is not None
+                        else saved.get("ram_cap_mb", DEFAULT_RAM_CAP)))
 
     def check_ct_id(value):
         ct_id = _int(value, "--ct-id")
@@ -251,7 +276,10 @@ def gather(runner: Runner, args, ui: Ui, saved: dict | None = None) -> dict:
             raise UsageError(f"Guest {ct_id} exists and is not an Umiak container; choose another CT ID")
         return ct_id
 
-    ct_id = field(args.ct_id, "Control-plane CT ID", default("ct_id", str(DEFAULT_CT_ID)), "--ct-id", check_ct_id)
+    ct_default = saved.get("ct_id")
+    if ct_default is None:
+        ct_default = allocation.free_block(DEFAULT_CT_ID, 1, {int(g["vmid"]) for g in guests}, (vmids, templates))[0]
+    ct_id = check_ct_id(str(args.ct_id if args.ct_id is not None else ct_default))
 
     def check_lan(value):
         try:
@@ -281,7 +309,7 @@ def gather(runner: Runner, args, ui: Ui, saved: dict | None = None) -> dict:
         bridge = ui.ask("LAN bridge for the control plane" + (f" ({', '.join(known)})" if known else ""),
                         known[0] if len(known) == 1 else None, "--bridge", check_bridge)
     lan_default = f"{saved['gw']}/{saved['cidr']}" if "gw" in saved else _lan_defaults(runner, bridge)
-    gw, cidr = field(args.gateway_cidr, "LAN router and prefix", lan_default, "--gateway-cidr", check_lan)
+    gw, cidr = field(args.gateway_cidr or lan_default, "LAN router and prefix", lan_default, "--gateway-cidr", check_lan)
     network = ipaddress.IPv4Network(f"{gw}/{cidr}", strict=False)
     ct_exists = ct.existing(runner, ct_id) is not None
 
@@ -311,21 +339,21 @@ def gather(runner: Runner, args, ui: Ui, saved: dict | None = None) -> dict:
             raise UsageError("Invalid tailnet hostname: use lowercase letters, digits and hyphens")
         return value
 
-    hostname = field(args.hostname, "Tailnet hostname", default("hostname", "umiak"), "--hostname", check_hostname)
+    hostname = check_hostname(args.hostname or saved.get("hostname", "umiak"))
     dns = args.guest_dns or saved.get("guest_dns") or GUEST_DNS
     spec = ct.CtSpec(id=ct_id, ip=ct_ip, cidr=cidr, gw=gw, storage=storage, dns=dns, bridge=bridge)
     try:
         ct.validate(spec)
     except InstallerError as error:
         raise UsageError(str(error)) from error
-    return {"storage": storage, "vmid_min": vmids[0], "vmid_max": vmids[1], "tpl_min": templates[0],
+    return {"guest_subnet": str(net), "storage": storage, "vmid_min": vmids[0], "vmid_max": vmids[1], "tpl_min": templates[0],
             "tpl_max": templates[1], "ram_cap_mb": ram, "ct_id": ct_id, "ct_ip": spec.ip, "gw": spec.gw,
             "cidr": spec.cidr, "hostname": hostname, "guest_dns": dns, "bridge": bridge}
 
 
 def run_checklist(runner: Runner, ui: Ui, storage: str | None) -> None:
     for _ in range(2):
-        failing = [check for check in checklist.inspect(runner, storage=storage) if not check.ok]
+        failing = [check for check in checklist.inspect(runner, storage=storage, ranges=()) if not check.ok]
         if not failing:
             return
         for check in failing:
@@ -414,6 +442,10 @@ class Flow:
             "start Umiak and publish it on your tailnet",
         ]:
             self.ui.say("  • " + line)
+        subnet = a.get('guest_subnet', allocation.DEFAULT_SUBNET)
+        if (a['vmid_min'], a['vmid_max'], a['tpl_min'], a['tpl_max'], subnet) != (500, 589, 600, 699, allocation.DEFAULT_SUBNET):
+            self.ui.say(f"  VMIDs: sandboxes {a['vmid_min']}-{a['vmid_max']}, "
+                        f"templates {a['tpl_min']}-{a['tpl_max']}; guests {subnet}")
         self.ui.say(style.dim("  Other guests and host network settings stay unchanged."))
         if not self.ui.confirm("Proceed?"):
             raise InstallerError("Cancelled; nothing was changed by this step. Rerun with --yes to accept.")
@@ -421,7 +453,6 @@ class Flow:
     def run(self, args) -> str:
         saved = dict(self.current.answers) if self.current is not None else {}
         self.progress("Checking prerequisites")
-        run_checklist(self.runner, self.ui, args.storage or saved.get("storage"))
         self.step = "Questions"
         if saved and self.reached("ct-created"):
             a = saved  # The CT exists with these answers; they are fixed from here on.
@@ -430,13 +461,22 @@ class Flow:
                 self.ui.say("")
                 self.ui.say(style.step("Questions"))
             a = gather(self.runner, args, self.ui, saved)
+        # Validate allocations before even prerequisite repairs change this host.
+        if saved and self.reached("ct-created"):
+            gather_args = argparse.Namespace(**vars(args))
+            for key in ("storage", "ct_ip", "gateway_cidr", "hostname"):
+                setattr(gather_args, key, getattr(args, key) or
+                        (f"{a['gw']}/{a['cidr']}" if key == "gateway_cidr" else a.get(key)))
+            gather(self.runner, gather_args, Ui(False, True, self.ui.input, self.ui.say), a)
+        run_checklist(self.runner, self.ui, args.storage or a.get("storage"))
         self.plan(a)
         runner, ct_id = self.runner, a["ct_id"]
         node = runner.hostname()
 
         cfg = prepare_host.PrepareConfig(node=node, storage=a["storage"], gateway_ip=a["ct_ip"], guest_dns=a["guest_dns"],
                                          vmid_min=a["vmid_min"], vmid_max=a["vmid_max"], tpl_min=a["tpl_min"],
-                                         tpl_max=a["tpl_max"], bridge=a.get("bridge", "vmbr0"))
+                                         tpl_max=a["tpl_max"], guest_subnet=a.get("guest_subnet", allocation.DEFAULT_SUBNET),
+                                         bridge=a.get("bridge", "vmbr0"))
         out_dir = runner.path(SECRETS_DIR)
         self.progress("Preparing Proxmox objects")
         result = prepare_host.prepare(runner, cfg, out_dir)

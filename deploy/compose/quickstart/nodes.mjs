@@ -204,8 +204,7 @@ export async function nodeCommand(
 		if (!build) throw Error("Unknown template build");
 		if (
 			build.pve_vmid < limits.templateVmidMin ||
-			build.pve_vmid > limits.templateVmidMax ||
-			[590, 599, 9000, 9001].includes(build.pve_vmid)
+			build.pve_vmid > limits.templateVmidMax
 		)
 			throw Error("Template VMID is outside the configured disposable range");
 		return retireNodeTemplate({

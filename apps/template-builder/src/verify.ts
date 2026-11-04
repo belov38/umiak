@@ -17,6 +17,7 @@ import {
 	type SnapshotRef,
 	s2SerialPayload,
 } from "@umiak/pve";
+import { guestSubnet } from "./guest-subnet.ts";
 import type {
 	BootTimes,
 	CheckResult,
@@ -32,7 +33,6 @@ import { verifyWindows } from "./windows/verify.ts";
 /** Tunnel URL of the test smbios family when no gateway is used: never resolves. */
 export const TEST_TUNNEL_URL = "wss://tunnel.verify.invalid/v1/connect";
 const SIZE = { cores: 2, memoryMb: 2048 };
-const EXPECT_SUBNET = "10.88.0.0/24";
 const MIN = 60_000;
 const AGENT_ACTIVE_TIMEOUT_MS = MIN;
 const TUNNEL_TIMEOUT_MS = MIN;
@@ -652,7 +652,7 @@ export async function verifyTemplate(
 
 		step("guest checks (verify.sh)");
 		const vs = await io.exec(["bash", "-s"], {
-			input: `export MACHINE_ID=${A.uuid}\nexport EXPECT_SUBNET=${EXPECT_SUBNET}\n${deps.verifyScript}`,
+			input: `export MACHINE_ID=${A.uuid}\nexport EXPECT_SUBNET=${guestSubnet()}\n${deps.verifyScript}`,
 			timeoutMs: VERIFY_SH_TIMEOUT_MS,
 		});
 		const parsed = parseCheckLines(vs.stdout);

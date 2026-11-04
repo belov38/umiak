@@ -311,3 +311,26 @@ test("retired installer node can bootstrap without reinstalling its node-agent",
 	});
 	assert.equal(result, "imported");
 });
+
+test("installer imports nondefault sandbox range and guest subnet", async () => {
+	const s = await setup();
+	s.files.install.limits.vmidMin = 710;
+	s.files.install.limits.vmidMax = 799;
+	s.files.install.network.guestSubnet = "172.20.8.0/24";
+	await s.write();
+	const options = s.options();
+	options.nodeCheck = async () => ({
+		version: "1.0",
+		config: {
+			vmidMin: 710,
+			vmidMax: 799,
+			guestSubnet: "172.20.8.0/24",
+			vnet: "umiak0",
+		},
+	});
+	assert.equal(await bootstrapFromInstall(options), "imported");
+	assert.equal(
+		(await options.store.read()).steps.network.data.guestSubnet,
+		"172.20.8.0/24",
+	);
+});

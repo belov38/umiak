@@ -64,6 +64,7 @@ export function buildInvocation(
 		UMIAK_PVE_MEDIA_STORAGE:
 			input.mediaStorage || state.mediaStorage || "local",
 		UMIAK_PVE_VNET: "umiak0",
+		UMIAK_GUEST_SUBNET: network.guestSubnet || "10.88.0.0/24",
 		UMIAK_PVE_POOL: "umiak",
 		UMIAK_STATE_DB: join(directory, "state.db"),
 		UMIAK_TEMPLATE_REGISTRY: join(secretsDir, "template-registry"),

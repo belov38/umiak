@@ -837,7 +837,7 @@ describe("buildTemplate: failures", () => {
 	});
 
 	it("never creates or touches a protected VMID, whatever the allocator says", async () => {
-		for (const vmid of [450, 599, 9000, 9001]) {
+		for (const vmid of [0, 99, 1000000000]) {
 			const s = setup();
 			const released: number[] = [];
 			s.deps.allocator = {

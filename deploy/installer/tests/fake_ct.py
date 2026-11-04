@@ -37,6 +37,7 @@ def ps_rows(services=SERVICES, oneshot_exit=0, health="healthy"):
 class CtFake(FakeRunner):
     def __init__(self, root: Path, **kwargs):
         super().__init__(root, **kwargs)
+        self.path("/etc/pve/priv/known_hosts").write_text("pve2 ssh-ed25519 fake\n")
         self.local_templates = []  # names on storage `local`
         self.available = ["debian-12-standard_12.12-1_amd64.tar.zst", "debian-13-standard_13.4-1_amd64.tar.zst",
                           "debian-13-standard_13.6-1_amd64.tar.zst", "ubuntu-24.04-standard_24.04-2_amd64.tar.zst"]
@@ -59,6 +60,12 @@ class CtFake(FakeRunner):
 
     def run(self, argv, input=None):
         argv = list(argv)
+        if argv[0] == "ssh" and input and json.loads(input).get("request", {}).get("op") == "networks":
+            self.commands.append(argv)
+            return json.dumps({"addresses": [], "routes": []})
+        if argv in (["ip", "-j", "-4", "address", "show"], ["ip", "-j", "-4", "route", "show", "table", "all"]):
+            self.commands.append(argv)
+            return "[]"
         if argv[0] not in ("pct", "pveam", "ping") and argv[:2] not in (["ip", "-j"], ["ip", "neigh"]):
             return super().run(argv, input)
         assert all(isinstance(part, str) for part in argv), argv

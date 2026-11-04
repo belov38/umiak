@@ -116,9 +116,11 @@ def apply_stack(runner: Runner, ct_id: int, bundle, a: dict, node_ip: str, publi
     stack.write_install_json(stack.install_json(
         release=bundle.version, node=node, node_ip=node_ip, fingerprint=stack.pve_fingerprint(runner),
         ct_ip=a["ct_ip"], guest_dns=a["guest_dns"], tailnet_dns=identity.dns_name, tailnet_ip=identity.ipv4,
-        limits=limits,
+        limits=limits, guest_subnet=a.get("guest_subnet", "10.88.0.0/24"),
     ), out_dir)
-    stack.write_network(runner, ct_id, stack.network_json(a["ct_ip"], preview, a["guest_dns"]), image, work)
+    stack.write_network(runner, ct_id,
+                        stack.network_json(a["ct_ip"], preview, a["guest_dns"], a.get("guest_subnet", "10.88.0.0/24")),
+                        image, work)
     # The bootstrap import runs only when quickstart starts: if it already runs
     # (Update, Resume), restart it after the new secrets land.
     was_running = stack.quickstart_running(runner, ct_id)
@@ -325,7 +327,7 @@ def _pool_guests(runner: Runner, ct_id: int) -> list[dict]:
     return [row for row in members if row.get("type") in ("qemu", "lxc") and int(row["vmid"]) != ct_id]
 
 
-def _pve_steps(runner: Runner) -> list[tuple[str, list]]:
+def _pve_steps(runner: Runner, guest_subnet="10.88.0.0/24") -> list[tuple[str, list]]:
     """Umiak PVE objects that exist now, as (description, rollback action), in removal order.
 
     Uses the same names prepare_host creates and rollback's tolerant undo, so a
@@ -357,7 +359,8 @@ def _pve_steps(runner: Runner) -> list[tuple[str, list]]:
         steps.append(("firewall security group umiak-egress", ["collection", EGRESS_GROUP]))
     if exists(runner, IPSET):
         steps.append(("firewall IPSet umiak-gateway", ["collection", IPSET]))
-    for description, path in ((f"SDN subnet {prepare_host.SUBNET.rsplit('/', 1)[1]}", prepare_host.SUBNET),
+    subnet = prepare_host.subnet_path(guest_subnet)
+    for description, path in ((f"SDN subnet {subnet.rsplit('/', 1)[1]}", subnet),
                               ("SDN VNet umiak0", "/cluster/sdn/vnets/umiak0"),
                               ("SDN zone umiak", "/cluster/sdn/zones/umiak")):
         if exists(runner, path):
@@ -470,7 +473,7 @@ def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: b
         if pending_sdn(runner):
             raise InstallerError("Pending SDN changes must be applied or reverted by the administrator first; "
                                  "removing the Umiak zone applies SDN. Nothing was changed.")
-        pve_steps = _pve_steps(runner)
+        pve_steps = _pve_steps(runner, current.answers.get("guest_subnet", "10.88.0.0/24"))
 
     plan = []
     if ct_row is not None:

@@ -85,7 +85,8 @@ def test_non_interactive_install_end_to_end(env):
     assert install["connection"]["fingerprint"] == hashlib.sha256(CERT_DER).hexdigest()
     assert install["connection"]["apiUrl"] == "https://192.168.68.10:8006"
     assert install["network"] == {"gatewayAddress": "192.168.68.50", "guestDns": "1.1.1.1",
-                                  "previewDomain": "umiak.100-64-10-20.sslip.io", "sshHost": "100.64.10.20"}
+                                  "previewDomain": "umiak.100-64-10-20.sslip.io", "sshHost": "100.64.10.20",
+                                  "guestSubnet": "10.88.0.0/24"}
     assert install["limits"]["ramCapMb"] == 8192
     assert json.loads(pushed[stack.STAGING + "/host-report.json"])["nodeAgent"]["ok"] is True
     assert set(stack.SECRET_NAMES) <= {k.rsplit("/", 1)[1] for k in pushed if k.startswith(stack.STAGING)}
@@ -158,11 +159,12 @@ def test_yes_applies_listed_fix(env):
     assert runner.path("/etc/sysctl.d/99-umiak.conf").read_text() == "net.ipv4.ip_forward = 1\n"
 
 
-def test_rejects_sandbox_range_other_than_bootstrap_contract(env):
+def test_accepts_custom_sandbox_range(env):
     runner, run, printed = env
     flags = list(FLAGS)
-    flags[flags.index("500-589")] = "500-520"
-    assert run(flags) == 2
+    flags[flags.index("500-589")] = "710-799"
+    assert run(flags) == 0
+    assert saved(runner).answers["vmid_min"] == 710
 
 
 def test_complete_install_does_not_reinstall(env):
@@ -243,7 +245,7 @@ def test_interactive_resume_re_asks_with_saved_defaults(env):
         return ""
 
     assert run([], input_fn=answer) == 0
-    assert any(p.startswith("Control-plane CT ID [591]") for p in prompts)
+    assert not any(p.startswith("Control-plane CT ID") for p in prompts)
     assert any(p.startswith("Control-plane static IPv4 address [192.168.68.50]") for p in prompts)
     assert saved(runner).ct_ip == "192.168.68.51"
 
@@ -355,8 +357,8 @@ def test_interactive_install_reasks_bad_answers_and_suggests_a_free_ip(env):
 
     assert run([], input_fn=answer) == 0
     assert not any(p.startswith("Choose") for p in prompts)
-    assert any("No LVM-thin storage named fast" in line for line in printed)
-    assert any("590 exists and is not an Umiak container" in line for line in printed)
+    assert not any(p.startswith("LVM-thin storage") for p in prompts)
+    assert not any(p.startswith("Control-plane CT ID") for p in prompts)
     assert any("Invalid address" in line for line in printed)
     assert any("Could not read that input" in line for line in printed)
     # .50 is a stopped guest's static address, so the suggestion skips it.
@@ -434,3 +436,15 @@ def test_unknown_bridge_flag_is_a_usage_error(env):
     assert run(FLAGS + ["--bridge", "vmbr9"]) == 2
     assert any("No Linux bridge named vmbr9" in line for line in printed)
     assert runner.mutations() == []
+
+
+def test_custom_subnet_reaches_sdn_stack_and_node_agent(env):
+    runner, run, printed = env
+    assert run(FLAGS + ["--guest-subnet", "172.20.8.0/24", "--vmid-range", "710-799"]) == 0
+    subnet = runner.objects["/cluster/sdn/vnets/umiak0/subnets/umiak-172.20.8.0-24"]
+    assert subnet["gateway"] == "172.20.8.1"
+    assert subnet["dhcp-range"] == "start-address=172.20.8.100,end-address=172.20.8.250"
+    install = json.loads(runner.path("/var/lib/umiak-installer/secrets/install.json").read_text())
+    assert install["network"]["guestSubnet"] == "172.20.8.0/24"
+    assert install["limits"]["vmidMax"] == 799
+    assert 'guestSubnet = "172.20.8.0/24"' in runner.path("/etc/umiak-node.toml").read_text()

@@ -15,10 +15,11 @@ const DefaultPath = "/etc/umiak-node.toml"
 
 // Config describes the node resources umiak-node may touch.
 type Config struct {
-	Node     string `toml:"node" json:"node"`
-	VG       string `toml:"vg" json:"vg"`
-	ThinPool string `toml:"thinPool" json:"thinPool"`
-	Storage  string `toml:"storage" json:"storage"`
+	GuestSubnet string `toml:"guestSubnet" json:"guestSubnet"`
+	Node        string `toml:"node" json:"node"`
+	VG          string `toml:"vg" json:"vg"`
+	ThinPool    string `toml:"thinPool" json:"thinPool"`
+	Storage     string `toml:"storage" json:"storage"`
 	// VMIDMin..VMIDMax: sandbox machines (pve: 500-589).
 	VMIDMin int `toml:"vmidMin" json:"vmidMin"`
 	VMIDMax int `toml:"vmidMax" json:"vmidMax"`
@@ -41,6 +42,7 @@ type Config struct {
 // Default returns the PoC values from the S1 spec.
 func Default() Config {
 	return Config{
+		GuestSubnet:  "10.88.0.0/24",
 		Node:         "pve",
 		VG:           "pve",
 		ThinPool:     "data",

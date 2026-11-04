@@ -147,7 +147,7 @@ export function createQuickstartServer({
 }) {
 	const clientNotDenied = clientGuard(
 		"0.0.0.0/1,128.0.0.0/1,::/1,8000::/1",
-		env.UMIAK_LOCAL_DENIED_CIDRS ?? "10.88.0.0/24",
+		env.UMIAK_LOCAL_DENIED_CIDRS ?? env.UMIAK_GUEST_SUBNET ?? "10.88.0.0/24",
 		env,
 	);
 	const appOrigin = env.UMIAK_APP_ORIGIN ?? "http://localhost:4180";

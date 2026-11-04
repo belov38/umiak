@@ -21,19 +21,15 @@ export function validateTemplateRange(limits) {
 	if (
 		!Number.isInteger(min) ||
 		!Number.isInteger(max) ||
-		min < 500 ||
+		min < 100 ||
 		max > 999999999 ||
 		min > max
 	)
 		throw new Error(
-			"Template VMID range must contain integers from 500 to 999999999",
+			"Template VMID range must contain integers from 100 to 999999999",
 		);
 	if (min <= vmidMax && vmidMin <= max)
 		throw new Error("Template VMID range must not overlap the sandbox range");
-	if ([590, 599, 9000, 9001].some((id) => min <= id && id <= max))
-		throw new Error(
-			"Template VMID range contains a protected infrastructure or legacy VMID (590, 599, 9000, 9001)",
-		);
 	return { templateVmidMin: min, templateVmidMax: max };
 }
 export function validateTemplateInventory(limits, resources) {

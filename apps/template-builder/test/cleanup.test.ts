@@ -233,7 +233,7 @@ describe("cleanup", () => {
 
 	it("never touches protected VMIDs even when the config range covers them", async () => {
 		const s = await setup();
-		for (const vmid of [450, 599, 9000, 9001])
+		for (const vmid of [90, 91, 92, 93])
 			s.pve.vms.set(vmid, {
 				config: { name: `umiak-tpl-linux-x-${vmid}`, tags: "umiak-tpl" },
 				status: "running",
@@ -241,14 +241,14 @@ describe("cleanup", () => {
 			});
 		await s.store.tryInsert({
 			cluster: 1,
-			vmid: 450,
-			mac: macFor(1, 450),
+			vmid: 90,
+			mac: macFor(1, 90),
 			state: "active",
 			purpose: "template",
 			createdAt: 0,
 			updatedAt: 0,
 		});
-		s.pve.vms.delete(450);
+		s.pve.vms.delete(90);
 		await cleanup({
 			api: s.pve,
 			node: s.node,
@@ -261,13 +261,12 @@ describe("cleanup", () => {
 			},
 			now: () => NOW,
 		});
-		for (const vmid of [599, 9000, 9001])
-			expect(s.pve.vms.has(vmid)).toBe(true);
+		for (const vmid of [91, 92, 93]) expect(s.pve.vms.has(vmid)).toBe(true);
 		const touched = s.pve.calls.filter((c) =>
-			/\/qemu\/(450|599|9000|9001)(\/|$)/.test(c.path),
+			/\/qemu\/(90|91|92|93)(\/|$)/.test(c.path),
 		);
 		expect(touched).toEqual([]);
-		expect((await s.allocator.get(450))?.state).toBe("active");
+		expect((await s.allocator.get(90))?.state).toBe("active");
 		// The unprotected leftover still goes.
 		expect(s.pve.vms.has(598)).toBe(false);
 	});

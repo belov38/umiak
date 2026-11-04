@@ -110,7 +110,7 @@ Connection and host facts are recorded by the installer and imported when the
 stack starts; the browser never edits them. `/setup` shows the remaining steps,
 each saved with its status and errors in Postgres and retryable:
 
-1. Storage and capacity: lvmthin storage, sandbox VMID range within 500-589 and a
+1. Storage and capacity: lvmthin storage, configurable sandbox VMID range and a
    RAM cap up to 8192 MiB.
 2. Gateway and previews: the guest-reachable gateway address, tunnel URL and
    preview domain. IPv4 defaults use sslip.io for DNS only. Do not reissue the CA
@@ -349,3 +349,24 @@ metadata bridge. The single offline `secrets-init` initializes the gateway befor
 copying service secrets; renewal keeps its separate offline service. Existing
 volumes and the node-agent extraction path are preserved. Image sharing does not
 reduce the number of V8 heaps. Corporate OIDC keeps separate role commands.
+
+The host installer asks for a fixed LAN address for the control plane, and for
+LVM-thin storage only when several are available. LAN bridge and router/prefix
+are requested only if detection fails. The default tailnet hostname is `umiak`
+(`--hostname` overrides it).
+
+Sandbox VMIDs default to 500–589 and template VMIDs to 600–699. Occupied blocks
+are replaced with the first available blocks of 90 and 100 IDs. The control-plane
+CT ID defaults to the first free ID from 590 outside both ranges. Use
+`--vmid-range`, `--template-range`, and `--ct-id` to override; occupied foreign
+guests and overlapping ranges are refused cluster-wide.
+
+The isolated guest network defaults to `10.88.0.0/24`. Before host changes the
+installer checks addresses and routes on every online cluster node and existing
+SDN subnets, choosing another private /24 on overlap. `--guest-subnet` overrides
+selection. Gateway `.1` and DHCP `.100`–`.250` follow the chosen network. Old
+installations without a subnet fact retain `10.88.0.0/24`. Cluster SSH trust must
+work for every online node so the overlap check can complete.
+
+The default RAM cap is 8192 MiB and guest DNS is `1.1.1.1`; edit them in the web
+setup or override them with `--ram-cap-mb` and `--guest-dns` during installation.

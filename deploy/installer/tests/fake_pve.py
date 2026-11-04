@@ -105,6 +105,8 @@ class FakeRunner(Runner):
             return [{field: key[len(prefix):]} for key in self.objects
                     if key.startswith(prefix) and "/" not in key[len(prefix):]]
 
+        if path == f"/nodes/{self.hostname()}/storage":
+            return self.objects["/storage"]
         if path == "/access/roles":
             return [{"roleid": x["roleid"]} for x in self.roles]
         if path == "/access/users":
@@ -147,7 +149,9 @@ class FakeRunner(Runner):
             raise CommandError(argv, 1, "", "injected failure")
         out = ""
         head = argv[:2]
-        if head == ["pvesh", "get"] and self._listing(argv[2]) is not None:
+        if argv in (["ip", "-j", "-4", "address", "show"], ["ip", "-j", "-4", "route", "show", "table", "all"]):
+            out = "[]"
+        elif head == ["pvesh", "get"] and self._listing(argv[2]) is not None:
             out = json.dumps(self._listing(argv[2]))
         elif head == ["pvesh", "get"]:
             path = argv[2]
@@ -173,14 +177,14 @@ class FakeRunner(Runner):
             if child:
                 child_path = path + "/" + child
                 if "subnets" in path:
-                    child_path = path + "/umiak-10.88.0.0-24"
+                    child_path = path + "/umiak-" + child.replace("/", "-")
                 if child_path in self.objects:
                     raise CommandError(argv, 2, "", "exists")
                 self.objects[child_path] = [] if "/firewall/" in path else {
                     k.removeprefix("--"): v for k, v in values.items()
                 }
                 if path.endswith("subnets"):
-                    self.objects.setdefault(path, []).append({"subnet": "umiak-10.88.0.0-24"})
+                    self.objects.setdefault(path, []).append({"subnet": "umiak-" + child.replace("/", "-")})
                 elif path.endswith(("zones", "vnets")):
                     self.objects[path].append({path.rsplit("/", 1)[1][:-1]: child})
                     if path.endswith("vnets"):

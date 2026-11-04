@@ -1,4 +1,5 @@
 import { type PveClient, Qga } from "@umiak/pve";
+import { guestSubnet } from "../guest-subnet.ts";
 import {
 	DEFAULT_POLL_MS,
 	DEFAULT_REBOOT_TIMEOUT_MS,
@@ -28,7 +29,6 @@ const START_CHECK_MS = 10_000;
 /** Polls in a row that see no running task and no exit file before the step counts as dead. */
 const DEAD_TASK_POLLS = 3;
 const DEFAULT_NETWORK_TIMEOUT_MS = 5 * 60_000;
-const DEFAULT_SUBNET = "10.88.0.0/24";
 
 const POWERSHELL = [
 	"powershell.exe",
@@ -549,7 +549,7 @@ export async function networkUp(
 	mac: string,
 	o: { subnet?: string; timeoutMs?: number; pollMs?: number } = {},
 ): Promise<void> {
-	const subnet = o.subnet ?? DEFAULT_SUBNET;
+	const subnet = o.subnet ?? guestSubnet();
 	const timeoutMs = o.timeoutMs ?? DEFAULT_NETWORK_TIMEOUT_MS;
 	const pollMs = o.pollMs ?? DEFAULT_POLL_MS;
 	const base = `/nodes/${node}/qemu/${vmid}`;

@@ -177,3 +177,14 @@ def test_rejects_invalid_spec(runner, change):
     values.update(change)
     with pytest.raises(InstallerError):
         ct.create(runner, ct.CtSpec(**values), sleep=lambda _: None)
+
+
+def test_template_storage_prefers_local_and_supports_other_names(tmp_path):
+    from fake_ct import CtFake
+    runner = CtFake(tmp_path)
+    assert ct.template_storage(runner) == "local"
+    runner.objects["/storage"][0]["storage"] = "media"
+    assert ct.template_storage(runner) == "media"
+    runner.objects["/storage"][0]["content"] = "iso,import"
+    with pytest.raises(InstallerError, match="vztmpl"):
+        ct.template_storage(runner)

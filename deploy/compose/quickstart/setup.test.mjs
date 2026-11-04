@@ -55,8 +55,8 @@ test("limits protect infrastructure and clamp total sandbox RAM", () => {
 		8192,
 	);
 	for (const limits of [
-		{ vmidMin: 499, vmidMax: 589, ramCapMb: 8192 },
-		{ vmidMin: 500, vmidMax: 590, ramCapMb: 8192 },
+		{ vmidMin: 99, vmidMax: 589, ramCapMb: 8192 },
+		{ vmidMin: 590, vmidMax: 500, ramCapMb: 8192 },
 		{ vmidMin: 500, vmidMax: 589, ramCapMb: 8193 },
 	])
 		assert.throws(() => validateLimits({ storage: "local-lvm", ...limits }));

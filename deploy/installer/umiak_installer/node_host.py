@@ -4,6 +4,7 @@ import base64
 import dataclasses
 import fcntl
 import hashlib
+import ipaddress
 import json
 import shlex
 import shutil
@@ -65,12 +66,14 @@ def _unused(runner, node, control_plane_id):
 
 
 def _verify_local_sdn(runner, cfg):
+    network = ipaddress.IPv4Network(cfg.guest_subnet)
     bridge = json.loads(runner.run(["ip", "-j", "address", "show", "dev", "umiak0"]))
-    if not any(a.get("local") == "10.88.0.1" and a.get("prefixlen") == 24 for row in bridge for a in row.get("addr_info", [])):
-        raise InstallerError("Verification failed: local umiak0 gateway 10.88.0.1/24 is missing")
+    if not any(a.get("local") == str(network[1]) and a.get("prefixlen") == 24
+               for row in bridge for a in row.get("addr_info", [])):
+        raise InstallerError(f"Verification failed: local umiak0 gateway {network[1]}/24 is missing")
     runner.run(["systemctl", "is-active", "dnsmasq@umiak.service"])
-    subnet = get(runner, prepare_host.SUBNET)
-    if str(subnet.get("snat")) != "1" or subnet.get("gateway") != "10.88.0.1" or not subnet.get("dhcp-range"):
+    subnet = get(runner, prepare_host.subnet_path(cfg.guest_subnet))
+    if str(subnet.get("snat")) != "1" or subnet.get("gateway") != str(network[1]) or not subnet.get("dhcp-range"):
         raise InstallerError("Verification failed: Umiak subnet gateway, DHCP or SNAT")
     # PVE SimplePlugin installs this subnet's SNAT in POSTROUTING on each node.
     rules = runner.run(["iptables", "-t", "nat", "-S", "POSTROUTING"])
@@ -83,7 +86,7 @@ def _verify_local_sdn(runner, cfg):
 
         return (
             fields[:2] == ["-A", "POSTROUTING"]
-            and value("-s") == "10.88.0.0/24"
+            and value("-s") == cfg.guest_subnet
             and value("-j") == "SNAT"
             and value("--to-source")
         )
@@ -97,7 +100,7 @@ def _verify_local_sdn(runner, cfg):
 def dispatch(runner: Runner, request: dict) -> dict:
     _identity(runner, request.get("node"))
     # A disconnected SSH client may leave its helper alive. Serialize on the target too.
-    if request.get("op") == "inspect":
+    if request.get("op") in ("inspect", "networks"):
         return _dispatch(runner, request)
     path = runner.path(prepare_host.STATE_DIR) / "node-helper.lock"
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -116,6 +119,9 @@ def dispatch(runner: Runner, request: dict) -> dict:
 def _dispatch(runner: Runner, request: dict) -> dict:
     node = request.get("node")
     _identity(runner, node)
+    if request["op"] == "networks":
+        from .allocation import local_networks
+        return local_networks(runner)
     if request["op"] == "remove":
         purge = request.get("purge_disks")
         if purge:
@@ -153,6 +159,20 @@ def _dispatch(runner: Runner, request: dict) -> dict:
         if not prepare_host.PUBLIC_KEY.fullmatch(request["public_key"]):
             raise InstallerError("Invalid node-agent public key")
     cfg = prepare_host.PrepareConfig(node=node, **request["config"])
+    # Recheck an added node: its routes may have changed since the original install.
+    from .allocation import local_networks
+    network = ipaddress.IPv4Network(cfg.guest_subnet)
+    local = local_networks(runner)
+    for row in local["addresses"]:
+        if row.get("ifname") == "umiak0":
+            continue
+        for addr in row.get("addr_info", []):
+            if network.overlaps(ipaddress.IPv4Network(f"{addr['local']}/{addr['prefixlen']}", strict=False)):
+                raise InstallerError("Guest subnet overlaps node addresses")
+    for row in local["routes"]:
+        if row.get("dst", "default") != "default" and row.get("dev") != "umiak0":
+            if network.overlaps(ipaddress.IPv4Network(row["dst"], strict=False)):
+                raise InstallerError("Guest subnet overlaps node routes")
     checks = checklist.inspect(
         runner, node=node, storage=cfg.storage, ranges=((cfg.vmid_min, cfg.vmid_max), (cfg.tpl_min, cfg.tpl_max))
     )

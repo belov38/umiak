@@ -31,6 +31,7 @@ const networkFile =
 	env.UMIAK_QUICKSTART_NETWORK_FILE ?? `${pveDir}/quickstart-network.json`;
 if (existsSync(networkFile)) {
 	const config = JSON.parse(readFileSync(networkFile, "utf8"));
+	env.UMIAK_GUEST_SUBNET = config.guestSubnet || "10.88.0.0/24";
 	if (config.tunnelUrl) env.UMIAK_TUNNEL_URL = config.tunnelUrl;
 	if (config.previewDomain) {
 		env.UMIAK_PREVIEW_DOMAIN = config.previewDomain;

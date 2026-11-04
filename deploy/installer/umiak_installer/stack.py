@@ -73,15 +73,15 @@ def tunnel_url(gateway: str) -> str:
     return f"wss://{gateway}/v1/connect"
 
 
-def network_json(gateway: str, preview: str, guest_dns: str) -> bytes:
+def network_json(gateway: str, preview: str, guest_dns: str, guest_subnet: str = "10.88.0.0/24") -> bytes:
     """Exactly the bytes of JSON.stringify(validateNetwork(...)) in the quickstart network step."""
     network = {"gatewayAddress": gateway, "previewDomain": preview, "tunnelUrl": tunnel_url(gateway),
-               "guestDns": guest_dns}
+               "guestDns": guest_dns, "guestSubnet": guest_subnet}
     return json.dumps(network, separators=(",", ":"), ensure_ascii=False).encode()
 
 
 def install_json(*, release: str, node: str, node_ip: str, fingerprint: str, ct_ip: str, guest_dns: str,
-                 tailnet_dns: str, tailnet_ip: str, limits: dict) -> dict:
+                 tailnet_dns: str, tailnet_ip: str, limits: dict, guest_subnet: str = "10.88.0.0/24") -> dict:
     """Installer facts for deploy/compose/quickstart/bootstrap.mjs (version 1)."""
     host = f"[{node_ip}]" if ":" in node_ip else node_ip
     return {
@@ -91,7 +91,7 @@ def install_json(*, release: str, node: str, node_ip: str, fingerprint: str, ct_
                        "fingerprint": fingerprint, "tlsName": node, "sshHost": node_ip},
         "limits": dict(limits),
         "network": {"gatewayAddress": ct_ip, "guestDns": guest_dns, "previewDomain": preview_domain(tailnet_ip),
-                    "sshHost": tailnet_ip},
+                    "sshHost": tailnet_ip, "guestSubnet": guest_subnet},
         "publicUrl": f"https://{tailnet_dns}",
     }
 

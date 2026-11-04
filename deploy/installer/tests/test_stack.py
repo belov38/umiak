@@ -55,7 +55,7 @@ def test_network_json_is_byte_identical_to_quickstart_network_step():
     content = stack.network_json("192.168.68.50", "umiak.100-64-10-20.sslip.io", "1.1.1.1")
     assert content == (
         b'{"gatewayAddress":"192.168.68.50","previewDomain":"umiak.100-64-10-20.sslip.io",'
-        b'"tunnelUrl":"wss://tunnel.192-168-68-50.sslip.io/v1/connect","guestDns":"1.1.1.1"}'
+        b'"tunnelUrl":"wss://tunnel.192-168-68-50.sslip.io/v1/connect","guestDns":"1.1.1.1","guestSubnet":"10.88.0.0/24"}'
     )
 
 
@@ -215,7 +215,7 @@ def test_install_json_matches_bootstrap_contract():
         "limits": {"storage": "local-lvm", "vmidMin": 500, "vmidMax": 589, "ramCapMb": 8192,
                    "templateVmidMin": 600, "templateVmidMax": 699},
         "network": {"gatewayAddress": "192.168.68.50", "guestDns": "1.1.1.1",
-                    "previewDomain": "umiak.100-64-10-20.sslip.io", "sshHost": "100.64.10.20"},
+                    "previewDomain": "umiak.100-64-10-20.sslip.io", "sshHost": "100.64.10.20", "guestSubnet": "10.88.0.0/24"},
         "publicUrl": "https://umiak.tail0000.ts.net",
     }
     json.dumps(data)

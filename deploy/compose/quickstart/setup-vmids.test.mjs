@@ -19,14 +19,13 @@ test("template range is separate and adoption infers existing slots without relo
 		() => validateTemplateRange({ ...limits, templateVmidMin: 580 }),
 		/overlap/,
 	);
-	assert.throws(
-		() =>
-			validateTemplateRange({
-				...limits,
-				templateVmidMin: 9000,
-				templateVmidMax: 9001,
-			}),
-		/protected/,
+	assert.deepEqual(
+		validateTemplateRange({
+			...limits,
+			templateVmidMin: 9000,
+			templateVmidMax: 9001,
+		}),
+		{ templateVmidMin: 9000, templateVmidMax: 9001 },
 	);
 	const state = {
 		steps: {

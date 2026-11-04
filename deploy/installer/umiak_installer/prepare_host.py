@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import rollback
+from .allocation import DEFAULT_SUBNET, subnet_path
 from .pve import (
     CommandError,
     InstallerError,
@@ -84,6 +85,7 @@ class PrepareConfig:
     storage: str
     gateway_ip: str
     guest_dns: str = "1.1.1.1"
+    guest_subnet: str = DEFAULT_SUBNET
     vmid_min: int = 500
     vmid_max: int = 589
     tpl_min: int = 600
@@ -138,6 +140,9 @@ def _validate(cfg: PrepareConfig) -> None:
     if not NAME.fullmatch(cfg.node) or not NAME.fullmatch(cfg.storage):
         raise InstallerError("Invalid node or storage name")
     try:
+        subnet = ipaddress.IPv4Network(cfg.guest_subnet)
+        if subnet.prefixlen != 24:
+            raise ValueError("Guest subnet must be an IPv4 /24")
         ipaddress.IPv4Address(cfg.gateway_ip)
         ipaddress.ip_address(cfg.guest_dns)
         if cfg.node_ip is not None:
@@ -377,9 +382,10 @@ def _apply(runner: Runner, cfg: PrepareConfig, facts: dict, out_dir: Path, journ
         sdn_changed = True
     sdn_changed |= journal.create("/cluster/sdn/vnets", "/cluster/sdn/vnets/umiak0",
                    "--vnet", "umiak0", "--zone", "umiak", "--isolate-ports", "1")
-    sdn_changed |= journal.create("/cluster/sdn/vnets/umiak0/subnets", SUBNET,
-                   "--subnet", "10.88.0.0/24", "--type", "subnet", "--gateway", "10.88.0.1", "--snat", "1",
-                   "--dhcp-range", "start-address=10.88.0.100,end-address=10.88.0.250",
+    network = ipaddress.IPv4Network(cfg.guest_subnet)
+    sdn_changed |= journal.create("/cluster/sdn/vnets/umiak0/subnets", subnet_path(cfg.guest_subnet),
+                   "--subnet", cfg.guest_subnet, "--type", "subnet", "--gateway", str(network[1]), "--snat", "1",
+                   "--dhcp-range", f"start-address={network[100]},end-address={network[250]}",
                    "--dhcp-dns-server", str(ipaddress.ip_address(cfg.guest_dns)))
     journal.create("/cluster/firewall/ipset", "/cluster/firewall/ipset/umiak-gateway", "--name", "umiak-gateway")
     ipset = "/cluster/firewall/ipset/umiak-gateway"
@@ -505,7 +511,7 @@ def _verify(runner: Runner, cfg: PrepareConfig, media_name: str) -> None:
         current = get(runner, path)
         if any(str(current.get(key)) != str(value) for key, value in expected.items()):
             raise InstallerError("Verification failed: " + path)
-    get(runner, SUBNET)
+    get(runner, subnet_path(cfg.guest_subnet))
     if not any(row.get("cidr") == cfg.gateway_ip for row in get(runner, "/cluster/firewall/ipset/umiak-gateway")):
         raise InstallerError("Verification failed: gateway IPSet")
     rules = sorted(get(runner, "/cluster/firewall/groups/umiak-egress"), key=lambda row: int(row.get("pos", 0)))
@@ -548,6 +554,7 @@ def _node_config(cfg: PrepareConfig, facts: dict) -> str:
         "templateVmid = 0\n"
         'sdnZone = "umiak"\n'
         'vnet = "umiak0"\n'
+        f"guestSubnet = {q(cfg.guest_subnet)}\n"
         "clusterId = 1\n"
     )
 
