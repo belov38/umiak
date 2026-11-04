@@ -6,6 +6,12 @@ import { fileURLToPath } from "node:url";
 import { canonicalFetch } from "../canonical-fetch.mjs";
 import { claimContent } from "./claim-ui.mjs";
 import { clientGuard } from "./client-guard.mjs";
+import {
+	desktopContextFromEnv,
+	handleDesktop,
+	handleDesktopUpgrade,
+	isDesktopRequest,
+} from "./desktop-proxy.mjs";
 import { requestContext } from "./origin.mjs";
 import { OwnerStore, PgOwnerRepository } from "./owner.mjs";
 import { signinContent, signinIssueContent } from "./signin-ui.mjs";
@@ -137,6 +143,7 @@ export function createQuickstartServer({
 	transport = http,
 	proxyListener = false,
 	metadataFetch = canonicalFetch,
+	desktop = desktopContextFromEnv(env, assetsDir),
 }) {
 	const clientNotDenied = clientGuard(
 		"0.0.0.0/1,128.0.0.0/1,::/1,8000::/1",
@@ -330,6 +337,12 @@ export function createQuickstartServer({
 				return fail(res, 401, "owner_required");
 			}
 			await store.touch(token);
+			if (isDesktopRequest(req.url))
+				return handleDesktop(req, res, {
+					...desktop(),
+					owner: await store.canApprove(token),
+					origin,
+				});
 			if (path === "/owner/signin-code" && req.method === "POST") {
 				if (req.headers.origin !== origin)
 					return fail(res, 403, "origin_required");
@@ -479,13 +492,22 @@ export function createQuickstartServer({
 		try {
 			const { origin, clientAddress } = requestContext(req, env, proxyListener);
 			req.umiakClientAddress = clientAddress;
+			const token = bearer(req);
 			if (
 				!clientNotDenied(req.umiakClientAddress) ||
 				(await setupHandler?.deniedPeer?.(req.umiakClientAddress)) ||
-				!(await store.authenticate(bearer(req))) ||
+				!(await store.authenticate(token)) ||
 				(req.headers.origin && req.headers.origin !== origin)
 			)
 				throw new Error("denied");
+			if (
+				handleDesktopUpgrade(req, socket, head, {
+					...desktop(),
+					owner: await store.canApprove(token),
+					origin,
+				})
+			)
+				return;
 			const [host, port, path] = route(req.url, env);
 			const upstream = net.connect(port, host, () => {
 				upstream.write(

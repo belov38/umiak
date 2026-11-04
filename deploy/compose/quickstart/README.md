@@ -38,6 +38,19 @@ default; `umiak port 3000 --public` deliberately allows anyone who can reach tha
 preview. sslip.io supplies DNS only; use your own wildcard DNS if needed.
 `UMIAK_PREVIEW_PORT` changes port 8085.
 
+## Desktop viewer
+
+The owner ingress serves a trusted copy of the pinned moonlight-web frontend
+(baked into the image, same SHA256 as the desktop template) under
+`/desktop/<slug>/` and forwards only `/desktop/<slug>/api/...` and the stream
+WebSocket to the gateway (`http://gateway:8085`, Host
+`<slug>-desktop.<previewDomain>:8085`) with a signed `Umiak-Ingress-Desktop`
+credential (key `/gateway-secrets/ingress-desktop-key`). Only browser owner
+sessions may use it; guest responses pass only as JSON/SDP/NDJSON/binary or an
+empty body, never HTML or JavaScript, and without `Set-Cookie`. A request to
+`/desktop/<slug>/` with a query string opens the desktop; the bare path (where
+the viewer navigates when a stream ends) shows "Stream ended" with Reconnect.
+
 ## Browser secure contexts
 
 The tailnet HTTPS origin and `http://localhost` are secure contexts, so the
