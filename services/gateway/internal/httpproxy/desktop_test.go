@@ -2,6 +2,7 @@ package httpproxy
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
@@ -74,5 +75,28 @@ func TestDesktopRewriteDropsIngressCredential(t *testing.T) {
 	hd := pr.Out.Header
 	if hd.Get("Umiak-Ingress-Desktop") != "" || hd.Get("Authorization") != "" || hd.Get("X-Umiak-Desktop-User") != "umiak" {
 		t.Fatalf("forwarded headers: %v", hd)
+	}
+}
+
+func TestDesktopUpgradeSecurityHeadersSetOnce(t *testing.T) {
+	w := httptest.NewRecorder()
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	h := &handler{}
+	x := &exchange{w: &recorder{rw: w}, rid: "rid", route: &cpapi.Route{Kind: cpapi.KindDesktop}}
+	res := &http.Response{StatusCode: http.StatusSwitchingProtocols, Header: http.Header{"Upgrade": {"websocket"}}}
+	if err := h.modifyResponse(x, res, nil); err != nil {
+		t.Fatal(err)
+	}
+	// ReverseProxy copies the 101 fields onto the writer with Add.
+	for k, vs := range res.Header {
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+	for _, k := range []string{"Cache-Control", "Referrer-Policy"} {
+		if got := w.Header().Values(k); len(got) != 1 {
+			t.Errorf("%s = %v, want exactly one", k, got)
+		}
 	}
 }

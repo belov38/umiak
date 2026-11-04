@@ -654,8 +654,9 @@ test("the 101 is rebuilt and refused unless accept, protocol, extensions and byt
 	await refused(reply("Sec-WebSocket-Protocol: a\r\n"));
 	await refused(reply("", "AAAAAAAAAAAAAAAAAAAAAAAAAAA="));
 	await refused(reply("Sec-WebSocket-Extensions: permessage-deflate\r\n"));
-	await refused(reply("X-Bad: a\x01b\r\n"));
-	await refused(reply("X-Split: a\nInjected: 1\r\n"));
+	await refused(reply("Upgrade: websocket\r\n"));
+	await refused(reply("sec-websocket-accept: x\r\n"));
+	await refused(reply("Sec-WebSocket-Protocol: a\x01b\r\n"));
 
 	const before = f.upgrades.length;
 	assert.doesNotMatch(
@@ -667,4 +668,17 @@ test("the 101 is rebuilt and refused unless accept, protocol, extensions and byt
 		f.upgrades.at(-1).headers["sec-websocket-extensions"],
 		undefined,
 	);
+});
+
+test("the live gateway 101 with duplicated unrelated headers relays", async (t) => {
+	const f = await fixture(t);
+	f.setUpgradeReply((socket, req) =>
+		socket.write(
+			`HTTP/1.1 101 Switching Protocols\r\nCache-Control: no-store\r\nCache-Control: no-store\r\nConnection: upgrade\r\nDate: Wed, 04 Nov 2026 00:00:00 GMT\r\nExpires: 0\r\nPragma: no-cache\r\nReferrer-Policy: no-referrer\r\nReferrer-Policy: no-referrer\r\nSec-Websocket-Accept: ${accept(req.headers["sec-websocket-key"])}\r\nUpgrade: websocket\r\nX-Request-Id: abc\r\nX-Robots-Tag: noindex, nofollow\r\n\r\nHELLO`,
+		),
+	);
+	const out = await f.rawUpgrade(`/desktop/${SLUG}/api/host/stream/web_socket`);
+	assert.match(out, /^HTTP\/1\.1 101 /);
+	assert.match(out, /HELLO/);
+	assert.doesNotMatch(out, /cache-control|referrer-policy/i);
 });
