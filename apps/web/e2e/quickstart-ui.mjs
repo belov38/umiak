@@ -125,7 +125,7 @@ test("quickstart appearance, focus and revoke confirmation", async () => {
 		assert.equal(await page.locator("nav").count(), 0);
 		assert.equal(
 			await page.locator("#host-command").textContent(),
-			"docker compose exec quickstart umiak-signin",
+			"curl -fsSL https://raw.githubusercontent.com/belov38/umiak/main/install.sh | sh",
 		);
 		await page.getByLabel("Sign-in code", { exact: true }).fill("WRONG");
 		await page.getByRole("button", { name: "Sign in", exact: true }).click();

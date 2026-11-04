@@ -310,7 +310,9 @@ no deployment settings, owner state or arbitrary paths are exposed.
 
 Owner sessions belong to each browser and hostname. Open the deployment, then
 enter a one-time sign-in code. Existing sessions and CLI pairings remain valid.
-From a shell in the control plane container:
+Homelab installs: on the Proxmox node run the installer and choose **Sign in a new
+browser** (`curl -fsSL https://raw.githubusercontent.com/belov38/umiak/main/install.sh | sh`,
+or `... | sh -s -- --action signin`). Low-level alternative, from the Proxmox node:
 
 ```sh
 pct exec <ct> -- docker compose --project-directory /opt/umiak exec quickstart umiak-signin
@@ -326,7 +328,8 @@ rate-limit error, check the code or obtain a new one; source limits reset after 
 minutes. CLI credentials cannot issue broader browser credentials.
 
 Use **Lost every session? Reset owner access** only as a last resort: recovery
-revokes all browsers, CLI credentials and pending pairings.
+revokes all browsers, CLI credentials and pending pairings. On homelab installs
+use the installer menu **Reset owner access** (`--action reset-owner`).
 
 Sign-in admission allows 20 attempts per source address per 10 minutes. NAT can
 put all clients in one shared bucket: one attacker can block new sign-ins for 10
