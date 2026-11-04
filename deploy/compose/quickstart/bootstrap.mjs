@@ -16,7 +16,19 @@ const LATER = ["templates", "smoke"];
 const fail = (message) => {
 	throw new Error(message);
 };
-const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+// Postgres jsonb reorders object keys, so compare with keys sorted recursively.
+const canonical = (value) =>
+	Array.isArray(value)
+		? value.map(canonical)
+		: value && typeof value === "object"
+			? Object.fromEntries(
+					Object.keys(value)
+						.sort()
+						.map((key) => [key, canonical(value[key])]),
+				)
+			: value;
+const same = (a, b) =>
+	JSON.stringify(canonical(a ?? null)) === JSON.stringify(canonical(b ?? null));
 
 async function deniedAddresses(connection, lookup) {
 	const found = [];
