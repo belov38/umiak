@@ -1,60 +1,60 @@
-# S4. Gateway: публичные URL портов, SSH, edge
+# S4. Gateway: public port URLs, SSH, edge
 
-Статус: черновик на согласование, 2026-10-29. Дополнено решением Ильи 2026-10-29 (Keycloak, offboarding вариант A): вход по коротким SSH-сертификатам и разрыв сессий при деактивации (§9.2, §9.3, §9.5). Область S4 из `docs/roadmap.md`. Архитектура: `docs/architecture.md` (§7, §10, §11). Основа: `docs/specs/s2-tunnel-protocol.md` (дальше «S2»).
+Status: draft for agreement, 2026-10-29. Supplemented by Ilia's decision of 2026-10-29 (Keycloak, offboarding option A): login by short-lived SSH certificates and session termination on deactivation (§9.2, §9.3, §9.5). Area S4 from `docs/roadmap.md`. Architecture: `docs/architecture.md` (§7, §10, §11). Basis: `docs/specs/s2-tunnel-protocol.md` (below "S2").
 
-S2 уже задал в gateway приём туннелей, реестр `machine → gateway`, drain и внутренний listener для `api`/`worker`. Этот документ добавляет всё, что смотрит наружу:
-- HTTP-прокси портов sandbox на `https://<slug>-<port>.umiak.<domain>`;
-- режимы доступа `public`, `token`, `sso`;
-- маршрутизацию запроса, попавшего не на тот под;
+S2 has already defined in the gateway the tunnel intake, the `machine → gateway` registry, drain, and the internal listener for `api`/`worker`. This document adds everything that faces outward:
+- an HTTP proxy of sandbox ports at `https://<slug>-<port>.umiak.<domain>`;
+- the access modes `public`, `token`, `sso`;
+- routing of a request that landed on the wrong pod;
 - TLS-edge;
 - SSH gateway;
-- лимиты, наблюдаемость и заглушку под TURN.
+- limits, observability, and a placeholder for TURN.
 
-Протокол туннеля, реестр и drain S2 здесь не меняются, кроме одного переопределения (§10.4).
+The tunnel protocol, registry, and drain of S2 do not change here, except for one override (§10.4).
 
-Пометка **[исполнитель]** означает решение автора спеки в рамках брифа. Его можно менять без нового согласования, если причина изменения записана. Остальное согласовано master-сессией 2026-10-29.
+The mark **[implementer]** means a decision of the spec author within the brief. It can be changed without new agreement if the reason for the change is recorded. The rest was agreed with the master session on 2026-10-29.
 
-## 1. Зачем и что считается успехом
+## 1. Why, and what counts as success
 
-Sandbox не имеет публичного IP, весь входящий трафик идёт через исходящий туннель агента. Gateway — единственная входная точка для людей и программ, которые хотят достучаться до того, что работает внутри VM.
+A sandbox has no public IP, all inbound traffic goes through the agent's outbound tunnel. The gateway is the single entry point for people and programs that want to reach what runs inside the VM.
 
-Сценарии по приоритету:
+Scenarios by priority:
 
-1. **Превью dev-сервера.** AI-агент запускает в sandbox `npm run dev` (Vite, Next.js), публикует порт через API и отдаёт человеку ссылку `https://quiet-otter-lamp-5173.umiak.example.com?_token=…`. Человек открывает её в браузере: страница, HMR через WebSocket и загрузка файлов работают. Флаги `--host 0.0.0.0` или `allowedHosts` в конфиге Vite не нужны.
-2. **Внутренний инструмент для коллег.** Порт в режиме `sso`. Любой сотрудник, вошедший через корпоративный IdP, открывает URL без токена, приложение получает его e-mail в заголовке.
-3. **Публичная ссылка** (`public`): webhook-приёмник, демо для внешнего человека.
-4. **SSH.** `ssh quiet-otter-lamp@ssh.example.com` с ключом, который пользователь зарегистрировал в платформе. Работают scp, sftp, `-L`/`-R`, agent forwarding и VS Code Remote-SSH. После fork или resume на новую machine `known_hosts` не ломается.
-5. **Деплой gateway** не требует ручных действий. HTTP-запросы в полёте завершаются, WebSocket и SSH закрываются предсказуемо и с предупреждением, клиенты переподключаются.
+1. **A dev server preview.** An AI agent runs `npm run dev` (Vite, Next.js) in the sandbox, publishes the port via the API, and gives a person the link `https://quiet-otter-lamp-5173.umiak.example.com?_token=…`. The person opens it in a browser: the page, HMR over WebSocket, and file loading work. The flags `--host 0.0.0.0` or `allowedHosts` in the Vite config are not needed.
+2. **An internal tool for colleagues.** A port in `sso` mode. Any employee signed in through the corporate IdP opens the URL without a token, the application receives their e-mail in a header.
+3. **A public link** (`public`): a webhook receiver, a demo for an outside person.
+4. **SSH.** `ssh quiet-otter-lamp@ssh.example.com` with a key the user registered in the platform. scp, sftp, `-L`/`-R`, agent forwarding, and VS Code Remote-SSH work. After a fork or a resume onto a new machine `known_hosts` does not break.
+5. **A gateway deploy** requires no manual actions. In-flight HTTP requests complete, WebSocket and SSH close predictably and with a warning, clients reconnect.
 
-## 2. Цели, не-цели, анти-цели
+## 2. Goals, non-goals, anti-goals
 
-**Цели:**
-- один код прокси для любого пода, независимо от того, где туннель machine;
-- прозрачные HTTP/1.1, HTTP/2, WebSocket, SSE, большие загрузки без буферизации;
-- никакая учётная запись платформы (cookie, токен, сессия IdP) не доходит до кода в sandbox;
-- TLS и L4-вход без зависимости от конкретного ingress-контроллера;
-- SSH со всеми возможностями OpenSSH;
-- метрики и логи, по которым видно, где запрос сломался: маршрут, агент, приложение.
+**Goals:**
+- one proxy code for any pod, regardless of where the machine's tunnel is;
+- transparent HTTP/1.1, HTTP/2, WebSocket, SSE, large uploads without buffering;
+- no platform account (cookie, token, IdP session) reaches code in the sandbox;
+- TLS and L4 entry without dependence on a specific ingress controller;
+- SSH with all OpenSSH capabilities;
+- metrics and logs that show where a request broke: route, agent, application.
 
-**Не-цели:**
-- протокол туннеля, реестр, drain туннелей (S2);
-- гостевой агент (S3), но S4 формулирует к нему требования (§16);
-- публичный REST API и хранение HostedPort (S7);
-- дашборд и JIT-пользователи (S8);
-- манифесты Kubernetes (S12), здесь только требования;
-- TURN и рабочий стол (S10), здесь только заглушка (§13);
-- пробуждение остановленного sandbox по HTTP-запросу (позже, продуктовая функция);
-- свои домены пользователей (CNAME), сырые TCP/UDP-порты наружу, HTTPS к приложению внутри VM (позже).
+**Non-goals:**
+- the tunnel protocol, registry, tunnel drain (S2);
+- the guest agent (S3), but S4 states requirements for it (§16);
+- the public REST API and HostedPort storage (S7);
+- the dashboard and JIT users (S8);
+- Kubernetes manifests (S12), only requirements here;
+- TURN and the desktop (S10), only a placeholder here (§13);
+- waking a stopped sandbox on an HTTP request (later, a product feature);
+- users' own domains (CNAME), raw TCP/UDP ports outward, HTTPS to the application inside the VM (later).
 
-**Анти-цели** (провал, даже если формально работает):
-- cookie сессии IdP, API-ключ или токен порта попали в запрос к приложению в sandbox;
-- код в одном sandbox может читать или подменять авторизацию другого sandbox или дашборда;
-- запрос к sandbox A доставлен в sandbox B (например, из-за устаревшего кэша после rename или fork);
-- gateway буферизует тело целиком, и загрузка 5 GB съедает память пода;
-- деплой gateway молча рвёт SSH-сессии без предупреждения;
-- ошибку gateway невозможно отличить от ошибки приложения.
+**Anti-goals** (a failure even if it formally works):
+- an IdP session cookie, an API key, or a port token reached a request to the application in the sandbox;
+- code in one sandbox can read or forge the authorization of another sandbox or the dashboard;
+- a request to sandbox A was delivered to sandbox B (for example, because of a stale cache after rename or fork);
+- the gateway buffers the whole body, and a 5 GB upload eats the pod's memory;
+- a gateway deploy silently breaks SSH sessions without warning;
+- a gateway error cannot be distinguished from an application error.
 
-## 3. Обзор
+## 3. Overview
 
 ```
                  DNS: *.umiak.<domain>, ssh.<domain>, tunnel.<domain>  ->  LB IP
@@ -78,28 +78,28 @@ Sandbox не имеет публичного IP, весь входящий тр�
  web / api / oauth2-proxy live behind the regular ingress on <domain>, not on this LB.
 ```
 
-Принципы:
+Principles:
 
-1. **Принявший под делает всё прикладное.** HTTP-разбор, авторизацию, лимиты, логи и метрики делает под, который принял соединение. От владельца туннеля ему нужен только байтовый поток до `127.0.0.1:port` в VM. Поток он получает локально (`MachineConn.DialTCP`) или от пода-владельца через `CONNECT` на внутреннем listener-е (S2 §8.4). Редирект на «правильный» под невозможен: hostname один, и L4-балансировщик снова выберет случайный под.
-2. **Gateway не хранит данных о маршрутах.** Источник истины — `api`; gateway кэширует ответы и сбрасывает кэш по `NOTIFY`.
-3. **Всё, что принадлежит платформе, gateway вырезает** на границе с приложением в обе стороны.
+1. **The accepting pod does everything application-level.** HTTP parsing, authorization, limits, logs, and metrics are done by the pod that accepted the connection. From the tunnel owner it needs only a byte stream to `127.0.0.1:port` in the VM. It gets the stream locally (`MachineConn.DialTCP`) or from the owner pod via `CONNECT` on the internal listener (S2 §8.4). A redirect to the "right" pod is impossible: the hostname is one, and the L4 balancer would again pick a random pod.
+2. **The gateway stores no route data.** The source of truth is `api`; the gateway caches responses and drops the cache on `NOTIFY`.
+3. **Everything that belongs to the platform is stripped by the gateway** at the boundary with the application in both directions.
 
-## 4. Имена и DNS
+## 4. Names and DNS
 
-### 4.1 Домены
+### 4.1 Domains
 
-| Имя | Назначение | Куда в DNS |
+| Name | Purpose | Where in DNS |
 |---|---|---|
-| `*.umiak.<domain>` | публичные URL портов | IP `gateway-edge` |
-| `tunnel.<domain>` | туннели агентов (S2) | IP `gateway-edge` |
+| `*.umiak.<domain>` | public port URLs | the `gateway-edge` IP |
+| `tunnel.<domain>` | agent tunnels (S2) | the `gateway-edge` IP |
 | `ssh.<domain>` | SSH gateway | IP `gateway-edge` |
-| `<domain>`, `app.<domain>`, `api.<domain>` | web, API, oauth2-proxy | обычный ingress, не gateway |
+| `<domain>`, `app.<domain>`, `api.<domain>` | web, API, oauth2-proxy | the regular ingress, not the gateway |
 
-Суффикс публичных URL задаётся конфигом (`UMIAK_GATEWAY_PREVIEW_DOMAIN`). По умолчанию это `umiak.<domain>`. Поддерживается и отдельный регистрируемый домен (например, `example-umiak.net`): в коде это только значение конфига и режим cookie (§8.2). Риски выбора — §14.1.
+The suffix of public URLs is set by config (`UMIAK_GATEWAY_PREVIEW_DOMAIN`). By default it is `umiak.<domain>`. A separate registrable domain is also supported (for example `example-umiak.net`): in code this is only a config value and the cookie mode (§8.2). The risks of the choice are in §14.1.
 
-### 4.2 Грамматика метки
+### 4.2 Label grammar
 
-Хост = `<label>.<umiak-domain>`, где label — **ровно одна** DNS-метка (её покрывает один wildcard-сертификат):
+Host = `<label>.<umiak-domain>`, where the label is **exactly one** DNS label (covered by a single wildcard certificate):
 
 ```
 label = slug "-" port
@@ -107,63 +107,63 @@ slug  = [a-z0-9]+ ( "-" [a-z0-9]+ )*      ; 3..40 chars, no "--", no leading/tra
 port  = [1-9][0-9]{0,4}                    ; 1..65535, no leading zeros
 ```
 
-- Порт — последний сегмент после `-`, slug — всё до него. Slug не может заканчиваться на `-<цифры>`: иначе разбор неоднозначен. Это правило валидации slug в S7.
-- Зарезервированы суффиксы slug для служебных хостов. `<slug>-desktop` — рабочий стол (S10). Список зарезервированных суффиксов — константа в gateway и в валидации S7.
-- Host приводится к нижнему регистру, `:443` отбрасывается. Хост вне грамматики, apex `umiak.<domain>` и вложенные метки дают `404 route_not_found`.
-- Slug — свойство sandbox, а не machine: он переживает stop/resume и смену machine. Fork получает новый sandbox и новый slug. Генерация slug (по умолчанию случайные три слова, как у boat) и rename — S7.
-- Порт `22` и порты из списка зарезервированных платформой (S3/S10, константа в конфиге) публиковать нельзя: S7 их отклоняет, gateway на всякий случай отвечает `404`.
+- The port is the last segment after `-`, the slug is everything before it. A slug cannot end with `-<digits>`: otherwise parsing is ambiguous. This is a slug validation rule in S7.
+- Slug suffixes are reserved for service hosts. `<slug>-desktop` is the desktop (S10). The list of reserved suffixes is a constant in the gateway and in the S7 validation.
+- The host is lowercased, `:443` is dropped. A host outside the grammar, the apex `umiak.<domain>`, and nested labels give `404 route_not_found`.
+- The slug is a property of the sandbox, not of the machine: it survives stop/resume and a machine change. A fork gets a new sandbox and a new slug. Slug generation (by default three random words, like boat) and rename are S7.
+- Port `22` and the ports from the platform-reserved list (S3/S10, a constant in the config) cannot be published: S7 rejects them, the gateway answers `404` just in case.
 
-## 5. Edge: TLS и входящие соединения
+## 5. Edge: TLS and incoming connections
 
-### 5.1 Основной режим: gateway терминирует TLS за L4 LoadBalancer
+### 5.1 Main mode: the gateway terminates TLS behind an L4 LoadBalancer
 
-- Service `gateway-edge` типа `LoadBalancer` (в homelab — MetalLB, kube-vip или аналог; выбирает S12): `443/tcp → 8443`, `22/tcp → 2222`.
-- **IP клиента** — два равноправных режима (`UMIAK_GATEWAY_PROXY_PROTOCOL=off|v2`). Выбирает S12 по возможностям LB.
-  - `v2` — **PROXY protocol v2** на обоих портах. Для облачных и внешних L4-балансировщиков, которые умеют его слать. Gateway принимает заголовок PROXY только от адресов из `UMIAK_GATEWAY_PROXY_PROTOCOL_CIDRS`. С других адресов соединение с заголовком отклоняется, без заголовка — принимается.
-  - `off` + `externalTrafficPolicy: Local` — IP берётся из TCP-соединения. Для homelab: MetalLB и kube-vip только анонсируют IP, трафик идёт через kube-proxy, а он PROXY-заголовок не добавляет. **Этот режим используется в PoC и на стенде.**
-  - Оба режима покрыты тестами (§15.6).
-- Listener `:8443` выбирает сертификат по SNI:
+- Service `gateway-edge` of type `LoadBalancer` (in a homelab — MetalLB, kube-vip, or similar; chosen by S12): `443/tcp → 8443`, `22/tcp → 2222`.
+- **Client IP** — two equal modes (`UMIAK_GATEWAY_PROXY_PROTOCOL=off|v2`). S12 chooses by the LB's capabilities.
+  - `v2` — **PROXY protocol v2** on both ports. For cloud and external L4 balancers that can send it. The gateway accepts the PROXY header only from addresses in `UMIAK_GATEWAY_PROXY_PROTOCOL_CIDRS`. From other addresses a connection with a header is rejected, without a header is accepted.
+  - `off` + `externalTrafficPolicy: Local` — the IP is taken from the TCP connection. For a homelab: MetalLB and kube-vip only announce the IP, traffic goes through kube-proxy, which does not add a PROXY header. **This mode is used in the PoC and on the stand.**
+  - Both modes are covered by tests (§15.6).
+- The listener `:8443` picks a certificate by SNI:
 
-| SNI | Сертификат | Дальше |
+| SNI | Certificate | Next |
 |---|---|---|
-| `tunnel.<domain>` | от приватного tunnel CA (S2 §5.4) | приёмник туннелей S2 |
-| `*.umiak.<domain>` | публичный wildcard | HTTP-прокси (§7) |
-| пусто или чужое | соединение закрывается (TLS alert `unrecognized_name`) | — |
+| `tunnel.<domain>` | from the private tunnel CA (S2 §5.4) | the S2 tunnel receiver |
+| `*.umiak.<domain>` | public wildcard | HTTP proxy (§7) |
+| empty or foreign | the connection is closed (TLS alert `unrecognized_name`) | — |
 
-- ALPN: `h2`, `http/1.1` для `*.umiak`. Для `tunnel` — `http/1.1`: WebSocket upgrade (S2 §4.1).
-- TLS 1.2 и 1.3, набор шифров Go по умолчанию. Handshake timeout 10 s.
-- **Сертификаты.** Wildcard `*.umiak.<domain>` выпускает cert-manager через ACME DNS-01 (Let's Encrypt; HTTP-01 для wildcard невозможен) или через корпоративный CA, если это решит S12. Сертификат `tunnel.<domain>` — от tunnel CA (cert-manager `CA` Issuer или выпуск вручную, S12). Оба лежат в Secret `kubernetes.io/tls` и смонтированы файлами. Gateway перечитывает их без рестарта: проверка mtime раз в 30 s и `fsnotify` **[исполнитель]**. Метрика срока действия — §12.
-- Для PoC без публичного домена допустим cert-manager `SelfSigned`/`CA` Issuer для `*.umiak`. Браузеры тогда требуют доверия к CA. Это настройка, код не меняется.
+- ALPN: `h2`, `http/1.1` for `*.umiak`. For `tunnel` — `http/1.1`: WebSocket upgrade (S2 §4.1).
+- TLS 1.2 and 1.3, the default Go cipher set. Handshake timeout 10 s.
+- **Certificates.** The wildcard `*.umiak.<domain>` is issued by cert-manager via ACME DNS-01 (Let's Encrypt; HTTP-01 is impossible for a wildcard) or via a corporate CA if S12 decides so. The `tunnel.<domain>` certificate is from the tunnel CA (a cert-manager `CA` Issuer or manual issuance, S12). Both live in a `kubernetes.io/tls` Secret and are mounted as files. The gateway re-reads them without a restart: an mtime check every 30 s and `fsnotify` **[implementer]**. The expiry metric is in §12.
+- For the PoC without a public domain a cert-manager `SelfSigned`/`CA` Issuer for `*.umiak` is acceptable. Browsers then require trust in the CA. This is configuration, the code does not change.
 
-### 5.2 Запасной режим: за ingress
+### 5.2 Fallback mode: behind an ingress
 
-Gateway умеет слушать plain HTTP (`UMIAK_GATEWAY_HTTP_LISTEN`, h2c и HTTP/1.1) для `*.umiak` и `tunnel`, а TLS тогда терминирует ingress. SSH в этом режиме всё равно идёт через отдельный L4 Service на `:2222`: HTTP-ingress его не обслуживает.
+The gateway can listen on plain HTTP (`UMIAK_GATEWAY_HTTP_LISTEN`, h2c and HTTP/1.1) for `*.umiak` and `tunnel`, and then TLS is terminated by the ingress. SSH in this mode still goes through a separate L4 Service on `:2222`: an HTTP ingress does not serve it.
 
-Требования к ingress в этом режиме (контроллер любой):
-- wildcard-хост `*.umiak.<domain>` с wildcard-сертификатом; `tunnel.<domain>` с сертификатом от tunnel CA (S2 §6);
-- WebSocket upgrade; соединения без ограничения длительности; idle timeout не меньше 60 min для `*.umiak` (§7.7) и не меньше 60 s для `tunnel`;
-- **без буферизации** запросов и ответов, без лимита размера тела (иначе ломаются большие загрузки и SSE);
-- передача `X-Forwarded-For`, `X-Forwarded-Proto`; gateway доверяет им только от адресов `UMIAK_GATEWAY_TRUSTED_PROXY_CIDRS`;
-- HTTP/2 до backend не обязателен. Без него gRPC к приложениям (`appProtocol: h2c`, §7.5) не работает, остальное работает;
-- снятие пода из endpoints по readiness.
+Requirements for the ingress in this mode (any controller):
+- the wildcard host `*.umiak.<domain>` with a wildcard certificate; `tunnel.<domain>` with a certificate from the tunnel CA (S2 §6);
+- WebSocket upgrade; connections without a duration limit; idle timeout of at least 60 min for `*.umiak` (§7.7) and at least 60 s for `tunnel`;
+- **no buffering** of requests and responses, no body size limit (otherwise large uploads and SSE break);
+- passing `X-Forwarded-For`, `X-Forwarded-Proto`; the gateway trusts them only from addresses in `UMIAK_GATEWAY_TRUSTED_PROXY_CIDRS`;
+- HTTP/2 to the backend is not required. Without it gRPC to applications (`appProtocol: h2c`, §7.5) does not work, the rest works;
+- removing the pod from endpoints by readiness.
 
-Основной режим — §5.1. Запасной поддерживается кодом и покрывается одним интеграционным тестом (§15).
+The main mode is §5.1. The fallback is supported by the code and covered by one integration test (§15).
 
-### 5.3 Остальные listener-ы пода
+### 5.3 The pod's other listeners
 
-| Порт | Что | Кто ходит |
+| Port | What | Who connects |
 |---|---|---|
 | 8443 | TLS edge (§5.1) | LB |
 | 2222 | SSH (§9) | LB |
-| 8080 | plain-режим за ingress (§5.2), по умолчанию выключен | ingress |
-| 7000 | внутренний listener S2 (h2c, service token) | `api`, `worker`, другие поды gateway |
+| 8080 | plain mode behind an ingress (§5.2), off by default | ingress |
+| 7000 | the internal S2 listener (h2c, service token) | `api`, `worker`, other gateway pods |
 | 9090 | `/metrics`, `/healthz`, `/readyz` | Prometheus, kubelet |
 
-## 6. Поиск маршрута
+## 6. Route lookup
 
-### 6.1 Контракт с `api`
+### 6.1 Contract with `api`
 
-Gateway не читает схему `api`. Он вызывает внутренний endpoint `api` по сети кластера с service token gateway (тот же механизм, что `POST /internal/v1/agent-events` в S2 §5.5):
+The gateway does not read the `api` schema. It calls an internal `api` endpoint over the cluster network with the gateway's service token (the same mechanism as `POST /internal/v1/agent-events` in S2 §5.5):
 
 ```
 GET /internal/v1/gateway/routes/{label}
@@ -186,177 +186,177 @@ GET /internal/v1/gateway/routes/{label}
 404 {"code": "route_not_found"}   // unknown slug, port not hosted, reserved suffix
 ```
 
-Здесь gateway ничего не решает о политике: заблокирован ли маршрут, разрешён ли `public` в организации, кто владелец — всё это вычисляет `api`. Глобальный выключатель режима `public` живёт в `api`: при выключенном `public` такие маршруты приходят как `blocked: true, blockReason: "public_disabled"`.
+Here the gateway decides nothing about policy: whether a route is blocked, whether `public` is allowed in the organization, who the owner is — `api` computes all of this. The global switch of the `public` mode lives in `api`: with `public` turned off such routes come as `blocked: true, blockReason: "public_disabled"`.
 
-### 6.2 Кэш
+### 6.2 Cache
 
-- Кэш в памяти пода, ключ — label. Положительный TTL 30 s, отрицательный (`404`) 5 s **[исполнитель]**.
-- Одновременные промахи по одной метке сливаются в один запрос (singleflight). Таймаут запроса к `api` 3 s.
-- **Инвалидация.** После любого изменения, влияющего на ответ, в Postgres уходит `NOTIFY umiak_routes, '<slug>'`. Поводы: hosted port, режим, токен, блокировка, состояние sandbox, `machineId`, rename. Эти данные пишут и `api`, и `worker` (состояние, machine), поэтому уведомление шлёт **триггер БД** на соответствующих таблицах, а не код приложения: так ни один писатель его не забудет. Триггеры — часть схемы S6/S7, контракт задаёт S4. При rename уходят два уведомления, со старым и новым slug. Gateway держит `LISTEN umiak_routes` (то же соединение pgx, что для `tunnel_sessions` в S2) и выкидывает все записи со slug из payload. Payload `*` очищает весь кэш: так срабатывает глобальный выключатель `public`.
-- Если соединение `LISTEN` оборвалось, gateway очищает весь кэш при переподключении: уведомления за время обрыва потеряны.
-- **`api` недоступен.** Записи, у которых истёк TTL, продолжают обслуживаться до 10 min (stale-if-error), чтобы падение `api` не валило все превью. Промах без старой записи даёт `503 route_lookup_unavailable`. Исключение: устаревшая запись с `blocked: true` остаётся заблокированной.
+- An in-memory cache of the pod, keyed by label. Positive TTL 30 s, negative (`404`) 5 s **[implementer]**.
+- Simultaneous misses on one label are merged into one request (singleflight). The timeout of a request to `api` is 3 s.
+- **Invalidation.** After any change that affects the response, `NOTIFY umiak_routes, '<slug>'` goes to Postgres. Triggers: hosted port, mode, token, block, sandbox state, `machineId`, rename. This data is written by both `api` and `worker` (state, machine), so the notification is sent by a **DB trigger** on the corresponding tables, not by application code: this way no writer forgets it. The triggers are part of the S6/S7 schema, the contract is set by S4. On rename two notifications go out, with the old and new slug. The gateway holds `LISTEN umiak_routes` (the same pgx connection as for `tunnel_sessions` in S2) and drops all entries with the slug from the payload. The payload `*` clears the whole cache: this is how the global `public` switch takes effect.
+- If the `LISTEN` connection dropped, the gateway clears the whole cache on reconnect: notifications during the drop are lost.
+- **`api` unavailable.** Entries whose TTL has expired keep being served for up to 10 min (stale-if-error), so that an `api` failure does not take down all previews. A miss without an old entry gives `503 route_lookup_unavailable`. Exception: a stale entry with `blocked: true` stays blocked.
 
-### 6.3 Состояние sandbox
+### 6.3 Sandbox state
 
-| `sandboxState` (S6) | Действие gateway |
+| `sandboxState` (S6) | Gateway action |
 |---|---|
-| `ready`, `running` | проксировать |
+| `ready`, `running` | proxy |
 | `creating`, `resuming` | `503 sandbox_starting`, `Retry-After: 5` |
 | `stopping`, `stopped` | `503 sandbox_stopped` |
 | `deleting`, `deleted` | `404 route_not_found` |
-| `error` и любое неизвестное | `503 sandbox_unavailable` |
+| `error` and any unknown | `503 sandbox_unavailable` |
 
-Если в `ready`/`running` поле `machineId` равно `null`, это несогласованность; ответ — `503 sandbox_unavailable`. Пробуждения по запросу нет.
+If in `ready`/`running` the field `machineId` is `null`, this is an inconsistency; the answer is `503 sandbox_unavailable`. There is no wake-up on request.
 
-### 6.4 Владелец туннеля
+### 6.4 Tunnel owner
 
-1. Gateway ищет machine в своих локальных туннелях. Нашёл с актуальным epoch — это локальный dial.
-2. Иначе смотрит реестр S2: `tunnel_sessions` join `gateway_instances`, `state = connected`, heartbeat свежий. Это та же логика и тот же кэш с `LISTEN tunnel_sessions`, что S2 §8.4 описывает для `agent-client`, но на Go. Реализация живёт в `libs/tunnel` рядом с реестром.
-3. Machine не подключена: gateway ждёт `NOTIFY` до **10 s** (покрывает обычное переподключение агента, S2 §6), затем отвечает `503 agent_unavailable` с `Retry-After: 5`.
+1. The gateway looks for the machine among its local tunnels. If found with the current epoch — a local dial.
+2. Otherwise it looks at the S2 registry: `tunnel_sessions` join `gateway_instances`, `state = connected`, the heartbeat is fresh. This is the same logic and the same cache with `LISTEN tunnel_sessions` that S2 §8.4 describes for `agent-client`, but in Go. The implementation lives in `libs/tunnel` next to the registry.
+3. The machine is not connected: the gateway waits for `NOTIFY` up to **10 s** (covers the usual agent reconnect, S2 §6), then answers `503 agent_unavailable` with `Retry-After: 5`.
 
-## 7. HTTP-прокси
+## 7. HTTP proxy
 
-### 7.1 Конвейер запроса
+### 7.1 Request pipeline
 
-1. Принять TLS (или plain из §5.2), определить IP клиента (§5.1).
-2. Лимиты по IP (§11).
-3. Разобрать host (§4.2). Путь `/__umiak/*` gateway обрабатывает сам и никогда не проксирует (§8.4).
-4. Маршрут (§6), блокировка, состояние.
-5. Авторизация по режиму (§8).
-6. Лимиты по маршруту и machine (§11).
-7. Подготовить заголовки (§7.4).
-8. Получить поток до приложения (§7.2) и проксировать запрос.
-9. Подготовить заголовки ответа (§7.4), записать access log и метрики (§12).
+1. Accept TLS (or plain from §5.2), determine the client IP (§5.1).
+2. Per-IP limits (§11).
+3. Parse the host (§4.2). The path `/__umiak/*` is handled by the gateway itself and never proxied (§8.4).
+4. Route (§6), block, state.
+5. Authorization by mode (§8).
+6. Per-route and per-machine limits (§11).
+7. Prepare the headers (§7.4).
+8. Get the stream to the application (§7.2) and proxy the request.
+9. Prepare the response headers (§7.4), write the access log and metrics (§12).
 
-Реализация — `net/http/httputil.ReverseProxy` с хуком `Rewrite` и своим `Transport` **[исполнитель]**.
+The implementation is `net/http/httputil.ReverseProxy` with a `Rewrite` hook and its own `Transport` **[implementer]**.
 
-### 7.2 Поток до приложения
+### 7.2 Stream to the application
 
-`Transport.DialContext` получает адрес вида `m-<machineId>-<port>.umiak.internal:80` и превращает его в поток:
-- **локально:** `MachineConn.DialTCP(ctx, port)` (S2 §4.5);
-- **через владельца:** `CONNECT` на `internal_url` пода-владельца, h2c, service token gateway (S2 §5.5, §8.4). К каждому соседнему поду одно HTTP/2-соединение, потоки мультиплексируются. Клиентская функция для этого — в `libs/tunnel`.
-- Если владелец ответил `421 machine_moved`, gateway ищет владельца заново и повторяет dial один раз. Это безопасно: байты запроса ещё не отправлены.
+`Transport.DialContext` receives an address of the form `m-<machineId>-<port>.umiak.internal:80` and turns it into a stream:
+- **locally:** `MachineConn.DialTCP(ctx, port)` (S2 §4.5);
+- **via the owner:** `CONNECT` to the `internal_url` of the owner pod, h2c, the gateway's service token (S2 §5.5, §8.4). One HTTP/2 connection to each neighboring pod, streams are multiplexed. The client function for this is in `libs/tunnel`.
+- If the owner answered `421 machine_moved`, the gateway looks for the owner again and repeats the dial once. This is safe: the request bytes have not been sent yet.
 
-**Форма peer CONNECT на проводе (уточнение S2 §8.4).** Обычный HTTP/2 CONNECT не несёт `:path` (RFC 9113 §8.5): Go-клиент его не шлёт, Go-сервер отвергает. Путь возможен только в extended CONNECT, а его Go включает лишь глобальным `GODEBUG=http2xconnect=1`, который запрещён §7.3. Поэтому цель кодируется в `:authority`, как в CONNECT к агенту (S2 §4.2):
-- запрос: `CONNECT <machineId>:<port>`, где `machineId` — UUID, допустимое reg-name;
-- заголовки: `Authorization: Bearer <service-token>`;
-- обработчик выбирается по методу `CONNECT` до маршрутизации по пути.
+**The wire form of the peer CONNECT (a clarification of S2 §8.4).** A plain HTTP/2 CONNECT carries no `:path` (RFC 9113 §8.5): the Go client does not send it, the Go server rejects it. A path is possible only in extended CONNECT, which Go enables only with the global `GODEBUG=http2xconnect=1`, forbidden by §7.3. Therefore the target is encoded in `:authority`, as in the CONNECT to the agent (S2 §4.2):
+- request: `CONNECT <machineId>:<port>`, where `machineId` is a UUID, a valid reg-name;
+- headers: `Authorization: Bearer <service-token>`;
+- the handler is chosen by the `CONNECT` method before path routing.
 
-Форма `/v1/machines/{id}/tcp/{port}` в тексте S2 означает этот запрос. Поправка внесена в S2 §8.4.
+The form `/v1/machines/{id}/tcp/{port}` in the S2 text means this request. The correction was made in S2 §8.4.
 
-**Бюджет потоков.**
-- На внутреннем listener-е `MaxConcurrentStreams` поднимается до 10 000 на соединение (по умолчанию в Go 250). Иначе долгие WebSocket и SSH между двумя подами упрутся в лимит.
-- Агент держит до 1000 потоков на туннель (S2 §4.3), и делят их RPC, attach, файлы и TCP. Поэтому лимит TCP-потоков к приложениям (включая SSH) — **800 на machine** — считает **под-владелец**: только он видит все потоки туннеля, локальные и от соседей. Сверх лимита владелец отвечает на CONNECT `503`, а front отдаёт `503 overloaded`. 200 потоков остаются RPC и файлам.
+**Stream budget.**
+- On the internal listener `MaxConcurrentStreams` is raised to 10 000 per connection (the Go default is 250). Otherwise long WebSocket and SSH between two pods would hit the limit.
+- The agent holds up to 1000 streams per tunnel (S2 §4.3), shared by RPC, attach, files, and TCP. Therefore the limit of TCP streams to applications (including SSH) — **800 per machine** — is counted by the **owner pod**: only it sees all the tunnel's streams, local and from neighbors. Beyond the limit the owner answers the CONNECT with `503`, and the front returns `503 overloaded`. 200 streams stay for RPC and files.
 
-Синтетический host в URL нужен, чтобы стандартный пул соединений `http.Transport` держал keep-alive отдельно для каждой пары `(machine, epoch, port)`: `m-<machineId>-e<epoch>-<port>.umiak.internal`. Epoch в ключе нужен потому, что `http.Transport` не умеет закрывать простаивающие соединения одного хоста. После переезда machine новые запросы идут в новый пул, а старые соединения умирают по таймауту простоя. Пул: до 8 простаивающих соединений на ключ, простой 30 s **[исполнитель]**. Каждое простаивающее соединение держит поток туннеля, поэтому пул маленький.
+A synthetic host in the URL is needed so that the standard `http.Transport` connection pool keeps keep-alive separately for each pair `(machine, epoch, port)`: `m-<machineId>-e<epoch>-<port>.umiak.internal`. The epoch is in the key because `http.Transport` cannot close idle connections of one host. After a machine moves, new requests go into a new pool and the old connections die by idle timeout. The pool: up to 8 idle connections per key, idle 30 s **[implementer]**. Each idle connection holds a tunnel stream, so the pool is small.
 
-**Куда агент дозванивается внутри VM** (требование к S3; согласовано master-сессией): порядок `127.0.0.1:port`, затем `[::1]:port`, затем адреса интерфейсов VM. Так одинаково работают приложения на `localhost` и на `0.0.0.0`, и флаг `--localhost`, как у boat, не нужен.
+**Where the agent dials inside the VM** (a requirement for S3; agreed by the master session): the order `127.0.0.1:port`, then `[::1]:port`, then the VM interface addresses. This way applications on `localhost` and on `0.0.0.0` work the same, and the `--localhost` flag, as in boat, is not needed.
 
-**Ошибки dial** (требование к S2/S3, в рамках ответа на `CONNECT`):
+**Dial errors** (a requirement for S2/S3, within the `CONNECT` response):
 
-| Ответ агента или владельца | Ответ gateway |
+| Agent or owner response | Gateway response |
 |---|---|
-| ничего не слушает порт (`ECONNREFUSED` на всех адресах) | `502 app_not_listening` |
-| таймаут dial внутри VM | `504 app_timeout` |
-| туннель оборвался во время dial | `503 agent_unavailable` |
-| `403`/`400` от агента (S2 §4.2) | `502 upstream_error`, в лог как ошибка платформы |
+| nothing listens on the port (`ECONNREFUSED` on all addresses) | `502 app_not_listening` |
+| dial timeout inside the VM | `504 app_timeout` |
+| the tunnel dropped during the dial | `503 agent_unavailable` |
+| `403`/`400` from the agent (S2 §4.2) | `502 upstream_error`, logged as a platform error |
 
-Агенту достаточно отвечать на `CONNECT` статусом `502` с заголовком `Umiak-Dial-Error: refused|timeout` **[исполнитель]**. Точную форму фиксирует реализация S2/S3; gateway сопоставляет её с таблицей выше.
+It is enough for the agent to answer `CONNECT` with the status `502` and the header `Umiak-Dial-Error: refused|timeout` **[implementer]**. The exact form is fixed by the S2/S3 implementation; the gateway maps it to the table above.
 
-### 7.3 Протоколы
+### 7.3 Protocols
 
-- **Клиент → gateway:** HTTP/1.1 и HTTP/2 (ALPN).
-- **WebSocket:** только HTTP/1.1 `Upgrade`, `ReverseProxy` его поддерживает. **WebSocket поверх HTTP/2 (RFC 8441) не объявляем:** `ReverseProxy` не транслирует extended CONNECT в HTTP/1.1 upgrade. Проверено экспериментом 2026-10-29: Go 1.27.3 по умолчанию не шлёт `SETTINGS_ENABLE_CONNECT_PROTOCOL`, его включает только `GODEBUG=http2xconnect=1`. Эту настройку не включать; приёмочный тест проверяет SETTINGS (§15). Браузер в этом случае открывает WebSocket отдельным HTTP/1.1-соединением.
-- **Gateway → приложение:** HTTP/1.1 по умолчанию (`appProtocol: http1`). Для gRPC и серверов только с h2c — `appProtocol: h2c`: HTTP/2 prior knowledge с полным дуплексом и trailers. Клиент должен прийти по HTTP/2. HTTPS к приложению внутри VM не поддерживается в S4.
-- **SSE и стриминг:** `FlushInterval: -1`, ответы сбрасываются сразу.
-- **Тела без буферизации.** Запрос и ответ идут потоком. Backpressure сквозная, через flow control HTTP/2 туннеля (S2 §4.3). Лимита размера тела нет (`UMIAK_GATEWAY_MAX_BODY_BYTES`, 0 = без лимита).
+- **Client → gateway:** HTTP/1.1 and HTTP/2 (ALPN).
+- **WebSocket:** only HTTP/1.1 `Upgrade`, `ReverseProxy` supports it. **We do not advertise WebSocket over HTTP/2 (RFC 8441):** `ReverseProxy` does not translate extended CONNECT into an HTTP/1.1 upgrade. Verified by an experiment on 2026-10-29: Go 1.27.3 by default does not send `SETTINGS_ENABLE_CONNECT_PROTOCOL`, only `GODEBUG=http2xconnect=1` enables it. Do not enable this setting; the acceptance test checks SETTINGS (§15). The browser then opens the WebSocket as a separate HTTP/1.1 connection.
+- **Gateway → application:** HTTP/1.1 by default (`appProtocol: http1`). For gRPC and h2c-only servers — `appProtocol: h2c`: HTTP/2 prior knowledge with full duplex and trailers. The client must arrive over HTTP/2. HTTPS to the application inside the VM is not supported in S4.
+- **SSE and streaming:** `FlushInterval: -1`, responses are flushed immediately.
+- **Bodies without buffering.** The request and response are streamed. Backpressure is end to end, through the tunnel's HTTP/2 flow control (S2 §4.3). There is no body size limit (`UMIAK_GATEWAY_MAX_BODY_BYTES`, 0 = no limit).
 
-### 7.4 Заголовки
+### 7.4 Headers
 
-**В запрос к приложению:**
+**Into the request to the application:**
 
-| Заголовок | Значение |
+| Header | Value |
 |---|---|
-| `Host` | исходный `<label>.<umiak-domain>`; при `hostRewrite: localhost` — `localhost:<port>` |
-| `X-Forwarded-For` | IP клиента. От клиента пришедший XFF **заменяется**: gateway — край. В режиме §5.2 цепочка от доверенных прокси сохраняется, клиентом считается правый недоверенный адрес |
+| `Host` | the original `<label>.<umiak-domain>`; with `hostRewrite: localhost` — `localhost:<port>` |
+| `X-Forwarded-For` | the client IP. An incoming XFF from the client is **replaced**: the gateway is the edge. In the §5.2 mode the chain from trusted proxies is kept, the client is the rightmost untrusted address |
 | `X-Forwarded-Proto` | `https` |
-| `X-Forwarded-Host` | исходный host |
+| `X-Forwarded-Host` | the original host |
 | `X-Forwarded-Port` | `443` |
 | `Forwarded` | `for=…;proto=https;host=…` (RFC 7239) |
-| `X-Request-Id` | от клиента, если это 1–128 печатных символов, иначе новый ULID; тот же id в access log и на страницах ошибок |
-| `X-Umiak-User-Email` | только в режиме `sso`, e-mail вошедшего пользователя (§8.4) |
+| `X-Request-Id` | from the client if it is 1–128 printable characters, otherwise a new ULID; the same id in the access log and on error pages |
+| `X-Umiak-User-Email` | only in `sso` mode, the e-mail of the signed-in user (§8.4) |
 
-**Вырезается из запроса:**
-- cookie gateway `__Host-umiak_auth` и `__Host-umiak_state` (удаляются из `Cookie`, остальные cookie остаются);
-- cookie из `UMIAK_GATEWAY_STRIP_COOKIE_PREFIXES` (по умолчанию `_oauth2_proxy`, `__Host-oauth2_proxy`, `__Secure-oauth2_proxy`). Это вторая линия защиты: при правильной настройке (§14.1) эти cookie на `*.umiak` вообще не приходят;
-- параметр `_token` в query;
-- заголовок `Umiak-Port-Token`;
-- все входящие `Umiak-*` и `X-Umiak-*` (gateway ставит свои заново);
-- заголовки идентичности, которые мог бы подделать клиент: `X-Auth-Request-*`, `X-Forwarded-Email`, `X-Forwarded-User`, `X-Forwarded-Groups`, `X-Forwarded-Preferred-Username`, `X-Forwarded-Access-Token`;
-- hop-by-hop (делает `ReverseProxy`).
+**Stripped from the request:**
+- the gateway cookies `__Host-umiak_auth` and `__Host-umiak_state` (removed from `Cookie`, other cookies stay);
+- cookies from `UMIAK_GATEWAY_STRIP_COOKIE_PREFIXES` (by default `_oauth2_proxy`, `__Host-oauth2_proxy`, `__Secure-oauth2_proxy`). This is the second line of defense: with correct configuration (§14.1) these cookies do not arrive on `*.umiak` at all;
+- the `_token` query parameter;
+- the header `Umiak-Port-Token`;
+- all incoming `Umiak-*` and `X-Umiak-*` (the gateway sets its own anew);
+- identity headers a client could forge: `X-Auth-Request-*`, `X-Forwarded-Email`, `X-Forwarded-User`, `X-Forwarded-Groups`, `X-Forwarded-Preferred-Username`, `X-Forwarded-Access-Token`;
+- hop-by-hop (done by `ReverseProxy`).
 
-`Authorization` и прочие заголовки приложения не трогаются: они принадлежат приложению.
+`Authorization` and the application's other headers are not touched: they belong to the application.
 
-**В ответе:**
-- вырезаются `Set-Cookie` с именами cookie gateway: приложение на том же хосте может их поставить;
-- вырезаются `Umiak-*`, чтобы приложение не подделало ошибку gateway, и `Alt-Svc` (приложение не знает, через что его опубликовали);
-- ставится `X-Robots-Tag: noindex, nofollow` на всех ответах, включая ответы приложения и страницы gateway.
+**In the response:**
+- `Set-Cookie` with the gateway cookie names is stripped: an application on the same host could set them;
+- `Umiak-*` is stripped so that the application cannot forge a gateway error, and `Alt-Svc` (the application does not know through what it was published);
+- `X-Robots-Tag: noindex, nofollow` is set on all responses, including application responses and gateway pages.
 
-### 7.5 Vite, «host not allowed» и другие dev-серверы
+### 7.5 Vite, "host not allowed", and other dev servers
 
-Host сохраняется по умолчанию: от него зависят абсолютные URL, редиректы и OAuth-колбэки приложений.
+The Host is kept by default: the application's absolute URLs, redirects, and OAuth callbacks depend on it.
 
-- **Vite** с версии 6.1.0 читает `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` и добавляет значение к `server.allowedHosts`, если это массив (по умолчанию так и есть). В 6.1–7.x значение — один хост, с 8.x — список через запятую. Ведущая точка означает поддомены. `vite preview` наследует `server.allowedHosts`, если `preview.allowedHosts` не задан. Проверено по пакетам npm 6.0.8, 6.1.0, 7.1.0 и 8.3.5, 2026-10-29.
-- S3/S5 ставят в окружение sandbox **одно значение** `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.<umiak-domain>` (согласовано master-сессией). Оно работает во всех версиях с 6.1.
-- Для остальных случаев (Vite ниже 6.1, webpack-dev-server `allowedHosts`, Angular, сервер со строгой проверкой Host) у порта есть опция `hostRewrite: localhost`. Gateway тогда шлёт `Host: localhost:<port>`, исходный host остаётся в `X-Forwarded-Host`.
-- Документация для пользователей (S7) перечисляет эти варианты, как boat в `hosting/how-it-works`.
+- **Vite** since version 6.1.0 reads `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` and adds the value to `server.allowedHosts` if it is an array (that is the default). In 6.1–7.x the value is a single host, since 8.x — a comma-separated list. A leading dot means subdomains. `vite preview` inherits `server.allowedHosts` if `preview.allowedHosts` is not set. Verified against the npm packages 6.0.8, 6.1.0, 7.1.0, and 8.3.5, 2026-10-29.
+- S3/S5 put **one value** `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.<umiak-domain>` into the sandbox environment (agreed by the master session). It works in all versions since 6.1.
+- For other cases (Vite below 6.1, webpack-dev-server `allowedHosts`, Angular, a server with strict Host checking) the port has the option `hostRewrite: localhost`. The gateway then sends `Host: localhost:<port>`, the original host stays in `X-Forwarded-Host`.
+- The user documentation (S7) lists these options, like boat in `hosting/how-it-works`.
 
-### 7.6 Ответы gateway
+### 7.6 Gateway responses
 
-Каждый ответ, который сгенерировал сам gateway, несёт `Umiak-Error: <code>`. Так клиент и приложение отличают ошибку gateway от ответа приложения. Если `Accept` содержит `text/html`, ответ — минимальная HTML-страница без внешних ресурсов; иначе JSON `{"error": {"code", "message", "retryable", "requestId"}}`. Внутренних подробностей (machineId, имя пода, адреса) в ответе нет.
+Every response generated by the gateway itself carries `Umiak-Error: <code>`. This is how the client and the application tell a gateway error from an application response. If `Accept` contains `text/html`, the response is a minimal HTML page without external resources; otherwise JSON `{"error": {"code", "message", "retryable", "requestId"}}`. There are no internal details (machineId, pod name, addresses) in the response.
 
-| HTTP | `Umiak-Error` | Когда |
+| HTTP | `Umiak-Error` | When |
 |---|---|---|
-| 404 | `route_not_found` | host вне грамматики, порт не опубликован, sandbox удалён |
-| 403 | `route_blocked` | `blocked: true`; на странице причина: «заблокировано оператором» или «публичные ссылки отключены» |
-| 401 | `auth_required` | `token`/`sso` без валидной сессии (для `sso` браузеру — редирект, §8.4) |
-| 401 | `token_invalid` | неверный `_token` или `Umiak-Port-Token` |
-| 429 | `rate_limited` | §11, с `Retry-After` |
-| 502 | `app_not_listening` | в VM никто не слушает порт |
-| 502 | `upstream_error` | приложение оборвало соединение или вернуло невалидный HTTP |
+| 404 | `route_not_found` | host outside the grammar, port not published, sandbox deleted |
+| 403 | `route_blocked` | `blocked: true`; the page shows the reason: "blocked by an operator" or "public links are disabled" |
+| 401 | `auth_required` | `token`/`sso` without a valid session (for `sso` a redirect for the browser, §8.4) |
+| 401 | `token_invalid` | a wrong `_token` or `Umiak-Port-Token` |
+| 429 | `rate_limited` | §11, with `Retry-After` |
+| 502 | `app_not_listening` | nobody listens on the port in the VM |
+| 502 | `upstream_error` | the application dropped the connection or returned invalid HTTP |
 | 503 | `sandbox_starting`, `sandbox_stopped`, `sandbox_unavailable` | §6.3 |
-| 503 | `agent_unavailable` | §6.4, с `Retry-After: 5` |
+| 503 | `agent_unavailable` | §6.4, with `Retry-After: 5` |
 | 503 | `route_lookup_unavailable` | §6.2 |
-| 503 | `overloaded` | лимит потоков на machine (§11) |
+| 503 | `overloaded` | per-machine stream limit (§11) |
 | 504 | `app_timeout` | §7.7 |
 
-Страницы `sandbox_starting` и `agent_unavailable` обновляются сами через 5 s (`<meta http-equiv="refresh">`). Все ответы gateway идут с `Cache-Control: no-store`.
+The pages `sandbox_starting` and `agent_unavailable` refresh themselves every 5 s (`<meta http-equiv="refresh">`). All gateway responses carry `Cache-Control: no-store`.
 
-### 7.7 Таймауты
+### 7.7 Timeouts
 
-| Что | Значение | Ответ |
+| What | Value | Response |
 |---|---|---|
-| TLS handshake | 10 s | закрыть |
-| Чтение заголовков запроса (`ReadHeaderTimeout`) | 10 s; `MaxHeaderBytes` 64 KiB | закрыть / `431` |
-| Простой keep-alive клиента (HTTP/1.1 и HTTP/2) | 120 s | закрыть |
-| Поиск маршрута в `api` | 3 s | stale или `503` |
-| Ожидание подключения агента | 10 s | `503 agent_unavailable` |
-| Dial до приложения (с CONNECT через владельца) | 10 s | `504 app_timeout` |
-| Заголовки ответа приложения (`ResponseHeaderTimeout`) | 5 min (первая компиляция Next.js бывает долгой) | `504 app_timeout` |
-| Простой потока: ни байта ни в одну сторону для тела запроса, ответа, WebSocket, SSE | 60 min | закрыть |
-| Общая длительность запроса или соединения | без ограничения | — |
+| TLS handshake | 10 s | close |
+| Reading request headers (`ReadHeaderTimeout`) | 10 s; `MaxHeaderBytes` 64 KiB | close / `431` |
+| Client keep-alive idle (HTTP/1.1 and HTTP/2) | 120 s | close |
+| Route lookup in `api` | 3 s | stale or `503` |
+| Waiting for the agent to connect | 10 s | `503 agent_unavailable` |
+| Dial to the application (with CONNECT via the owner) | 10 s | `504 app_timeout` |
+| Application response headers (`ResponseHeaderTimeout`) | 5 min (the first Next.js compile can be long) | `504 app_timeout` |
+| Stream idle: not a byte in either direction for a request body, response, WebSocket, SSE | 60 min | close |
+| Overall duration of a request or connection | unlimited | — |
 
-Значения **[исполнитель]**, все настраиваются конфигом.
+Values are **[implementer]**, all configurable.
 
-## 8. Режимы доступа
+## 8. Access modes
 
 ### 8.1 `public`
 
-Без авторизации. Разрешён всем по умолчанию. Оператор выключает его глобально или для отдельного sandbox или маршрута в `api` (§6.1), действует сразу через `NOTIFY`. Режим по умолчанию для нового опубликованного порта — `token`, как у boat (решение S7, рекомендация S4).
+No authorization. Allowed to everyone by default. An operator turns it off globally or for a particular sandbox or route in `api` (§6.1), effective immediately via `NOTIFY`. The default mode for a newly published port is `token`, like boat (S7 decision, S4 recommendation).
 
-### 8.2 Сессионная cookie gateway
+### 8.2 The gateway session cookie
 
-Одна cookie для `token` и `sso`:
+One cookie for `token` and `sso`:
 
 ```
 name:  __Host-umiak_auth
@@ -371,31 +371,31 @@ payload (JSON): {
 attributes: Secure; HttpOnly; Path=/; SameSite=Lax; Max-Age=<ttl>   (no Domain)
 ```
 
-- Префикс `__Host-` запрещает атрибут `Domain`. Поэтому соседний sandbox не может подбросить или перезаписать эту cookie через общий родительский домен (§14.1).
-- Проверка на каждом запросе: подпись, `l`, `m`, `e`, `x`. Любое изменение доступа к порту (смена режима, ротация токена, блокировка, rename) поднимает `authEpoch` в `api`, и все выданные cookie этого порта сразу перестают действовать.
-- TTL: `token` — 7 дней, `sso` — 12 h **[исполнитель для token; sso согласовано]**.
-- Ключи: `UMIAK_GATEWAY_COOKIE_KEYS` из Secret, список `kid:base64(32 bytes)`. Первый ключ подписывает, все проверяют. Ротация: добавить новый первым, через 7 дней удалить старый.
-- **Режим cookie для отдельного регистрируемого домена** (`UMIAK_GATEWAY_COOKIE_CROSS_SITE=true`): `SameSite=None; Partitioned`, чтобы превью работало в iframe дашборда на другом сайте. Работает в браузерах с CHIPS; в Safari поддержка ненадёжна. В основном варианте (`umiak.<domain>`) umiak и дашборд — один сайт, iframe работает с `SameSite=Lax` везде.
+- The `__Host-` prefix forbids the `Domain` attribute. So a neighboring sandbox cannot plant or overwrite this cookie through a shared parent domain (§14.1).
+- Checked on every request: signature, `l`, `m`, `e`, `x`. Any change of a port's access (mode change, token rotation, block, rename) raises `authEpoch` in `api`, and all cookies already issued for this port stop working at once.
+- TTL: `token` — 7 days, `sso` — 12 h **[implementer for token; sso agreed]**.
+- Keys: `UMIAK_GATEWAY_COOKIE_KEYS` from a Secret, a list `kid:base64(32 bytes)`. The first key signs, all verify. Rotation: add a new one first, delete the old one after 7 days.
+- **Cookie mode for a separate registrable domain** (`UMIAK_GATEWAY_COOKIE_CROSS_SITE=true`): `SameSite=None; Partitioned`, so that the preview works in a dashboard iframe on another site. Works in browsers with CHIPS; Safari support is unreliable. In the main variant (`umiak.<domain>`) umiak and the dashboard are one site, the iframe works with `SameSite=Lax` everywhere.
 
 ### 8.3 `token`
 
-Токен порта генерирует `api` при публикации: `umiakp_` + 32 случайных байта в base64url. В маршруте хранится только SHA-256. Высокая энтропия, поэтому медленный хеш не нужен; сравнение — constant-time.
+The port token is generated by `api` at publication: `umiakp_` + 32 random bytes in base64url. Only the SHA-256 is stored in the route. High entropy, so a slow hash is not needed; the comparison is constant-time.
 
-Порядок проверки:
-1. **`_token` в query.** Верный:
-   - переход браузера (`GET`/`HEAD`, `Accept` содержит `text/html`, нет `Upgrade`) → `302` на тот же URL без `_token` (остальные параметры в исходном порядке), `Set-Cookie: __Host-umiak_auth`, `Referrer-Policy: no-referrer`;
-   - всё остальное (curl без cookie jar, `fetch`, WebSocket, не-GET) → запрос проксируется без `_token`, cookie ставится в ответе.
+Order of checks:
+1. **`_token` in the query.** A correct one:
+   - a browser navigation (`GET`/`HEAD`, `Accept` contains `text/html`, no `Upgrade`) → `302` to the same URL without `_token` (other parameters in the original order), `Set-Cookie: __Host-umiak_auth`, `Referrer-Policy: no-referrer`;
+   - everything else (curl without a cookie jar, `fetch`, WebSocket, non-GET) → the request is proxied without `_token`, the cookie is set in the response.
    
-   Неверный → `401 token_invalid`, засчитывается в лимит ошибок авторизации (§11).
-2. **`Umiak-Port-Token: <token>`** — для API-клиентов и скриптов. Верный → проксировать, cookie не ставить. Неверный → `401 token_invalid`.
-3. **Валидная cookie** → проксировать.
-4. Иначе `401 auth_required`: страница «для этой ссылки нужен токен».
+   A wrong one → `401 token_invalid`, counted toward the authorization error limit (§11).
+2. **`Umiak-Port-Token: <token>`** — for API clients and scripts. A correct one → proxy, do not set a cookie. A wrong one → `401 token_invalid`.
+3. **A valid cookie** → proxy.
+4. Otherwise `401 auth_required`: the page "this link needs a token".
 
-Ротация и отзыв — в `api` (S7): новый токен и `authEpoch+1`. Старые ссылки и cookie перестают работать сразу, без промежутка «открыто без токена», который есть у boat.
+Rotation and revocation are in `api` (S7): a new token and `authEpoch+1`. Old links and cookies stop working at once, without the "open without a token" gap that boat has.
 
 ### 8.4 `sso`
 
-Цель: пустить любого вошедшего пользователя платформы, не отдавая домену sandbox ни cookie IdP, ни cookie oauth2-proxy. Схема — редирект на endpoint за oauth2-proxy и одноразовый код, как subdomain apps в Coder.
+Goal: let in any signed-in platform user without giving the sandbox's domain either the IdP cookie or the oauth2-proxy cookie. The scheme is a redirect to an endpoint behind oauth2-proxy and a one-time code, like subdomain apps in Coder.
 
 ```mermaid
 sequenceDiagram
@@ -417,29 +417,29 @@ sequenceDiagram
   G-->>B: 302 /page, Set-Cookie __Host-umiak_auth (sso, 12 h), clear __Host-umiak_state
 ```
 
-- **Кто запускает.** Браузер без валидной cookie (`GET`/`HEAD` и `Accept` содержит `text/html`) получает редирект. Остальные запросы получают `401 auth_required`. Программный доступ к `sso`-портам (по API-ключу) — позже (§17).
-- **`AUTH_URL`** (`UMIAK_GATEWAY_AUTH_URL`, например `https://app.<domain>/umiak-auth/authorize`) реализует `api` за oauth2-proxy (S7/S8), контракт задаёт S4:
-  - вход: `label`, `state`;
-  - проверки: label проходит грамматику §4.2, маршрут существует и `access = sso`, пользователь — вошедший пользователь платформы (политика `api`; сейчас — любой);
-  - выход: `302` на `https://<label>.<umiak-domain>/__umiak/auth/callback?code=…&state=…`. Хост редиректа `api` строит сам из label, произвольный URL не принимает (нет open redirect);
-  - код: 32 случайных байта, в БД хранится хеш, TTL 60 s, одноразовый, привязан к `(label, userId)`.
-- **Обмен кода.** `POST /internal/v1/gateway/port-auth/exchange {code, label}` с service token gateway. `api` атомарно гасит код и отвечает `{userId, email, label, authEpoch}` или `400 {"code": "invalid_code"}`. Одноразовость обеспечивает БД `api`, а не память пода.
-- **`__Host-umiak_state`** — подписанная тем же ключом cookie, 10 min, содержит `state` (16 случайных байт) и `rd`. `rd` — только путь с query: начинается с `/`, но не с `//` и не с `/\`. Проверка `state` защищает от login CSRF.
-- **`/__umiak/`** — зарезервированный префикс пути на каждом хосте `*.umiak`, gateway его не проксирует. В S4: `/__umiak/auth/callback` и `/__umiak/auth/logout` (стирает cookie, `302` на `/`).
-- **В приложение** идёт `X-Umiak-User-Email: <email>` (согласовано). Из запроса клиента этот заголовок всегда вырезается (§7.4), поэтому подделать его нельзя. Для `public` и `token` его нет.
-- Деактивированный пользователь теряет доступ не позже чем через 12 h. Немедленно — через `authEpoch+1` на маршрутах (операция в `api`, S8).
+- **Who triggers it.** A browser without a valid cookie (`GET`/`HEAD` and `Accept` contains `text/html`) gets a redirect. Other requests get `401 auth_required`. Programmatic access to `sso` ports (by API key) is later (§17).
+- **`AUTH_URL`** (`UMIAK_GATEWAY_AUTH_URL`, for example `https://app.<domain>/umiak-auth/authorize`) is implemented by `api` behind oauth2-proxy (S7/S8), the contract is set by S4:
+  - input: `label`, `state`;
+  - checks: the label passes the grammar of §4.2, the route exists and `access = sso`, the user is a signed-in platform user (the `api` policy; currently — any);
+  - output: `302` to `https://<label>.<umiak-domain>/__umiak/auth/callback?code=…&state=…`. The redirect host is built by `api` itself from the label, it does not accept an arbitrary URL (no open redirect);
+  - code: 32 random bytes, the hash is stored in the DB, TTL 60 s, one-time, bound to `(label, userId)`.
+- **Code exchange.** `POST /internal/v1/gateway/port-auth/exchange {code, label}` with the gateway's service token. `api` atomically consumes the code and answers `{userId, email, label, authEpoch}` or `400 {"code": "invalid_code"}`. One-timeness is ensured by the `api` DB, not by pod memory.
+- **`__Host-umiak_state`** is a cookie signed with the same key, 10 min, containing `state` (16 random bytes) and `rd`. `rd` is only a path with a query: it starts with `/` but not with `//` and not with `/\`. The `state` check protects against login CSRF.
+- **`/__umiak/`** is a reserved path prefix on every `*.umiak` host, the gateway does not proxy it. In S4: `/__umiak/auth/callback` and `/__umiak/auth/logout` (erases the cookie, `302` to `/`).
+- **Into the application** goes `X-Umiak-User-Email: <email>` (agreed). This header is always stripped from the client request (§7.4), so it cannot be forged. For `public` and `token` it is absent.
+- A deactivated user loses access no later than 12 h. Immediately — via `authEpoch+1` on the routes (an operation in `api`, S8).
 
-### 8.5 Несколько портов и CORS
+### 8.5 Multiple ports and CORS
 
-Доступ и cookie действуют на один label, то есть на один порт: cookie host-only. Фронтенд на `slug-5173`, который делает `fetch` к бэкенду на `slug-8000` в режиме `token`/`sso`, получит `401`, пока пользователь не откроет URL бэкенда.
+Access and the cookie apply to one label, i.e. one port: the cookie is host-only. A frontend on `slug-5173` doing a `fetch` to a backend on `slug-8000` in `token`/`sso` mode gets `401` until the user opens the backend URL.
 
-- **CORS preflight пропускается без авторизации** **[исполнитель]**. Это `OPTIONS` с заголовками `Origin` и `Access-Control-Request-Method`: браузер никогда не шлёт в нём cookie, и без пропуска он всегда получал бы `401`. Отвечает приложение. Риск — открытый обработчик `OPTIONS` приложения; он считается приемлемым, так же делают Cloudflare Access и аналоги.
-- Рекомендация пользователям (документация S7): ходить к бэкенду через proxy dev-сервера (Vite `server.proxy`) с того же origin или сделать порт API `public`.
-- Доступ на весь sandbox сразу (одна авторизация на все порты) — позже (§17).
+- **A CORS preflight is let through without authorization** **[implementer]**. This is an `OPTIONS` with the headers `Origin` and `Access-Control-Request-Method`: the browser never sends a cookie in it, and without the pass-through it would always get `401`. The application answers. The risk is the application's open `OPTIONS` handler; it is considered acceptable, Cloudflare Access and similar do the same.
+- Recommendation to users (S7 documentation): reach the backend through the dev server proxy (Vite `server.proxy`) from the same origin or make the API port `public`.
+- Access to the whole sandbox at once (one authorization for all ports) is later (§17).
 
 ## 9. SSH gateway
 
-### 9.1 Схема
+### 9.1 Scheme
 
 ```
 ssh client --(SSH, user key or short-lived cert from api)--> gateway :2222 (x/crypto/ssh server, one host key)
@@ -449,19 +449,19 @@ ssh client --(SSH, user key or short-lived cert from api)--> gateway :2222 (x/cr
                     VM sshd 127.0.0.1:22 <--(SSH, short-lived user cert from gateway SSH CA)
 ```
 
-Gateway терминирует SSH, потому что только так можно прочитать имя sandbox из имени пользователя. Дальше он открывает собственное SSH-соединение к **системному OpenSSH в VM** через туннель и пробрасывает каналы.
+The gateway terminates SSH because that is the only way to read the sandbox name from the user name. Then it opens its own SSH connection to the **system OpenSSH in the VM** through the tunnel and forwards the channels.
 
-Встроенный в агента shell отвергнут: пришлось бы заново писать sftp, проброс портов, agent forwarding и окружение логина. OpenSSH есть в Linux и включается в Windows (S9).
+A shell built into the agent was rejected: sftp, port forwarding, agent forwarding, and the login environment would have to be rewritten. OpenSSH exists on Linux and is enabled on Windows (S9).
 
-### 9.2 Подключение
+### 9.2 Connecting
 
-- `ssh <sandbox>@ssh.<domain>`, где `<sandbox>` — slug или sandboxId. Синтаксис `<sandbox>+<osuser>` зарезервирован на будущее. Пользователь ОС в VM приходит от `api` (`loginUser`, по умолчанию пользователь шаблона, S5/S9).
-- **Host key gateway** — ed25519 и ecdsa-p256 из Secret, общие для всех подов. Публичные ключи `api` отдаёт клиентам (S7: CLI пишет запись `known_hosts` для `ssh.<domain>` и обходится без TOFU). Fork и resume не меняют host key, который видит клиент.
-- **Аутентификация** только `publickey`. Пароль и keyboard-interactive выключены. `MaxAuthTries` 6, handshake и аутентификация — 20 s.
-- **Два вида `publickey`** [решение Ильи 2026-10-29]:
-  - **короткий сертификат** — основной путь CLI и единственный для командных ключей. Его выпускает `api` (S7 §11.3) по Keycloak JWT человека или по командному ключу, подписывая **SSH login CA** (отдельный от SSH user CA §9.3). Gateway проверяет его сам через `ssh.CertChecker`: `CertType = UserCert`, подписант — один из ключей `UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS` (публичные, текущий и следующий), ровно один principal (ID sandbox `sb_…`; имя пользователя в SSH — slug, поэтому вызывается `CheckCert(cert.ValidPrincipals[0], cert)`, а не `Authenticate` по имени), подпись, `ValidAfter`/`ValidBefore` (допуск 60 s), `KeyId` вида `umiak:user:<id>` или `umiak:key:<id>`. Только затем — `ssh/authorize` с полями сертификата; `api` проверяет, что principal равен ID sandbox, и личность (§9.2 ниже);
-  - **зарегистрированный ключ пользователя** (дашборд, `umiak ssh-keys`) — для людей с обычным `ssh` без CLI.
-- **Проверка.** `PublicKeyCallback` вызывает `api`:
+- `ssh <sandbox>@ssh.<domain>`, where `<sandbox>` is a slug or sandboxId. The syntax `<sandbox>+<osuser>` is reserved for the future. The OS user in the VM comes from `api` (`loginUser`, by default the template's user, S5/S9).
+- **The gateway host key** — ed25519 and ecdsa-p256 from a Secret, shared by all pods. The public keys are given to clients by `api` (S7: the CLI writes a `known_hosts` entry for `ssh.<domain>` and avoids TOFU). A fork and a resume do not change the host key the client sees.
+- **Authentication** is `publickey` only. Password and keyboard-interactive are off. `MaxAuthTries` 6, handshake and authentication 20 s.
+- **Two kinds of `publickey`** [Ilia's decision 2026-10-29]:
+  - **a short-lived certificate** — the main path of the CLI and the only one for team keys. It is issued by `api` (S7 §11.3) from a person's Keycloak JWT or a team key, signed by the **SSH login CA** (separate from the SSH user CA of §9.3). The gateway verifies it itself via `ssh.CertChecker`: `CertType = UserCert`, the signer is one of the keys `UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS` (public, current and next), exactly one principal (the sandbox ID `sb_…`; the user name in SSH is the slug, so `CheckCert(cert.ValidPrincipals[0], cert)` is called, not `Authenticate` by name), the signature, `ValidAfter`/`ValidBefore` (60 s tolerance), `KeyId` of the form `umiak:user:<id>` or `umiak:key:<id>`. Only then `ssh/authorize` with the certificate fields; `api` checks that the principal equals the sandbox ID, and the identity (§9.2 below);
+  - **a user's registered key** (dashboard, `umiak ssh-keys`) — for people with a regular `ssh` without the CLI.
+- **Verification.** `PublicKeyCallback` calls `api`:
 
 ```
 POST /internal/v1/gateway/ssh/authorize
@@ -471,137 +471,137 @@ POST /internal/v1/gateway/ssh/authorize
 200 { "allowed": false }
 ```
 
-Кто может входить в sandbox, решает `api` (S7 §12.1): человек — активный участник команды sandbox; командный ключ — не отозван, не истёк, из команды sandbox, со scope `ssh:connect`. Проверка идёт на каждом подключении, поэтому деактивация и отзыв действуют сразу, а не по истечении сертификата (10 min). Ключи пользователи регистрируют в дашборде или через CLI (S7/S8). Результат кэшируется на соединение. Идентичность берётся только из `ssh.Permissions`, возвращённых callback-ом для ключа, который прошёл проверку подписи, а не из «последнего ключа, переданного в callback» (урок CVE-2024-45337). Нужен актуальный `golang.org/x/crypto`.
+Who may log into a sandbox is decided by `api` (S7 §12.1): a person — an active member of the sandbox's team; a team key — not revoked, not expired, from the sandbox's team, with the scope `ssh:connect`. The check runs on every connection, so deactivation and revocation take effect at once, not when the certificate expires (10 min). Users register keys in the dashboard or through the CLI (S7/S8). The result is cached per connection. The identity is taken only from the `ssh.Permissions` returned by the callback for the key that passed the signature check, not from "the last key passed to the callback" (the lesson of CVE-2024-45337). An up-to-date `golang.org/x/crypto` is needed.
 
-### 9.3 Соединение с VM
+### 9.3 Connection to the VM
 
-- После аутентификации gateway находит владельца (§6.4, ожидание агента до 10 s) и делает dial порта 22 (§7.2).
-- Ключ: эфемерный ed25519 на каждую сессию и сертификат пользователя от **SSH user CA** gateway:
+- After authentication the gateway finds the owner (§6.4, waiting for the agent up to 10 s) and dials port 22 (§7.2).
+- Key: an ephemeral ed25519 per session and a user certificate from the gateway's **SSH user CA**:
   - `ValidPrincipals: [loginUser]`;
-  - `ValidAfter` = сейчас − 60 s, `ValidBefore` = сейчас + 5 min (sshd проверяет сертификат только при входе, сессия живёт дольше);
-  - `KeyId: umiak:user:<userId>:<sessionId>` или `umiak:key:<apiKeyId>:<sessionId>` (из `actor` ответа `ssh/authorize`), чтобы журнал sshd в VM показывал, кто вошёл — та же личность, что во входящем сертификате или ключе;
-  - расширения `permit-pty`, `permit-port-forwarding`, `permit-agent-forwarding`, `permit-X11-forwarding`, `permit-user-rc`.
-- Закрытый ключ CA лежит в Secret. Публичный ключ CA (текущий и следующий, для ротации) S5 запекает в шаблон, а S3 обновляет при claim.
-- Host key sshd в VM gateway не проверяет **[исполнитель]**. Поток идёт через туннель, аутентифицированный как именно эта machine (S2 §5), а host key VM меняется при fork. Отпечаток пишется в лог.
-- **Требования к VM** (S3/S5/S9; согласовано master-сессией для S3):
-  - sshd слушает только `127.0.0.1:22` и `[::1]:22`;
-  - `TrustedUserCAKeys` с ключами CA gateway;
+  - `ValidAfter` = now − 60 s, `ValidBefore` = now + 5 min (sshd checks the certificate only at login, the session lives longer);
+  - `KeyId: umiak:user:<userId>:<sessionId>` or `umiak:key:<apiKeyId>:<sessionId>` (from the `actor` of the `ssh/authorize` response), so that the sshd journal in the VM shows who logged in — the same identity as in the incoming certificate or key;
+  - extensions `permit-pty`, `permit-port-forwarding`, `permit-agent-forwarding`, `permit-X11-forwarding`, `permit-user-rc`.
+- The CA private key lies in a Secret. The CA public key (current and next, for rotation) is baked into the template by S5 and updated by S3 at claim.
+- The gateway does not verify the VM's sshd host key **[implementer]**. The stream goes through the tunnel authenticated as exactly this machine (S2 §5), and the VM's host key changes on fork. The fingerprint is written to the log.
+- **Requirements for the VM** (S3/S5/S9; agreed by the master session for S3):
+  - sshd listens only on `127.0.0.1:22` and `[::1]:22`;
+  - `TrustedUserCAKeys` with the gateway CA keys;
   - `PasswordAuthentication no`;
-  - `AuthorizedPrincipalsFile` не нужен: принципал равен имени пользователя.
-- **Sandbox не запущен или агент недоступен.** Gateway принимает первый канал `session`, пишет в stderr понятное сообщение (`umiak: sandbox quiet-otter-lamp is stopped; run: umiak resume quiet-otter-lamp`), отдаёт `exit-status 255` и закрывает соединение. Обычный отказ аутентификации клиент показал бы как непонятный `Permission denied`.
+  - `AuthorizedPrincipalsFile` is not needed: the principal equals the user name.
+- **The sandbox is not running or the agent is unavailable.** The gateway accepts the first `session` channel, writes a clear message to stderr (`umiak: sandbox quiet-otter-lamp is stopped; run: umiak resume quiet-otter-lamp`), returns `exit-status 255`, and closes the connection. A plain authentication refusal would be shown by the client as an unclear `Permission denied`.
 
-### 9.4 Проброс
+### 9.4 Forwarding
 
-Gateway — прозрачный посредник на уровне SSH-каналов:
-- каналы от клиента (`session`, `direct-tcpip`, `direct-streamlocal@openssh.com`) открываются на backend с тем же типом и extra data. Отказ backend передаётся клиенту с причиной;
-- в канале в обе стороны идут данные, extended data (stderr), запросы с `want-reply` и ответами (`pty-req`, `shell`, `exec`, `subsystem`, `env`, `window-change`, `signal`, `exit-status`, `exit-signal`, `auth-agent-req@openssh.com`, `eow@openssh.com` и любые неизвестные), EOF и close;
-- каналы от backend (`forwarded-tcpip`, `forwarded-streamlocal@openssh.com`, `auth-agent@openssh.com`, `x11`) открываются у клиента.
+The gateway is a transparent intermediary at the level of SSH channels:
+- the client's channels (`session`, `direct-tcpip`, `direct-streamlocal@openssh.com`) are opened on the backend with the same type and extra data. A backend refusal is passed to the client with the reason;
+- data flows both ways in a channel, extended data (stderr), requests with `want-reply` and replies (`pty-req`, `shell`, `exec`, `subsystem`, `env`, `window-change`, `signal`, `exit-status`, `exit-signal`, `auth-agent-req@openssh.com`, `eow@openssh.com`, and any unknown ones), EOF and close;
+- the backend's channels (`forwarded-tcpip`, `forwarded-streamlocal@openssh.com`, `auth-agent@openssh.com`, `x11`) are opened at the client.
 
-Глобальные запросы (уровень соединения) пробрасываются по явному списку, потому что у двух SSH-соединений разные session id:
+Global requests (connection level) are forwarded by an explicit list, because the two SSH connections have different session ids:
 
-| Направление | Запрос | Что делает gateway |
+| Direction | Request | What the gateway does |
 |---|---|---|
-| клиент → VM | `tcpip-forward`, `cancel-tcpip-forward`, `streamlocal-forward@openssh.com`, `cancel-streamlocal-forward@openssh.com`, `no-more-sessions@openssh.com` | проксирует, ответ передаёт клиенту |
-| клиент → gateway | `keepalive@openssh.com` | отвечает сам |
-| клиент → gateway | `hostkeys-prove-00@openssh.com` | отвечает отказом: host key клиенту показывает gateway |
-| VM → gateway | `hostkeys-00@openssh.com` | **отбрасывает**. Иначе клиент получил бы ключи sshd VM и проверка `hostkeys-prove` сломалась бы |
-| VM → gateway | `keepalive@openssh.com` | отвечает сам |
-| любое | неизвестный запрос | отказ (`want-reply` → false) |
+| client → VM | `tcpip-forward`, `cancel-tcpip-forward`, `streamlocal-forward@openssh.com`, `cancel-streamlocal-forward@openssh.com`, `no-more-sessions@openssh.com` | proxies, passes the reply to the client |
+| client → gateway | `keepalive@openssh.com` | answers itself |
+| client → gateway | `hostkeys-prove-00@openssh.com` | answers with a refusal: the host key is shown to the client by the gateway |
+| VM → gateway | `hostkeys-00@openssh.com` | **drops it**. Otherwise the client would get the VM sshd's keys and the `hostkeys-prove` check would break |
+| VM → gateway | `keepalive@openssh.com` | answers itself |
+| any | unknown request | refusal (`want-reply` → false) |
 
-Реализация — на `golang.org/x/crypto/ssh` **[исполнитель]**. Альтернатива для сравнения перед реализацией — `tg123/sshpiper` (MIT, v1.6.1): он проксирует на уровне пакетов после аутентификации, но на своём форке `crypto/ssh`. Решает исполнитель, критерий — тесты §15.4.
+The implementation is on `golang.org/x/crypto/ssh` **[implementer]**. An alternative to compare before implementation is `tg123/sshpiper` (MIT, v1.6.1): it proxies at the packet level after authentication, but on its own fork of `crypto/ssh`. The implementer decides, the criterion is the tests of §15.4.
 
-Keepalive: gateway шлёт `keepalive@openssh.com` клиенту и backend раз в 30 s, соединение мёртво после 3 пропусков. Простой сессии сам по себе соединение не закрывает.
+Keepalive: the gateway sends `keepalive@openssh.com` to the client and the backend every 30 s, the connection is dead after 3 misses. A session being idle does not close the connection by itself.
 
-### 9.5 Разрыв сессий при отзыве доступа
+### 9.5 Terminating sessions on access revocation
 
-Деактивация пользователя (оператором или синхронизацией с Keycloak, S8 §20.1), удаление участника из команды и отзыв командного ключа закрывают уже открытые SSH-сессии сразу [решение Ильи 2026-10-29]:
-- `NOTIFY umiak_ssh_revoke` шлют хуки Payload в `@umiak/payload` в той же транзакции, что и изменение (S8 §8), поэтому неважно, кто его сделал — `web` (оператор, server action), `api` или `worker` (синхронизация): `users` стал неактивным → `user:<userId>`; удалено членство (`afterDelete`, запись ещё есть) → `member:<teamId>:<userId>`; ключу поставлен `revokedAt` → `key:<apiKeyId>`; удалена команда → `team:<teamId>` (публичный формат ID). Это тот же повод, по которому `api` закрывает стримы и PTY (S8 C9).
-- Каждый под gateway держит `LISTEN umiak_ssh_revoke` (то же соединение pgx, что `umiak_routes`) и индекс открытых сессий по `actor` и команде sandbox. Подходящим сессиям он пишет в stderr каналов `session` сообщение (`umiak: access revoked`) и закрывает соединение.
-- Если `LISTEN` оборвался, при переподключении gateway заново проверяет все открытые сессии через `ssh/authorize` и закрывает отклонённые.
+Deactivating a user (by an operator or by Keycloak sync, S8 §20.1), removing a member from a team, and revoking a team key close already open SSH sessions at once [Ilia's decision 2026-10-29]:
+- `NOTIFY umiak_ssh_revoke` is sent by the Payload hooks in `@umiak/payload` in the same transaction as the change (S8 §8), so it does not matter who made it — `web` (an operator, a server action), `api`, or `worker` (sync): `users` became inactive → `user:<userId>`; a membership deleted (`afterDelete`, the record still exists) → `member:<teamId>:<userId>`; a key got `revokedAt` → `key:<apiKeyId>`; a team deleted → `team:<teamId>` (the public ID format). This is the same trigger by which `api` closes streams and PTYs (S8 C9).
+- Each gateway pod holds `LISTEN umiak_ssh_revoke` (the same pgx connection as `umiak_routes`) and an index of open sessions by `actor` and the sandbox's team. To matching sessions it writes a message (`umiak: access revoked`) to the stderr of the `session` channels and closes the connection.
+- If `LISTEN` dropped, on reconnect the gateway re-checks all open sessions via `ssh/authorize` and closes the rejected ones.
 
-## 10. Деплой и drain
+## 10. Deploy and drain
 
-### 10.1 Роли пода
+### 10.1 Pod roles
 
-Каждый под одновременно:
-- **front** — держит публичные HTTP- и SSH-соединения клиентов;
-- **owner** — держит туннели агентов (S2).
+Every pod at once is:
+- **front** — holds the clients' public HTTP and SSH connections;
+- **owner** — holds the agent tunnels (S2).
 
-Drain обеих ролей начинается по одному `preStop`/SIGTERM.
+The drain of both roles starts at a single `preStop`/SIGTERM.
 
 ### 10.2 Front: HTTP
 
-1. Readiness падает (S2 §7, шаг 1). Под ещё 5 s принимает новые соединения, пока LB снимает его из endpoints.
-2. Затем listener-ы закрываются. Простаивающие keep-alive соединения закрываются (HTTP/1.1 — `Connection: close` на следующем ответе, HTTP/2 — GOAWAY). Запросы в полёте идут до конца.
-3. Длинные потоки (WebSocket, SSE, долгие ответы и загрузки) живут до **2 min** от начала drain, затем закрываются. Браузеры и Vite HMR переподключаются сами.
+1. Readiness fails (S2 §7, step 1). The pod accepts new connections for another 5 s while the LB removes it from endpoints.
+2. Then the listeners close. Idle keep-alive connections are closed (HTTP/1.1 — `Connection: close` on the next response, HTTP/2 — GOAWAY). In-flight requests run to the end.
+3. Long streams (WebSocket, SSE, long responses and uploads) live up to **2 min** from the start of drain, then close. Browsers and Vite HMR reconnect on their own.
 
 ### 10.3 Front: SSH
 
-Front и owner SSH-сессии обычно разные поды, и сессия закроется, когда начнёт drain любой из них. Предупреждать пользователя должен front: только он говорит по SSH с клиентом.
+The front and owner of an SSH session are usually different pods, and the session closes when either of them starts draining. The front must warn the user: only it speaks SSH with the client.
 
-- **Срок закрытия сессии** = min(срок своего drain, срок drain пода-владельца). Срок пода — `drain_started_at + UMIAK_GATEWAY_SSH_DRAIN_DEADLINE` (одинаковый конфиг на всех подах).
-- **Как front узнаёт о drain владельца.** Начиная drain, под пишет `gateway_instances.drain_started_at` вместе с `state = draining` и шлёт `NOTIFY gateway_instances, '<instanceId>'`. Это аддитивное расширение реестра S2, оно делается в `libs/tunnel`. Front слушает этот канал и пересчитывает срок для своих SSH-сессий, чьи backend-потоки идут через этот под. Переезд machine (`NOTIFY tunnel_sessions`) служит запасным сигналом: если backend-поток жив, а machine уже у другого владельца, старый владелец в drain.
-- **Действия:**
-  1. Свой drain: новые соединения не принимаются (так же, как в HTTP).
-  2. Когда срок стал известен, и ещё раз за 1 min до него, gateway пишет в stderr каждого интерактивного канала `session` с PTY: `umiak: gateway restarting, this SSH session will close in N min; reconnect to continue`. Если до срока меньше 1 min, второе сообщение не пишется.
-  3. В срок front закрывает соединение сам. Владелец закрывает поток со своей стороны в тот же момент.
+- **The session closing deadline** = min(its own drain deadline, the owner pod's drain deadline). A pod's deadline is `drain_started_at + UMIAK_GATEWAY_SSH_DRAIN_DEADLINE` (the same config on all pods).
+- **How the front learns about the owner's drain.** On starting drain, a pod writes `gateway_instances.drain_started_at` together with `state = draining` and sends `NOTIFY gateway_instances, '<instanceId>'`. This is an additive extension of the S2 registry, done in `libs/tunnel`. The front listens on this channel and recomputes the deadline for its SSH sessions whose backend streams go through this pod. A machine move (`NOTIFY tunnel_sessions`) serves as a fallback signal: if a backend stream is alive but the machine is already with another owner, the old owner is draining.
+- **Actions:**
+  1. Its own drain: new connections are not accepted (the same as in HTTP).
+  2. When the deadline becomes known, and once more 1 min before it, the gateway writes to the stderr of every interactive `session` channel with a PTY: `umiak: gateway restarting, this SSH session will close in N min; reconnect to continue`. If less than 1 min remains to the deadline, the second message is not written.
+  3. At the deadline the front closes the connection itself. The owner closes the stream on its side at the same moment.
 
-### 10.4 Owner: туннели, переопределение S2
+### 10.4 Owner: tunnels, the S2 override
 
-- Gateway вызывает `Control/Drain` с `tcpDeadline` = **15 min** вместо 2 min из S2 §7, чтобы SSH-потоки через старый туннель дожили до своего срока. Протокол не меняется: S2 передаёт срок в аргументе.
-- Сам gateway закрывает потоки через старый туннель раньше по виду потока:
-  - порт 22 (только SSH gateway, публиковать его нельзя, §4.2) — 15 min;
-  - всё остальное — 2 min.
+- The gateway calls `Control/Drain` with `tcpDeadline` = **15 min** instead of the 2 min of S2 §7, so that SSH streams through the old tunnel survive until their deadline. The protocol does not change: S2 passes the deadline as an argument.
+- The gateway itself closes streams through the old tunnel earlier by stream kind:
+  - port 22 (SSH gateway only, it cannot be published, §4.2) — 15 min;
+  - everything else — 2 min.
   
-  Это касается и локальных потоков, и потоков, пришедших через `CONNECT` от соседнего пода. Вид потока определяется по порту, новых заголовков не нужно.
-- RPC-стримы и `421` — без изменений (S2 §7).
-- Старое соединение туннеля закрывается, как только через него не осталось TCP-потоков. Под выходит, когда не осталось ни туннелей, ни клиентских соединений (S2 §7, шаг 7). Поэтому 15 min живёт только под, через который действительно идут SSH-сессии; остальные завершаются за 2 min или быстрее.
+  This applies to local streams and to streams that arrived via `CONNECT` from a neighboring pod. The stream kind is determined by the port, no new headers are needed.
+- RPC streams and `421` — unchanged (S2 §7).
+- The old tunnel connection is closed as soon as no TCP streams are left through it. A pod exits when neither tunnels nor client connections remain (S2 §7, step 7). So 15 min is lived only by a pod through which SSH sessions really go; the others finish in 2 min or faster.
 
 ### 10.5 `terminationGracePeriodSeconds`
 
-5 s (снятие из endpoints) + 5 s (`spreadMs`) + 900 s (SSH) + 30 s запаса ≈ 940 → **960**. Это значение заменяет 180 из S2 §7 (поправка внесена в S2). Rollout это не тормозит: новые поды принимают трафик сразу, старые доживают в фоне. Цена — память старых подов до 16 min после деплоя.
+5 s (removal from endpoints) + 5 s (`spreadMs`) + 900 s (SSH) + 30 s margin ≈ 940 → **960**. This value replaces the 180 of S2 §7 (the correction was made in S2). The rollout is not slowed by this: new pods take traffic at once, old ones live out in the background. The price is the memory of the old pods for up to 16 min after a deploy.
 
-Возобновляемые TCP-потоки, при которых SSH переживает деплой, — фаза 2 (S2 §11, вариант (a)). Пользователям рекомендуем tmux.
+Resumable TCP streams, with which SSH survives a deploy, are phase 2 (S2 §11, option (a)). We recommend tmux to users.
 
-## 11. Лимиты и защита от злоупотреблений
+## 11. Limits and abuse protection
 
-Token bucket в памяти пода, без Redis **[исполнитель]**. Лимит действует на под, поэтому эффективный лимит при N подах примерно в N раз выше; для защиты этого достаточно. IPv6 считается по /64. Адреса из `UMIAK_GATEWAY_RATELIMIT_EXEMPT_CIDRS` (например, NAT офиса) не ограничиваются по IP.
+A token bucket in pod memory, without Redis **[implementer]**. The limit applies per pod, so the effective limit with N pods is roughly N times higher; this is enough for protection. IPv6 is counted by /64. Addresses from `UMIAK_GATEWAY_RATELIMIT_EXEMPT_CIDRS` (for example, an office NAT) are not limited by IP.
 
-**Туннели и сами sandbox.**
-- Лимиты по IP применяются только после выбора назначения: к `*.umiak` по SNI и к SSH. Соединения `tunnel.<domain>` им **не подчиняются**: все VM ноды приходят с одного SNAT-адреса, и при drain переподключаются сотни агентов разом (S2 §7). Защиту туннелей задаёт S2 (аутентификация, `503` при перегрузке).
-- Sandbox могут открывать `*.umiak`, в том числе свои превью: AI-агенты так проверяют свою работу. IPSet `umiak-gateway` пускает TCP 443 к `gateway-edge`. SSH (22) из sandbox к gateway закрыт.
-- Egress-адреса нод Proxmox (SNAT) по умолчанию входят в `UMIAK_GATEWAY_RATELIMIT_EXEMPT_CIDRS` (настройка S12). Их защищает лимит по label.
+**Tunnels and the sandboxes themselves.**
+- The per-IP limits apply only after the destination is chosen: to `*.umiak` by SNI and to SSH. `tunnel.<domain>` connections are **not subject** to them: all VMs of a node come from one SNAT address, and on drain hundreds of agents reconnect at once (S2 §7). Tunnel protection is set by S2 (authentication, `503` on overload).
+- Sandboxes may open `*.umiak`, including their own previews: AI agents verify their work this way. The IPSet `umiak-gateway` lets TCP 443 through to `gateway-edge`. SSH (22) from a sandbox to the gateway is closed.
+- The egress addresses of Proxmox nodes (SNAT) are by default part of `UMIAK_GATEWAY_RATELIMIT_EXEMPT_CIDRS` (an S12 setting). They are protected by the per-label limit.
 
-| Что | Ключ | По умолчанию | Ответ |
+| What | Key | Default | Response |
 |---|---|---|---|
-| HTTP-запросы | IP клиента | 300 rps, burst 2000 (страница Vite в dev-режиме — сотни модулей) | `429 rate_limited` |
-| HTTP-запросы | label | 1000 rps, burst 3000 | `429` |
-| Ошибки авторизации (`token_invalid`, неверный callback) | IP | 20/min | `429` на 5 min |
-| Одновременные соединения | IP | 512 | закрыть |
-| Одновременные TCP-потоки к приложениям и SSH, считает под-владелец (§7.2) | machine | 800 | `503 overloaded` |
-| Новые SSH-соединения | IP | 10/min, burst 20 | закрыть до handshake |
-| Ошибки SSH-аутентификации | IP | 10/min | закрыть |
-| Одновременные SSH-сессии | пользователь | 20 | отказ канала с сообщением |
+| HTTP requests | client IP | 300 rps, burst 2000 (a Vite page in dev mode is hundreds of modules) | `429 rate_limited` |
+| HTTP requests | label | 1000 rps, burst 3000 | `429` |
+| Authorization errors (`token_invalid`, a wrong callback) | IP | 20/min | `429` for 5 min |
+| Concurrent connections | IP | 512 | close |
+| Concurrent TCP streams to applications and SSH, counted by the owner pod (§7.2) | machine | 800 | `503 overloaded` |
+| New SSH connections | IP | 10/min, burst 20 | close before the handshake |
+| SSH authentication errors | IP | 10/min | close |
+| Concurrent SSH sessions | user | 20 | channel refusal with a message |
 
-Значения настраиваются конфигом.
+Values are configurable.
 
-Прочее:
-- Slowloris: `ReadHeaderTimeout` и handshake timeout (§7.7).
-- Блокировка оператором: на маршрут, sandbox или режим `public` целиком — через `api` (§6.1), действует сразу.
-- `X-Robots-Tag: noindex, nofollow` везде (§7.4).
-- Перечислить маршруты нельзя. Неизвестная и неопубликованная метка дают одинаковый `404`.
-- Злоупотребления (фишинг, раздача вредоносного кода с публичных URL) отслеживаются по access log (§12). Автоматический сканер — не в S4.
+Other:
+- Slowloris: `ReadHeaderTimeout` and the handshake timeout (§7.7).
+- Operator block: on a route, a sandbox, or the `public` mode as a whole — via `api` (§6.1), effective at once.
+- `X-Robots-Tag: noindex, nofollow` everywhere (§7.4).
+- Routes cannot be enumerated. An unknown label and an unpublished label give the same `404`.
+- Abuse (phishing, serving malicious code from public URLs) is tracked by the access log (§12). An automatic scanner is not in S4.
 
-## 12. Наблюдаемость
+## 12. Observability
 
-### 12.1 Метрики Prometheus (`:9090/metrics`)
+### 12.1 Prometheus metrics (`:9090/metrics`)
 
-Метки по sandbox и machine не используются: до 10 000 machine дали бы взрыв кардинальности. Данные по конкретному sandbox берутся из access log.
+Labels by sandbox and machine are not used: up to 10 000 machines would cause a cardinality explosion. Data on a specific sandbox comes from the access log.
 
-| Метрика | Метки |
+| Metric | Labels |
 |---|---|
 | `umiak_gateway_http_requests_total` | `access`, `code_class`, `umiak_error`, `via` (`local`/`peer`) |
-| `umiak_gateway_http_request_duration_seconds` (histogram, до заголовков ответа) | `access`, `via` |
+| `umiak_gateway_http_request_duration_seconds` (histogram, up to the response headers) | `access`, `via` |
 | `umiak_gateway_http_bytes_total` | `direction` |
 | `umiak_gateway_http_active_streams` (WebSocket, SSE, upgrade) | — |
 | `umiak_gateway_upstream_dial_duration_seconds` | `via` |
@@ -618,269 +618,269 @@ Token bucket в памяти пода, без Redis **[исполнитель]**
 | `umiak_gateway_cert_expiry_timestamp_seconds` | `cert` (`umiak`, `tunnel`) |
 | `umiak_gateway_drain_open_streams` | `kind` (`http`, `ssh`) |
 
-Плюс метрики туннелей из S2 §13.
+Plus the tunnel metrics from S2 §13.
 
 ### 12.2 Access log
 
-JSON, одна строка на запрос в stdout:
+JSON, one line per request on stdout:
 - `time`, `requestId`, `clientIp`, `host`, `label`, `sandboxId`, `machineId`, `port`;
-- `method`, `path` **без query** (в query бывают `_token` и секреты приложений);
+- `method`, `path` **without the query** (the query sometimes holds `_token` and application secrets);
 - `status`, `umiakError`, `bytesIn`, `bytesOut`, `durationMs`, `ttfbMs`;
 - `access`, `authResult`, `userId` (sso), `upgrade` (`websocket`);
 - `via` (`local`/`peer`), `ownerInstance`, `userAgent`.
 
-Долгие потоки пишут строку при закрытии.
+Long streams write a line on close.
 
-SSH-лог: `sessionId`, `clientIp`, `actor` (`userId` или `apiKeyId`), `fingerprint` или serial сертификата, `sandboxId`, начало, конец, байты, типы открытых каналов и причина закрытия. Содержимое сессий не пишется.
+SSH log: `sessionId`, `clientIp`, `actor` (`userId` or `apiKeyId`), the certificate `fingerprint` or serial, `sandboxId`, start, end, bytes, the types of opened channels, and the close reason. Session contents are not written.
 
 ### 12.3 Health
 
-- `/healthz` — процесс жив.
-- `/readyz` — сертификаты загружены и под не в drain. Postgres и `api` **не входят** в readiness: при их сбое все поды разом стали бы неготовыми, LB остался бы без endpoints, и упали бы превью, SSH и туннели. Это противоречит stale-if-error (§6.2). Состояние Postgres `LISTEN` и `api` видно в метриках `umiak_gateway_dependency_up{dep}`.
+- `/healthz` — the process is alive.
+- `/readyz` — certificates loaded and the pod is not in drain. Postgres and `api` are **not part** of readiness: on their failure all pods would become unready at once, the LB would be left with no endpoints, and previews, SSH, and tunnels would fail. This contradicts stale-if-error (§6.2). The state of Postgres `LISTEN` and `api` is visible in the metrics `umiak_gateway_dependency_up{dep}`.
 
-Трейсинг (OTel) — фаза 2 (architecture §12).
+Tracing (OTel) is phase 2 (architecture §12).
 
-## 13. TURN: заглушка для S10
+## 13. TURN: a placeholder for S10
 
-- TURN — отдельный coturn (Deployment с UDP LoadBalancer или hostNetwork), **не процесс gateway**. Поправка к architecture §2 и §10.
-- Креды TURN — временные, по схеме TURN REST API (`use-auth-secret`). ~~Секрет общий с `api`, креды выдаёт `api` вместе с URL рабочего стола.~~ **Переопределено S10 §9.3:** секрет есть только у `worker` и coturn, креды доставляются агенту через `Desktop/Configure`. Gateway в медиапути не участвует. Рабочий стол целиком — `docs/specs/s10-desktop.md` (gateway — S10 §10).
-- От S4 нужно только:
-  - зарезервированный суффикс `<slug>-desktop` (§4.2) для сигналинга moonlight-web через тот же HTTP-прокси и те же режимы доступа;
-  - разрешение в firewall sandbox (S1 IPSet) на исходящий UDP к адресам TURN. Порты и форму определяет S10.
+- TURN is a separate coturn (a Deployment with a UDP LoadBalancer or hostNetwork), **not a gateway process**. A correction to architecture §2 and §10.
+- TURN credentials are temporary, per the TURN REST API scheme (`use-auth-secret`). ~~The secret is shared with `api`, the credentials are issued by `api` together with the desktop URL.~~ **Overridden by S10 §9.3:** the secret is held only by `worker` and coturn, the credentials are delivered to the agent through `Desktop/Configure`. The gateway does not take part in the media path. The desktop as a whole is `docs/specs/s10-desktop.md` (the gateway — S10 §10).
+- From S4 only this is needed:
+  - the reserved suffix `<slug>-desktop` (§4.2) for moonlight-web signaling through the same HTTP proxy and the same access modes;
+  - permission in the sandbox firewall (the S1 IPSet) for outbound UDP to the TURN addresses. Ports and form are defined by S10.
 
-## 14. Безопасность
+## 14. Security
 
-### 14.1 Общий родительский домен и cookie tossing
+### 14.1 Shared parent domain and cookie tossing
 
-Приложения в sandbox — недоверенный код, и все они живут под `*.umiak.<domain>`. Если суффикс umiak не в Public Suffix List, браузер считает все `*.umiak.<domain>` и `<domain>` одним сайтом. Отсюда риски:
-- **Cookie tossing.** Страница `evil-80.umiak.<domain>` ставит cookie с `Domain=umiak.<domain>` или `Domain=<domain>`, и браузер отправит её другим sandbox, дашборду и `api`. Так можно перезаписать или затенить cookie платформы (фиксация сессии, сбой CSRF-защиты oauth2-proxy).
-- **Утечка cookie платформы.** Если cookie oauth2-proxy или дашборда выставлена на `Domain=<domain>`, браузер шлёт её в каждый sandbox.
-- **Same-site запросы между sandbox.** Страница одного sandbox делает credentialed-запросы к другому; `SameSite` не защищает, потому что сайт один.
+Applications in a sandbox are untrusted code, and all of them live under `*.umiak.<domain>`. If the umiak suffix is not in the Public Suffix List, the browser considers all `*.umiak.<domain>` and `<domain>` one site. Hence the risks:
+- **Cookie tossing.** The page `evil-80.umiak.<domain>` sets a cookie with `Domain=umiak.<domain>` or `Domain=<domain>`, and the browser will send it to other sandboxes, the dashboard, and `api`. This can overwrite or shadow a platform cookie (session fixation, breaking oauth2-proxy's CSRF protection).
+- **Leak of a platform cookie.** If the cookie of oauth2-proxy or the dashboard is set on `Domain=<domain>`, the browser sends it to every sandbox.
+- **Same-site requests between sandboxes.** A page of one sandbox makes credentialed requests to another; `SameSite` does not protect, because the site is the same.
 
-**Обязательные меры** (согласовано; часть — требования к S8/S12):
-1. Все cookie gateway — `__Host-`, без `Domain` (§8.2).
-2. **Все cookie платформы на основном домене** (oauth2-proxy, Payload, web) host-only и с префиксом `__Host-`, если компонент это позволяет. oauth2-proxy: `--cookie-name=__Host-oauth2_proxy`, без `--cookie-domain`, `--cookie-secure`. Префикс `__Host-` защищает и от подбрасывания: браузер не примет cookie с таким именем, если у неё есть `Domain`. Требование к S8/S12.
-3. Gateway вырезает cookie gateway и cookie с префиксами oauth2-proxy из запросов к приложениям, а также свои `Set-Cookie` из ответов приложений (§7.4).
-4. Сессии IdP и oauth2-proxy никогда не выставляются на домене umiak: режим `sso` использует одноразовый код (§8.4).
-5. Состояние доступа к порту привязано к `authEpoch` и label, а не только к наличию cookie.
+**Mandatory measures** (agreed; some are requirements for S8/S12):
+1. All gateway cookies are `__Host-`, without `Domain` (§8.2).
+2. **All platform cookies on the main domain** (oauth2-proxy, Payload, web) are host-only and with the prefix `__Host-` if the component allows it. oauth2-proxy: `--cookie-name=__Host-oauth2_proxy`, without `--cookie-domain`, `--cookie-secure`. The `__Host-` prefix also protects against planting: the browser will not accept a cookie with such a name if it has a `Domain`. A requirement for S8/S12.
+3. The gateway strips the gateway cookies and cookies with oauth2-proxy prefixes from requests to applications, and its own `Set-Cookie` from application responses (§7.4).
+4. IdP and oauth2-proxy sessions are never set on the umiak domain: the `sso` mode uses a one-time code (§8.4).
+5. The state of access to a port is bound to `authEpoch` and the label, not only to the presence of a cookie.
 
-**Остаточный риск, принят:** CSRF между sandbox одного родительского сайта. Приложение в sandbox A может заставить браузер посетителя слать запросы с его cookie в sandbox B. Защита от CSRF внутри приложения — забота приложения, как и в любом хостинге. Полностью риск снимает отдельный регистрируемый домен (`UMIAK_GATEWAY_PREVIEW_DOMAIN`, §4.1) и, если домен публичный, внесение его в Public Suffix List. Цена: покупка домена и ненадёжная работа cookie в iframe в Safari (§8.2). Илья проинформирован и может выбрать отдельный домен позже; код от этого не меняется.
+**Residual risk, accepted:** CSRF between sandboxes of one parent site. An application in sandbox A can make a visitor's browser send requests with their cookie to sandbox B. CSRF protection inside an application is the application's concern, as in any hosting. The risk is removed entirely by a separate registrable domain (`UMIAK_GATEWAY_PREVIEW_DOMAIN`, §4.1) and, if the domain is public, adding it to the Public Suffix List. The price: buying a domain and unreliable cookies in an iframe in Safari (§8.2). Ilia has been informed and may choose a separate domain later; the code does not change because of this.
 
-### 14.2 Прочее
+### 14.2 Other
 
-- **Граница доверия к заголовкам.** Gateway перезаписывает `X-Forwarded-*` и вырезает заголовки идентичности. `X-Umiak-User-Email` ставит только он (§7.4).
-- **Open redirect.** Его нет: `rd` — только путь (§8.4), а хост колбэка `api` строит из label.
-- **Утечка токена.** `_token` пропадает из URL после первого запроса (`302`), в логах нет query, `Referrer-Policy: no-referrer` на редиректе.
+- **Header trust boundary.** The gateway overwrites `X-Forwarded-*` and strips identity headers. `X-Umiak-User-Email` is set only by it (§7.4).
+- **Open redirect.** There is none: `rd` is a path only (§8.4), and the callback host is built by `api` from the label.
+- **Token leak.** `_token` disappears from the URL after the first request (`302`), the logs have no query, `Referrer-Policy: no-referrer` on the redirect.
 - **SSH.**
-  - Закрытые ключи CA и host keys — в Secret.
-  - Сертификат для VM живёт 5 min и выдаётся только на `loginUser`, которого назвал `api`.
-  - CONNECT агента ограничен адресами самой VM (S2 §4.2), поэтому gateway не может стать прокси в LAN.
-- **Service tokens** — по S2 §5.5 и §16: статические ротируемые токены в приватной сети кластера.
+  - The CA private keys and host keys are in a Secret.
+  - The certificate for the VM lives 5 min and is issued only for the `loginUser` named by `api`.
+  - The agent's CONNECT is limited to the VM's own addresses (S2 §4.2), so the gateway cannot become a proxy into the LAN.
+- **Service tokens** — per S2 §5.5 and §16: static rotatable tokens in the cluster's private network.
 
-## 15. Приёмка
+## 15. Acceptance
 
-Где идут тесты — как в S2 §14:
-- in-memory транспорт `libs/tunnel` в CI;
-- kind/k3s с 2–3 подами gateway и агентами-процессами;
-- стенд `pve` с реальной VM.
+Where tests run — as in S2 §14:
+- the `libs/tunnel` in-memory transport in CI;
+- kind/k3s with 2–3 gateway pods and agent processes;
+- the `pve` stand with a real VM.
 
-`api` в тестах gateway заменён фейком, который реализует контракты §6.1, §8.4 и §9.2.
+In the gateway tests `api` is replaced by a fake that implements the contracts of §6.1, §8.4, and §9.2.
 
 ### 15.1 HTTP
 
-- Vite (последняя стабильная на момент реализации; 2026-10-29 это 8.3.5) на `localhost:5173` без флагов, с `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` в окружении: страница грузится, HMR через WebSocket обновляет модуль после правки файла. То же для `vite preview`.
-- Приложение на `0.0.0.0` и приложение только на `[::1]` — оба отвечают.
-- `hostRewrite: localhost` — приложение видит `Host: localhost:<port>` и исходный `X-Forwarded-Host`.
-- SSE: событие доходит до клиента меньше чем за 100 ms после записи.
-- Загрузка 5 GB через `PUT` и скачивание 5 GB: RSS пода gateway растёт не больше чем на 64 MiB, sha256 совпадает.
-- gRPC unary и bidi-stream к серверу с `appProtocol: h2c`.
-- `curl --http2` к gateway: в SETTINGS нет `ENABLE_CONNECT_PROTOCOL`; Chrome открывает WebSocket к приложению.
-- Каждая строка таблицы §7.6 воспроизводится, и у ответа правильный `Umiak-Error`.
+- Vite (the latest stable at implementation time; on 2026-10-29 this is 8.3.5) on `localhost:5173` without flags, with `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` in the environment: the page loads, HMR over WebSocket updates a module after a file edit. The same for `vite preview`.
+- An application on `0.0.0.0` and an application on `[::1]` only — both answer.
+- `hostRewrite: localhost` — the application sees `Host: localhost:<port>` and the original `X-Forwarded-Host`.
+- SSE: an event reaches the client in under 100 ms after being written.
+- A 5 GB upload via `PUT` and a 5 GB download: the gateway pod's RSS grows by no more than 64 MiB, the sha256 matches.
+- gRPC unary and a bidi stream to a server with `appProtocol: h2c`.
+- `curl --http2` to the gateway: there is no `ENABLE_CONNECT_PROTOCOL` in SETTINGS; Chrome opens a WebSocket to the application.
+- Every row of the §7.6 table is reproduced, and the response has the right `Umiak-Error`.
 
-### 15.2 Маршрутизация
+### 15.2 Routing
 
-- Запрос на под P, туннель на поде O — ответ корректный, в логе `via=peer`; peer CONNECT идёт по одному HTTP/2-соединению (§7.2).
-- 1000 одновременных WebSocket через одного соседа: все открываются (лимит потоков внутреннего listener-а не 250). 801-й TCP-поток к одной machine получает `503 overloaded`, а exec через API при этом работает.
-- Rolling update gateway во время 100 параллельных долгих HTTP-запросов (по 30 s): ни один запрос короче 2 min не оборвался; WebSocket закрылись не раньше чем через 2 min после начала drain.
-- Rename slug: старый URL даёт `404`, новый работает не позже чем через 1 s (по `NOTIFY`).
-- `api` недоступен: закэшированные маршруты работают 10 min, новые метки дают `503 route_lookup_unavailable`.
+- A request to pod P, the tunnel on pod O — the response is correct, `via=peer` in the log; the peer CONNECT goes over one HTTP/2 connection (§7.2).
+- 1000 simultaneous WebSockets through one neighbor: all open (the stream limit of the internal listener is not 250). The 801st TCP stream to one machine gets `503 overloaded`, while exec through the API keeps working.
+- A rolling update of the gateway during 100 parallel long HTTP requests (30 s each): no request shorter than 2 min was dropped; WebSockets closed no earlier than 2 min after the start of drain.
+- Slug rename: the old URL gives `404`, the new one works no later than 1 s (via `NOTIFY`).
+- `api` unavailable: cached routes work for 10 min, new labels give `503 route_lookup_unavailable`.
 
-### 15.3 Доступ
+### 15.3 Access
 
 - `token`:
-  - браузерный переход с `?_token=` → `302` без токена, cookie выставлена; `curl` без cookie jar и WebSocket с `?_token=` проксируются сразу;
-  - неверный токен → `401`;
-  - ротация (`authEpoch+1`) → старая cookie сразу даёт `401`.
+  - a browser navigation with `?_token=` → `302` without the token, the cookie is set; `curl` without a cookie jar and a WebSocket with `?_token=` are proxied right away;
+  - a wrong token → `401`;
+  - rotation (`authEpoch+1`) → the old cookie gives `401` at once.
 - `sso`:
-  - полный цикл через настоящий oauth2-proxy и тестовый IdP (Dex или аналог);
-  - подмена `state` → отказ;
-  - повторное использование кода → отказ;
-  - `rd=//evil.com` → игнорируется;
-  - приложение видит `X-Umiak-User-Email`, а клиентский `X-Umiak-User-Email` вырезан.
-- Вырезание: приложение-эхо не видит ни одного cookie и заголовка из §7.4. `Set-Cookie: __Host-umiak_auth` от приложения до браузера не доходит.
-- `blocked` и выключенный `public` → `403 route_blocked` не позже чем через 1 s после изменения в `api`.
-- CORS preflight к `token`/`sso`-порту доходит до приложения без авторизации; `fetch` с credentials без cookie получает `401`.
+  - the full cycle through a real oauth2-proxy and a test IdP (Dex or similar);
+  - a forged `state` → refusal;
+  - code reuse → refusal;
+  - `rd=//evil.com` → ignored;
+  - the application sees `X-Umiak-User-Email`, and the client's `X-Umiak-User-Email` is stripped.
+- Stripping: an echo application sees none of the cookies and headers of §7.4. `Set-Cookie: __Host-umiak_auth` from the application does not reach the browser.
+- `blocked` and a disabled `public` → `403 route_blocked` no later than 1 s after the change in `api`.
+- A CORS preflight to a `token`/`sso` port reaches the application without authorization; a `fetch` with credentials without a cookie gets `401`.
 
 ### 15.4 SSH
 
-Через gateway на стенде с реальной VM:
-- `ssh`, `ssh -t … tmux`, `scp`, `sftp`, `rsync`, `ssh -L`, `ssh -R`, `ssh -A` (агент виден в VM);
-- VS Code Remote-SSH подключается и ставит свой сервер;
-- в журнале sshd в VM — `KeyId` с `umiak:user:<id>` или `umiak:key:<id>`;
-- вход по сертификату от `api` (человек и командный ключ); сертификат чужого CA, истёкший, с principal другой sandbox → отказ; деактивация пользователя и отзыв ключа закрывают открытую сессию за секунды (§9.5);
-- неверный ключ → отказ; остановленный sandbox → понятное сообщение в stderr;
-- после fork запись `known_hosts` для `ssh.<domain>` действует;
-- `hostkeys-00@openssh.com` от sshd VM до клиента не доходит; в выводе `ssh -v` нет ошибок `hostkeys`;
-- drain front-а: сообщения сразу и за 1 min, закрытие через 15 min; под завершается в пределах 960 s;
-- drain только владельца (front другой и не в drain): front получает срок по `NOTIFY gateway_instances`, пишет те же сообщения и закрывает сессию в срок владельца.
+Through the gateway on the stand with a real VM:
+- `ssh`, `ssh -t … tmux`, `scp`, `sftp`, `rsync`, `ssh -L`, `ssh -R`, `ssh -A` (the agent is visible in the VM);
+- VS Code Remote-SSH connects and installs its server;
+- in the sshd journal in the VM — a `KeyId` with `umiak:user:<id>` or `umiak:key:<id>`;
+- login by a certificate from `api` (a person and a team key); a certificate from a foreign CA, expired, with the principal of another sandbox → refusal; deactivating a user and revoking a key close an open session within seconds (§9.5);
+- a wrong key → refusal; a stopped sandbox → a clear message on stderr;
+- after a fork the `known_hosts` entry for `ssh.<domain>` is valid;
+- `hostkeys-00@openssh.com` from the VM's sshd does not reach the client; there are no `hostkeys` errors in the `ssh -v` output;
+- front drain: messages at once and 1 min before, closing after 15 min; the pod terminates within 960 s;
+- drain of the owner only (the front is another and not draining): the front gets the deadline from `NOTIFY gateway_instances`, writes the same messages, and closes the session at the owner's deadline.
 
-### 15.5 Лимиты
+### 15.5 Limits
 
-Каждая строка таблицы §11 срабатывает на нагрузочном скрипте; `exempt`-адрес не ограничивается.
+Each row of the §11 table triggers on a load script; an `exempt` address is not limited.
 
-### 15.6 Режимы edge
+### 15.6 Edge modes
 
-- `UMIAK_GATEWAY_PROXY_PROTOCOL=v2`: тестовый клиент шлёт PROXY v2 — IP клиента в логе верный; заголовок PROXY с адреса вне `PROXY_PROTOCOL_CIDRS` отклоняется.
-- `off` + `externalTrafficPolicy: Local` в kind (MetalLB) — IP клиента верный.
-- Режим за ingress: один прогон §15.1 (без gRPC) через ingress-nginx или Traefik в kind.
-- Под с недоступным Postgres остаётся ready, закэшированные маршруты обслуживаются.
+- `UMIAK_GATEWAY_PROXY_PROTOCOL=v2`: a test client sends PROXY v2 — the client IP in the log is right; a PROXY header from an address outside `PROXY_PROTOCOL_CIDRS` is rejected.
+- `off` + `externalTrafficPolicy: Local` in kind (MetalLB) — the client IP is right.
+- Behind-ingress mode: one run of §15.1 (without gRPC) through ingress-nginx or Traefik in kind.
+- A pod with an unavailable Postgres stays ready, cached routes are served.
 
-## 16. Раскладка кода и интерфейсы к другим областям
+## 16. Code layout and interfaces to other areas
 
-### 16.1 Код
+### 16.1 Code
 
-Бинарник — `services/gateway` (Go-модуль `github.com/belov38/umiak/services/gateway`, в `go.work`). Он встраивает библиотеку туннеля S2 `libs/tunnel`: приёмник, реестр, drain, `MachineConn`, клиент `CONNECT` к соседнему поду, поиск владельца с кэшем по `LISTEN`.
+The binary is `services/gateway` (the Go module `github.com/belov38/umiak/services/gateway`, in `go.work`). It embeds the S2 tunnel library `libs/tunnel`: the receiver, registry, drain, `MachineConn`, the `CONNECT` client to a neighboring pod, owner lookup with a `LISTEN` cache.
 
-Раскладка пакетов внутри `services/gateway/internal/` **[исполнитель]**:
+The package layout inside `services/gateway/internal/` **[implementer]**:
 
-| Пакет | Что |
+| Package | What |
 |---|---|
-| `edge` | listener-ы, SNI, PROXY protocol, перечитывание сертификатов |
-| `routes` | клиент `api`, кэш, `LISTEN umiak_routes` |
-| `upstream` | dial: локальный или через владельца, пул |
-| `httpproxy` | `ReverseProxy`, заголовки, таймауты, страницы ошибок |
+| `edge` | listeners, SNI, PROXY protocol, certificate re-reading |
+| `routes` | the `api` client, cache, `LISTEN umiak_routes` |
+| `upstream` | dial: local or via the owner, pool |
+| `httpproxy` | `ReverseProxy`, headers, timeouts, error pages |
 | `portauth` | cookie, `token`, `sso`, `/__umiak/*` |
-| `sshgw` | SSH-сервер, CA, проброс каналов |
-| `ratelimit` | лимиты |
-| `obs` | метрики, логи |
+| `sshgw` | SSH server, CA, channel forwarding |
+| `ratelimit` | limits |
+| `obs` | metrics, logs |
 
-Если `libs/tunnel` в реализации S2 ещё не даёт поиска владельца, клиента peer `CONNECT` (§7.2), `drain_started_at` с `NOTIFY gateway_instances` (§10.3) или счётчика TCP-потоков на machine (§7.2), S4 добавляет их туда, а не в `services/gateway`: эти части нужны и другим.
+If `libs/tunnel` in the S2 implementation does not yet provide owner lookup, the peer `CONNECT` client (§7.2), `drain_started_at` with `NOTIFY gateway_instances` (§10.3), or the per-machine TCP stream counter (§7.2), S4 adds them there, not in `services/gateway`: others need these parts too.
 
-Порядок реализации **[исполнитель]**, по фазам архитектуры (§12):
-- **PoC** — edge, маршруты, прокси, `public` и `token`, базовые метрики и логи;
-- **MVP** — `sso`, SSH, лимиты, drain front-а.
+Implementation order **[implementer]**, by the architecture phases (§12):
+- **PoC** — edge, routes, proxy, `public` and `token`, basic metrics and logs;
+- **MVP** — `sso`, SSH, limits, front drain.
 
-### 16.2 Конфиг (env)
+### 16.2 Config (env)
 
-| Переменная | Назначение |
+| Variable | Purpose |
 |---|---|
-| `UMIAK_GATEWAY_PREVIEW_DOMAIN`, `UMIAK_GATEWAY_TUNNEL_HOST`, `UMIAK_GATEWAY_SSH_HOST` | имена (§4.1) |
-| `UMIAK_GATEWAY_TLS_PREVIEW_CERT_FILE`/`_KEY_FILE`, `UMIAK_GATEWAY_TLS_TUNNEL_CERT_FILE`/`_KEY_FILE` | сертификаты |
-| `UMIAK_GATEWAY_PROXY_PROTOCOL` (`off`/`v2`), `UMIAK_GATEWAY_PROXY_PROTOCOL_CIDRS`, `UMIAK_GATEWAY_TRUSTED_PROXY_CIDRS` | IP клиента |
-| `UMIAK_GATEWAY_HTTP_LISTEN` | plain-режим (§5.2), пусто — выключен |
-| `UMIAK_GATEWAY_API_URL`, `UMIAK_GATEWAY_API_TOKEN_FILE` | внутренний `api` |
+| `UMIAK_GATEWAY_PREVIEW_DOMAIN`, `UMIAK_GATEWAY_TUNNEL_HOST`, `UMIAK_GATEWAY_SSH_HOST` | names (§4.1) |
+| `UMIAK_GATEWAY_TLS_PREVIEW_CERT_FILE`/`_KEY_FILE`, `UMIAK_GATEWAY_TLS_TUNNEL_CERT_FILE`/`_KEY_FILE` | certificates |
+| `UMIAK_GATEWAY_PROXY_PROTOCOL` (`off`/`v2`), `UMIAK_GATEWAY_PROXY_PROTOCOL_CIDRS`, `UMIAK_GATEWAY_TRUSTED_PROXY_CIDRS` | client IP |
+| `UMIAK_GATEWAY_HTTP_LISTEN` | plain mode (§5.2), empty — off |
+| `UMIAK_GATEWAY_API_URL`, `UMIAK_GATEWAY_API_TOKEN_FILE` | the internal `api` |
 | `UMIAK_GATEWAY_AUTH_URL` | authorize endpoint (§8.4) |
 | `UMIAK_GATEWAY_COOKIE_KEYS_FILE`, `UMIAK_GATEWAY_COOKIE_CROSS_SITE` | §8.2 |
 | `UMIAK_GATEWAY_INGRESS_DESKTOP_KEY_FILE` | 32 raw bytes; HMAC key of the `Umiak-Ingress-Desktop` header (owner ingress, path-addressed desktop). Unset: header always 403 |
 | `UMIAK_GATEWAY_STRIP_COOKIE_PREFIXES` | §7.4 |
-| `UMIAK_GATEWAY_SSH_HOST_KEY_FILES`, `UMIAK_GATEWAY_SSH_USER_CA_KEY_FILE`, `UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS` (публичные ключи SSH login CA) | §9 |
+| `UMIAK_GATEWAY_SSH_HOST_KEY_FILES`, `UMIAK_GATEWAY_SSH_USER_CA_KEY_FILE`, `UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS` (the public keys of the SSH login CA) | §9 |
 | `UMIAK_GATEWAY_RESERVED_PORTS`, `UMIAK_GATEWAY_RESERVED_SUFFIXES` | §4.2 |
 | `UMIAK_GATEWAY_RATELIMIT_*`, `UMIAK_GATEWAY_RATELIMIT_EXEMPT_CIDRS` | §11 |
 | `UMIAK_GATEWAY_HTTP_DRAIN_DEADLINE` (2m), `UMIAK_GATEWAY_SSH_DRAIN_DEADLINE` (15m) | §10 |
-| таймауты §7.7 | `UMIAK_GATEWAY_TIMEOUT_*` |
+| timeouts of §7.7 | `UMIAK_GATEWAY_TIMEOUT_*` |
 
-Плюс конфиг S2 (Postgres, внутренний listener, service tokens).
+Plus the S2 config (Postgres, the internal listener, service tokens).
 
-### 16.3 Что S4 ожидает от других областей
+### 16.3 What S4 expects from other areas
 
-- **S2 / `libs/tunnel`** (нужно согласовать с треком `s2-impl`):
+- **S2 / `libs/tunnel`** (to be agreed with the `s2-impl` track):
   - `MachineConn.DialTCP`;
-  - peer CONNECT в форме `CONNECT <machineId>:<port>` по `:authority` (§7.2) с ответом `421`; `MaxConcurrentStreams` 10 000 на внутреннем listener-е;
-  - поиск владельца на Go;
-  - `Control/Drain` с произвольным `tcpDeadline`;
-  - отличимые ошибки dial (§7.2);
-  - счётчик и лимит TCP-потоков на machine у владельца (§7.2);
-  - `gateway_instances.drain_started_at` и `NOTIFY gateway_instances` (§10.3).
+  - peer CONNECT in the form `CONNECT <machineId>:<port>` via `:authority` (§7.2) with a `421` response; `MaxConcurrentStreams` 10 000 on the internal listener;
+  - owner lookup in Go;
+  - `Control/Drain` with an arbitrary `tcpDeadline`;
+  - distinguishable dial errors (§7.2);
+  - a counter and limit of TCP streams per machine at the owner (§7.2);
+  - `gateway_instances.drain_started_at` and `NOTIFY gateway_instances` (§10.3).
 - **S3:**
-  - порядок dial `127.0.0.1` → `[::1]` → адреса интерфейсов;
-  - ответ на `CONNECT` с причиной ошибки dial;
-  - `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` в окружении процессов и логин-шеллов;
-  - sshd только на loopback;
-  - `TrustedUserCAKeys` и обновление ключей CA при claim.
+  - the dial order `127.0.0.1` → `[::1]` → interface addresses;
+  - a `CONNECT` response with the dial error reason;
+  - `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` in the environment of processes and login shells;
+  - sshd on loopback only;
+  - `TrustedUserCAKeys` and updating the CA keys at claim.
   
-  Согласовано master-сессией.
-- **S5/S9:** OpenSSH в шаблоне (Windows: OpenSSH Server включён, shell по умолчанию PowerShell), ключи CA gateway, `loginUser` шаблона.
+  Agreed by the master session.
+- **S5/S9:** OpenSSH in the template (Windows: OpenSSH Server enabled, the default shell PowerShell), the gateway CA keys, the template's `loginUser`.
 - **S6:**
-  - состояния sandbox (§6.3);
+  - sandbox states (§6.3);
   - `machineId` sandbox;
-  - триггеры БД, которые шлют `NOTIFY umiak_routes` при изменениях (§6.2);
-  - право «exec» как основа SSH-доступа.
+  - DB triggers that send `NOTIFY umiak_routes` on changes (§6.2);
+  - the "exec" right as the basis of SSH access.
 - **S7:**
-  - HostedPort: `port`, `access`, токен (хеш), `authEpoch`, `hostRewrite`, `appProtocol`, `blocked`;
-  - валидация slug и портов (§4.2), rename;
-  - лимит 50 портов на sandbox;
-  - эндпоинты §6.1, §8.4 (`authorize`, `exchange`), §9.2 (включая вход по сертификату), выпуск SSH-сертификатов (S7 §11.3);
-  - отдача host keys SSH;
-  - документация пользователей (§7.5).
+  - HostedPort: `port`, `access`, token (hash), `authEpoch`, `hostRewrite`, `appProtocol`, `blocked`;
+  - slug and port validation (§4.2), rename;
+  - a limit of 50 ports per sandbox;
+  - the endpoints of §6.1, §8.4 (`authorize`, `exchange`), §9.2 (including login by certificate), issuing SSH certificates (S7 §11.3);
+  - serving SSH host keys;
+  - user documentation (§7.5).
 - **S8:**
-  - регистрация SSH-ключей;
-  - выключатели оператора (блокировка, `public`);
-  - cookie платформы по §14.1;
-  - отзыв доступа пользователя через `authEpoch`;
-  - деактивация пользователей по Keycloak (S8 §20.1); `NOTIFY umiak_ssh_revoke` из хуков Payload при деактивации, удалении участника, отзыве ключа и удалении команды (§9.5).
-- **S10:** суффикс `-desktop`, TURN (§13).
+  - SSH key registration;
+  - operator switches (block, `public`);
+  - platform cookies per §14.1;
+  - revoking a user's access via `authEpoch`;
+  - deactivating users by Keycloak (S8 §20.1); `NOTIFY umiak_ssh_revoke` from the Payload hooks on deactivation, member removal, key revocation, and team deletion (§9.5).
+- **S10:** the `-desktop` suffix, TURN (§13).
 - **S12:**
-  - Service `gateway-edge` (L4, PROXY protocol v2, 443 и 22);
+  - the Service `gateway-edge` (L4, PROXY protocol v2, 443 and 22);
   - DNS (§4.1);
   - cert-manager (DNS-01 wildcard, tunnel CA);
-  - Secrets: ключи cookie, SSH host keys, SSH user CA, публичные ключи SSH login CA, service tokens;
+  - Secrets: cookie keys, SSH host keys, SSH user CA, the public keys of the SSH login CA, service tokens;
   - `terminationGracePeriodSeconds: 960`;
-  - IPSet `umiak-gateway` = IP `gateway-edge` (только TCP 443);
-  - egress-адреса нод Proxmox в `UMIAK_GATEWAY_RATELIMIT_EXEMPT_CIDRS`;
-  - режим IP клиента: `v2` или `off` + `externalTrafficPolicy: Local` (§5.1);
-  - oauth2-proxy с `__Host-` cookie.
+  - IPSet `umiak-gateway` = the `gateway-edge` IP (TCP 443 only);
+  - the egress addresses of Proxmox nodes in `UMIAK_GATEWAY_RATELIMIT_EXEMPT_CIDRS`;
+  - client IP mode: `v2` or `off` + `externalTrafficPolicy: Local` (§5.1);
+  - oauth2-proxy with `__Host-` cookies.
 
-## 17. Позже
+## 17. Later
 
-- Пробуждение остановленного sandbox по HTTP или SSH.
-- Программный доступ к `sso`-портам по API-ключу (заголовок, который gateway проверяет через `api`).
-- Одна авторизация на все порты sandbox (§8.5).
-- HTTPS к приложению внутри VM; сырые TCP/UDP-порты наружу; свои домены.
-- Возобновляемые TCP-потоки, чтобы SSH и WebSocket переживали деплой (S2 §11).
-- Счётчики трафика по sandbox в дашборде (из access log или агрегатов gateway).
-- Внесение отдельного домена umiak в Public Suffix List.
-- Общие лимиты на кластер (через Postgres или Redis), если лимитов на под окажется мало.
+- Waking a stopped sandbox by HTTP or SSH.
+- Programmatic access to `sso` ports by API key (a header that the gateway verifies through `api`).
+- One authorization for all ports of a sandbox (§8.5).
+- HTTPS to the application inside the VM; raw TCP/UDP ports outward; custom domains.
+- Resumable TCP streams so that SSH and WebSocket survive a deploy (S2 §11).
+- Per-sandbox traffic counters in the dashboard (from the access log or gateway aggregates).
+- Adding a separate umiak domain to the Public Suffix List.
+- Cluster-wide limits (via Postgres or Redis) if per-pod limits turn out to be insufficient.
 
-## 18. Библиотеки
+## 18. Libraries
 
-Правило проекта: последние стабильные версии, проверить перед добавлением. Проверено 2026-10-29.
+Project rule: the latest stable versions, to be checked before adding. Checked 2026-10-29.
 
-| Назначение | Библиотека | Версия |
+| Purpose | Library | Version |
 |---|---|---|
 | Go toolchain | `mise.toml` | go 1.27.3 |
-| HTTP, reverse proxy, TLS | стандартная библиотека | — |
-| HTTP/2 (h2c к приложению, если std не хватит) | `golang.org/x/net/http2` | v0.62.0 |
-| SSH-сервер и клиент | `golang.org/x/crypto/ssh` | v0.58.0 |
+| HTTP, reverse proxy, TLS | standard library | — |
+| HTTP/2 (h2c to the application, if std is not enough) | `golang.org/x/net/http2` | v0.62.0 |
+| SSH server and client | `golang.org/x/crypto/ssh` | v0.58.0 |
 | PROXY protocol | `github.com/pires/go-proxyproto` | v0.16.0 |
 | Postgres `LISTEN` | `github.com/jackc/pgx/v5` | v5.11.0 |
 | Token bucket | `golang.org/x/time/rate` | v0.16.0 |
-| Метрики | `github.com/prometheus/client_golang` | v1.25.0 |
-| Перечитывание сертификатов | `github.com/fsnotify/fsnotify` | v1.10.1 |
-| Альтернатива для SSH-прокси | `github.com/tg123/sshpiper` | v1.6.1 |
-| Сертификаты в кластере (S12) | cert-manager | v1.21.3 |
+| Metrics | `github.com/prometheus/client_golang` | v1.25.0 |
+| Re-reading certificates | `github.com/fsnotify/fsnotify` | v1.10.1 |
+| Alternative for the SSH proxy | `github.com/tg123/sshpiper` | v1.6.1 |
+| Certificates in the cluster (S12) | cert-manager | v1.21.3 |
 | TURN (S10) | coturn | 4.18.0 |
 
-## 19. Оставлено исполнителю
+## 19. Left to the implementer
 
-- Структура пакетов (§16.1) и как разделить код между `services/gateway` и `libs/tunnel`.
-- Форма ответа агента на неудачный dial (§7.2), согласованно с реализацией S2/S3.
-- Свой проброс SSH-каналов или sshpiper (§9.4).
-- Значения таймаутов и лимитов (§7.7, §11) по результатам тестов.
-- Дизайн HTML-страниц ошибок (минимальный, без внешних ресурсов).
-- Механизм перечитывания сертификатов.
+- The package structure (§16.1) and how to split code between `services/gateway` and `libs/tunnel`.
+- The form of the agent's response to a failed dial (§7.2), agreed with the S2/S3 implementation.
+- Our own SSH channel forwarding or sshpiper (§9.4).
+- Timeout and limit values (§7.7, §11) based on test results.
+- The design of the HTML error pages (minimal, no external resources).
+- The certificate re-reading mechanism.
 
-## 20. Открытые вопросы
+## 20. Open questions
 
-- Отдельный регистрируемый домен для umiak вместо `umiak.<domain>`: выбор Ильи, может быть сделан позже (§14.1).
-- Какой L4 LoadBalancer в кластере и умеет ли он PROXY protocol v2 (S12). На PoC — `off` + `externalTrafficPolicy: Local`.
-- Кто именно может входить по SSH и открывать `sso`-порты: сейчас SSH — по праву exec, `sso` — любой вошедший пользователь; уточнение политики — S6/S8.
+- A separate registrable domain for umiak instead of `umiak.<domain>`: Ilia's choice, can be made later (§14.1).
+- Which L4 LoadBalancer is in the cluster and whether it supports PROXY protocol v2 (S12). On the PoC — `off` + `externalTrafficPolicy: Local`.
+- Who exactly may log in via SSH and open `sso` ports: now SSH is by the exec right, `sso` — any signed-in user; refining the policy is for S6/S8.
