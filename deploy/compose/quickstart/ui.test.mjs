@@ -49,12 +49,11 @@ test("only fixed font asset paths are public and both fonts are available", () =
 });
 
 test("setup auxiliary controls are secondary and side effects ask for confirmation", () => {
-	const html = renderSetup({ steps: {} }, "http://localhost");
+	const html = renderSetup({ steps: {} });
 	assert.match(html, /class="outline" type="button" id="validate-media"/);
-	assert.match(html, /class="outline" type="button" id="prepare"/);
+	assert.doesNotMatch(html, /id="prepare"/);
 	assert.match(html, /confirm\("Build this template/);
 	assert.match(html, /confirm\('Run the smoke test/);
-	assert.match(html, /result.warning/);
 });
 
 test("owner navigation and progress follow dashboard composition", () => {
@@ -69,7 +68,7 @@ test("owner navigation and progress follow dashboard composition", () => {
 		/class="sidebar-footer"><nav aria-label="Owner navigation"><a href="\/setup"/,
 	);
 	assert.match(html, /data-theme="light"[^>]*><svg/);
-	const setup = renderSetup({ steps: {} }, "http://localhost");
+	const setup = renderSetup({ steps: {} });
 	assert.match(setup, /href="\/setup" aria-current="page"/);
 	assert.match(setup, /role="progressbar"/);
 	assert.doesNotMatch(setup, /<progress/);

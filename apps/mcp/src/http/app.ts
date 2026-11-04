@@ -10,7 +10,12 @@ import {
 	type McpRequestContext,
 	TRACEPARENT_META_KEY,
 } from "@modelcontextprotocol/server";
-import { authMode, isLocalClientAllowed, TrustedProxies } from "@umiak/auth";
+import {
+	isTrustedIngressClient,
+	ownerCidrSet,
+	parseAuthMode,
+	TrustedProxies,
+} from "@umiak/auth";
 import { Umiak } from "@umiak/sdk";
 import { type Context, Hono } from "hono";
 import { canonicalFetch } from "../../../../deploy/compose/canonical-fetch.mjs";
@@ -45,7 +50,7 @@ import {
 } from "./prm.ts";
 
 export interface HttpOptions {
-	localEnv?: Record<string, string | undefined>;
+	ownerEnv?: Record<string, string | undefined>;
 	/** UMIAK_MCP_API_URL: the api's public listener. */
 	apiUrl: string;
 	/** UMIAK_MCP_PUBLIC_URL, e.g. https://api.example.com/mcp. */
@@ -184,7 +189,7 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 	}
 	const log = o.log;
 	const canonicalApi =
-		o.localEnv?.UMIAK_AUTH_MODE === "none" && o.localEnv.UMIAK_API_URL;
+		o.ownerEnv?.UMIAK_AUTH_MODE === "owner" && o.ownerEnv.UMIAK_API_URL;
 	// Connect to fixed internal DNS while presenting the configured API authority.
 	// Never derive this Host from an incoming browser or MCP header.
 	const apiTransport = canonicalApi
@@ -217,7 +222,7 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 		o.metrics?.authRejections.inc({ status: r.status, reason: r.reason });
 		log.info({ status: r.status, reason: r.reason }, "bearer refused");
 		const headers: Record<string, string> = {};
-		if (r.status === 401 && authMode(o.localEnv ?? {}) === "oidc") {
+		if (r.status === 401 && parseAuthMode(o.ownerEnv ?? {}) === "oidc") {
 			headers["WWW-Authenticate"] = bearerChallenge(metadataUrl, r.challenge);
 		}
 		if (r.status === 503) headers["Retry-After"] = "1";
@@ -233,17 +238,17 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 	): Promise<Principal | Response> {
 		if (o.authenticate !== undefined) return o.authenticate(req, team);
 		const bearer = bearerOf(req);
-		const local = authMode(o.localEnv ?? {}) === "none";
-		if (local && req.headers.has("authorization") && bearer === null) {
+		const owner = parseAuthMode(o.ownerEnv ?? {}) === "owner";
+		if (owner && req.headers.has("authorization") && bearer === null) {
 			return refuse({
 				status: 401,
 				reason: "malformed_authorization",
 				code: "unauthorized",
 				message:
-					"send one Authorization: Bearer <token> header or omit it in local mode",
+					"send one Authorization: Bearer <token> header or omit it in owner mode",
 			});
 		}
-		const token = bearer ?? (local ? "" : null);
+		const token = bearer ?? (owner ? "" : null);
 		if (token === null) {
 			o.metrics?.authRejections.inc({ status: 401, reason: "no_bearer" });
 			return Response.json(
@@ -432,10 +437,11 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 	}
 
 	const app = new Hono();
-	if (authMode(o.localEnv ?? {}) === "none") {
+	if (parseAuthMode(o.ownerEnv ?? {}) === "owner") {
 		let observed = 0;
+		const cidrs = ownerCidrSet(o.ownerEnv);
 		const trusted = new TrustedProxies(
-			(o.localEnv?.UMIAK_API_TRUSTED_PROXY_CIDRS ?? "")
+			(o.ownerEnv?.UMIAK_API_TRUSTED_PROXY_CIDRS ?? "")
 				.split(",")
 				.filter(Boolean),
 		);
@@ -447,16 +453,17 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 			)?.incoming?.socket?.remoteAddress;
 			const client = trusted.clientOf(peer, c.req.header("x-forwarded-for"));
 			if (observed++ < 10)
-				console.info("local MCP observed peer/client (may be Docker NAT)", {
+				console.info("owner MCP observed peer/client (may be Docker NAT)", {
 					peer,
 					client,
 				});
-			if (!isLocalClientAllowed(client, o.localEnv))
+			if (!isTrustedIngressClient(peer ?? "", cidrs))
 				return c.json(
 					{
 						error: {
-							code: "local_network_forbidden",
-							message: "client address is outside UMIAK_LOCAL_ALLOWED_CIDRS",
+							code: "ingress_required",
+							message:
+								"owner mode accepts requests from the trusted ingress only",
 						},
 					},
 					403,

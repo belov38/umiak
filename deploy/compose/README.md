@@ -1,5 +1,7 @@
 # Локальный стек (docker compose)
 
+> Этот каталог описывает корпоративный стек с OIDC (Keycloak, oauth2-proxy). Домашняя установка (режим `owner`) делается установщиком на узле Proxmox: `curl -fsSL https://raw.githubusercontent.com/belov38/umiak/main/install.sh | sh`, см. [docs/getting-started.md](../../docs/getting-started.md) и [заметки оператора](quickstart/README.md). Корневой `compose.yaml` только тянет опубликованные образы; для разработки из исходников: `docker compose --env-file compose.dev.env -f compose.yaml -f compose.dev.yaml up --build`.
+
 Сейчас в стеке:
 
 | Сервис | Что делает | Порт на хосте (127.0.0.1) |
@@ -452,9 +454,3 @@ mise exec -- node apps/api/src/main.ts   # переменные окружени
 ```
 
 Тесты (`vitest`) и `typecheck` от этого не зависят: vitest берёт исходники по условию `source`, а `typecheck` сам собирает `dist`.
-
-## Single-user LAN mode (S15)
-
-Use `docker compose -f deploy/compose/compose.yaml -f deploy/compose/local.yaml up -d --build`
-for a separate `umiak-local` project without Keycloak/oauth2-proxy.
-See [Russian home quickstart](README.local.ru.md) for CIDRs, URLs and the retained WSS/CA requirements.

@@ -4,7 +4,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { postgresAdapter } from "@payloadcms/db-postgres";
-import { authMode } from "@umiak/auth";
+import { parseAuthMode } from "@umiak/auth";
 import { buildConfig, type EmailAdapter, type SanitizedConfig } from "payload";
 import { nobody, operatorAccess, operatorOnly } from "./access.ts";
 import { ApiKeys } from "./collections/api-keys.ts";
@@ -120,7 +120,7 @@ export async function buildUmiakConfig(
 		routes: { api: "/cms-api", admin: "/admin" },
 		csrf: o.appOrigin ? [o.appOrigin] : [],
 		cookiePrefix:
-			authMode() === "none" && o.appOrigin?.startsWith("http:")
+			parseAuthMode() === "owner" && o.appOrigin?.startsWith("http:")
 				? "payload"
 				: "__Host-payload",
 		// avatar "default": no Gravatar request (an external origin, and it
@@ -130,10 +130,10 @@ export async function buildUmiakConfig(
 			avatar: "default",
 			components: {
 				beforeNavLinks: ["/src/components/admin/brand#Logo"],
-				...(authMode() === "none"
+				...(parseAuthMode() === "owner"
 					? {
 							logout: {
-								Button: "/src/components/admin/local-logout#LocalLogout",
+								Button: "/src/components/admin/owner-logout#OwnerLogout",
 							},
 						}
 					: {}),

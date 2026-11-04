@@ -25,7 +25,7 @@ func TestHTTPPreviewsPublicAndToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	front := env.StartInstance(func(c *config.Config) {
-		c.AuthMode = "none"
+		c.AuthMode = "owner"
 		c.PreviewScheme = "http"
 		c.PreviewPort = 8085
 		c.UmiakCertFile, c.UmiakKeyFile = "", ""

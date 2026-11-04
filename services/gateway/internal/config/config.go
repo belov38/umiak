@@ -103,7 +103,10 @@ type Config struct {
 	AuthURL  string
 
 	// Cookies.
-	CookieKeys          []CookieKey
+	CookieKeys []CookieKey
+	// IngressDesktopKey is the 32-byte HMAC key of the owner ingress's
+	// desktop credential; nil disables the credential.
+	IngressDesktopKey   []byte
 	CookieCrossSite     bool
 	StripCookiePrefixes []string
 
@@ -191,8 +194,8 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	if c.AuthMode == "" {
 		c.AuthMode = "oidc"
 	}
-	if c.AuthMode != "oidc" && c.AuthMode != "none" {
-		return c, fmt.Errorf("UMIAK_AUTH_MODE must be oidc or none")
+	if c.AuthMode != "oidc" && c.AuthMode != "owner" {
+		return c, fmt.Errorf("UMIAK_AUTH_MODE must be oidc or owner")
 	}
 
 	c.InstanceID = l.str("INSTANCE_ID", "")
@@ -260,6 +263,7 @@ func FromEnv(getenv func(string) string) (Config, error) {
 
 	c.ServiceTokens, c.PeerToken = l.serviceTokens("SERVICE_TOKENS_FILE")
 	c.CookieKeys = l.cookieKeys("COOKIE_KEYS_FILE")
+	c.IngressDesktopKey = l.ingressDesktopKey("INGRESS_DESKTOP_KEY_FILE")
 	c.CookieCrossSite = l.boolean("COOKIE_CROSS_SITE", false)
 	c.StripCookiePrefixes = l.list("STRIP_COOKIE_PREFIXES", []string{"_oauth2_proxy", "__Host-oauth2_proxy", "__Secure-oauth2_proxy"})
 
@@ -639,6 +643,24 @@ func (l *loader) fileText(name string, required bool) string {
 		return ""
 	}
 	return strings.TrimSpace(string(b))
+}
+
+// ingressDesktopKey reads the optional file of exactly 32 raw random bytes.
+func (l *loader) ingressDesktopKey(name string) []byte {
+	path := l.raw(name)
+	if path == "" {
+		return nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		l.fail(name, err)
+		return nil
+	}
+	if len(b) != 32 {
+		l.fail(name, fmt.Errorf("must hold exactly 32 bytes, got %d", len(b)))
+		return nil
+	}
+	return b
 }
 
 func (l *loader) serviceTokens(name string) (gateway.TokenSet, string) {

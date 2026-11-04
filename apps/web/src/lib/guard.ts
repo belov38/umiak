@@ -1,4 +1,8 @@
-import { isLocalClientAllowed } from "@umiak/auth";
+import {
+	type AuthMode,
+	isTrustedIngressClient,
+	ownerCidrSet,
+} from "@umiak/auth";
 import { ACCESS_CSS } from "./access-style";
 import { APPEARANCE_BOOTSTRAP } from "./appearance";
 import { LOCKUP_SVG } from "./brand-markup";
@@ -64,33 +68,36 @@ export function guard(
 	o: {
 		appOrigin: string;
 		operatorGroups: readonly string[];
-		authMode?: "oidc" | "none";
+		authMode?: AuthMode;
 		localAllowedCidrs?: string;
 		localDeniedCidrs?: string;
 	},
 ): GuardDenial | null {
 	if (PUBLIC_PATHS.has(r.pathname)) return null;
-	const local = o.authMode === "none";
-	// Only the private local ingress may reach Next; it replaces this header
+	const owner = o.authMode === "owner";
+	// Only the private owner ingress may reach Next; it replaces this header
 	// with its socket peer. X-Forwarded-For never authenticates web requests.
 	if (
-		local &&
-		!isLocalClientAllowed(r.headers.get("x-umiak-client-ip") ?? undefined, {
-			UMIAK_LOCAL_ALLOWED_CIDRS: o.localAllowedCidrs,
-			UMIAK_LOCAL_DENIED_CIDRS: o.localDeniedCidrs,
-		})
+		owner &&
+		!isTrustedIngressClient(
+			r.headers.get("x-umiak-client-ip") ?? "",
+			ownerCidrSet({
+				UMIAK_LOCAL_ALLOWED_CIDRS: o.localAllowedCidrs,
+				UMIAK_LOCAL_DENIED_CIDRS: o.localDeniedCidrs,
+			}),
+		)
 	) {
 		return {
 			status: 403,
 			reason: "client_network_forbidden",
 			html: page(
 				"Forbidden",
-				"Your client network is not allowed in local mode.",
+				"Your client network is not allowed in owner mode.",
 			),
 		};
 	}
 	const email = r.headers.get("x-auth-request-email")?.trim() ?? "";
-	if (!local && email === "") {
+	if (!owner && email === "") {
 		return {
 			status: 401,
 			reason: "not_signed_in",
@@ -108,7 +115,7 @@ export function guard(
 		};
 	}
 	if (
-		!local &&
+		!owner &&
 		OPERATOR_PATH.test(r.pathname) &&
 		!headerGroups(r.headers).some((g) => o.operatorGroups.includes(g))
 	) {

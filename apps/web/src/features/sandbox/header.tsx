@@ -148,7 +148,7 @@ export function SandboxHeader({
 									await copyText(s.endpoints.ssh);
 									toast.success("SSH command copied");
 								} catch {
-									toast.error(copyFailureGuidance(window.isSecureContext));
+									toast.error(copyFailureGuidance());
 								}
 							})
 						}

@@ -71,8 +71,10 @@ test("HTTP routes gate API and WS, claim requires same origin, pair needs owner 
 		const claim = await post("/owner/claim", { code }, { origin });
 		assert.equal(claim.status, 200);
 		const cookie = claim.headers.get("set-cookie");
+		assert.match(cookie, /^__Host-umiak_owner=/);
+		assert.match(cookie, /Path=\//);
 		assert.match(cookie, /HttpOnly/);
-		assert.doesNotMatch(cookie, /Secure/);
+		assert.match(cookie, /Secure/);
 		assert.match(cookie, /SameSite=Strict/);
 		const auth = { cookie: cookie.split(";")[0], origin };
 		assert.equal(
@@ -152,7 +154,7 @@ test("WebSocket upgrades cannot bypass owner authentication or origin checks", a
 		);
 		assert.equal(
 			await upgrade({
-				cookie: `umiak_owner=${token}`,
+				cookie: `__Host-umiak_owner=${token}`,
 				origin: "https://evil.example",
 			}),
 			401,
@@ -182,45 +184,170 @@ test("network denial precedes public and authenticated routes despite forged for
 	}
 });
 
-test("denied PVE peer can only invoke token-protected preparation endpoints", async () => {
+test("denied PVE peer gets no preparation exemption", async () => {
 	const store = new OwnerStore(new MemoryOwnerRepository());
 	await store.init();
+	let called = false;
 	const server = createQuickstartServer({
 		store,
 		transport: http,
 		env: { UMIAK_LOCAL_DENIED_CIDRS: "127.0.0.1/32" },
-		setupHandler: async (req, res) => {
-			const valid =
-				new URL(req.url, "https://host").searchParams.get("token") ===
-				"capability";
-			res.writeHead(valid ? 200 : 403);
-			res.end();
+		setupHandler: async () => {
+			called = true;
 			return true;
 		},
 	});
 	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 	const base = `http://127.0.0.1:${server.address().port}`;
 	try {
-		assert.equal(
-			(await fetch(`${base}/pve-setup.sh?token=capability`)).status,
-			200,
-		);
-		assert.equal((await fetch(`${base}/pve-setup.sh?token=bad`)).status, 403);
-		assert.equal((await fetch(`${base}/v1/me?token=capability`)).status, 403);
-		assert.equal(
-			(await fetch(`${base}/pve-setup.sh/other?token=capability`)).status,
-			403,
-		);
+		for (const path of [
+			"/pve-setup.sh?token=capability",
+			"/quickstart/setup/callback",
+			"/v1/me",
+		])
+			assert.equal((await fetch(base + path)).status, 403);
+		assert.equal(called, false);
 	} finally {
 		await new Promise((resolve) => server.close(resolve));
 	}
 });
 
-test("wizard resolved PVE addresses are denied dynamically", async () => {
+// Drives the request handler with a chosen socket peer, which loopback tests cannot spoof.
+async function viaPeer(options, { peer, host, accept }) {
+	const { Readable } = await import("node:stream");
+	let handler;
+	createQuickstartServer({
+		...options,
+		transport: {
+			createServer: (fn) => {
+				handler = fn;
+				return { on() {} };
+			},
+		},
+	});
+	const req = Readable.from([]);
+	req.method = "GET";
+	req.url = "/";
+	req.headers = { host, accept };
+	req.socket = { remoteAddress: peer };
+	const out = {};
+	await new Promise((resolve) => {
+		const res = {
+			setHeader() {},
+			writeHead(status) {
+				out.status = status;
+			},
+			end(data) {
+				out.body = String(data ?? "");
+				resolve();
+			},
+		};
+		handler(req, res);
+	});
+	return out;
+}
+
+test("port 4180 serves only loopback Host names; other Hosts are told to use the tailnet", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	await store.init();
+	const options = { store, env: { UMIAK_LOCAL_DENIED_CIDRS: "10.88.0.0/24" } };
+	const wrongHost = await viaPeer(options, {
+		peer: "192.168.68.116",
+		host: "192.168.68.50:4180",
+		accept: "application/json",
+	});
+	assert.equal(wrongHost.status, 403);
+	assert.equal(JSON.parse(wrongHost.body).error.code, "use_tailnet_https");
+	const html = await viaPeer(options, {
+		peer: "192.168.68.116",
+		host: "umiak.tail123.ts.net",
+		accept: "text/html",
+	});
+	assert.equal(html.status, 403);
+	assert.match(html.body, /use_tailnet_https/);
+	for (const host of ["localhost:4180", "127.0.0.1:4180", "[::1]:4180"]) {
+		const served = await viaPeer(options, {
+			peer: "192.168.68.116",
+			host,
+			accept: "text/html",
+		});
+		assert.equal(served.status, 200, host);
+		assert.match(served.body, /Claim this Umiak deployment/);
+	}
+});
+
+test("plain umiak_owner cookie is neither accepted nor set", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	const token = await store.claim(await store.init());
+	const server = createQuickstartServer({ store });
+	await new Promise((r) => server.listen(0, "127.0.0.1", r));
+	const base = `http://127.0.0.1:${server.address().port}`;
+	try {
+		const get = (cookie) =>
+			fetch(`${base}/owner/sessions`, {
+				headers: { cookie, accept: "application/json" },
+			});
+		assert.equal((await get(`umiak_owner=${token}`)).status, 401);
+		assert.equal((await get(`__Host-umiak_owner=${token}`)).status, 200);
+		const issued = await store.signinCode();
+		const reply = await fetch(`${base}/owner/signin`, {
+			method: "POST",
+			headers: { origin: base, "content-type": "application/json" },
+			body: JSON.stringify(issued),
+		});
+		assert.equal(reply.status, 200);
+		assert.doesNotMatch(reply.headers.get("set-cookie"), /^umiak_owner=/);
+		assert.match(reply.headers.get("set-cookie"), /^__Host-umiak_owner=/);
+	} finally {
+		await new Promise((r) => server.close(r));
+	}
+});
+
+test("wizard resolved PVE addresses are denied dynamically on the tailnet proxy listener", async () => {
 	const store = new OwnerStore(new MemoryOwnerRepository());
 	await store.init();
 	const handler = async () => false;
-	handler.deniedPeer = async () => true;
+	const seen = [];
+	handler.deniedPeer = async (address) => {
+		seen.push(address);
+		return true;
+	};
+	const server = createQuickstartServer({
+		store,
+		setupHandler: handler,
+		transport: http,
+		proxyListener: true,
+		env: { UMIAK_PUBLIC_URL: "https://lab.example" },
+	});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	try {
+		const reply = await fetch(
+			`http://127.0.0.1:${server.address().port}/v1/me`,
+			{
+				headers: {
+					"x-forwarded-proto": "https",
+					"x-forwarded-host": "lab.example",
+					"x-forwarded-for": "192.168.68.116",
+				},
+			},
+		);
+		assert.equal(reply.status, 403);
+		assert.match(await reply.text(), /local_network_forbidden/);
+		assert.deepEqual(seen, ["192.168.68.116"]);
+	} finally {
+		await new Promise((resolve) => server.close(resolve));
+	}
+});
+
+test("emergency ssh -L via the PVE node: loopback Host on 4180 exempts the node address (R8)", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	await store.init();
+	const handler = async () => false;
+	let asked = 0;
+	handler.deniedPeer = async () => {
+		asked++;
+		return true;
+	};
 	const server = createQuickstartServer({
 		store,
 		setupHandler: handler,
@@ -228,11 +355,36 @@ test("wizard resolved PVE addresses are denied dynamically", async () => {
 		env: {},
 	});
 	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const port = server.address().port;
 	try {
-		assert.equal(
-			(await fetch(`http://127.0.0.1:${server.address().port}/v1/me`)).status,
-			403,
-		);
+		const reply = await fetch(`http://127.0.0.1:${port}/owner/sessions`, {
+			headers: { accept: "application/json" },
+		});
+		assert.notEqual(reply.status, 403);
+		assert.doesNotMatch(await reply.text(), /local_network_forbidden/);
+		assert.equal(asked, 0);
+		// A non-loopback Host on 4180 is still refused before any exemption applies.
+		const lan = await new Promise((resolve, reject) => {
+			const req = http.request(
+				{
+					host: "127.0.0.1",
+					port,
+					path: "/v1/me",
+					headers: { host: "192.168.68.40:4180", accept: "application/json" },
+				},
+				(res) => {
+					let body = "";
+					res.on("data", (c) => {
+						body += c;
+					});
+					res.on("end", () => resolve({ status: res.statusCode, body }));
+				},
+			);
+			req.on("error", reject);
+			req.end();
+		});
+		assert.equal(lan.status, 403);
+		assert.match(lan.body, /use_tailnet_https/);
 	} finally {
 		await new Promise((resolve) => server.close(resolve));
 	}
@@ -467,7 +619,7 @@ test("sign-in POST checks Origin and Host; only browser owners mint codes", asyn
 		assert.equal(reply.status, 200);
 		assert.match(
 			reply.headers.get("set-cookie"),
-			/^umiak_owner=.*HttpOnly; SameSite=Strict/,
+			/^__Host-umiak_owner=.*HttpOnly; Secure; SameSite=Strict/,
 		);
 		assert.equal(await store.authenticate(first), true);
 		const pair = await store.pairStart();
@@ -488,7 +640,7 @@ test("sign-in POST checks Origin and Host; only browser owners mint codes", asyn
 				await post(
 					"/owner/signin-code",
 					{},
-					{ origin, cookie: `umiak_owner=${first}` },
+					{ origin, cookie: `__Host-umiak_owner=${first}` },
 				)
 			).status,
 			200,
@@ -510,7 +662,7 @@ test("sign-in limits have retry metadata; JSON owner gate and self revoke behave
 			headers: {
 				origin,
 				"content-type": "application/json",
-				...(auth ? { cookie: `umiak_owner=${token}` } : {}),
+				...(auth ? { cookie: `__Host-umiak_owner=${token}` } : {}),
 			},
 			body: JSON.stringify(data),
 		});
@@ -535,13 +687,13 @@ test("sign-in limits have retry metadata; JSON owner gate and self revoke behave
 		});
 		const html = await (
 			await fetch(`${origin}/owner/sessions`, {
-				headers: { cookie: `umiak_owner=${token}` },
+				headers: { cookie: `__Host-umiak_owner=${token}` },
 			})
 		).text();
 		assert.match(html, /This browser/);
 		assert.match(html, /aria-label="Revoke browser session created/);
 		const bogus = await fetch(`${origin}/owner/pair?id=bogus`, {
-			headers: { cookie: `umiak_owner=${token}` },
+			headers: { cookie: `__Host-umiak_owner=${token}` },
 		});
 		assert.match(await bogus.text(), /Pairing unavailable/);
 		const revoked = await post(
@@ -552,5 +704,106 @@ test("sign-in limits have retry metadata; JSON owner gate and self revoke behave
 		assert.match(revoked.headers.get("set-cookie"), /Max-Age=0/);
 	} finally {
 		await new Promise((r) => server.close(r));
+	}
+});
+
+test("the 4180 Host gate also covers WebSocket upgrades", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	const token = await store.claim(await store.init());
+	const server = createQuickstartServer({
+		store,
+		env: { UMIAK_LOCAL_DENIED_CIDRS: "10.88.0.0/24" },
+	});
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const port = server.address().port;
+	const upgrade = (host) =>
+		new Promise((resolve) => {
+			const req = http.request({
+				host: "127.0.0.1",
+				port,
+				path: "/v1/ptys/test/ws",
+				headers: {
+					host,
+					connection: "Upgrade",
+					upgrade: "websocket",
+					cookie: `__Host-umiak_owner=${token}`,
+				},
+			});
+			req.on("response", (res) => {
+				let body = "";
+				res.on("data", (x) => (body += x));
+				res.on("end", () => resolve({ status: res.statusCode, body }));
+			});
+			req.on("error", () => resolve({ status: "closed", body: "" }));
+			req.end();
+		});
+	try {
+		const denied = await upgrade("192.168.68.50:4180");
+		assert.equal(denied.status, 403);
+		assert.match(denied.body, /use_tailnet_https/);
+		// Loopback Host passes the gate and fails later only because no upstream exists.
+		const served = await upgrade(`127.0.0.1:${port}`);
+		assert.notEqual(served.status, 403);
+		assert.doesNotMatch(served.body, /use_tailnet_https/);
+	} finally {
+		await new Promise((resolve) => server.close(resolve));
+	}
+});
+
+test("GET /claim serves a hash-reading claim page when unclaimed and redirects to sign in once claimed", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository());
+	const code = await store.init();
+	const server = createQuickstartServer({ store, env: {}, transport: http });
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const base = `http://127.0.0.1:${server.address().port}`;
+	try {
+		const res = await fetch(`${base}/claim`, {
+			headers: { accept: "text/html" },
+		});
+		assert.equal(res.status, 200);
+		const html = await res.text();
+		assert.match(html, /location\.hash/);
+		assert.match(html, /\/owner\/claim/);
+		assert.match(html, /history\.replaceState/);
+		assert.match(html, /\/setup/);
+		assert.match(html, /id="claim"/);
+		assert.doesNotMatch(html, new RegExp(code));
+		await store.claim(code);
+		const after = await fetch(`${base}/claim`, { redirect: "manual" });
+		assert.equal(after.status, 302);
+		assert.equal(after.headers.get("location"), "/signin");
+	} finally {
+		server.close();
+	}
+});
+
+test("GET /signin serves a page that posts the fragment code to /owner/signin", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository(), {
+		audit: () => {},
+	});
+	const code = await store.init();
+	const server = createQuickstartServer({ store, env: {}, transport: http });
+	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const base = `http://127.0.0.1:${server.address().port}`;
+	try {
+		const unclaimed = await fetch(`${base}/signin`, { redirect: "manual" });
+		assert.equal(unclaimed.status, 302);
+		assert.equal(unclaimed.headers.get("location"), "/claim");
+		await store.claim(code);
+		const res = await fetch(`${base}/signin`, {
+			headers: { accept: "text/html" },
+		});
+		assert.equal(res.status, 200);
+		const html = await res.text();
+		assert.match(html, /location\.hash/);
+		assert.match(html, /history\.replaceState/);
+		assert.match(html, /\/owner\/signin/);
+		assert.match(html, /signin\(hashCode\)/);
+		assert.match(html, /id="signin"/);
+		// The generic sign-in page shown on other routes does not auto-submit fragments.
+		const root = await fetch(`${base}/`, { headers: { accept: "text/html" } });
+		assert.doesNotMatch(await root.text(), /takeHashCode/);
+	} finally {
+		server.close();
 	}
 });

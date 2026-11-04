@@ -15,11 +15,12 @@
 //   refused, it adds the response header `X-Umiak-Auth-Denied: <reason>`
 //   (Payload copies strategy response headers to its REST responses).
 import {
-	authMode,
 	IdentityError,
-	isLocalClientAllowed,
-	LOCAL_OPERATOR_GROUP,
-	localSessionHeaders,
+	isTrustedIngressClient,
+	OWNER_OPERATOR_GROUP,
+	ownerCidrSet,
+	ownerSessionHeaders,
+	parseAuthMode,
 	type SessionHeaders,
 	type SessionIdentity,
 } from "@umiak/auth";
@@ -68,17 +69,17 @@ export async function authenticateHeaders(
 	headers: HeaderSource,
 	o: { operatorGroups?: readonly string[] } = {},
 ): Promise<AuthOutcome> {
-	const local = authMode() === "none";
-	if (local && !localClientAllowed(headers))
+	const owner = parseAuthMode() === "owner";
+	if (owner && !ingressClientAllowed(headers))
 		return { kind: "denied", status: 403, reason: "client_network_forbidden" };
-	const claims = local ? localSessionHeaders() : parseAuthHeaders(headers);
+	const claims = owner ? ownerSessionHeaders() : parseAuthHeaders(headers);
 	if (claims === null) return { kind: "anonymous", status: 401 };
 	try {
 		const session = await resolveSession(payload, claims, {
-			operatorGroups: local
+			operatorGroups: owner
 				? [
 						...(o.operatorGroups ?? operatorGroupsOf(payload)),
-						LOCAL_OPERATOR_GROUP,
+						OWNER_OPERATOR_GROUP,
 					]
 				: (o.operatorGroups ?? operatorGroupsOf(payload)),
 		});
@@ -137,7 +138,7 @@ export async function authenticateRequest(
 	headers: HeaderSource,
 ): Promise<RequestAuth> {
 	// Recheck the network for every request before reading the session cache.
-	if (authMode() === "none") return resolveRequest(payload, headers);
+	if (parseAuthMode() === "owner") return resolveRequest(payload, headers);
 	const cache = sessionCacheOf(payload);
 	if (cache === null) return resolveRequest(payload, headers);
 	const claims = parseAuthHeaders(headers);
@@ -171,13 +172,15 @@ export const oauth2ProxyStrategy: AuthStrategy = {
 	},
 };
 
-/** This header is replaced by the local ingress; Next's port stays private. */
-function localClientAllowed(headers: HeaderSource): boolean {
+/** This header is replaced by the owner ingress; Next's port stays private. */
+function ingressClientAllowed(headers: HeaderSource): boolean {
 	const value =
 		headers instanceof Headers
 			? headers.get("x-umiak-client-ip")
 			: Object.entries(headers).find(
 					([key]) => key.toLowerCase() === "x-umiak-client-ip",
 				)?.[1];
-	return isLocalClientAllowed(typeof value === "string" ? value : undefined);
+	return (
+		typeof value === "string" && isTrustedIngressClient(value, ownerCidrSet())
+	);
 }

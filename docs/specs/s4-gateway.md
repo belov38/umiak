@@ -781,6 +781,7 @@ SSH-лог: `sessionId`, `clientIp`, `actor` (`userId` или `apiKeyId`), `fing
 | `UMIAK_GATEWAY_API_URL`, `UMIAK_GATEWAY_API_TOKEN_FILE` | внутренний `api` |
 | `UMIAK_GATEWAY_AUTH_URL` | authorize endpoint (§8.4) |
 | `UMIAK_GATEWAY_COOKIE_KEYS_FILE`, `UMIAK_GATEWAY_COOKIE_CROSS_SITE` | §8.2 |
+| `UMIAK_GATEWAY_INGRESS_DESKTOP_KEY_FILE` | 32 raw bytes; HMAC key of the `Umiak-Ingress-Desktop` header (owner ingress, path-addressed desktop). Unset: header always 403 |
 | `UMIAK_GATEWAY_STRIP_COOKIE_PREFIXES` | §7.4 |
 | `UMIAK_GATEWAY_SSH_HOST_KEY_FILES`, `UMIAK_GATEWAY_SSH_USER_CA_KEY_FILE`, `UMIAK_GATEWAY_SSH_LOGIN_CA_KEYS` (публичные ключи SSH login CA) | §9 |
 | `UMIAK_GATEWAY_RESERVED_PORTS`, `UMIAK_GATEWAY_RESERVED_SUFFIXES` | §4.2 |

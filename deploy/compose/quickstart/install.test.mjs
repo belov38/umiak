@@ -138,15 +138,12 @@ test("unsupported OS fails before any download", async () => {
 });
 
 for (const originHost of ["192.168.1.10", "100.64.0.2", "umiak.example.com"])
-	test(`installs over HTTP at ${originHost} and explains same-channel checksums`, async () => {
+	test(`refuses plain HTTP at ${originHost} before any download`, async () => {
 		const r = await runInstaller({ originHost });
-		assert.equal(r.status, 0, r.output);
-		assert.equal(r.login, `login\n--api-url\n${r.origin}\n`);
-		assert.equal(
-			(r.output.match(/integrity relies on the local network/g) ?? []).length,
-			1,
-		);
-		assert.match(r.output, /SHA256SUMS.*same.*channel/);
+		assert.notEqual(r.status, 0);
+		assert.deepEqual(r.downloads, []);
+		assert.equal(r.login, null);
+		assert.match(r.output, /requires the HTTPS tailnet address/);
 	});
 for (const [os, arch, release] of [
 	["Darwin", "x86_64", "darwin-x64"],

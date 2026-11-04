@@ -47,7 +47,7 @@ import { humanMe, type Me } from "./whoami.ts";
 
 interface MetaOidc {
 	tenancy?: "single" | "teams";
-	authMode?: "none" | "oidc" | "owner";
+	authMode?: "oidc" | "owner";
 	oidc: { issuer: string; clientId: string; audience: string } | null;
 }
 
@@ -217,8 +217,6 @@ async function login(
 			});
 			cred = { kind: "key", token };
 			profile = { apiUrl, auth: "owner" };
-		} else if (meta.authMode === "none") {
-			profile = { apiUrl, auth: "none" };
 		} else {
 			const f = await deviceFlow(ctx, apiUrl, opts.browser !== false, meta);
 			cred = f.cred;

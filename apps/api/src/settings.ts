@@ -3,12 +3,13 @@
 import { readFileSync } from "node:fs";
 import { isIP } from "node:net";
 import {
-	authMode,
-	LOCAL_OPERATOR_GROUP,
+	type AuthMode,
 	loadSshCa,
 	loadSshHostKeys,
-	localAllowedCidrs,
-	localDeniedCidrs,
+	OWNER_OPERATOR_GROUP,
+	ownerAllowedCidrs,
+	ownerDeniedCidrs,
+	parseAuthMode,
 	type SshCa,
 } from "@umiak/auth";
 import { z } from "zod";
@@ -41,10 +42,11 @@ export interface OidcSettings {
 }
 
 export interface Settings {
-	authMode: "oidc" | "none";
+	authMode: AuthMode;
 	localAllowedCidrs: string[];
 	localDeniedCidrs?: string[];
-	localAllowedHosts: string[];
+	/** Host authorities accepted in owner mode (API and app). */
+	ownerHosts: string[];
 	publicPort: number;
 	proxiedPort: number;
 	internalPort: number;
@@ -78,6 +80,11 @@ export interface Settings {
 	previewScheme: "http" | "https";
 	previewPort: number;
 	sshHost: string;
+	/**
+	 * Owner mode: desktop links are `<appOrigin><prefix>/<slug>/` on the owner
+	 * origin instead of `<slug>-desktop.<domain>`. Null keeps hostname links.
+	 */
+	desktopPathPrefix: string | null;
 	sshPort: number;
 	sshHostKeysFile: string | null;
 	sshLoginCaKeyFile: string | null;
@@ -199,25 +206,6 @@ const version = z.preprocess(
 );
 
 const schema = z.object({
-	UMIAK_LOCAL_ALLOWED_HOSTS: csv("").refine(
-		(hosts) =>
-			hosts.every((host) => {
-				try {
-					const url = new URL(`http://${host}`);
-					return (
-						!url.username &&
-						!url.password &&
-						url.pathname === "/" &&
-						!url.search &&
-						!url.hash &&
-						url.host === host.toLowerCase()
-					);
-				} catch {
-					return false;
-				}
-			}),
-		{ message: "must be comma-separated host[:port] authorities" },
-	),
 	UMIAK_API_PUBLIC_PORT: port(8080),
 	UMIAK_API_PROXIED_PORT: port(8081),
 	UMIAK_API_INTERNAL_PORT: port(8082),
@@ -255,6 +243,15 @@ const schema = z.object({
 		z.coerce.number().int().min(1).max(65535).optional(),
 	),
 	UMIAK_SSH_HOST: optional,
+	UMIAK_DESKTOP_PATH_PREFIX: z.preprocess(
+		unsetEmpty,
+		z
+			.string()
+			.regex(/^\/[A-Za-z0-9._~-]+(\/[A-Za-z0-9._~-]+)*\/?$/, {
+				message: "must be an absolute path such as /desktop",
+			})
+			.optional(),
+	),
 	UMIAK_SSH_PORT: int(22, 1, 65535),
 	UMIAK_SSH_HOST_KEYS_FILE: optional,
 	UMIAK_SSH_LOGIN_CA_KEY_FILE: optional,
@@ -280,9 +277,9 @@ const schema = z.object({
 export function loadSettings(
 	env: Record<string, string | undefined>,
 ): Settings {
-	const mode = authMode(env);
-	const local = mode === "none";
-	const allowed = local ? localAllowedCidrs(env) : [];
+	const mode = parseAuthMode(env);
+	const owner = mode === "owner";
+	const allowed = owner ? ownerAllowedCidrs(env) : [];
 	const r = schema.safeParse(env);
 	const lines = r.success
 		? []
@@ -305,12 +302,11 @@ export function loadSettings(
 	return {
 		authMode: mode,
 		localAllowedCidrs: allowed,
-		localDeniedCidrs: local ? localDeniedCidrs(env) : [],
-		localAllowedHosts: [
+		localDeniedCidrs: owner ? ownerDeniedCidrs(env) : [],
+		ownerHosts: [
 			...new Set([
 				new URL(e.UMIAK_API_URL).host,
 				new URL(e.UMIAK_APP_ORIGIN ?? e.UMIAK_APP_URL).host,
-				...e.UMIAK_LOCAL_ALLOWED_HOSTS.map((host) => host.toLowerCase()),
 			]),
 		],
 		publicPort: e.UMIAK_API_PUBLIC_PORT,
@@ -326,11 +322,11 @@ export function loadSettings(
 		gatewayTokenFile: e.UMIAK_API_GATEWAY_TOKEN_FILE ?? null,
 		identityFile: e.UMIAK_IDENTITY_FILE ?? null,
 		operatorGroups:
-			mode === "none"
-				? [...e.UMIAK_OPERATOR_GROUPS, LOCAL_OPERATOR_GROUP]
+			mode === "owner"
+				? [...e.UMIAK_OPERATOR_GROUPS, OWNER_OPERATOR_GROUP]
 				: e.UMIAK_OPERATOR_GROUPS,
 		oidc:
-			mode === "none" || issuer === undefined
+			mode === "owner" || issuer === undefined
 				? null
 				: {
 						issuer,
@@ -348,6 +344,7 @@ export function loadSettings(
 		previewScheme: e.UMIAK_PREVIEW_SCHEME,
 		previewPort:
 			e.UMIAK_PREVIEW_PORT ?? (e.UMIAK_PREVIEW_SCHEME === "http" ? 80 : 443),
+		desktopPathPrefix: e.UMIAK_DESKTOP_PATH_PREFIX?.replace(/\/+$/, "") ?? null,
 		sshHost: e.UMIAK_SSH_HOST ?? `ssh.${e.UMIAK_PREVIEW_DOMAIN}`,
 		sshPort: e.UMIAK_SSH_PORT,
 		sshHostKeysFile: e.UMIAK_SSH_HOST_KEYS_FILE ?? null,

@@ -1,0 +1,45 @@
+# Contributor override: build the images from this checkout instead of pulling them.
+#   docker compose --env-file compose.dev.env -f compose.yaml -f compose.dev.yaml up --build
+# The images keep the published names; compose.dev.env sets UMIAK_VERSION=dev (compose interpolates
+# the base file on its own, so the override cannot supply it), so a local build never shadows a release tag. The release workflow builds the same Dockerfiles.
+x-quickstart-build: &quickstart-build
+  context: .
+  dockerfile: deploy/compose/quickstart/Dockerfile
+
+services:
+  gateway-secrets:
+    build: *quickstart-build
+  secrets-init:
+    build:
+      context: .
+      dockerfile: deploy/compose/secrets-init/Dockerfile
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+  web-migrate:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+  mcp:
+    build:
+      context: .
+      dockerfile: apps/mcp/Dockerfile
+  gateway:
+    build: *quickstart-build
+  gateway-renewal:
+    build: *quickstart-build
+  quickstart:
+    build: *quickstart-build

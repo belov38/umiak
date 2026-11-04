@@ -14,7 +14,7 @@ import { ConfirmButton } from "@/components/app/confirm-button";
 import { CopyButton, CopyLine } from "@/components/app/copy-button";
 import { Field, FormDialog } from "@/components/app/form-dialog";
 import { QueryError } from "@/components/app/query-error";
-import { useLocalMode } from "@/components/app/session-context";
+import { useOwnerMode } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
 import { Radio } from "@/components/ui/choice";
 import {
@@ -297,7 +297,7 @@ function PublishDialog({
 	) => Promise<void>;
 }) {
 	const describeError = useDescribeError();
-	const localMode = useLocalMode();
+	const ownerMode = useOwnerMode();
 	const [port, setPort] = useState("");
 	const [access, setAccess] = useState<Access>("token");
 	const [rewrite, setRewrite] = useState<HostRewrite>("preserve");
@@ -377,7 +377,7 @@ function PublishDialog({
 			<fieldset className="grid gap-1 text-sm">
 				<legend className="mb-1 font-medium">Access</legend>
 				{(Object.keys(ACCESS_TEXT) as Access[])
-					.filter((a) => !localMode || a !== "sso")
+					.filter((a) => !ownerMode || a !== "sso")
 					.map((a) => (
 						<label
 							key={a}

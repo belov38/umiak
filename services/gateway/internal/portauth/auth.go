@@ -75,6 +75,13 @@ type Config struct {
 	StateTTL      time.Duration
 	Limits        *ratelimit.Limits // nil disables the auth-failure limit
 	Metrics       *obs.Metrics      // nil disables metrics
+
+	// IngressDesktopKey is the HMAC key of the Umiak-Ingress-Desktop header
+	// (UMIAK_GATEWAY_INGRESS_DESKTOP_KEY_FILE). Empty disables the header:
+	// it is then always rejected.
+	IngressDesktopKey []byte
+	// Now is the clock of the ingress credential; nil is time.Now.
+	Now func() time.Time
 }
 
 // Auth runs the token and sso checks. It is safe for concurrent use.
@@ -102,6 +109,9 @@ func New(cfg Config) *Auth {
 	if cfg.StateTTL <= 0 {
 		cfg.StateTTL = DefaultStateTTL
 	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
 	return &Auth{cfg: cfg}
 }
 
@@ -116,6 +126,9 @@ type Result struct {
 	AuthResult string
 	// SetCookie, when set, must be added to the application's response.
 	SetCookie *http.Cookie
+	// Ingress is true when a desktop request was authorized by the signed
+	// Umiak-Ingress-Desktop header of the owner ingress.
+	Ingress bool
 }
 
 // Check authorizes r for a token or sso route. Every call increments the
@@ -128,8 +141,8 @@ func (a *Auth) Check(w http.ResponseWriter, r *http.Request, l routes.Label, rt 
 	case AccessToken:
 		res = a.checkToken(w, r, l, rt, ip, requestID)
 	case AccessSSO:
-		if a.cfg.AuthMode == "none" || a.cfg.PreviewScheme == "http" {
-			http.Error(w, "sso_unavailable_in_local_mode: use token or public preview access", http.StatusForbidden)
+		if a.cfg.AuthMode == "owner" || a.cfg.PreviewScheme == "http" {
+			http.Error(w, "sso_unavailable_in_owner_mode: use token or public preview access", http.StatusForbidden)
 			res = Result{AuthResult: ResultInvalid}
 			break
 		}

@@ -26,7 +26,7 @@ export const OIDC_CLI_CLIENT_ID = "umiak-cli";
 
 export const MetaSchema = z
 	.object({
-		authMode: z.enum(["oidc", "none", "owner"]).optional(),
+		authMode: z.enum(["oidc", "owner"]).optional(),
 		tenancy: z.enum(["single", "teams"]).optional().openapi({
 			description:
 				"Presentation model for this deployment. Missing on older servers means teams; independent of credential kind.",
@@ -136,8 +136,8 @@ const getDocs = createRoute({
 export function metaOf(deps: ApiDeps): Meta {
 	const s = deps.settings;
 	return {
-		...(s.authMode === "none" ? { authMode: "none" as const } : {}),
-		tenancy: s.authMode === "none" ? "single" : "teams",
+		...(s.authMode === "owner" ? { authMode: "owner" as const } : {}),
+		tenancy: s.authMode === "owner" ? "single" : "teams",
 		apiVersion: "v1",
 		build: s.build,
 		appUrl: s.appUrl,
@@ -226,7 +226,7 @@ export function registerMetaRoutes(
 		return c.json(doc, 200);
 	});
 
-	if (!o.docs || deps.settings.authMode === "none") return;
+	if (!o.docs || deps.settings.authMode === "owner") return;
 	app.openapi(getDocs, (c) =>
 		c.html(DOCS_HTML, 200, { "Content-Security-Policy": DOCS_CSP }),
 	);

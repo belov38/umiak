@@ -197,16 +197,6 @@ UMIAK_OAUTH2_PROXY_REDIRECT_URL=$APP_ORIGIN/oauth2/callback
 UMIAK_LOGOUT_URL=$LOGOUT_URL
 $EXTRA_ENV
 ENV
-if [ "$AUTH_MODE" = none ]; then
- cat >>.env <<LOCAL
-COMPOSE_FILE=$FILES:../../infra/dev-cp/compose.dev-cp.yaml:local.yaml:../../infra/dev-cp/compose.local.yaml
-UMIAK_LOCAL_BIND=$CT_IP
-UMIAK_LOCAL_ALLOWED_CIDRS=127.0.0.0/8,::1/128,192.168.68.0/24,172.18.0.0/16
-UMIAK_LOCAL_DENIED_CIDRS=$PVE_LAN_IP/32,10.88.0.0/24
-UMIAK_LOCAL_INGRESS_IP=172.18.255.10
-UMIAK_LOCAL_MCP_IP=172.18.255.11
-LOCAL
-fi
 chmod 600 .env
 docker compose config --quiet
 # The one-time switch to S8 (identities move from the schema identity to payload): the pre-S8 api
@@ -223,16 +213,12 @@ if [ -n "$(docker compose ps -q --status running postgres)" ]; then
 		docker compose stop api worker
 	fi
 fi
-if [ "$AUTH_MODE" = none ]; then
- docker compose --profile excluded-oidc stop keycloak keycloak-db oauth2-proxy
-fi
 docker compose up -d --remove-orphans 2>&1 | tail -30
 # api and oauth2-proxy wait for Keycloak, whose first start (realm import) takes a minute or two;
 # api, worker and web wait for migrate and web-migrate.
 healthy() {
 	local s
-	local services="worker gateway api web mcp turn"
- [ "$AUTH_MODE" = none ] || services="$services oauth2-proxy"
+	local services="worker gateway api web mcp turn oauth2-proxy"
  for s in $services; do
 		[ "$(docker compose ps --format '{{.Health}}' "$s")" = healthy ] || return 1
 	done
@@ -292,10 +278,6 @@ for port in $(tr ' ' '\n' <<<"$SERVE" | cut -d: -f1 | sort -u); do
 done
 check api "$API_URL/v1/meta" ||
 	log "WARNING: the api is not reachable through Tailscale Serve from this Mac"
-if [[ "$AUTH_MODE" = none ]]; then
- check_ok dashboard "$APP_ORIGIN/app" -L -o /dev/null
-else
 check_ok mcp "$MCP_PRM_URL" ||
 	log "WARNING: the MCP server is not reachable through Tailscale Serve from this Mac"
-fi
 log "deployed ($AUTH_MODE)"

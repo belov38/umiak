@@ -117,6 +117,7 @@ test("proxy socket requires an expected peer, regardless of forwarding chain tru
 		"172.29.116.129",
 		"172.29.116.11",
 		"172.30.116.1",
+		"172.30.116.12",
 		"172.30.116.13",
 		"192.168.1.5",
 	]) {
@@ -143,7 +144,6 @@ test("proxy socket requires an expected peer, regardless of forwarding chain tru
 		"::1",
 		"::ffff:127.0.0.1",
 		"172.29.116.128",
-		"172.30.116.12",
 	]) {
 		assert.equal(
 			requestContext(

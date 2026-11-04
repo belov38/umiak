@@ -47,7 +47,7 @@ test("quickstart and metadata bridge default transports preserve canonical Host 
 		calls++;
 		if (req.headers.host !== "localhost:4180") {
 			res.writeHead(403);
-			res.end("local_host_forbidden");
+			res.end("host_forbidden");
 			return;
 		}
 		res.setHeader("content-type", "application/json");

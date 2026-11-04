@@ -144,7 +144,7 @@ parallel sandbox VMs, broad cleanup or unrelated PVE modifications occurred.
 - Help/setup/install/MCP share the same origin at /app/help, /setup, /install.sh, /mcp.
 - Exact CA retrieval, newest log claim and pairing steps: infra/dev-cp/README.md,
   section S16. No claim code or owner credential is stored in git.
-- Rollback: `UMIAK_DEVCP_AUTH_MODE=none|oidc infra/dev-cp/deploy.sh`; when off-LAN,
+- Rollback (the `none` value was removed in S18; only `oidc` remains): `infra/dev-cp/deploy.sh`; when off-LAN,
   use `UMIAK_DEVCP_SSH=umiak@100.64.10.7`. This path was retained, not executed
   after S16 verification so the requested owner-gated stand remains deployed.
 - Real fresh-host preparation and from-scratch Linux/optional template builds were

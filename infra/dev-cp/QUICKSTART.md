@@ -26,7 +26,6 @@ umiak whoami
 Переключение и откат с Mac:
 
 ```sh
-UMIAK_DEVCP_AUTH_MODE=none mise exec -- bash infra/dev-cp/deploy.sh
 UMIAK_DEVCP_AUTH_MODE=oidc mise exec -- bash infra/dev-cp/deploy.sh
 ```
 
@@ -82,7 +81,7 @@ Host key gateway CLI кладёт в `~/.config/umiak/known_hosts`; для об�
 
 ## Если что-то не так
 
-- Проверить стенд целиком: `UMIAK_DEVCP_AUTH_MODE=none mise exec -- bash infra/dev-cp/e2e.sh` (~4 мин, локальная команда, за собой убирает).
-- Перевыкатить в none: `UMIAK_DEVCP_AUTH_MODE=none mise exec -- bash infra/dev-cp/deploy.sh`. Пользователи Keycloak нужны только после OIDC-отката.
+- Проверить стенд целиком: `mise exec -- bash infra/dev-cp/e2e.sh` (~4 мин, локальная команда, за собой убирает).
+- Перевыкатить в OIDC: `UMIAK_DEVCP_AUTH_MODE=oidc mise exec -- bash infra/dev-cp/deploy.sh`. Пользователи Keycloak нужны только после OIDC-отката.
 - Логи: `ssh umiak@192.168.68.90`, `cd ~/umiak/deploy/compose && docker compose logs -f api worker gateway`.
 - Подробности: `infra/dev-cp/README.md`.

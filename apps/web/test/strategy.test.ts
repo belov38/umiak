@@ -98,8 +98,9 @@ describe.skipIf(skipPg())(
 			expect(admin.user?.collection).toBe("users");
 		});
 
-		it("local mode resolves the same owner/operator in dashboard and admin without IdP headers", async () => {
-			vi.stubEnv("UMIAK_AUTH_MODE", "none");
+		it("owner mode resolves the same owner/operator in dashboard and admin without IdP headers", async () => {
+			vi.stubEnv("UMIAK_AUTH_MODE", "owner");
+			vi.stubEnv("UMIAK_LOCAL_ALLOWED_CIDRS", "192.168.1.0/24");
 			try {
 				const h = new Headers({ "x-umiak-client-ip": "192.168.1.20" });
 				const app = await authenticateRequest(payload, h);

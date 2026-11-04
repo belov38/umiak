@@ -100,7 +100,7 @@ func TestDevSecretsIdempotent(t *testing.T) {
 		"umiak.key", "umiak.pem", "service-tokens.json",
 		"ssh_host_ecdsa_key", "ssh_host_ecdsa_key.pub", "ssh_host_ed25519_key", "ssh_host_ed25519_key.pub",
 		"ssh_login_ca", "ssh_login_ca.pub", "ssh_user_ca", "ssh_user_ca.pub",
-		"tunnel.key", "tunnel.pem", "worker-gateway-token",
+		"tunnel.key", "tunnel.pem", "worker-gateway-token", "ingress-desktop-key",
 	}
 	slices.Sort(created)
 	slices.Sort(want)
@@ -346,7 +346,7 @@ func TestDevSecretsChownExisting(t *testing.T) {
 	}
 	for _, name := range all {
 		want := [2]int{65532, 65532}
-		if name == "worker-gateway-token" {
+		if name == "worker-gateway-token" || name == "ingress-desktop-key" {
 			want = [2]int{1000, 1000}
 		}
 		if got[name] != want {

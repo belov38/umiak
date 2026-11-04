@@ -9,11 +9,11 @@ const BASE = {
 };
 
 describe("worker env", () => {
-	it("none disables IDP sync even with leftover Keycloak configuration", () => {
+	it("owner disables IDP sync even with leftover Keycloak configuration", () => {
 		expect(
 			parseWorkerEnv({
 				...BASE,
-				UMIAK_AUTH_MODE: "none",
+				UMIAK_AUTH_MODE: "owner",
 				UMIAK_IDP_SYNC_KEYCLOAK_URL: "http://keycloak:8080",
 			}).idpSync,
 		).toBeUndefined();

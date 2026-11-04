@@ -69,6 +69,7 @@ principal, то есть после аутентификации; до неё к
 | `UMIAK_PREVIEW_DOMAIN` | обязательна | домен портов (`<slug>-<port>.<domain>`) |
 | `UMIAK_PREVIEW_SCHEME`, `UMIAK_PREVIEW_PORT` | `https`, `443` (для `http`: `80`) | схема и внешний порт preview URL; quickstart использует `http` и `8085` |
 | `UMIAK_SSH_HOST`, `UMIAK_SSH_PORT` | `ssh.<UMIAK_PREVIEW_DOMAIN>`, `22` | SSH gateway для `/v1/meta` и `/ssh` |
+| `UMIAK_DESKTOP_PATH_PREFIX` | — | owner-режим: ссылки desktop имеют вид `<origin>/desktop/<slug>/?dataTransport=websocket` на origin владельца, без тикета (авторизует сессия браузера); без неё — hostname-ссылки `<slug>-desktop.<domain>` с тикетом; compose задаёт `/desktop` |
 | `UMIAK_SSH_HOST_KEYS_FILE` | — | публичные host keys gateway, по одному в строке |
 | `UMIAK_SSH_LOGIN_CA_KEY_FILE` | — | закрытый ed25519 SSH login CA без пароля (PKCS#8 PEM или OpenSSH); без него `ssh/certificate` недоступен |
 | `UMIAK_API_TRUSTED_PROXY_CIDRS` | — | CIDR через запятую: от них `X-Forwarded-For` идёт в `clientIp` лога |

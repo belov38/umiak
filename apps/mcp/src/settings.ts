@@ -1,6 +1,6 @@
 // Environment of the remote MCP server (S11 16.3), validated once at start.
 // An invalid environment is a fatal error that lists every problem.
-import { authMode, localAllowedCidrs, localDeniedCidrs } from "@umiak/auth";
+import { ownerCidrSet, parseAuthMode } from "@umiak/auth";
 import { z } from "zod";
 
 export class SettingsError extends Error {
@@ -21,7 +21,7 @@ export const LOG_LEVELS = [
 ] as const;
 
 export interface Settings {
-	localEnv?: Record<string, string | undefined>;
+	ownerEnv?: Record<string, string | undefined>;
 	/** UMIAK_MCP_PORT: /mcp, metadata, /healthz, /readyz. */
 	port: number;
 	/** UMIAK_MCP_OPS_PORT: /metrics, /healthz, /readyz. */
@@ -115,11 +115,8 @@ const schema = z.object({
 export function loadSettings(
 	env: Record<string, string | undefined>,
 ): Settings {
-	const mode = authMode(env);
-	if (mode === "none") {
-		localAllowedCidrs(env);
-		localDeniedCidrs(env);
-	}
+	const mode = parseAuthMode(env);
+	const cidrs = mode === "owner" ? ownerCidrSet(env) : undefined;
 	const r = schema.safeParse(env);
 	if (!r.success) {
 		const lines = r.error.issues.map(
@@ -129,13 +126,13 @@ export function loadSettings(
 	}
 	const e = r.data;
 	return {
-		...(mode === "none"
+		...(mode === "owner" && cidrs !== undefined
 			? {
-					localEnv: {
-						UMIAK_AUTH_MODE: "none",
+					ownerEnv: {
+						UMIAK_AUTH_MODE: "owner",
 						UMIAK_API_URL: e.UMIAK_API_URL,
-						UMIAK_LOCAL_DENIED_CIDRS: localDeniedCidrs(env).join(","),
-						UMIAK_LOCAL_ALLOWED_CIDRS: env.UMIAK_LOCAL_ALLOWED_CIDRS,
+						UMIAK_LOCAL_DENIED_CIDRS: cidrs.denied.join(","),
+						UMIAK_LOCAL_ALLOWED_CIDRS: cidrs.allowed.join(","),
 						UMIAK_API_TRUSTED_PROXY_CIDRS: env.UMIAK_API_TRUSTED_PROXY_CIDRS,
 					},
 				}
@@ -145,7 +142,7 @@ export function loadSettings(
 		apiUrl: e.UMIAK_MCP_API_URL.replace(/\/+$/, ""),
 		publicUrl: e.UMIAK_MCP_PUBLIC_URL,
 		issuer:
-			mode === "none"
+			mode === "owner"
 				? null
 				: (e.UMIAK_OIDC_ISSUER?.replace(/\/+$/, "") ?? null),
 		allowedOrigins: e.UMIAK_MCP_ALLOWED_ORIGINS,

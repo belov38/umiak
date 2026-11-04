@@ -25,7 +25,7 @@ test("quickstart appearance, focus and revoke confirmation", async () => {
 		setupHandler: async (req, res) => {
 			if (req.url !== "/setup") return false;
 			res.setHeader("content-type", "text/html");
-			res.end(renderSetup({ steps: {} }, origin));
+			res.end(renderSetup({ steps: {} }));
 			return true;
 		},
 	});
@@ -192,7 +192,7 @@ test("quickstart appearance, focus and revoke confirmation", async () => {
 			await second.close();
 		}
 		await context.addCookies([
-			{ name: "umiak_owner", value: token, url: origin },
+			{ name: "__Host-umiak_owner", value: token, url: origin, secure: true },
 		]);
 		const pair = await store.pairStart({
 			source: "127.0.0.1",

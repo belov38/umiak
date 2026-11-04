@@ -1,13 +1,13 @@
 // `umiak auth token [--json]` (S7 §7.6): the bearer of the current profile for
 // the SDK and MCP, refreshed when due, or exit 4. Without --json only the
 // token is printed (stdout is data); --json prints
-// {kind: "oidc" | "key" | "none", token, expiresAt, apiUrl, team}.
+// {kind: "oidc" | "key", token, expiresAt, apiUrl, team}.
 
 import type { Command } from "commander";
 import type { Runner } from "../program.ts";
 
 export interface AuthTokenJson {
-	kind: "oidc" | "key" | "none";
+	kind: "oidc" | "key";
 	token: string;
 	expiresAt: string | null;
 	apiUrl: string;

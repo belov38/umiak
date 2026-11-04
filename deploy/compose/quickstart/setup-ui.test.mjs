@@ -1,26 +1,25 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import { renderHelp, renderSetup } from "./setup-ui.mjs";
 
 test("wizard expands the current step and marks completed steps", () => {
-	const html = renderSetup(
-		{ steps: { connection: { status: "ready" }, host: { status: "ready" } } },
-		"https://localhost",
-	);
-	assert.equal((html.match(/<details /g) || []).length, 6);
+	const html = renderSetup({
+		steps: { limits: { status: "ready" }, network: { status: "ready" } },
+	});
+	assert.equal((html.match(/<details /g) || []).length, 4);
 	assert.equal(
 		(html.match(/<details name="setup-step" open>/g) || []).length,
 		1,
 	);
-	assert.match(html, /<summary>✓ 1\. Connect Proxmox/);
-	assert.match(html, /open><summary>3\. Storage/);
+	assert.match(html, /<h1>Templates and smoke test<\/h1>/);
+	assert.match(html, /<summary>✓ 1\. Storage/);
+	assert.match(html, /open><summary>3\. Template builds/);
 	assert.doesNotMatch(html, /github\.com\/belov38/);
-	const readme = readFileSync(new URL("./README.md", import.meta.url), "utf8");
-	assert.match(html, /restart gateway worker api web/);
-	assert.match(readme, /restart gateway worker api web/);
-	assert.doesNotMatch(html, /owner\/tls/);
+	assert.doesNotMatch(
+		html,
+		/Connect Proxmox|Prepare or adopt|Funnel(?! Display)|chrome:\/\/flags|docker compose|id="prepare"|owner\/tls/,
+	);
 });
 
 test("setup displays durable build output and prefills the pinned VirtIO checksum", async () => {
@@ -40,32 +39,24 @@ test("setup displays durable build output and prefills the pinned VirtIO checksu
 	assert.ok(html.includes(`id="build-virtio-sha" value="${VIRTIO_SHA256}"`));
 });
 
-test("setup warns on the current ts.net origin and recommends private Serve", () => {
-	const html = renderSetup({ steps: {} }, "https://umiak.tail123.ts.net");
-	assert.match(html, /if you use Funnel, this is public/);
-	assert.match(html, /Tailscale Serve/);
-	for (const origin of [
-		"http://192.168.1.20:8080",
-		"https://ts.net.evil.example",
-	]) {
-		assert.doesNotMatch(
-			renderSetup({ steps: {} }, origin),
-			/if you use Funnel, this is public/,
-		);
-	}
+test("setup renders no tailnet, LAN or browser-flag guidance", () => {
+	assert.doesNotMatch(
+		renderSetup({ steps: {} }),
+		/Funnel(?! Display)|Tailscale Serve|trusted LAN|chrome:/,
+	);
 });
 
-test("help installs over LAN HTTP without owner CA commands", () => {
-	const html = renderHelp("http://192.168.1.20:8080");
-	assert.match(html, /http:\/\/192.168.1.20:8080\/install.sh/);
+test("help points at the given origin without LAN, flag or compose guidance", () => {
+	const html = renderHelp("https://umiak.tail123.ts.net");
+	assert.match(html, /https:\/\/umiak.tail123.ts.net\/install.sh/);
 	assert.doesNotMatch(
 		html,
-		/owner\/tls|UMIAK_CA_CERT|quickstart-ca.pem|owner HTTPS CA/,
+		/owner\/tls|UMIAK_CA_CERT|quickstart-ca.pem|owner HTTPS CA|chrome:\/\/flags|docker compose|LAN HTTP/,
 	);
 });
 
 test("help copy controls work without the secure-context Clipboard API", async () => {
-	const html = renderHelp("http://192.168.1.20:4180");
+	const html = renderHelp("https://umiak.tail123.ts.net");
 	const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].find(
 		(match) => match[1].includes("async function copyText"),
 	)?.[1];
@@ -101,7 +92,7 @@ test("help copy controls work without the secure-context Clipboard API", async (
 });
 
 test("setup displays current gateway CA and leaf certificate expiry status", async () => {
-	const html = renderSetup({ steps: {} }, "http://192.168.1.20:4180");
+	const html = renderSetup({ steps: {} });
 	const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].find(
 		(match) => match[1].includes("async function showCertificateStatus"),
 	)?.[1];
@@ -142,4 +133,40 @@ test("setup offers three recipes and one Windows desktop with ISO URL inputs", (
 	assert.match(select, /value="windows">Windows 11 \(with desktop\)/);
 	assert.doesNotMatch(select, /windows-desktop/);
 	assert.match(html, /id="build-iso-url"/);
+});
+
+test("progress counts only visible steps and warns until the installer has bootstrapped", () => {
+	const ready = { status: "ready" };
+	const boot = { connection: ready, host: ready };
+	const none = renderSetup({ steps: boot });
+	assert.match(none, /0 of 4 steps verified/);
+	assert.match(none, /aria-valuenow="0"/);
+	assert.doesNotMatch(none, /installer has not finished/);
+	const all = renderSetup({
+		steps: {
+			...boot,
+			limits: ready,
+			network: ready,
+			templates: ready,
+			smoke: ready,
+		},
+	});
+	assert.match(all, /4 of 4 steps verified/);
+	assert.match(all, /aria-valuenow="4"/);
+	assert.match(all, /width:100%/);
+	assert.match(
+		renderSetup({ steps: {} }),
+		/The installer has not finished setting up this deployment\. Re-run the installer on your Proxmox node\./,
+	);
+});
+
+test("setup page shows a recorded installer import failure", () => {
+	const html = renderSetup({
+		steps: {},
+		bootstrapError: { message: "fingerprint <mismatch>" },
+	});
+	assert.match(
+		html,
+		/Installer data could not be imported: fingerprint &lt;mismatch&gt;/,
+	);
 });

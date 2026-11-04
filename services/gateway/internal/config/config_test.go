@@ -283,6 +283,23 @@ func TestFromEnvDisableListeners(t *testing.T) {
 	}
 }
 
+func TestIngressDesktopKey(t *testing.T) {
+	f := newFixture(t)
+	cfg, err := FromEnv(f.getenv)
+	if err != nil || cfg.IngressDesktopKey != nil {
+		t.Fatalf("unset: %v %v", cfg.IngressDesktopKey, err)
+	}
+	f.env["UMIAK_GATEWAY_INGRESS_DESKTOP_KEY_FILE"] = writeFile(t, f.dir, "ingress.key", strings.Repeat("k", 32))
+	cfg, err = FromEnv(f.getenv)
+	if err != nil || string(cfg.IngressDesktopKey) != strings.Repeat("k", 32) {
+		t.Fatalf("set: %q %v", cfg.IngressDesktopKey, err)
+	}
+	f.env["UMIAK_GATEWAY_INGRESS_DESKTOP_KEY_FILE"] = writeFile(t, f.dir, "short.key", "short")
+	if _, err := FromEnv(f.getenv); err == nil || !strings.Contains(err.Error(), "INGRESS_DESKTOP_KEY_FILE") {
+		t.Fatalf("short key: %v", err)
+	}
+}
+
 func TestFromEnvFiles(t *testing.T) {
 	f := newFixture(t)
 	k2 := base64.URLEncoding.EncodeToString([]byte(strings.Repeat("\xfb", 32)))
@@ -657,13 +674,13 @@ func TestProcessDrainTimeout(t *testing.T) {
 	}
 }
 
-func TestAuthMode(t *testing.T) {
-	for _, mode := range []string{"", "oidc", "none", "invalid"} {
+func TestAuthModeOwner(t *testing.T) {
+	for _, mode := range []string{"", "oidc", "owner", "none", "invalid"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newFixture(t)
 			f.env["UMIAK_AUTH_MODE"] = mode
 			cfg, err := FromEnv(f.getenv)
-			if mode == "invalid" {
+			if mode == "invalid" || mode == "none" {
 				if err == nil {
 					t.Fatal("invalid auth mode accepted")
 				}

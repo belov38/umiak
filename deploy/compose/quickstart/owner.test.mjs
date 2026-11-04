@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MemoryOwnerRepository, OwnerStore } from "./owner.mjs";
+import { claimLink, MemoryOwnerRepository, OwnerStore } from "./owner.mjs";
 
 test("claim is atomic, one-time, persists across stores and stores only digests", async () => {
 	const repo = new MemoryOwnerRepository();
@@ -257,4 +257,15 @@ test("startup drops legacy buckets while preserving the exact sessions object", 
 	assert.equal(await new OwnerStore(repo).init(), null);
 	assert.equal(JSON.stringify(repo.state.sessions), sessions);
 	assert.equal(repo.state.signinSources, undefined);
+});
+
+test("claimLink builds a fragment-based claim URL", () => {
+	assert.equal(
+		claimLink("https://umiak.tail0000.ts.net", "abc"),
+		"https://umiak.tail0000.ts.net/claim#abc",
+	);
+	assert.equal(
+		claimLink("https://umiak.tail0000.ts.net/", "a b"),
+		"https://umiak.tail0000.ts.net/claim#a%20b",
+	);
 });

@@ -5,7 +5,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import type { ApiDeps, ApiEnv } from "../deps.ts";
 import { ApiError, validationError } from "../http/errors.ts";
-import { localAuthenticate } from "./local.ts";
+import { ownerAuthenticate } from "./owner.ts";
 import {
 	type AuthContext,
 	authRequired,
@@ -129,8 +129,8 @@ async function authenticate(
 	deps: ApiDeps,
 	c: Context<ApiEnv>,
 ): Promise<AuthContext> {
-	if (deps.settings.authMode === "none")
-		return localAuthenticate(deps, c, requestedTeam(c));
+	if (deps.settings.authMode === "owner")
+		return ownerAuthenticate(deps, c, requestedTeam(c));
 	const email = c.req.header("x-auth-request-email")?.trim() ?? "";
 	if (email === "") {
 		throw authRequired("no browser session (X-Auth-Request-Email is missing)");

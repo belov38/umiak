@@ -8,7 +8,7 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { MiddlewareHandler } from "hono";
 import { serviceAuth } from "./auth/internal.ts";
-import { localNetworkGuard } from "./auth/local.ts";
+import { ownerNetworkGuard } from "./auth/owner.ts";
 import { proxiedAuth } from "./auth/proxied.ts";
 import { publicAuth, stripProxyHeaders } from "./auth/public.ts";
 import { rateLimit } from "./auth/rate-limit.ts";
@@ -110,7 +110,7 @@ export function mountV1(
 export function createPublicApp(deps: ApiDeps): ApiApp {
 	// oauth2-proxy headers are forged on this host: removed before anything.
 	const app = listenerApp(deps, {}, [stripProxyHeaders()]);
-	app.use("*", localNetworkGuard(deps));
+	app.use("*", ownerNetworkGuard(deps));
 	app.use("/v1/*", publicAuth(deps), rateLimit(deps));
 	mountV1(app, deps);
 	return app;
@@ -118,7 +118,7 @@ export function createPublicApp(deps: ApiDeps): ApiApp {
 
 export function createProxiedApp(deps: ApiDeps): ApiApp {
 	const app = listenerApp(deps);
-	app.use("*", localNetworkGuard(deps));
+	app.use("*", ownerNetworkGuard(deps));
 	app.use("/v1/*", proxiedAuth(deps), rateLimit(deps));
 	// No /v1/docs: a third-party script must not run on the cookie origin.
 	mountV1(app, deps, { docs: false });

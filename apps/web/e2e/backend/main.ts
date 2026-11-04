@@ -218,8 +218,8 @@ async function main(): Promise<void> {
 	}
 
 	const kcSecret =
-		process.env.UMIAK_AUTH_MODE === "none"
-			? "unused-local-mode"
+		process.env.UMIAK_AUTH_MODE === "owner"
+			? "unused-owner-mode"
 			: readFileSync(
 					required("UMIAK_IDP_SYNC_CLIENT_SECRET_FILE"),
 					"utf8",
@@ -252,7 +252,7 @@ async function main(): Promise<void> {
 		migrateOnStart: false,
 		httpPort: WORKER_HTTP_PORT,
 		pollingIntervalSeconds: 0.5,
-		...(process.env.UMIAK_AUTH_MODE === "none" ? {} : { idpSync }),
+		...(process.env.UMIAK_AUTH_MODE === "owner" ? {} : { idpSync }),
 		// Passes run on demand (POST /idp-sync); the timer would race them.
 		idpSyncIntervalMs: 24 * 3600 * 1000,
 		payloadReady: () => wp.ready(),

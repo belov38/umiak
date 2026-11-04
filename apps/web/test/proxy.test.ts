@@ -142,7 +142,7 @@ describe("proxy", () => {
 			"frame-ancestors 'self'",
 		);
 		expect(res.headers.get("content-security-policy")).toContain(
-			"frame-src http://*.umiak.example.com:8085",
+			"frame-src 'self' http://*.umiak.example.com:8085",
 		);
 	});
 

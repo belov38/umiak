@@ -165,12 +165,17 @@ API-платформа, которая выдаёт AI-агентам и люд�
 
 ## 10. Развёртывание и аутентификация
 
-Режим по умолчанию — `UMIAK_AUTH_MODE=oidc` (описан ниже). S15 добавляет
-опциональный `none` для одного локального owner/operator без Keycloak и
-oauth2-proxy, с обязательным client CIDR guard. Отдельный compose override
-сохраняет WSS/CA гостевых агентов и отдаёт web по HTTP через private ingress.
-Спецификация: `docs/specs/s15-local-mode.md`; домашний запуск:
-`deploy/compose/README.local.ru.md`.
+Режим по умолчанию — `UMIAK_AUTH_MODE=oidc` (описан ниже). Режим `owner`
+(домашний запуск, установщик S18, корневой `compose.yaml`) — один owner/operator за доверенным
+ingress (`deploy/compose/quickstart/server.mjs`): backend принимает только
+сокет-peer ingress из `UMIAK_LOCAL_ALLOWED_CIDRS` и работает под фиксированной
+идентичностью `umiak:local`, без Keycloak и oauth2-proxy.
+
+### Homelab mode (S18)
+
+Домашний вариант ставится одной командой на узле Proxmox VE 9 (`install.sh` → Python-установщик `deploy/installer`, релизный bundle из GitHub с проверкой `SHA256SUMS`). Установщик создаёт объекты Umiak в PVE (пользователь и токен `umiak@pve`, роли, pool `umiak`, SDN zone `umiak` / VNet `umiak0` `10.88.0.0/24`, IPSet `umiak-gateway`, группа `umiak-egress`) и ограниченный `node-agent`. Control plane — непривилегированный LXC Debian 13 с Docker и Tailscale; корневой `compose.yaml` тянет опубликованные образы GHCR (`UMIAK_VERSION`) в `/opt/umiak`. Tailscale работает внутри CT, не на хосте PVE.
+
+Вход только по tailnet HTTPS (`https://umiak.<tailnet>.ts.net`, Tailscale Serve → trusted ingress `quickstart` :4181). Режим `owner`: один владелец, claim по одноразовой ссылке `/claim#<code>`, cookie `__Host-umiak_owner`. Аварийный путь: SSH-туннель на :4180 (только Host `localhost`). Превью портов — `http://<slug>-<port>.<tailnet-ip-dashed>.sslip.io:8085` по tailnet, SSH — tailnet IP :2222. Рабочий стол встроен в дашборд на том же origin (`/desktop/<slug>/`): ingress отдаёт собственную доверенную копию фронтенда moonlight-web, а от гостя пропускает только JSON/SDP/NDJSON/binary, не HTML и JS. Браузерный мастер: Templates и Smoke test. Day 2 (Update, новый браузер, сброс владельца, Uninstall) — повторный запуск установщика. Спека: `docs/specs/s18-onboarding.md`.
 
 **Control plane работает в Kubernetes:** `api`, `worker`, `web`, `gateway`, `mcp`, Keycloak (IdP, эксплуатация — S12). Postgres — в кластере (оператор) или внешний. Proxmox-ноды, VM и `umiak-node` остаются вне Kubernetes.
 

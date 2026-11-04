@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import net from "node:net";
 import { hostname } from "node:os";
-import { clientGuard } from "../local/ingress.mjs";
+import { clientGuard } from "./client-guard.mjs";
 
 function authority(value, protocol) {
 	if (typeof value !== "string" || !value || /[\s/@\\#?]/.test(value))
@@ -65,12 +65,7 @@ export function requestContext(
 	// Docker Desktop may NAT host-published traffic to the bridge gateway;
 	// see README for the limit this places on container isolation.
 	const proxyPeer = clientGuard(
-		[
-			"127.0.0.0/8",
-			"::1/128",
-			"172.30.116.12/32", // Tailscale sidecar on serve-internal
-			...gateways.map((g) => `${g}/32`),
-		].join(","),
+		["127.0.0.0/8", "::1/128", ...gateways.map((g) => `${g}/32`)].join(","),
 		"",
 		{ UMIAK_LOCAL_DENIED_CIDRS: "" },
 	);

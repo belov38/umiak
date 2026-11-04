@@ -23,7 +23,7 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
 					toast.success("Copied");
 					setTimeout(() => setCopied(false), 1500);
 				} catch {
-					toast.error(copyFailureGuidance(window.isSecureContext));
+					toast.error(copyFailureGuidance());
 				}
 			}}
 		>

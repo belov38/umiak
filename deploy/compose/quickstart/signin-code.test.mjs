@@ -15,6 +15,21 @@ test("host command prints a usable code and preserves existing access", async ()
 	assert.equal(await store.authenticate(first), true);
 });
 
+test("--link prints the one-click path form that signs in", async () => {
+	const store = new OwnerStore(new MemoryOwnerRepository(), {
+		audit: () => {},
+	});
+	await store.claim(await store.init());
+	const lines = [];
+	assert.equal(
+		await runSigninCode(store, (line) => lines.push(line), { link: true }),
+		0,
+	);
+	assert.match(lines[0], /^\/signin#[A-Z2-7-]+$/);
+	assert.match(lines[1], /Expires:/);
+	assert.ok(await store.signin(lines[0].slice("/signin#".length), "link"));
+});
+
 test("ten outstanding codes produce a friendly console message", async () => {
 	const store = new OwnerStore(new MemoryOwnerRepository(), {
 		audit: () => {},

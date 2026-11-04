@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
 	renderHelp,
 	renderSetup,
+	requireRootCA,
 	SetupWizard,
 	validateConnection,
 	validateLimits,
@@ -150,8 +151,11 @@ test("adoption reads only existing PVE objects and fails closed on missing zone"
 		/missing zone/,
 	);
 });
+const bootstrapped = Object.fromEntries(
+	["connection", "host"].map((name) => [name, { status: "ready", data: {} }]),
+);
 test("failed steps persist an error and cannot complete setup; retry clears error", async () => {
-	let state = { steps: {} };
+	let state = { steps: structuredClone(bootstrapped) };
 	const store = {
 		read: async () => structuredClone(state),
 		write: async (s) => {
@@ -161,18 +165,59 @@ test("failed steps persist an error and cannot complete setup; retry clears erro
 	const wizard = new SetupWizard({
 		store,
 		steps: {
-			connection: async (x) => {
+			limits: async (x) => {
 				if (!x.ok) throw new Error("pin mismatch");
-				return { node: "pve" };
+				return { storage: "local-lvm" };
 			},
 		},
 	});
-	await assert.rejects(() => wizard.run("connection", {}), /pin mismatch/);
-	assert.equal(state.steps.connection.status, "error");
+	await assert.rejects(() => wizard.run("limits", {}), /pin mismatch/);
+	assert.equal(state.steps.limits.status, "error");
 	assert.equal(state.complete, false);
-	await wizard.run("connection", { ok: true });
-	assert.equal(state.steps.connection.status, "ready");
-	assert.equal(state.steps.connection.error, undefined);
+	await wizard.run("limits", { ok: true });
+	assert.equal(state.steps.limits.status, "ready");
+	assert.equal(state.steps.limits.error, undefined);
+});
+test("browser steps wait for the installer-recorded connection and host", async () => {
+	const { createSetupHandler } = await import("./setup.mjs");
+	let state = { steps: {} };
+	const wizard = new SetupWizard({
+		store: {
+			read: async () => structuredClone(state),
+			write: async (s) => {
+				state = structuredClone(s);
+			},
+		},
+		steps: { limits: async () => ({}) },
+	});
+	await assert.rejects(() => wizard.run("limits", {}), /installer/);
+	assert.equal(state.steps.limits, undefined);
+	const { Readable } = await import("node:stream");
+	const handler = createSetupHandler({
+		pool: {},
+		store: {
+			read: async () => structuredClone(state),
+			write: async () => {},
+		},
+	});
+	const req = Readable.from(["{}"]);
+	req.url = "/quickstart/setup/limits";
+	req.method = "POST";
+	let status, data;
+	await handler(
+		req,
+		{
+			writeHead: (s) => {
+				status = s;
+			},
+			end: (x) => {
+				data = x;
+			},
+		},
+		{ owner: true, origin: "https://stack.example" },
+	);
+	assert.equal(status, 400);
+	assert.match(JSON.parse(data).error, /installer has not recorded connection/);
 });
 test("help substitutes origin and escapes hostile text with copy controls", () => {
 	const html = renderHelp("https://pve.example:8443");
@@ -182,48 +227,15 @@ test("help substitutes origin and escapes hostile text with copy controls", () =
 	assert.match(html, /Codex/);
 	assert.doesNotMatch(
 		renderSetup(
-			{ steps: { connection: { error: "<script>alert(1)</script>" } } },
+			{
+				steps: {
+					limits: { status: "error", error: "<script>alert(1)</script>" },
+				},
+			},
 			"https://host",
 		),
 		/<script>alert/,
 	);
-});
-test("connection preserves mounted PVE root CA and writes the configured token ID", async () => {
-	const { mkdtemp, writeFile, readFile } = await import("node:fs/promises");
-	const { tmpdir } = await import("node:os");
-	const { join } = await import("node:path");
-	const { createSetupHandler } = await import("./setup.mjs");
-	const dir = await mkdtemp(join(tmpdir(), "umiak-setup-ca-"));
-	await writeFile(join(dir, "pve-root-ca.pem"), "existing-root-ca");
-	let state = { steps: {} };
-	const store = {
-		read: async () => structuredClone(state),
-		write: async (s) => {
-			state = structuredClone(s);
-		},
-	};
-	const handler = createSetupHandler({
-		pool: {},
-		store,
-		secretsDir: dir,
-		makePve: () => ({
-			get: async () => ({}),
-			certificate: () => "pinned-server-leaf",
-		}),
-	});
-	await handler.wizard.run("connection", {
-		...connection,
-		tokenSecret: "private-test-token",
-	});
-	assert.equal(
-		await readFile(join(dir, "pve-root-ca.pem"), "utf8"),
-		"existing-root-ca",
-	);
-	assert.equal(
-		await readFile(join(dir, "pve-token-id"), "utf8"),
-		connection.tokenId,
-	);
-	assert.doesNotMatch(JSON.stringify(state), /private-test-token/);
 });
 test("IPv4 gateway derives a DNS tunnel host compatible with generated gateway certificates", () => {
 	assert.equal(
@@ -284,7 +296,7 @@ test("isolation verification rejects missing gateway rules and gateways outside 
 		/deny/,
 	);
 });
-test("adoption callback token expires, is single use, and setup denies the configured PVE SNAT address", async () => {
+test("legacy browser Connect, Prepare and callback routes are gone; PVE addresses stay denied", async () => {
 	const { Readable } = await import("node:stream");
 	const { createSetupHandler } = await import("./setup.mjs");
 	let state = {
@@ -302,12 +314,7 @@ test("adoption callback token expires, is single use, and setup denies the confi
 		},
 	};
 	const handler = createSetupHandler({ pool: {}, store });
-	async function request(
-		path,
-		input,
-		owner = true,
-		origin = "https://stack.example",
-	) {
+	async function request(path, input) {
 		const req = Readable.from(
 			input === undefined ? [] : [JSON.stringify(input)],
 		);
@@ -322,107 +329,28 @@ test("adoption callback token expires, is single use, and setup denies the confi
 				data = x;
 			},
 		};
-		await handler(req, res, {
-			owner,
-			origin,
-		});
-		return {
-			status,
-			data: path.startsWith("/pve-setup.sh") ? data : JSON.parse(data),
-		};
+		await handler(req, res, { owner: true, origin: "https://stack.example" });
+		return { status, data };
 	}
-	for (const storage of ["../local", "bad/name", "bad;name", 123]) {
-		const rejected = await request("/quickstart/setup/prepare", { storage });
-		assert.equal(rejected.status, 400);
-		assert.equal(state.preparation, undefined);
-	}
-	const publicPrepared = await request(
-		"/quickstart/setup/prepare",
-		{},
-		true,
-		"https://stack.example",
-	);
-	assert.equal(publicPrepared.status, 200);
-	assert.doesNotMatch(
-		publicPrepared.data.command,
-		/--cacert|Copy the verified quickstart CA/,
-	);
-	assert.equal(state.preparation.caPath, "/etc/ssl/certs/ca-certificates.crt");
-
-	const httpPrepared = await request(
-		"/quickstart/setup/prepare",
-		{},
-		true,
-		"http://192.168.1.10:4180",
-	);
-	assert.match(httpPrepared.data.warning, /HTTP.*root.*secret/i);
-	assert.match(httpPrepared.data.warning, /Serve.*HTTPS/);
-	assert.match(httpPrepared.data.command, /sha256sum -c/);
-	assert.match(httpPrepared.data.command, /curl -fsSL .* -o pve-setup.sh/);
-	assert.doesNotMatch(httpPrepared.data.command, /curl[^\n]*\| bash/);
-	const prepared = await request("/quickstart/setup/prepare", {});
-	assert.equal(prepared.status, 200);
-	assert.doesNotMatch(prepared.data.command, /--cacert/);
-	assert.equal(state.preparation.caPath, "/etc/ssl/certs/ca-certificates.crt");
-	const token = prepared.data.command.match(/token=([a-f0-9]{64})/)[1];
-	const script = await request(
-		`/pve-setup.sh?token=${token}`,
-		undefined,
-		false,
-	);
-	assert.equal(script.status, 200);
-	const { createHash } = await import("node:crypto");
-	assert.equal(
-		createHash("sha256").update(script.data).digest("hex"),
-		prepared.data.sha256,
-	);
-	const report = { zone: { type: "simple" }, vnet: { zone: "umiak" } };
-	const accepted = await request(
-		"/quickstart/setup/callback",
-		{ token, report },
-		false,
-	);
-	assert.equal(accepted.status, 200);
-	assert.equal(
-		(await request("/quickstart/setup/callback", { token, report }, false))
-			.status,
-		400,
-	);
-	await request("/quickstart/setup/prepare", {});
-	state.preparation.expiresAt = Date.now() - 1;
-	assert.equal(
-		(await request("/quickstart/setup/callback", { token, report }, false))
-			.status,
-		400,
-	);
+	assert.equal((await request("/quickstart/setup/connection", {})).status, 404);
+	assert.equal((await request("/quickstart/setup/host", {})).status, 404);
+	assert.equal((await request("/quickstart/setup/prepare", {})).status, 404);
+	assert.equal((await request("/quickstart/setup/callback", {})).status, 404);
+	assert.equal((await request("/pve-setup.sh?token=x")).status, undefined);
+	assert.equal(state.preparation, undefined);
 	assert.equal(await handler.deniedPeer("::ffff:192.168.68.116"), true);
 	assert.equal(await handler.deniedPeer("192.168.68.50"), false);
 });
-test("host adoption cannot become ready without a valid mounted PVE root CA", async () => {
-	const { createSetupHandler } = await import("./setup.mjs");
-	const { mkdtemp } = await import("node:fs/promises");
+test("requireRootCA accepts a CA certificate and rejects anything else", async () => {
+	const { mkdtemp, readFile } = await import("node:fs/promises");
 	const { tmpdir } = await import("node:os");
 	const { join } = await import("node:path");
-	let state = { steps: { connection: { status: "ready", data: connection } } };
-	const store = {
-		read: async () => structuredClone(state),
-		write: async (s) => {
-			state = structuredClone(s);
-		},
-	};
-	const secretsDir = await mkdtemp(join(tmpdir(), "umiak-missing-root-"));
-	const handler = createSetupHandler({
-		pool: {},
-		store,
-		secretsDir,
-		makePve: () => ({ get: async () => ({}) }),
-	});
-	await assert.rejects(
-		() => handler.wizard.run("host", { mode: "adopt" }),
-		/valid PVE root CA/,
-	);
-	assert.equal(state.steps.host.status, "error");
-	assert.equal(state.complete, false);
+	const { testTls } = await import("./test-helpers/tls.mjs");
+	const dir = await mkdtemp(join(tmpdir(), "umiak-root-ca-"));
+	await testTls(dir);
+	const ca = await readFile(join(dir, "ca.pem"), "utf8");
+	assert.equal(requireRootCA(ca), ca);
+	assert.throws(() => requireRootCA("not a certificate"), /root CA/);
 });
 test("help copy examples contain actual newlines without owner certificate settings", () => {
 	const html = renderHelp("https://stack.example");
@@ -475,6 +403,12 @@ test("wizard UI has themes, progress and template selections without raw JSON", 
 			],
 		},
 		"https://stack.example",
+	);
+	assert.match(html, /Templates/);
+	assert.match(html, /Smoke test/);
+	assert.doesNotMatch(
+		html,
+		/Connect Proxmox|Prepare or adopt|chrome:\/\/flags|Funnel(?! Display)|docker compose/,
 	);
 	assert.match(html, /prefers-color-scheme/);
 	assert.match(html, /umiak-theme/);
@@ -615,5 +549,67 @@ test("dashboard template registration preserves completion and smoke; wizard reg
 		await wizard.run("templates", {}, { dashboardBuild });
 		assert.equal(state.complete, dashboardBuild);
 		assert.equal(state.steps.smoke.status, dashboardBuild ? "ready" : "stale");
+	}
+});
+test("smoke calls the API with the public API host, not api:8080", async () => {
+	const http = await import("node:http");
+	const { mkdtemp } = await import("node:fs/promises");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const { createSetupHandler } = await import("./setup.mjs");
+	const hosts = new Set();
+	let deleted = false;
+	const api = http.createServer((req, res) => {
+		hosts.add(req.headers.host);
+		res.setHeader("content-type", "application/json");
+		if (req.headers.host !== "umiak.tail0000.ts.net") {
+			res.statusCode = 403;
+			return res.end(JSON.stringify({ error: { code: "host_forbidden" } }));
+		}
+		if (req.method === "POST" && req.url === "/v1/sandboxes")
+			return res.end(JSON.stringify({ sandbox: { id: "sbx_1" } }));
+		if (req.method === "POST" && req.url.endsWith("/commands"))
+			return res.end(
+				JSON.stringify({
+					command: { exitCode: 0 },
+					stdout: "umiak-quickstart-ok",
+				}),
+			);
+		if (req.method === "DELETE") {
+			deleted = true;
+			return res.end("{}");
+		}
+		return res.end(
+			JSON.stringify({ sandbox: { state: deleted ? "deleted" : "ready" } }),
+		);
+	});
+	await new Promise((resolve) => api.listen(0, "127.0.0.1", resolve));
+	const saved = process.env.UMIAK_API_URL;
+	// compose sets UMIAK_API_URL to the public URL; the default fetcher must use it.
+	process.env.UMIAK_API_URL = "https://umiak.tail0000.ts.net";
+	try {
+		const handler = createSetupHandler({
+			pool: {},
+			store: { read: async () => ({ steps: {} }), write: async () => {} },
+			secretsDir: await mkdtemp(join(tmpdir(), "umiak-smoke-")),
+			apiUrl: `http://127.0.0.1:${api.address().port}`,
+			makePve: () => ({ get: async () => [] }),
+		});
+		const result = await handler.wizard.steps.smoke(
+			{},
+			{
+				steps: {
+					connection: { data: { node: "pve" } },
+					limits: { data: { ramCapMb: 8192 } },
+				},
+			},
+			{},
+		);
+		assert.equal(result.exec, "passed");
+		assert.deepEqual([...hosts], ["umiak.tail0000.ts.net"]);
+	} finally {
+		if (saved === undefined) delete process.env.UMIAK_API_URL;
+		else process.env.UMIAK_API_URL = saved;
+		await new Promise((resolve) => api.close(resolve));
 	}
 });
