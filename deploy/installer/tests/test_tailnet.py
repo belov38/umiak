@@ -84,8 +84,7 @@ def test_up_asks_for_device_approval(runner):
 
 def test_key_expiry_hint_names_the_machine():
     assert tailnet.key_expiry_hint("lab.tail0000.ts.net") == (
-        "Disable key expiry for the machine 'lab' in the Tailscale admin console (Machines → … → Disable key "
-        "expiry), otherwise it drops off your tailnet after ~180 days. https://login.tailscale.com/admin/machines"
+        "Tip: disable key expiry for 'lab' in Tailscale, or it drops off in ~180 days:"
     )
 
 

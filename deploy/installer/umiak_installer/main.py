@@ -298,14 +298,12 @@ def gather(runner: Runner, args, ui: Ui, saved: dict | None = None) -> dict:
 
     ip_default = default("ct_ip", None)
     if not args.ct_ip and "ct_ip" not in saved:
-        ui.say("The control plane needs a static LAN address outside your router's DHCP range "
-               "(it must never be handed to another device); guests reach the gateway there.")
+        ui.say("The control plane needs a fixed LAN address outside your router's DHCP range.")
         if ui.interactive:
             ui.say("Looking for a free address…")
             ip_default = ct.suggest_ip(runner, gw, cidr, bridge)
             if ip_default:
-                ui.say(f"Suggested {style.bold(ip_default)}: nothing on the LAN answers there and no Proxmox guest "
-                       "uses it. Check that it is outside your router's DHCP range.")
+                ui.say(f"Suggested: {style.bold(ip_default)} (free on the LAN)")
     ct_ip = field(args.ct_ip, "Control-plane static IPv4 address", ip_default, "--ct-ip", check_ip)
 
     def check_hostname(value):
@@ -409,17 +407,14 @@ class Flow:
         self.ui.say("")
         self.ui.say(style.step("The installer will:"))
         for line in [
-            f"create or verify Umiak-only PVE objects (user umiak@pve, token, roles, pool, SDN zone umiak, "
-            f"IPSet umiak-gateway with {a['ct_ip']}, group umiak-egress); bridge {a.get('bridge', 'vmbr0')} and other "
-            "guests are not touched",
-            f"create CT {a['ct_id']} umiak-cp ({a['ct_ip']}/{a['cidr']} via {a['gw']} on {a.get('bridge', 'vmbr0')}, "
-            f"storage {a['storage']}) "
-            "with Docker and Tailscale from their signed apt repositories",
-            f"install /usr/local/bin/umiak-node and {prepare_host.NODE_CONFIG}, add one forced-command key line "
-            f"to {prepare_host.AUTHORIZED_KEYS}",
-            "start the Umiak stack in the CT and publish it on your tailnet with tailscale serve",
+            "add the Umiak user, pool, network and firewall rules to Proxmox",
+            f"create container {a['ct_id']} (umiak-cp): {a['ct_ip']} on {a.get('bridge', 'vmbr0')}, "
+            f"disk on {a['storage']}",
+            "install the Umiak node agent on this node",
+            "start Umiak and publish it on your tailnet",
         ]:
-            self.ui.say("  - " + line)
+            self.ui.say("  • " + line)
+        self.ui.say(style.dim("  Other guests and host network settings stay unchanged."))
         if not self.ui.confirm("Proceed?"):
             raise InstallerError("Cancelled; nothing was changed by this step. Rerun with --yes to accept.")
 
@@ -480,7 +475,8 @@ class Flow:
 
     def start_stack(self, a: dict, result, identity: tailnet.TailnetInfo, out_dir: Path) -> None:
         day2.apply_stack(self.runner, a["ct_id"], self.bundle, a, result.node_ip, result.public_key, identity, out_dir,
-                         self.sleep, agent_only_if_changed=False)
+                         self.sleep, agent_only_if_changed=False,
+                         say=lambda line: self.ui.say(style.dim("  " + line)))
 
     def day2(self, action: str, args, download, latest) -> int:
         current, ui = self.current, self.ui
@@ -597,12 +593,12 @@ def main(argv=None, runner: Runner | None = None, bundle: release.Release | None
         if ui.interactive:
             flow.offer_nodes()
         out("")
-        out(style.ok("The installation is complete. Continue setup in your browser."))
+        out(style.ok("Installed. Continue setup in your browser."))
         out("")
-        out("Recommended: " + tailnet.key_expiry_hint(urllib.parse.urlsplit(link).hostname))
-        style.action(out, "On a device in your tailnet, open:", link,
-                     "This link works once and makes that browser the owner; do not share it.")
-        out("  Then follow Setup: build the Linux template (about 10 minutes) and run the installation test.")
+        out(tailnet.key_expiry_hint(urllib.parse.urlsplit(link).hostname))
+        out("  " + style.link(tailnet.MACHINES_URL))
+        style.action(out, "On a device in your tailnet, open:", link, "One-time link, do not share it.")
+        out("  Then build the Linux template (~10 min) and run the test.")
         return 0
     except UsageError as error:
         out(style.error(f"Error: {error}"))

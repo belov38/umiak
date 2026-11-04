@@ -74,7 +74,7 @@ def _sha256(path: Path) -> str | None:
 
 def apply_stack(runner: Runner, ct_id: int, bundle, a: dict, node_ip: str, public_key: str,
                 identity: tailnet.TailnetInfo, out_dir: Path, sleep, *, agent_only_if_changed: bool,
-                sandbox_host: bool = True) -> bool:
+                sandbox_host: bool = True, say=lambda _line: None) -> bool:
     """Write the stack for `bundle`, refresh installer facts and secrets, start it, wait for the import.
 
     Shared by install and Update. The node-agent comes from the pulled image and
@@ -85,6 +85,7 @@ def apply_stack(runner: Runner, ct_id: int, bundle, a: dict, node_ip: str, publi
     node = runner.hostname()
     work = runner.path(prepare_host.STATE_DIR) / "work"
     preview = stack.preview_domain(identity.ipv4)
+    say("Writing the configuration")
     stack.write(runner, ct_id, bundle, {
         "UMIAK_VERSION": bundle.version,
         "UMIAK_PUBLIC_URL": f"https://{identity.dns_name}",
@@ -93,12 +94,13 @@ def apply_stack(runner: Runner, ct_id: int, bundle, a: dict, node_ip: str, publi
         "UMIAK_GATEWAY_TLS_BIND": a["ct_ip"],
     }, work)
     stack.write_firewall(runner, ct_id, node_ip)
-    stack.pull(runner, ct_id)
+    stack.pull(runner, ct_id, say=say)
     stack.create(runner, ct_id)
     image = stack.quickstart_image(bundle.version)
     install_agent = sandbox_host and not (agent_only_if_changed
                          and _sha256(runner.path(prepare_host.NODE_BINARY)) == bundle.node_agent_sha256)
     if install_agent:
+        say("Installing the node agent")
         binary = stack.extract_node_agent(runner, ct_id, image, work / "umiak-node-linux-amd64")
         prepare_host.install_node_agent(runner, binary, bundle.node_agent_sha256, public_key)
     if sandbox_host:
@@ -121,10 +123,11 @@ def apply_stack(runner: Runner, ct_id: int, bundle, a: dict, node_ip: str, publi
     # (Update, Resume), restart it after the new secrets land.
     was_running = stack.quickstart_running(runner, ct_id)
     stack.push_secrets(runner, ct_id, {name: out_dir / name for name in stack.SECRET_NAMES}, image)
-    stack.start(runner, ct_id, sleep=sleep)
+    stack.start(runner, ct_id, sleep=sleep, say=say)
     if was_running:
         stack.restart(runner, ct_id, "quickstart")
         stack.wait_healthy(runner, ct_id, sleep=sleep)
+    say("Waiting for the control plane to finish its first start")
     stack.wait_bootstrap(runner, ct_id, sleep=sleep)
     return install_agent
 
@@ -216,7 +219,8 @@ def update(runner: Runner, current: state.InstallState, bundle, *, ui, sleep=tim
         prepare_host.verify_dnsmasq_unit(runner)
     progress(f"Updating the Umiak stack to {bundle.version}")
     if apply_stack(runner, ct_id, bundle, a, node_ip, public_key, identity, out_dir, sleep,
-                   agent_only_if_changed=True, sandbox_host=sandbox_host):
+                   agent_only_if_changed=True, sandbox_host=sandbox_host,
+                   say=lambda line: ui.say(style.dim("  " + line))):
         ui.say("Node-agent updated on this node.")
     nodes.refresh_agents(runner, current, bundle, ui=ui)
     progress("Publishing the control plane on your tailnet")

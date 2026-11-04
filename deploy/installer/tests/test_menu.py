@@ -50,13 +50,10 @@ def test_non_interactive_install_end_to_end(env):
     # The claim link stands alone near the end, set off by blank lines.
     assert printed[-4:] == ["▶ On a device in your tailnet, open:",
                             f"  https://umiak.tail0000.ts.net/claim#{CODE}",
-                            "  This link works once and makes that browser the owner; do not share it.",
-                            "  Then follow Setup: build the Linux template (about 10 minutes) and run the installation "
-                            "test."]
-    assert (
-        "Recommended: Disable key expiry for the machine 'umiak' in the Tailscale admin console (Machines → … → Disable key "
-        "expiry), otherwise it drops off your tailnet after ~180 days. https://login.tailscale.com/admin/machines"
-    ) in printed
+                            "  One-time link, do not share it.",
+                            "  Then build the Linux template (~10 min) and run the test."]
+    assert "Tip: disable key expiry for 'umiak' in Tailscale, or it drops off in ~180 days:" in printed
+    assert "  https://login.tailscale.com/admin/machines" in printed
     final = saved(runner)
     assert final.phase == "complete" and final.tailnet_host == "umiak.tail0000.ts.net" and final.ct_id == 591
 

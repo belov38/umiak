@@ -212,8 +212,19 @@ def write_firewall(runner: Runner, ct_id: int, node_lan_ip: str) -> None:
     run_in(runner, ct_id, "systemctl", "restart", "umiak-ports.service")
 
 
-def pull(runner: Runner, ct_id: int) -> None:
-    run_in(runner, ct_id, *compose("pull", "--quiet"))
+def _quiet(_line: str) -> None:
+    pass
+
+
+def pull(runner: Runner, ct_id: int, say=_quiet) -> None:
+    """Pull service by service so a long first download shows progress (cached images return at once)."""
+    services = run_in(runner, ct_id, *compose("config", "--services")).split()
+    if not services:
+        run_in(runner, ct_id, *compose("pull", "--quiet"))
+        return
+    for n, service in enumerate(services, 1):
+        say(f"Downloading images {n}/{len(services)}: {service}")
+        run_in(runner, ct_id, *compose("pull", "--quiet", service))
 
 
 def create(runner: Runner, ct_id: int) -> None:
@@ -230,10 +241,12 @@ def _rows(output: str) -> list[dict]:
     return [json.loads(line) for line in output.splitlines() if line.strip()]
 
 
-def wait_healthy(runner: Runner, ct_id: int, sleep=time.sleep, clock=time.monotonic, timeout: float = 300) -> None:
+def wait_healthy(runner: Runner, ct_id: int, sleep=time.sleep, clock=time.monotonic, timeout: float = 300,
+                 say=_quiet) -> None:
     services = set(run_in(runner, ct_id, *compose("config", "--services")).split())
     long_running = services - ONESHOT
     deadline = clock() + timeout
+    shown = None
     while True:
         rows = _rows(run_in(runner, ct_id, *compose("ps", "-a", "--format", "json")))
         for row in rows:
@@ -242,6 +255,10 @@ def wait_healthy(runner: Runner, ct_id: int, sleep=time.sleep, clock=time.monoto
                                      f"see: pct exec {ct_id} -- docker compose --project-directory {DIR} logs")
         ready = {row.get("Service") for row in rows
                  if row.get("State") == "running" and row.get("Health", "") in ("", "healthy")}
+        count = len(long_running & ready)
+        if count != shown:
+            say(f"Services ready: {count}/{len(long_running)}")
+            shown = count
         if long_running <= ready:
             return
         if clock() >= deadline:
@@ -250,10 +267,12 @@ def wait_healthy(runner: Runner, ct_id: int, sleep=time.sleep, clock=time.monoto
         sleep(5)
 
 
-def start(runner: Runner, ct_id: int, sleep=time.sleep, clock=time.monotonic, timeout: float = 300) -> None:
+def start(runner: Runner, ct_id: int, sleep=time.sleep, clock=time.monotonic, timeout: float = 300,
+          say=_quiet) -> None:
     """`docker compose up -d --remove-orphans` (drops removed services), then wait for health."""
+    say("Starting services")
     run_in(runner, ct_id, *compose("up", "-d", "--remove-orphans"))
-    wait_healthy(runner, ct_id, sleep=sleep, clock=clock, timeout=timeout)
+    wait_healthy(runner, ct_id, sleep=sleep, clock=clock, timeout=timeout, say=say)
 
 
 def up(runner: Runner, ct_id: int, sleep=time.sleep, clock=time.monotonic, timeout: float = 300) -> None:

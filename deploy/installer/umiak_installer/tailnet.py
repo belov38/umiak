@@ -89,10 +89,7 @@ def serve(runner: Runner, ct_id: int) -> None:
 def key_expiry_hint(dns_name: str) -> str:
     """Tailscale node keys expire (~180 days by default); the control plane must not drop off."""
     machine = dns_name.split(".", 1)[0]
-    return (
-        f"Disable key expiry for the machine '{machine}' in the Tailscale admin console (Machines → … → Disable key "
-        f"expiry), otherwise it drops off your tailnet after ~180 days. {MACHINES_URL}"
-    )
+    return f"Tip: disable key expiry for '{machine}' in Tailscale, or it drops off in ~180 days:"
 
 
 def claim_link(dns_name: str, code: str) -> str:
