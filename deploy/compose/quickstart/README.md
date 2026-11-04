@@ -2,7 +2,28 @@
 
 This stack runs inside the Umiak control plane LXC container on your Proxmox node.
 The installer on the PVE node creates the container, hands over credentials and
-starts Tailscale. These notes cover operating what runs inside it.
+starts Tailscale. These notes cover operating what runs inside it; to install, run
+the one-line installer from the root `README.md` on the PVE node.
+
+## What runs
+
+The stack is the root `compose.yaml` (project `umiak`) in `/opt/umiak` inside the
+container, with a `.env` holding the public tailnet values. It runs `quickstart`
+(owner ingress, setup wizard, CLI downloads, desktop viewer), `api`, `worker`,
+`web`, `mcp`, `gateway` (with `gateway-renewal`), Postgres and the one-shot `secrets-init` and migrations.
+Images are the GHCR release tagged by `UMIAK_VERSION`. Listeners: 4181 (trusted,
+behind Tailscale Serve), 4180 (emergency, localhost Host only), 8085 (preview
+HTTP) and SSH on 2222 over the tailnet IP.
+
+Logs and status from the Proxmox node (`<ct>` is the container ID, default 590):
+
+```sh
+pct exec <ct> -- docker compose --project-directory /opt/umiak ps -a
+pct exec <ct> -- docker compose --project-directory /opt/umiak logs --tail=100 quickstart api worker gateway
+```
+
+Update, new-browser sign-in, owner reset and uninstall are installer menu items:
+re-run the installer on the PVE node.
 
 ## Access model
 
@@ -138,8 +159,10 @@ plane container can invalidate all owner sessions and CLI pairings and print a n
 one-time claim code. For a new browser use the non-destructive sign-in below:
 
 ```sh
-docker compose exec quickstart node deploy/compose/quickstart/run.mjs node deploy/compose/quickstart/recover.mjs
+pct exec <ct> -- docker compose --project-directory /opt/umiak exec quickstart node deploy/compose/quickstart/run.mjs node deploy/compose/quickstart/recover.mjs
 ```
+
+The installer's **Reset owner access** runs the same command and prints the new claim link.
 
 This changes only owner access; setup, VM data and guest trust are preserved. The
 recovery command is deliberately unavailable over HTTP. Protect and back up the
@@ -271,7 +294,7 @@ enter a one-time sign-in code. Existing sessions and CLI pairings remain valid.
 From a shell in the control plane container:
 
 ```sh
-docker compose exec quickstart umiak-signin
+pct exec <ct> -- docker compose --project-directory /opt/umiak exec quickstart umiak-signin
 ```
 
 `umiak-signin --link` prints `/signin#<code>` instead: append it to the

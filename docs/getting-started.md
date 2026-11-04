@@ -7,11 +7,25 @@ Quickstart owner and local deployments show a single-owner dashboard without tea
 
 The examples below use `https://api.example.com`, `https://app.example.com` and `preview.example.com`. Replace them with the URLs shown in your dashboard. Commands are checked against the in-app guide by `apps/web/test/getting-started.test.ts`.
 
-Install: on your Proxmox node run the installer, which creates the control plane container and joins your tailnet, then follow [the operator notes](../deploy/compose/quickstart/README.md).
+## Install on Proxmox
+
+Prerequisites: a Proxmox VE 9.x node, a root shell on it, and a Tailscale account with MagicDNS and HTTPS certificates enabled (the installer checks both). Tailscale runs inside the control plane container, not on the Proxmox host.
+
+On the node, as root, run the installer:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/belov38/umiak/main/install.sh | sh
 ```
+
+It downloads the latest release bundle, verifies it against `SHA256SUMS`, then creates the Umiak objects in Proxmox (the `umiak@pve` user and token, roles, pool `umiak`, SDN zone `umiak` with VNet `umiak0` on `10.88.0.0/24`, IPSet `umiak-gateway`, group `umiak-egress`), a restricted node-agent, and an unprivileged Debian 13 container with Docker and Tailscale. It pulls the release images from GHCR and prints a one-time claim link:
+
+```text
+https://umiak.<tailnet>.ts.net/claim#<code>
+```
+
+Open it from a device on your tailnet, claim the deployment, then finish the browser wizard (Templates and a Smoke test). The same address serves the dashboard, API and MCP; there is no plain HTTP or LAN access. For emergencies use `ssh -L 4180:<ct-ip>:4180 root@<pve-node>` and open `http://localhost:4180` in Chrome or Firefox. Operator notes for the stack inside the container are in [deploy/compose/quickstart/README.md](../deploy/compose/quickstart/README.md).
+
+Day 2: run the same command again. It shows a menu for the current state: Install, Resume install, Update, Sign in a new browser, Reset owner access, or Uninstall. For scripted runs use `--non-interactive --yes` with flags (`--action`, `--version`, `--storage`, `--ct-id`, `--ct-ip`, ...); `sh -s -- --help` lists them.
 
 ## The model in one minute (owner)
 
@@ -276,10 +290,10 @@ umiak --help
 umiak mcp --help
 ```
 
-**Inspect stack logs (control plane container)**
+**Inspect stack logs (on the Proxmox node)**
 
 ```text
-docker compose logs --tail=100 quickstart api worker gateway
+pct exec <ct> -- docker compose --project-directory /opt/umiak logs --tail=100 quickstart api worker gateway
 ```
 
 ## The model in one minute (oidc)
@@ -480,12 +494,8 @@ Plan rotation before expiry; the CA is never silently replaced or extended.
 
 Owner cookies are per browser and hostname. The Sign in page has no dashboard
 navigation until authenticated. Get a ten-minute, one-use code from an existing
-browser's **Owner sessions → Sign in another browser**, or in the control plane container:
-
-```sh
-docker compose exec quickstart node deploy/compose/quickstart/run.mjs node deploy/compose/quickstart/signin-code.mjs
-```
+browser's **Owner sessions → Sign in another browser**, or by re-running the installer on the Proxmox node and choosing **Sign in a new browser**, which prints a ready sign-in link.
 
 Enter the code and select **Sign in**. Other browsers and CLI credentials remain
-valid. CLI sessions cannot mint browser access. Console recovery is destructive:
+valid. CLI sessions cannot mint browser access. The installer's **Reset owner access** is destructive:
 use it only as a last resort because it revokes every browser and CLI credential.

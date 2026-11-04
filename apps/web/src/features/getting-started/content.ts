@@ -279,7 +279,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 				...(d.mode === "owner"
 					? [
 							text(
-								"New browser or device? Owner sessions live per browser and hostname. Get a ten-minute one-time code from Owner sessions → Sign in another browser in an existing session, or run docker compose exec quickstart node deploy/compose/quickstart/run.mjs node deploy/compose/quickstart/signin-code.mjs in the control plane container. Enter it on the Sign in page. Existing browsers and CLIs stay signed in. CLI credentials cannot issue browser access. Recovery revokes all sessions; use it only as a last resort. An expired CLI pairing request needs a fresh login.",
+								"New browser or device? Owner sessions live per browser and hostname. Get a ten-minute one-time code from Owner sessions → Sign in another browser in an existing session, or re-run the installer on the Proxmox node and choose Sign in a new browser. Enter it on the Sign in page. Existing browsers and CLIs stay signed in. CLI credentials cannot issue browser access. Recovery revokes all sessions; use it only as a last resort. An expired CLI pairing request needs a fresh login.",
 							),
 						]
 					: []),
@@ -291,10 +291,10 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 				code("Inspect CLI commands", "umiak --help\numiak mcp --help"),
 				code(
 					d.mode === "owner"
-						? "Inspect stack logs (control plane container)"
+						? "Inspect stack logs (on the Proxmox node)"
 						: "Inspect stack logs (Docker host)",
 					d.mode === "owner"
-						? "docker compose logs --tail=100 quickstart api worker gateway"
+						? "pct exec <ct> -- docker compose --project-directory /opt/umiak logs --tail=100 quickstart api worker gateway"
 						: "docker compose logs --tail=100 api worker gateway",
 				),
 			],
