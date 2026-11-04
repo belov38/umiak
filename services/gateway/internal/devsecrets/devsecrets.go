@@ -58,6 +58,11 @@ const (
 	FileWorkerGWToken = "worker-gateway-token"
 	// FileIngressDesktopKey is 32 raw random bytes: the HMAC key shared by the
 	// gateway and the owner ingress (UMIAK_GATEWAY_INGRESS_DESKTOP_KEY_FILE).
+	// Readers per stack: quickstart (root compose.yaml) - the gateway runs as
+	// root and the quickstart service as uid 1000, which owns the file
+	// (-worker-owner). Dev stack / dev-cp (deploy/compose/gateway.yaml) - no
+	// owner ingress, the gateway runs as 65532 and must NOT be pointed at the
+	// file; the feature stays disabled there.
 	FileIngressDesktopKey = "ingress-desktop-key"
 	modeSecret            = 0o600
 	modePublic            = 0o644

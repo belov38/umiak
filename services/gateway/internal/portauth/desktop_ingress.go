@@ -14,7 +14,9 @@ import (
 //
 //	<label>.<expUnix>.<mac>
 //
-// label is the routed desktop label (for example brave-otter-lake-desktop),
+// label is the routed desktop label (for example brave-otter-lake-desktop)
+// exactly as the gateway routes it: lowercase (routes.ParseHost lowercases
+// the Host), so the signer must lowercase the label too,
 // expUnix a decimal Unix time in seconds, and mac is
 // base64url WITHOUT padding (base64.RawURLEncoding) of
 // HMAC-SHA256(key, label + "." + expUnix). The key is 32 raw bytes.
