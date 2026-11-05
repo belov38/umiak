@@ -309,3 +309,27 @@ test("completed setup leads directly to browser sandbox creation and uses friend
 	assert.match(html, /Needs checking after settings changed/);
 	assert.doesNotMatch(html, />stale</);
 });
+
+test("several nodes: one Linux action builds on every node that lacks it", () => {
+	const html = renderSetup({
+		steps: { limits: { status: "ready" }, network: { status: "ready" } },
+		sandboxNodes: [
+			{ nodeId: "node_1", name: "pve", state: "active", templates: [] },
+			{ nodeId: "node_2", name: "pve2", state: "active", templates: [] },
+			{
+				nodeId: "node_3",
+				name: "pve3",
+				state: "active",
+				templates: [{ templateSlug: "linux", version: "1", pveVmid: 20000 }],
+			},
+		],
+	});
+	assert.match(html, /data-nodes="node_1,node_2"/);
+	assert.match(html, /Build Linux template on all nodes \(pve, pve2\)/);
+	assert.match(html, /per node; nodes are built one after another/);
+	// The node selector belongs to the optional single-template build only.
+	assert.ok(
+		html.indexOf('<select id="build-node"') >
+			html.indexOf("Other operating systems"),
+	);
+});

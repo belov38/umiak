@@ -146,7 +146,24 @@ function setupInteractions() {
 			polling = false;
 		}
 	};
-	const build = async (slug) => {
+	// Linux on several nodes: one build at a time; the rest wait in this tab's queue across reloads.
+	const QUEUE = "umiak-linux-build-queue";
+	const queue = {
+		get: () => {
+			try {
+				return (sessionStorage.getItem(QUEUE) || "").split(",").filter(Boolean);
+			} catch {
+				return [];
+			}
+		},
+		set: (ids) => {
+			try {
+				if (ids.length) sessionStorage.setItem(QUEUE, ids.join(","));
+				else sessionStorage.removeItem(QUEUE);
+			} catch {}
+		},
+	};
+	const build = async (slug, nodeId) => {
 		if (building) return;
 		disableBuilds(true);
 		$("#build-error").textContent = "";
@@ -154,7 +171,7 @@ function setupInteractions() {
 		try {
 			const input = {
 				slug,
-				nodeId: value("#build-node"),
+				nodeId: nodeId || value("#build-node"),
 				confirmRebuild: value("#build-confirm"),
 			};
 			if (slug === "windows") Object.assign(input, media());
@@ -163,8 +180,16 @@ function setupInteractions() {
 			await pollBuild();
 		} catch (error) {
 			$("#build-error").textContent = error.message;
+			queue.set([]);
 			disableBuilds(false);
 		}
+	};
+	const buildLinux = () => {
+		const [first, ...rest] = ($("#build-linux").dataset?.nodes || "")
+			.split(",")
+			.filter(Boolean);
+		queue.set(rest);
+		return build("linux", first);
 	};
 	const media = () => ({
 		iso: value("#build-iso"),
@@ -175,7 +200,7 @@ function setupInteractions() {
 		virtioSha256: value("#build-virtio-sha"),
 		allowInternalIsoUrls: $("#build-internal-urls").checked,
 	});
-	$("#build-linux").addEventListener("click", () => build("linux"));
+	$("#build-linux").addEventListener("click", buildLinux);
 	$("#build-template").addEventListener("click", () =>
 		build(value("#build-slug")),
 	);
@@ -254,6 +279,13 @@ function setupInteractions() {
 	}
 	// Only resume polling an active job; completed jobs must not cause reload loops.
 	if ($("#build-linux").disabled) void pollBuild();
+	else {
+		const [next, ...rest] = queue.get();
+		if (next) {
+			queue.set(rest);
+			void build("linux", next);
+		}
+	}
 }
 
 export function renderSetup(state) {
@@ -261,6 +293,9 @@ export function renderSetup(state) {
 	const limits = { ...templateRange(state), ...steps.limits?.data };
 	const network = steps.network?.data || {};
 	const nodes = state.sandboxNodes || [];
+	const needLinux = nodes.filter(
+		(n) => !(n.templates || []).some((t) => t.templateSlug === "linux"),
+	);
 	const nodeSelect = (id) =>
 		nodes.length === 1
 			? `<p>Build on: ${escapeHtml(nodes[0].name)}</p><input type="hidden" id="${id}" name="nodeId" value="${escapeHtml(nodes[0].nodeId)}">`
@@ -313,13 +348,13 @@ ${section(
 	`
 ${status("templates")}
 <p>A template is the reusable VM image your sandboxes start from. Build the Linux template to continue. Desktop and Windows templates can be added later.</p>
-<button type="button" id="build-linux"${running ? " disabled" : ""}>Build Linux template</button>
-<p>Allow about 10 minutes; download speed and hardware affect the time.</p>
-${nodeSelect("build-node")}
+<button type="button" id="build-linux" data-nodes="${escapeHtml(needLinux.map((n) => n.nodeId).join(","))}"${running ? " disabled" : ""}>${needLinux.length > 1 ? `Build Linux template on all nodes (${escapeHtml(needLinux.map((n) => n.name).join(", "))})` : needLinux.length === 1 && nodes.length > 1 ? `Build Linux template on ${escapeHtml(needLinux[0].name)}` : "Build Linux template"}</button>
+<p>Allow about 10 minutes${needLinux.length > 1 ? " per node; nodes are built one after another. Keep this tab open" : ""}; download speed and hardware affect the time.</p>
 ${buildProgress}
 
 <ul aria-label="Sandbox node template availability">${nodes.map((n) => `<li>${escapeHtml(n.name)} · ${escapeHtml(n.state)} · ${escapeHtml((n.templates || []).map((t) => `${t.templateSlug} · ${t.version} · VM ${t.pveVmid}`).join(", ") || "Linux template needed")}${n.buildJobId ? ` · Unfinished reservation: <code>${escapeHtml(n.buildJobId)}</code>` : ""}</li>`).join("")}</ul>
 <details><summary>Other operating systems</summary>
+${nodeSelect("build-node")}
 <label>Operating system<select id="build-slug"><option value="linux">Linux</option><option value="linux-desktop">Linux desktop</option><option value="windows">Windows 11 (with desktop)</option></select></label>
 <div id="windows-media" hidden><label>Uploaded Windows ISO file name<input id="build-iso" placeholder="Windows.iso"></label><label>Or Windows ISO HTTPS URL<input id="build-iso-url" type="url" placeholder="https://…/Windows.iso"></label><label>Windows ISO SHA256 (optional)<input id="build-iso-sha" pattern="[a-fA-F0-9]{64}"></label><label>ISO storage (blank selects first with iso content)<input id="build-media-storage"></label><label>VirtIO ISO URL<input id="build-virtio-url" type="url" value="${VIRTIO_STABLE_URL}"></label><label>VirtIO SHA256 (optional; pinned archive checksum)<input id="build-virtio-sha" value="${VIRTIO_SHA256}" pattern="[a-fA-F0-9]{64}"></label><label><input id="build-internal-urls" type="checkbox">I explicitly allow internal or loopback ISO URLs</label><p>Not verified: the ISO will be used as downloaded when SHA256 is omitted.</p><p>Umiak never ships or hosts Windows media. Supply your own licensed Windows ISO URL. Obtain its SHA256 from your Microsoft download portal. For VirtIO, download the official ISO to your workstation and run <code>sha256sum virtio-win.iso</code>; the Fedora CHECKSUM currently lists RPM MD5s, not the ISO SHA256. Changing the versioned ISO requires a new confirmed SHA256.</p><button class="outline" type="button" id="validate-media">Validate ISO inputs only</button><p id="media-result" role="status"></p></div>
 <button type="button" id="build-template"${running ? " disabled" : ""}>Build selected template</button></details>
