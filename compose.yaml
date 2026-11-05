@@ -1,7 +1,6 @@
 # Pull-only product stack: every image is a published GHCR image pinned by
 # UMIAK_VERSION (the installer writes it to .env). Contributors build locally with
 #   docker compose --env-file compose.dev.env -f compose.yaml -f compose.dev.yaml up --build
-# The corporate OIDC deployment remains at deploy/compose/compose.yaml.
 # Project `umiak`: named volumes are umiak_<name> (the installer writes
 # umiak_pve-secrets and umiak_network-config before the first start).
 name: umiak

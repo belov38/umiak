@@ -60,31 +60,3 @@ test("shared image build never copies the checkout wholesale", () => {
 	const file = readFileSync("deploy/compose/quickstart/Dockerfile", "utf8");
 	assert.doesNotMatch(file, /^COPY \. \.$/m);
 });
-
-// OIDC keeps separate processes and existing secret/network boundaries.
-test("corporate roles override the shared image ingress command", () => {
-	const corporate = JSON.parse(
-		execFileSync(
-			"docker",
-			[
-				"compose",
-				"-f",
-				"deploy/compose/compose.yaml",
-				"config",
-				"--format",
-				"json",
-			],
-			{ encoding: "utf8" },
-		),
-	);
-	for (const role of ["api", "worker", "mcp", "migrate", "web-meta"]) {
-		const s = corporate.services[role];
-		assert.equal(s.image, "umiak-quickstart:dev");
-		assert.deepEqual(s.entrypoint, []);
-		assert.ok(s.command.length > 0);
-	}
-	assert.equal((corporate.services.mcp.volumes ?? []).length, 0);
-	assert.deepEqual(Object.keys(corporate.services.web.networks), [
-		"web-internal",
-	]);
-});

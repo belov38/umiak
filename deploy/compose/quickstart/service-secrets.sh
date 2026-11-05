@@ -1,40 +1,13 @@
 #!/bin/sh
-# One-shot dev secrets of the local stack (S7 plan decision 13), run by the
-# `secrets-init` service on every `up`. Writes into /secrets
-# (deploy/compose/secrets, git-ignored), one directory per consumer, because
-# compose mounts directories (a file mount needs its file before any
-# container is created):
-#   data-keys.json        S6 key ring, the source of the copies below
-#   payload-secret        PAYLOAD_SECRET (S8), the source of the copies below
-#   api/                  data-keys.json, cursor-key, service-tokens.json,
-#                         gateway-token, ssh-login-ca, ssh-host-keys.pub,
-#                         payload-secret
-#   worker/               data-keys.json, payload-secret,
-#                         idp-sync-client-secret
-#   web/                  payload-secret
-#   turn/                 auth-secret (32 random bytes, base64; worker/coturn only)
-#   keycloak/             oauth2-proxy-client-secret, umiak-worker-client-secret,
-#                         admin-password
-#   oauth2-proxy/         client-secret, cookie-secret
-# Rules:
-#   - a generated secret is written only when missing, never replaced;
-#   - copies and the files derived from /secrets/gateway (written by the S4
-#     `gateway-secrets` service) are rewritten whenever they differ from
-#     their source;
-#   - every directory and file then gets its consumer's owner (on a Linux host
-#     the containers run as other uids than the host user).
+# Per-service secrets for the owner installation. Existing generated values are preserved.
 set -eu
 umask 077
 
 S=${UMIAK_SECRETS_ROOT:-/secrets}
 GW=$S/gateway
-# node in the api and worker images, keycloak in the Keycloak image.
 NODE_UID=1000
-KEYCLOAK_UID=1000
-# distroless nonroot in the oauth2-proxy image.
-OAUTH2_PROXY_UID=65532
 
-mkdir -p "$S/api" "$S/worker" "$S/web" "$S/turn" "$S/keycloak" "$S/oauth2-proxy"
+mkdir -p "$S/api" "$S/worker" "$S/web"
 
 # Base64 of N random bytes.
 rand() { head -c "$1" /dev/urandom | base64 | tr -d '\n'; }
@@ -139,18 +112,6 @@ else
 	new "$S/api/ssh-host-keys.pub" ed25519 umiak-dev-host pub
 fi
 
-# Keycloak and oauth2-proxy: client secrets of the realm `umiak`, cookie key.
-new "$S/keycloak/oauth2-proxy-client-secret" line "$(token)"
-new "$S/keycloak/umiak-worker-client-secret" line "$(token)"
-# Bootstrap admin of Keycloak, used unless KEYCLOAK_ADMIN_PASSWORD is set in .env.
-new "$S/keycloak/admin-password" line "$(token)"
-# worker: ctl-idp-sync reads users with the umiak-worker client (trimmed).
-synced "$S/worker/idp-sync-client-secret" cat "$S/keycloak/umiak-worker-client-secret"
-# oauth2-proxy reads its secret files as they are: no trailing newline.
-synced "$S/oauth2-proxy/client-secret" no_newline "$S/keycloak/oauth2-proxy-client-secret"
-# Exactly 32 bytes (an AES-256 key as is).
-new "$S/oauth2-proxy/cookie-secret" printf '%s' "$(rand 24 | tr '+/' '-_')"
-
 # Owners and modes; only root can hand files to other uids.
 own() {
 	[ "$(id -u)" = 0 ] || return 0
@@ -161,10 +122,6 @@ own() {
 own "$NODE_UID" "$S/api"
 own "$NODE_UID" "$S/worker"
 own "$NODE_UID" "$S/web"
-new "$S/turn/auth-secret" rand 32
-own "$NODE_UID" "$S/turn"
-own "$KEYCLOAK_UID" "$S/keycloak"
-own "$OAUTH2_PROXY_UID" "$S/oauth2-proxy"
 if [ "$(id -u)" = 0 ]; then
 	chown "$NODE_UID:$NODE_UID" "$S/data-keys.json"
 	chmod 600 "$S/data-keys.json"

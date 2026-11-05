@@ -10,7 +10,7 @@ if [ ! -s "$root/database/password" ]; then
 fi
 chown -R 1000:1000 "$root/database" "$root/pve"
 chmod 700 "$root/database" "$root/pve"
-sh /legacy-init.sh
+sh /service-secrets.sh
 # Only these consumers can read each generated copy.
 cp "$root/database/password" "$root/database/gateway-password"
 chown 65532:65532 "$root/database/gateway-password"

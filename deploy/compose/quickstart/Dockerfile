@@ -124,7 +124,7 @@ COPY deploy/compose/quickstart/*.mjs deploy/compose/quickstart/
 COPY deploy/compose/quickstart/*.sh deploy/compose/quickstart/
 COPY deploy/compose/quickstart/THIRD_PARTY_NOTICES.md deploy/compose/quickstart/
 COPY deploy/compose/meta-proxy.mjs deploy/compose/canonical-fetch.mjs deploy/compose/
-COPY deploy/compose/secrets-init/init.sh /legacy-init.sh
+COPY deploy/compose/quickstart/service-secrets.sh /service-secrets.sh
 COPY deploy/compose/quickstart/bootstrap.sh /bootstrap.sh
 COPY apps/web/src/app/globals.css apps/web/src/app/globals.css
 COPY apps/web/public/brand/lockup-inter-light.svg apps/web/public/brand/lockup-inter-light.svg

@@ -34,6 +34,6 @@ Full guide: [docs/getting-started.md](docs/getting-started.md).
 docker compose --env-file compose.dev.env -f compose.yaml -f compose.dev.yaml up --build
 ```
 
-[Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md) · [Specs](docs/specs/) · [Corporate deployment (OIDC)](deploy/compose/README.md)
+[Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md) · [Specs](docs/specs/)
 
 Apache-2.0
