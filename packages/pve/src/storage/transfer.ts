@@ -142,6 +142,8 @@ export async function relayVolume(
 	const extents = await runs(input, blockBytes);
 	if (
 		input.sourceBase &&
+		input.source.deltaStreamEnabled === true &&
+		input.target.deltaStreamEnabled === true &&
 		input.source.openTransfer &&
 		input.target.openTransfer
 	)

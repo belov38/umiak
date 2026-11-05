@@ -269,3 +269,24 @@ it("uses thin metadata to read only changed base-relative blocks", async () => {
 	expect(target.writes).toEqual([4]);
 	expect(reads.every((offset) => offset === 4)).toBe(true);
 });
+
+it("cold moves retain the verified relay unless both endpoints explicitly opt into experimental delta streams", async () => {
+	const source = node(Buffer.from([1, 2, 3, 4])),
+		target = node(Buffer.alloc(4));
+	source.ops.openTransfer = async () => {
+		throw Error("unverified stream selected");
+	};
+	target.ops.openTransfer = source.ops.openTransfer;
+	const result = await relayVolume({
+		source: source.ops,
+		target: target.ops,
+		sourceName: "source",
+		targetName: "target",
+		sourceBase: "base",
+		baseChecksum: "a".repeat(64),
+		sizeBytes: 4,
+		blockBytes: 2,
+	});
+	expect(result.transferredBytes).toBe(4);
+	expect(target.writes).toEqual([0, 2]);
+});

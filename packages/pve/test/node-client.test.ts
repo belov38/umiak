@@ -246,3 +246,11 @@ describe("SshNodeOps channel limits", () => {
 		expect(requests).toHaveLength(1);
 	});
 });
+
+it("does not enable experimental delta sessions by default", async () => {
+	const server = await startServer();
+	const node = client(server.port);
+	expect(node.deltaStreamEnabled).toBe(false);
+	await expect(node.openTransfer({})).rejects.toThrow(/disabled/);
+	expect(server.requests).toHaveLength(0);
+});
