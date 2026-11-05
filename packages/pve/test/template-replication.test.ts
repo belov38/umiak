@@ -84,7 +84,7 @@ it("copies a base once, verifies it before publication, and retries without rebu
 		close() {},
 		async call<T>(op: string, args?: object): Promise<T> {
 			if (op === "lv.list")
-				return [{ name: "base-600-disk-0", sizeBytes: 512 }] as T;
+				return { lvs: [{ name: "base-600-disk-0", sizeBytes: 512 }] } as T;
 			if (op === "lv.transferMap")
 				return {
 					sizeBytes: 512,

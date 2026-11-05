@@ -100,12 +100,14 @@ function bridge(
 							data: Buffer.from(original),
 						});
 				if (op === "lv.list")
-					return [...infra.lvs].map(([name, lv]) => ({
-						...lv,
-						name,
-						uuid: store.get(name)?.uuid,
-						sizeBytes: 512,
-					})) as T;
+					return {
+						lvs: [...infra.lvs].map(([name, lv]) => ({
+							...lv,
+							name,
+							uuid: store.get(name)?.uuid,
+							sizeBytes: 512,
+						})),
+					} as T;
 				if (op === "lv.transferMap")
 					return {
 						sizeBytes: 512,

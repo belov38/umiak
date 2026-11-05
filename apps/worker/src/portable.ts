@@ -215,10 +215,9 @@ async function copyDisks(
 ): Promise<InfraDisk[]> {
 	const src = portable(await ctx.infra.forNode(j.source_node_id));
 	const dst = portable(await ctx.infra.forNode(j.target_node_id));
-	const all = await src.node.call<{ name: string; sizeBytes: number }[]>(
-		"lv.list",
-		{ tags: ["umiak"] },
-	);
+	const { lvs: all } = await src.node.call<{
+		lvs: { name: string; sizeBytes: number }[];
+	}>("lv.list", { tags: ["umiak"] });
 	const bases = await matchingBases(
 		ctx,
 		templateBuildId,
@@ -326,9 +325,9 @@ async function removeOwned(
 	expected?: Record<string, string>,
 ) {
 	const node = portable(await ctx.infra.forNode(nodeId));
-	const lvs = await node.node.call<
-		{ name: string; uuid: string; tags: string[] }[]
-	>("lv.list", { tags: ["umiak"] });
+	const { lvs } = await node.node.call<{
+		lvs: { name: string; uuid: string; tags: string[] }[];
+	}>("lv.list", { tags: ["umiak"] });
 	for (const lv of lvs.filter(predicate)) {
 		if (expected && expected[lv.name] !== lv.uuid) continue;
 		if (!lv.uuid) throw new Error("cannot clean a volume without its LVM UUID");
@@ -517,9 +516,9 @@ export async function ensureMachineMove(
 		throw new Error("cold move requires a stopped machine with a VMID");
 	const source = await ctx.infra.forNode(j.source_node_id);
 	const sourceDisks = await diskRows(ctx, "machine", m.id);
-	const sourceLVs = await portable(source).node.call<
-		{ name: string; uuid: string }[]
-	>("lv.list", { tags: ["umiak"] });
+	const { lvs: sourceLVs } = await portable(source).node.call<{
+		lvs: { name: string; uuid: string }[];
+	}>("lv.list", { tags: ["umiak"] });
 	const sourceUUIDs =
 		(j.result?.sourceUUIDs as Record<string, string> | undefined) ??
 		Object.fromEntries(
@@ -663,10 +662,9 @@ export async function ensureSnapshotLocal(
 	);
 	const sourceDisks = await diskRows(ctx, "snapshot", snapshotId);
 	const src = portable(await ctx.infra.forNode(j.source_node_id));
-	const sourceLVs = await src.node.call<{ name: string; uuid: string }[]>(
-		"lv.list",
-		{ tags: ["umiak"] },
-	);
+	const { lvs: sourceLVs } = await src.node.call<{
+		lvs: { name: string; uuid: string }[];
+	}>("lv.list", { tags: ["umiak"] });
 	const sourceUUIDs =
 		(j.result?.sourceUUIDs as Record<string, string> | undefined) ??
 		Object.fromEntries(

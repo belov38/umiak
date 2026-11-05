@@ -83,10 +83,9 @@ export async function replicateTemplate(
 		await p.api.put(`${path}/config`, { tags: `umiak-tpl;${proof}` });
 		cfg = await p.api.get<Record<string, string | number>>(`${path}/config`);
 	}
-	const lvs = await p.source.call<{ name: string; sizeBytes: number }[]>(
-		"lv.list",
-		{ tags: ["umiak-tpl"] },
-	);
+	const { lvs } = await p.source.call<{
+		lvs: { name: string; sizeBytes: number }[];
+	}>("lv.list", { tags: ["umiak-tpl"] });
 	const checksums: Record<
 		string,
 		{ sha256: string; sizeBytes: number; algorithm: string }
