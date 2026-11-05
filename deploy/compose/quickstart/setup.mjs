@@ -888,6 +888,7 @@ export function createSetupHandler({
 				secretsDir,
 				onProgress: (p) =>
 					jobs.update((s) => {
+						if (s.buildJob) s.buildJob.replication = p;
 						if (s.buildQueue?.states)
 							s.buildQueue.states[p.nodeId] =
 								p.phase === "ready"
@@ -899,6 +900,10 @@ export function createSetupHandler({
 			});
 			await jobs.update((s) => {
 				for (const id of input.nodes) s.buildQueue.states[id] = "Ready";
+				if (s.buildJob) {
+					s.buildJob.status = "ready";
+					s.buildJob.error = null;
+				}
 			});
 			return true;
 		},

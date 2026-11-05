@@ -395,6 +395,10 @@ export class TemplateBuildJobs {
 			await this.update((s) => {
 				s.buildQueue.active = false;
 				s.buildQueue.error = error.message;
+				if (s.buildJob) {
+					s.buildJob.status = "error";
+					s.buildJob.error = error.message;
+				}
 				s.buildQueue.message = error.message;
 			});
 			return;
