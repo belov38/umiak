@@ -429,3 +429,31 @@ describe("generic layer agent seed", () => {
 			).toThrow();
 	});
 });
+
+it("generic seed carries stable browser/tool pins and offline bootstrap without vendor payloads", () => {
+	const root = tmp();
+	const binary = join(root, "agent");
+	writeFileSync(binary, AGENT_BYTES);
+	const unitsDirectory = join(root, "units");
+	mkdirSync(unitsDirectory);
+	for (const unit of [
+		"umiak-agent.service",
+		"umiak-identity.service",
+		"umiak-agent-rollback.service",
+		"umiak-cmd.slice",
+	])
+		writeFileSync(join(unitsDirectory, unit), "[Unit]\n");
+	const files = renderSeed(
+		input("linux-fixture", {
+			genericAgent: { binary, unitsDirectory },
+			layerCapture: true,
+		}),
+	);
+	expect(text(files, "build/env")).toContain("UMIAK_LAYER_MODE='capture'");
+	expect(files.has("build/offline-bootstrap.sh")).toBe(true);
+	expect(files.has("build/generic-chromium.sh")).toBe(true);
+	expect(files.has("build/xtradeb-apps.asc")).toBe(true);
+	const pins = JSON.parse(text(files, "build/layer-inputs.json"));
+	expect(pins.chromium.version).toContain("xtradeb");
+	expect(pins.chromium.packages.chromium).toMatch(/^[a-f0-9]{64}$/);
+});

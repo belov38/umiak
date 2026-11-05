@@ -9,6 +9,9 @@ set -euo pipefail
 DOCKER_KEY_FPR=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 key=/etc/apt/keyrings/docker.asc
 
+if [ "${UMIAK_LAYER_MODE:-}" = replay ]; then
+ install -D -m 0644 "$UMIAK_LAYER_ROOT/apt/docker-resolute/archive.asc" "$key"
+else
 install -d -m 0755 /etc/apt/keyrings
 curl -fsSL --retry 5 --retry-all-errors -o "$key.part" https://download.docker.com/linux/ubuntu/gpg
 # apt trusts every key of the Signed-By file: it must hold exactly this one.
@@ -26,6 +29,7 @@ Architectures: amd64
 Signed-By: $key
 EOF
 apt_update
+fi
 
 ce=$(toml_get docker.docker_ce)
 pkgs=(

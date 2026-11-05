@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import * as yaml from "yaml";
 import {
 	isDesktopRecipe,
 	REBOOT_STEP,
@@ -28,6 +29,8 @@ export const SEED_AGENT_PACKAGE = "build/umiak-agent.tar";
 /** Seed path of the update keys that verified the package (first-install trust anchor). */
 export const SEED_UPDATE_KEYS = "build/update-keys.pub";
 export interface SeedInput {
+	/** Capture every online input for a subsequent closed-network replay. */
+	layerCapture?: boolean;
 	/** CA-free first install, authenticated by the outer offline-layer signature. */
 	genericAgent?: { binary: string; unitsDirectory: string };
 	recipe: Recipe;
@@ -158,6 +161,8 @@ export function collectFiles(
 
 export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 	const { recipe } = i;
+	if (i.layerCapture && !i.genericAgent)
+		throw Error("Layer capture requires a generic agent seed");
 	if (
 		i.genericAgent &&
 		(i.tunnelUrl !== undefined ||
@@ -181,6 +186,19 @@ export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 		const file = requireInRecipe(recipe, `seed/${name}.tmpl`);
 		out.set(name, fillTemplate(readFileSync(file, "utf8"), values, file));
 	}
+	if (i.layerCapture) {
+		const userData = String(out.get("user-data"));
+		// bootcmd precedes apt's packages module; install the capture hook first.
+		const { parse, stringify } = yaml;
+		const config = parse(userData) as { bootcmd: unknown[] };
+		config.bootcmd.unshift([
+			"bash",
+			"-euc",
+			"mkdir -p /mnt/seed; mount -o ro LABEL=cidata /mnt/seed; bash /mnt/seed/build/capture-bootstrap.sh",
+		]);
+		out.set("user-data", `#cloud-config\n${stringify(config)}`);
+	}
+
 	out.set(
 		"network-config",
 		readFileSync(requireInRecipe(recipe, "seed/network-config")),
@@ -245,7 +263,34 @@ export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 				),
 			),
 		);
-		out.set("build/env", `${out.get("build/env")}UMIAK_GENERIC_IMAGE='1'\n`);
+		for (const name of [
+			"offline-bootstrap.sh",
+			"generic-chromium.sh",
+			"generic-npm.sh",
+			"capture-bootstrap.sh",
+			"capture-apt.py",
+			"capture-layer.sh",
+			"layer-inputs.json",
+		])
+			out.set(
+				`build/${name}`,
+				readFileSync(
+					new URL(`../../../infra/templates/linux/${name}`, import.meta.url),
+				),
+			);
+		out.set(
+			"build/xtradeb-apps.asc",
+			readFileSync(
+				new URL(
+					"../../../infra/templates/keys/xtradeb-apps.asc",
+					import.meta.url,
+				),
+			),
+		);
+		out.set(
+			"build/env",
+			`${out.get("build/env")}UMIAK_GENERIC_IMAGE='1'\n${i.layerCapture ? "UMIAK_LAYER_MODE='capture'\n" : ""}`,
+		);
 	} else out.set(SEED_AGENT_PACKAGE, readFileSync(i.agentPackage));
 	out.set(SEED_UPDATE_KEYS, i.updateKeys);
 	out.set(

@@ -25,10 +25,22 @@ fetch_verify "https://github.com/trycua/cua/releases/download/cua-driver-rs-v${c
 fetch_verify "https://github.com/sigstore/cosign/releases/download/v${cosign}/cosign-linux-amd64" \
  "$(toml_get desktop.cosign.sha256)" "$UMIAK_WORK_DIR/cosign"
 chmod 0755 "$UMIAK_WORK_DIR/cosign"
-curl -fsSL --retry 5 "https://github.com/trycua/cua/releases/download/cua-driver-rs-v${cua}/cua-driver-rs-${cua}-linux-x86_64-binary.tar.gz.sigstore.json" -o "$UMIAK_WORK_DIR/cua-driver.sigstore.json"
-"$UMIAK_WORK_DIR/cosign" verify-blob --bundle "$UMIAK_WORK_DIR/cua-driver.sigstore.json" \
+cosign_args=()
+if [ "${UMIAK_LAYER_MODE:-}" = replay ]; then
+ cp "$UMIAK_LAYER_ROOT/inputs/desktop/cua-driver.sigstore.json" "$UMIAK_WORK_DIR/cua-driver.sigstore.json"
+ cosign_args+=(--offline --trusted-root "$UMIAK_LAYER_ROOT/inputs/desktop/trusted_root.json")
+else
+ curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 --max-time 300 "https://github.com/trycua/cua/releases/download/cua-driver-rs-v${cua}/cua-driver-rs-${cua}-linux-x86_64-binary.tar.gz.sigstore.json" -o "$UMIAK_WORK_DIR/cua-driver.sigstore.json"
+fi
+"$UMIAK_WORK_DIR/cosign" verify-blob "${cosign_args[@]}" --bundle "$UMIAK_WORK_DIR/cua-driver.sigstore.json" \
  --certificate-identity "https://github.com/trycua/cua/.github/workflows/cd-rust-cua-driver.yml@refs/tags/cua-driver-rs-v${cua}" \
  --certificate-oidc-issuer https://token.actions.githubusercontent.com "$UMIAK_WORK_DIR/cua-driver.tar.gz"
+if [ "${UMIAK_LAYER_MODE:-}" = capture ]; then
+ mkdir -p "$UMIAK_CAPTURE_DIR/inputs/desktop"
+ cp "$UMIAK_WORK_DIR/cua-driver.sigstore.json" "$UMIAK_CAPTURE_DIR/inputs/desktop/"
+ # This trust root was just authenticated by cosign's TUF client, not downloaded unauthenticated.
+ cp /root/.sigstore/root/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json "$UMIAK_CAPTURE_DIR/inputs/desktop/"
+fi
 
 install -d -o user -g user -m 0700 /home/user/.local/state
 install -d -m 0755 "/opt/umiak-desktop/moonlight-web/$moonlight" "/opt/umiak-desktop/cua-driver/$cua"
@@ -72,6 +84,12 @@ printf 'uinput\n' >/etc/modules-load.d/umiak-uinput.conf
 systemctl disable --now lightdm.service
 systemctl --global disable app-dev.lizardbyte.app.Sunshine.service
 systemctl daemon-reload
-as_user xdg-settings set default-web-browser google-chrome.desktop
-update-alternatives --set x-www-browser /usr/bin/google-chrome-stable
+if [ "${UMIAK_GENERIC_IMAGE:-}" = 1 ]; then
+ install -D -m 0644 "$UMIAK_FILES_DIR/etc/opt/chrome/policies/managed/umiak.json" /etc/chromium/policies/managed/umiak.json
+ as_user xdg-settings set default-web-browser chromium.desktop
+ update-alternatives --set x-www-browser /usr/bin/chromium
+else
+ as_user xdg-settings set default-web-browser google-chrome.desktop
+ update-alternatives --set x-www-browser /usr/bin/google-chrome-stable
+fi
 log "desktop installed; session startup and streaming stay under agent control"

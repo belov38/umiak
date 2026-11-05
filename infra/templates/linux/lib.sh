@@ -84,6 +84,7 @@ installed_packages() {
 # Sets `Snapshot: <ts>` in every stanza of a deb822 sources file (spec S5
 # section 6.2); an empty ts removes the Snapshot lines.
 apt_snapshot() {
+ if [ "${UMIAK_LAYER_MODE:-}" = replay ]; then return 0; fi
 	local ts=$1 f=${2:-/etc/apt/sources.list.d/ubuntu.sources}
 	[ -f "$f" ] || die "$f not found"
 	awk -v ts="$ts" '
@@ -189,4 +190,24 @@ install_file() {
 as_user() {
 	runuser -u user -- env -i HOME=/home/user USER=user LOGNAME=user \
 		SHELL=/bin/bash LANG=C.UTF-8 PATH="$UMIAK_STD_PATH" "$@"
+}
+
+# Restore ordinary update sources only after all offline customization transactions finish.
+offline_restore_apt() {
+ [ "${UMIAK_LAYER_MODE:-}" = replay ] || return 0
+ rm -f /etc/apt/sources.list.d/umiak-offline.sources /etc/apt/apt.conf.d/99umiak-offline
+ python3 -I - "$UMIAK_LAYER_ROOT/build/apt-after" <<'PYRESTORE'
+from pathlib import Path
+import shutil,sys
+for p in Path('/var/lib/umiak-offline-sources').iterdir():
+    target=Path('/etc/apt/sources.list') if p.name=='sources.list' else Path('/etc/apt/sources.list.d')/p.name
+    p.rename(target)
+for p in Path(sys.argv[1]).glob('*.sources'):
+    if p.name!='ubuntu.sources': shutil.copyfile(p,Path('/etc/apt/sources.list.d')/p.name)
+for p in Path(sys.argv[1]).glob('*.pref'):
+    shutil.copyfile(p,Path('/etc/apt/preferences.d')/p.name.removesuffix('.pref'))
+PYRESTORE
+ rm -rf /var/lib/umiak-offline-sources
+ rm -f /etc/umiak-offline-replay
+ UMIAK_LAYER_MODE=complete
 }

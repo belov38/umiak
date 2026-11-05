@@ -306,3 +306,34 @@ Run Biome/Vitest for changed TS, Go tests/golangci-lint for changed Go and
 `mise exec -- node --test deploy/compose/quickstart/` from root after workspace
 install/dependency builds. Trust-stage evidence: 244 quickstart, 81 PVE, 45 worker,
 10 API tests and scoped Go/lint checks passed. No upload or live image test ran.
+
+### Stable native Chromium capture
+
+The generic layer uses xtradeb's native **resolute/amd64** Chromium packages,
+not the Ubuntu snap transition package. The committed layer input pins record
+Chromium, chromium-common and chromium-sandbox versions and SHA-256 values, plus
+the PPA authority `5301FA4FD93244FBC6F6149982BB6851C64F6880`. Capture retains the
+PPA's original InRelease/Packages and the unchanged debs. Replay uses those local
+indexes and the exact same key. Repository preferences allow this PPA to supply
+only those three packages; install them before any apt transaction during replay.
+Chromium's native policy directory and desktop association replace Chrome's;
+legacy CDP executable aliases resolve to Chromium.
+
+The checked package revision is `156.0.8078.73-1xtradeb1.2604.1` (source publication
+18904289). Its three debs total **129,291,674 bytes**, according to the original
+Packages index; this is an input measurement, not a measured layer size. Its
+copyright/third-party notices must be captured from the actual debs and included
+in the signed inventory. Chromium is not treated as a single BSD-only payload.
+The PPA publishes [native Ubuntu packages](https://xtradeb.net/apps/chromium/)
+and its [signed resolute archive](https://ppa.launchpadcontent.net/xtradeb/apps/ubuntu/dists/resolute/InRelease)
+provides the package authentication chain. Exact upstream source revision and
+notice hashes accompany the chosen binary revision.
+
+No update-cadence SLA was found. The .73 package appeared on October 28, about
+21 hours after that Linux stable release; the PPA was still on .73 when inspected
+on November 6, while Chromium's [official stable release feed](https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Linux&num=5)
+listed subsequent .79 and 157 releases. A successful native dependency/CDP replay
+is required before this candidate can be released. The manual publication review
+also checks the current stable security baseline and refreshes pins as needed;
+we do not silently switch to snapshots, snap, or an unreviewed third source.
+Debian trixie remains the approved fallback only if native xtradeb replay fails.

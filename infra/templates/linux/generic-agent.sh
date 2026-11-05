@@ -14,4 +14,6 @@ for unit in umiak-agent.service umiak-identity.service umiak-agent-rollback.serv
 done
 ln -s "versions/$UMIAK_AGENT_VERSION" /usr/local/lib/umiak-agent/current
 ln -s /usr/local/lib/umiak-agent/current/umiak-agent /usr/local/bin/umiak-agent
+install -d -m 0755 /etc/umiak-template
+touch /etc/umiak-template/generic
 systemctl daemon-reload

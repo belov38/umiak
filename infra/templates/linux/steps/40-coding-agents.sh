@@ -8,6 +8,9 @@ set -euo pipefail
 export NPM_CONFIG_UPDATE_NOTIFIER=false NPM_CONFIG_FUND=false NPM_CONFIG_AUDIT=false
 
 # npm checks each tarball against the integrity of the registry.
+if [ "${UMIAK_GENERIC_IMAGE:-}" = 1 ]; then
+ bash "$UMIAK_BUILD_DIR/generic-npm.sh"
+else
 pkgs=()
 while IFS='=' read -r name version; do
 	pkgs+=("$name@$version")
@@ -15,6 +18,7 @@ done < <(toml_table npm)
 [ "${#pkgs[@]}" -gt 0 ] || die "versions.toml [npm] is empty"
 log "npm install -g ${pkgs[*]}"
 npm install -g "${pkgs[@]}"
+fi
 
 # Auto-update off where the CLI has a system-wide switch (the rest is listed
 # in apps/template-builder/README.md).
@@ -37,7 +41,9 @@ if [ -f "$UMIAK_BUILD_DIR/umiak-config.json" ]; then
 	install -D -m 0644 "$UMIAK_BUILD_DIR/umiak-config.json" /etc/umiak/config.json
 fi
 
-for t in claude codex opencode gemini pnpm; do
+tools=(codex opencode gemini pnpm)
+if [ "${UMIAK_GENERIC_IMAGE:-}" != 1 ]; then tools+=(claude); fi
+for t in "${tools[@]}"; do
 	[ -x "/usr/local/bin/$t" ] || die "/usr/local/bin/$t is missing"
 done
 log "done"
