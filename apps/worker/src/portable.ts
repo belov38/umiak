@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 // Cross-node disk ownership changes. Host actions are narrowly scoped node-agent
 // RPCs; journals outlive worker attempts, and config locks outlive DB failures.
 import { randomBytes } from "node:crypto";
-import { lockNode } from "@umiak/core";
+import { lockNode, operationDeadline } from "@umiak/core";
 import { withTx } from "@umiak/db";
 import { relayVolume } from "@umiak/pve";
 import type { WorkerCtx } from "./context.ts";
@@ -295,6 +295,27 @@ async function copyDisks(
 			sizeBytes: size,
 			volume: `${dst.storage}:${final}`,
 		});
+	}
+	// Copy heartbeats use a short inactivity budget. Boot gets the normal OS-specific
+	// lifecycle budget again, including Windows resume and first-boot specialization.
+	if ("id" in fence) {
+		const opFence = fence as Fenced;
+		await opFence.tx(async (tx) => {
+			const os =
+				(
+					await tx.client.query<{ os: "linux" | "windows" }>(
+						"SELECT tb.os FROM runtime.sandboxes s JOIN runtime.template_builds tb ON tb.id=s.template_build_id WHERE s.id=$1",
+						[opFence.sandboxId],
+					)
+				).rows[0]?.os ?? "linux";
+			const budget = operationDeadline(opFence.op.kind, os);
+			if (budget !== null)
+				await tx.client.query(
+					"UPDATE runtime.operations SET deadline_at=now()+($2::int*interval '1 millisecond') WHERE id=$1",
+					[opFence.id, budget],
+				);
+		});
+		await opFence.check();
 	}
 	return copied;
 }

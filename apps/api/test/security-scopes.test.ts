@@ -52,6 +52,7 @@ const PAST_GUARDS_EXCEPTIONS: Record<string, { status: number; code: string }> =
 		"ptys.connect": { status: 426, code: "upgrade_required" },
 		// The fixture's sandbox is ready: resume is for stopped ones.
 		"sandboxes.resume": { status: 409, code: "invalid_state" },
+		"sandboxes.cancelStart": { status: 409, code: "invalid_state" },
 	};
 
 /** The answer of a request that got past the guards. */

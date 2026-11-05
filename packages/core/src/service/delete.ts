@@ -61,6 +61,10 @@ async function deleteLocked(
 		principal,
 		deadlineMs: null,
 	});
+	await tx.client.query(
+		"DELETE FROM runtime.start_queue q USING runtime.operations o WHERE q.operation_id=o.id AND o.sandbox_id=$1",
+		[row.id],
+	);
 	const prev = superseded.rows[0];
 	await insertSandboxEvent(tx, {
 		sandboxId: row.id,

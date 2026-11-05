@@ -116,11 +116,15 @@ def test_edge_numeric_order_and_ignore_drafts():
     rows = [{"tag_name": "v1.3.0-edge.20261105.10", "prerelease": True},
             {"tag_name": "v1.3.0-edge.20261105.9", "prerelease": True},
             {"tag_name": "v9.0.0", "draft": True}]
-    assert release.channel_version("edge", fetch=lambda url: json.dumps(rows if "&page=1" in url else []).encode()) == "1.3.0-edge.20261105.10"
+    assert release.channel_version(
+        "edge", fetch=lambda url: json.dumps(rows if "&page=1" in url else []).encode()
+    ) == "1.3.0-edge.20261105.10"
 
 
 def test_stable_channel_redirect_and_unknown_channel():
-    assert release.channel_version("stable", resolve=lambda url: "https://github.com/belov38/umiak/releases/tag/v1.4.0") == "1.4.0"
+    assert release.channel_version(
+        "stable", resolve=lambda url: "https://github.com/belov38/umiak/releases/tag/v1.4.0"
+    ) == "1.4.0"
     with pytest.raises(release.ReleaseError):
         release.channel_version("beta")
 

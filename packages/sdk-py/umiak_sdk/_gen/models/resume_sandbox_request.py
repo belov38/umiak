@@ -21,6 +21,8 @@ class ResumeSandboxRequest:
     """Sets merge onto the sandbox's own and are stored even if the resume fails
 
     Attributes:
+        capacity_wait_seconds (int | Unset): Wait for capacity in the durable per-team FIFO queue, in seconds (default
+            0: fail immediately)
         env (EnvVarsPatch | Unset): Variables `[A-Za-z_][A-Za-z0-9_]{0,127}`: up to 100, each value up to 32 KiB without
             NUL, 256 KiB per set. `UMIAK_` is reserved except UMIAK_API_KEY, UMIAK_API_URL, UMIAK_TEAM, UMIAK_PROFILE.
             Values with a newline are not visible in SSH sessions. Merged by key: null deletes the key.
@@ -31,6 +33,7 @@ class ResumeSandboxRequest:
         ttl_seconds (int | None | Unset): Lifetime from ready in seconds; the deadline is ready + ttl; null: no TTL
     """
 
+    capacity_wait_seconds: int | Unset = UNSET
     env: EnvVarsPatch | Unset = UNSET
     secret_files: SecretFilesPatch | Unset = UNSET
     secrets: ResumeSandboxRequestSecrets | Unset = UNSET
@@ -38,6 +41,8 @@ class ResumeSandboxRequest:
     ttl_seconds: int | None | Unset = UNSET
 
     def to_dict(self) -> dict[str, Any]:
+        capacity_wait_seconds = self.capacity_wait_seconds
+
         env: dict[str, Any] | Unset = UNSET
         if not isinstance(self.env, Unset):
             env = self.env.to_dict()
@@ -61,6 +66,8 @@ class ResumeSandboxRequest:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({})
+        if capacity_wait_seconds is not UNSET:
+            field_dict["capacityWaitSeconds"] = capacity_wait_seconds
         if env is not UNSET:
             field_dict["env"] = env
         if secret_files is not UNSET:
@@ -81,6 +88,8 @@ class ResumeSandboxRequest:
         from ..models.secret_files_patch import SecretFilesPatch  # noqa: PLC0415
 
         d = dict(src_dict)
+        capacity_wait_seconds = d.pop("capacityWaitSeconds", UNSET)
+
         _env = d.pop("env", UNSET)
         env: EnvVarsPatch | Unset
         if isinstance(_env, Unset):
@@ -114,6 +123,7 @@ class ResumeSandboxRequest:
         ttl_seconds = _parse_ttl_seconds(d.pop("ttlSeconds", UNSET))
 
         resume_sandbox_request = cls(
+            capacity_wait_seconds=capacity_wait_seconds,
             env=env,
             secret_files=secret_files,
             secrets=secrets,

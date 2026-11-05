@@ -31,18 +31,23 @@ role was retired, Update keeps the CT and does not reinstall its node-agent.
 
 ## Templates and smoke
 
-In Setup, select a sandbox node for each build. Each node needs its own local
-build; matching storage names do not imply shared disks or Windows ISO files.
+In Setup, select a sandbox node for each build. The template is built once on that node, then its base disks are copied and
+verified on the other sandbox nodes. Adding a node copies the existing active
+templates without rebuilding. The setup queue shows Building then Copying with
+verified-byte progress. Matching storage names do not imply shared disks or ISO files.
 ISO storage comes from the registered node configuration. Rebuild requires
 typing the recipe name and allocates a new free cluster-wide template VMID.
-Promotion changes only that node's active build. Existing sandboxes retain
+Each replica is promoted only after verification; failed copies preserve its previous active build. Existing sandboxes retain
 their local disks and template identity.
 
 Select a node for Smoke to create, execute in and delete a 2 GiB Linux sandbox
 there. This uses a private operator-only dashboard operation. Normal create
 continues to choose an eligible node automatically by free RAM; public API,
-CLI and SDK create have no node selector. Fork, resume and snapshot-based
-create remain on the source node.
+CLI and SDK create have no node selector. Fork, resume and snapshot-based create prefer home; under capacity pressure or
+cordon S21 cold-moves data to another eligible node. Source disks survive until
+the verified target owns the data. An offline source must return before copying.
+Use `umiak start <id> --wait 100m` or `create/resume/fork --capacity-wait 100m
+--wait-ready` to queue for RAM. `umiak cancel-start <id>` cancels a queued request.
 
 A template build reserves an idle node before host work. Other nodes remain
 usable. Interrupted jobs retain the reservation and block starts until an

@@ -337,6 +337,24 @@ const stopSandbox = createRoute({
 	},
 });
 
+const cancelStart = createRoute({
+	...action({
+		path: "/v1/sandboxes/{sandbox}/cancel-start",
+		operationId: "sandboxes.cancelStart",
+		summary: "Cancel a queued start",
+		description:
+			"Cancels only an unadmitted capacity wait. Idempotent; an admitted or moving start must be stopped/deleted through its normal lifecycle.",
+	}),
+	middleware: [requireScope("sandboxes:write")] as const,
+	request: { params: SandboxParams },
+	responses: {
+		202: jsonResponse(SandboxActionSchema, "Queued start cancelled"),
+		404: notFound404,
+		409: state409,
+		...ERROR_RESPONSES,
+	},
+});
+
 const resumeSandbox = createRoute({
 	...action({
 		path: "/v1/sandboxes/{sandbox}/resume",
@@ -623,6 +641,21 @@ export function registerSandboxRoutes(app: ApiApp, deps: ApiDeps): void {
 		return c.json(
 			{
 				sandbox: await one(await svc.get(p, s.id)),
+				operation: toOperationResource(op),
+			},
+			202,
+		);
+	});
+
+	app.openapi(cancelStart, async (c) => {
+		const p = authOf(c).principal;
+		const op = await svc.cancelQueuedStart(
+			p,
+			resolveSandboxRef(c.req.valid("param").sandbox),
+		);
+		return c.json(
+			{
+				sandbox: await one(await svc.get(p, op.sandboxId)),
 				operation: toOperationResource(op),
 			},
 			202,

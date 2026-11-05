@@ -122,7 +122,7 @@ it("console explicitly retires only a verified idle Umiak template, enabling nod
 	}
 });
 
-it("cleanup refuses running jobs and surviving interrupted runners before host inventory", async () => {
+it("cleanup refuses node preparation and surviving interrupted runners before host inventory", async () => {
 	const a = await createTopology(db.pool);
 	await db.pool.query("UPDATE quickstart.setup SET state=$1 WHERE id=true", [
 		{
@@ -134,14 +134,14 @@ it("cleanup refuses running jobs and surviving interrupted runners before host i
 	]);
 	const job = `cleanup-${a.nodeId}`;
 	await db.pool.query(
-		"INSERT INTO runtime.node_build_jobs(id,node_id,template_slug) VALUES($1,$2,'linux')",
+		"INSERT INTO runtime.node_build_jobs(id,node_id,template_slug) VALUES($1,$2,'node-prepare')",
 		[job, a.nodeId],
 	);
 	await expect(
 		nodeCommand(db.pool, { op: "cleanup-build", nodeId: a.nodeId, jobId: job }),
 	).rejects.toThrow(/interrupted/);
 	await db.pool.query(
-		"UPDATE runtime.node_build_jobs SET status='interrupted' WHERE id=$1",
+		"UPDATE runtime.node_build_jobs SET status='interrupted',template_slug='linux' WHERE id=$1",
 		[job],
 	);
 	const runner = await db.pool.connect();
@@ -532,7 +532,7 @@ it("ordinary interrupted cleanup reads active tasks and frees only absent job le
 				{ op: "cleanup-build", nodeId: a.nodeId, jobId: job },
 				options,
 			),
-		).rejects.toThrow(/local disks remain/);
+		).rejects.toThrow(/confirm removal/);
 		expect(
 			(
 				await db.pool.query(

@@ -965,3 +965,44 @@ def test_a_command_start_waits_75_s_for_the_first_byte(clock: FakeClock) -> None
     events = list(stream_umiak(Script(answer)).run("true"))
     assert isinstance(events[-1], ExitEvent)
     assert reads == [75.0]
+
+
+def test_capacity_wait_forwarding_and_cancel() -> None:
+    queued = {**SANDBOX, "state": "queued"}
+    cancelled = {
+        **OPERATION,
+        "state": "failed",
+        "error": {"code": "cancelled", "message": "Cancelled", "retryable": False},
+    }
+    script = Script(
+        httpx.Response(202, json={"sandbox": queued, "operation": OPERATION}),
+        httpx.Response(202, json={"sandbox": queued, "operation": OPERATION}),
+        httpx.Response(
+            202, json={"sandbox": queued, "operation": OPERATION, "sourceOperation": OPERATION}
+        ),
+        httpx.Response(202, json={"sandbox": SANDBOX, "operation": cancelled}),
+    )
+    with umiak(script) as client:
+        sb = client.sandboxes.create(capacity_wait_seconds=6000)
+        assert sb.state == "queued"
+        sb.resume(capacity_wait_seconds=6000)
+        sb.fork(capacity_wait_seconds=6000)
+        assert sb.cancel_start().error.code == "cancelled"
+    for request in script.requests[:3]:
+        assert json.loads(request.content)["capacityWaitSeconds"] == 6000
+    assert script.requests[-1].url.path == f"{SB_PATH}/cancel-start"
+
+
+def test_queue_timeout_keeps_retryable_out_of_capacity() -> None:
+    failed = {
+        **SANDBOX,
+        "state": "stopped",
+        "error": {"code": "out_of_capacity", "message": "Capacity wait expired"},
+    }
+    script = Script(httpx.Response(200, json=SANDBOX), httpx.Response(200, json=failed))
+    with umiak(script) as client:
+        sb = client.sandboxes.get(SANDBOX["id"])
+        with pytest.raises(UmiakError) as raised:
+            sb.wait_until_ready()
+        assert raised.value.code == "out_of_capacity"
+        assert raised.value.retryable

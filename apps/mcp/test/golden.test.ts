@@ -1,5 +1,5 @@
 // Golden tool list (S11 7.1, 14.1): tools/list as a client sees it equals
-// golden/tools-list.json, has exactly the 38 tools of 8.1-8.7 in order, fits
+// golden/tools-list.json, has exactly the 39 tools of 8.1-8.7 in order, fits
 // the 40 000 character budget, and keeps every name of main (names are a
 // contract). UPDATE_GOLDEN=1 rewrites the file (scripts/golden.ts).
 import { execFileSync } from "node:child_process";
@@ -26,6 +26,7 @@ const TOOL_NAMES = [
 	"sandbox_update",
 	"sandbox_stop",
 	"sandbox_resume",
+	"sandbox_cancel_start",
 	"sandbox_fork",
 	"sandbox_recover",
 	"sandbox_delete",
@@ -117,9 +118,9 @@ describe("golden tools/list", () => {
 		expect(seen).toEqual(readGolden().tools);
 	});
 
-	it("has exactly the 38 tools in the order of 8.1-8.7", async () => {
-		expect(TOOL_NAMES).toHaveLength(38);
-		expect(new Set(TOOL_NAMES).size).toBe(38);
+	it("has exactly the 39 tools in the order of 8.1-8.7", async () => {
+		expect(TOOL_NAMES).toHaveLength(39);
+		expect(new Set(TOOL_NAMES).size).toBe(39);
 		const listed = await published();
 		expect(listed.tools.map((t) => t.name)).toEqual(TOOL_NAMES);
 		expect(readGolden().tools.map((t) => t.name)).toEqual(TOOL_NAMES);

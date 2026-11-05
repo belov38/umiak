@@ -83,6 +83,7 @@ import {
 	type SaveSnapshotResult,
 	saveSnapshot,
 } from "./snapshots.ts";
+import { cancelQueuedStart } from "./start-queue.ts";
 
 export {
 	BLOCK_NOTE_MAX_CHARS,
@@ -180,6 +181,7 @@ export interface SandboxService {
 	): Promise<Page<Sandbox>>;
 	update(p: Principal, idOrSlug: string, patch: UpdateInput): Promise<Sandbox>;
 	extend(p: Principal, idOrSlug: string, ttlSeconds?: number): Promise<Sandbox>;
+	cancelQueuedStart(p: Principal, idOrSlug: string): Promise<Operation>;
 	delete(p: Principal, idOrSlug: string): Promise<Operation>;
 	/** From `ready`; returns the active stop on a repeat. */
 	stop(p: Principal, idOrSlug: string): Promise<Operation>;
@@ -368,6 +370,9 @@ export class SandboxServiceImpl implements SandboxService {
 		return extendSandbox(this.deps, p, idOrSlug, ttlSeconds);
 	}
 
+	cancelQueuedStart(p: Principal, idOrSlug: string): Promise<Operation> {
+		return cancelQueuedStart(this.deps, p, idOrSlug);
+	}
 	delete(p: Principal, idOrSlug: string): Promise<Operation> {
 		return deleteSandbox(this.deps, p, idOrSlug);
 	}

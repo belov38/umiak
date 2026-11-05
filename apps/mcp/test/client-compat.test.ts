@@ -40,7 +40,7 @@ afterAll(async () => {
 
 describe("published tools", () => {
 	it("all 38 are listed", () => {
-		expect(tools).toHaveLength(38);
+		expect(tools).toHaveLength(39);
 	});
 
 	it("every tool passes the 7.2 schema linter and the name rule", () => {

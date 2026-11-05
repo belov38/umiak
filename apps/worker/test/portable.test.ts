@@ -230,6 +230,10 @@ describe("journaled cold move", () => {
 			const e = opsEnv(w);
 			const s = await stoppedSandbox(w, e);
 			const target = await destination(w);
+			await w.pool.query(
+				"UPDATE runtime.template_builds SET os='windows' WHERE id=$1",
+				[w.topo.templateBuildId],
+			);
 			const m = await row(w, "machines", s.machineId);
 			const vmid = Number(m.vmid);
 			const vm = w.infra.vms.get(vmid);
@@ -254,6 +258,11 @@ describe("journaled cold move", () => {
 			);
 			await w.agentWorld.settled();
 			const after = await row(w, "machines", s.machineId);
+			expect(
+				new Date(
+					(await row(w, "operations", op.id)).deadline_at as string,
+				).getTime() - Date.now(),
+			).toBeGreaterThan(14 * 60_000);
 			expect(after.node_id).toBe(target.nodeId);
 			expect(after.vmid).toBe(vmid);
 			expect(after.mac).toBe(m.mac);

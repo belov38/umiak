@@ -80,8 +80,10 @@ def network_json(gateway: str, preview: str, guest_dns: str, guest_subnet: str =
     return json.dumps(network, separators=(",", ":"), ensure_ascii=False).encode()
 
 
-def install_json(*, release: str, node: str, node_ip: str, fingerprint: str, ct_ip: str, guest_dns: str,
-                 tailnet_dns: str, tailnet_ip: str, limits: dict, guest_subnet: str = "10.88.0.0/24", channel: str = "stable") -> dict:
+def install_json(
+    *, release: str, node: str, node_ip: str, fingerprint: str, ct_ip: str, guest_dns: str,
+    tailnet_dns: str, tailnet_ip: str, limits: dict, guest_subnet: str = "10.88.0.0/24", channel: str = "stable",
+) -> dict:
     """Installer facts for deploy/compose/quickstart/bootstrap.mjs (version 1)."""
     host = f"[{node_ip}]" if ":" in node_ip else node_ip
     return {

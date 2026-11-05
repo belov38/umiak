@@ -163,7 +163,7 @@ describe("umiak mcp against the fake API", () => {
 		const h = home();
 		const m = startMcp([], h.env);
 		await m.rpc.initialize();
-		expect(await toolNames(m.rpc)).toHaveLength(38);
+		expect(await toolNames(m.rpc)).toHaveLength(39);
 		const r = await m.rpc.callTool("limits_get");
 		expect(r.isError).toBe(true);
 		expect(r.text).toContain("error: not_logged_in");

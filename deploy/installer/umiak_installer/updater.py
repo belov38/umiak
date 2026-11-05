@@ -4,7 +4,7 @@ import dataclasses
 import fcntl
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .pve import CommandError, InstallerError, private_dir, write_secret
@@ -51,7 +51,7 @@ def action_lock(runner):
 
 
 def timestamp():
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def transaction(backend):
@@ -86,10 +86,14 @@ def transaction(backend):
         try:
             backend.retain()
         except Exception:
-            backend.history(record | {"status": "warning", "message": "Update finished but backup retention failed; inspect the host journal."})
+            backend.history(record | {
+                "status": "warning", "message": "Update finished but backup retention failed; inspect the host journal.",
+            })
         return record
     except Exception:
-        backend.history(record | {"finishedAt": timestamp(), "message": "Update failed; inspect host updater journal and recovery checkpoint."})
+        backend.history(record | {
+            "finishedAt": timestamp(), "message": "Update failed; inspect host updater journal and recovery checkpoint.",
+        })
         raise
     finally:
         if fenced:
@@ -148,7 +152,8 @@ class HostBackend:
                    f"ghcr.io/belov38/umiak-{name}:{self.bundle.version}")
         import hashlib
         import shutil
-        from . import release, day2, prepare_host
+
+        from . import day2, prepare_host, release
         recovery = self.runner.path(ROOT) / "recovery"
         if recovery.exists():
             shutil.rmtree(recovery)
@@ -201,7 +206,7 @@ class HostBackend:
 
     def backup(self):
         import secrets
-        identity = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + secrets.token_hex(6)
+        identity = datetime.now(UTC).strftime("%Y%m%d%H%M%S") + "-" + secrets.token_hex(6)
         self.ui.say("Backing up the database and state (control plane briefly unavailable)…")
         self.helper("backup", id=identity, release=self.current.release)
         self.helper("retain")
@@ -214,6 +219,7 @@ class HostBackend:
 
     def rollback(self, backup, restore_data):
         import shutil
+
         from . import day2, nodes, prepare_host, stack, state
         self.ui.say("Restoring the previous control plane…")
         self.helper("restore", id=backup, restoreData=restore_data)

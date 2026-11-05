@@ -1100,6 +1100,12 @@
 			"CreateSandboxRequest": {
 				"additionalProperties": false,
 				"properties": {
+					"capacityWaitSeconds": {
+						"description": "Wait for capacity in the durable per-team FIFO queue, in seconds (default 0: fail immediately)",
+						"maximum": 604800,
+						"minimum": 0,
+						"type": "integer"
+					},
 					"env": {
 						"$ref": "#/components/schemas/EnvVars"
 					},
@@ -1749,6 +1755,12 @@
 				"additionalProperties": false,
 				"description": "Sets merge onto a copy of the source's sets; the source is not changed",
 				"properties": {
+					"capacityWaitSeconds": {
+						"description": "Wait for capacity in the durable per-team FIFO queue, in seconds (default 0: fail immediately)",
+						"maximum": 604800,
+						"minimum": 0,
+						"type": "integer"
+					},
 					"env": {
 						"$ref": "#/components/schemas/EnvVarsPatch"
 					},
@@ -2812,6 +2824,12 @@
 				"additionalProperties": false,
 				"description": "Sets merge onto the sandbox's own and are stored even if the resume fails",
 				"properties": {
+					"capacityWaitSeconds": {
+						"description": "Wait for capacity in the durable per-team FIFO queue, in seconds (default 0: fail immediately)",
+						"maximum": 604800,
+						"minimum": 0,
+						"type": "integer"
+					},
 					"env": {
 						"$ref": "#/components/schemas/EnvVarsPatch"
 					},
@@ -5680,6 +5698,71 @@
 					}
 				},
 				"summary": "Block a sandbox (operator)",
+				"tags": [
+					"sandboxes"
+				]
+			}
+		},
+		"/v1/sandboxes/{sandbox}/cancel-start": {
+			"post": {
+				"description": "Cancels only an unadmitted capacity wait. Idempotent; an admitted or moving start must be stopped/deleted through its normal lifecycle.",
+				"operationId": "sandboxes.cancelStart",
+				"parameters": [
+					{
+						"description": "Sandbox id (`sb_...`) or slug",
+						"in": "path",
+						"name": "sandbox",
+						"required": true,
+						"schema": {
+							"description": "Sandbox id (`sb_...`) or slug",
+							"example": "quiet-otter-lamp",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"202": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SandboxAction"
+								}
+							}
+						},
+						"description": "Queued start cancelled"
+					},
+					"404": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`not_found`: no such sandbox in the team (also for a malformed id)"
+					},
+					"409": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "`invalid_state` (details.state) or `operation_in_progress` (retryable; details.operationId, kind)"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"summary": "Cancel a queued start",
 				"tags": [
 					"sandboxes"
 				]

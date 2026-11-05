@@ -120,7 +120,7 @@ Driver interface: `cloneFromTemplate`, `snapshot`, `cloneFromSnapshot`, `delete`
 - **Fork** = snapshot + a new machine from those LVs. Thin snapshots do not depend on the original, it can be deleted.
 - **Stop** = VM shutdown, LVs stay on the node. **Resume** = start of the same VM.
 - **Saved snapshot / user template** = a named snapshot from which new sandboxes are created.
-- **Disk locality:** LVs, snapshots, fork and resume remain on the machine's home node. S19 places new sandboxes across nodes of one cluster by free RAM when an active local template build is available. Cross-node migration and archive come later, through Proxmox Backup Server.
+- **Portable storage (S21):** Build templates once and replicate verified base disks over restricted node-agent RPCs. Resume/fork/saved-snapshot create prefer home, then cold-move immutable stopped data to another eligible node in the same cluster. Matching bases use thin metadata deltas; otherwise sparse copies. A durable journal verifies the target before switching VM config/DB ownership and removing source. Optional per-team FIFO capacity waits reserve RAM only on admission. Live migration and archives remain future work.
 
 ## 6. Warm pool
 
@@ -191,6 +191,8 @@ Published port access `sso` is the wire name for owner-session access; it uses
 the owner ingress and the gateway's short-lived access codes. It has no
 external sign-in provider or configurable corporate port policy. `token` and
 `public` port access remain available subject to platform settings.
+
+S19 adds sandbox nodes through the original root installer console. The source of truth is `runtime.nodes/storages/providers`; install-state records installation bookkeeping. The PVE token and forced-command SSH key are shared within the cluster; SSH endpoints, pinned host keys, LVM-thin and media storage are per node. Preparation validates configuration and persists a cordoned reservation before checking local DHCP/SNAT, the guest listener and restricted RPC, then activating the node and copying active templates (S21); nodes without a verified local build are not cold-placement candidates. A template build reserves an idle node and uses the shared PostgreSQL allocator; an interrupted build continues to block starts. Removing the sandbox role preserves topology/history and refuses while machines, snapshots, templates, build jobs or leases remain. The control-plane CT is independent of this role. Details: `docs/specs/s19-multi-node.md`, `docs/operations-multi-node.md`.
 
 Desktop streaming uses WebSocket through the gateway and agent tunnel (S18).
 It needs no media relay service or separate media address.

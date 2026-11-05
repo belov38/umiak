@@ -312,6 +312,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sandboxes/{sandbox}/cancel-start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a queued start
+         * @description Cancels only an unadmitted capacity wait. Idempotent; an admitted or moving start must be stopped/deleted through its normal lifecycle.
+         */
+        post: operations["sandboxes.cancelStart"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sandboxes/{sandbox}/commands": {
         parameters: {
             query?: never;
@@ -1662,6 +1682,8 @@ export interface components {
             user?: string;
         };
         CreateSandboxRequest: {
+            /** @description Wait for capacity in the durable per-team FIFO queue, in seconds (default 0: fail immediately) */
+            capacityWaitSeconds?: number;
             env?: components["schemas"]["EnvVars"];
             /**
              * @description Environment name or `env_...` (needs environments:read); absent: the team's default environment; null: none. Its sets are applied first, the request's sets on top
@@ -1892,6 +1914,8 @@ export interface components {
         };
         /** @description Sets merge onto a copy of the source's sets; the source is not changed */
         ForkSandboxRequest: {
+            /** @description Wait for capacity in the durable per-team FIFO queue, in seconds (default 0: fail immediately) */
+            capacityWaitSeconds?: number;
             env?: components["schemas"]["EnvVarsPatch"];
             /** @description Windows only: a running Windows sandbox is snapshotted from a stopped VM. With true, the source is stopped (running commands, sessions and connections end), snapshotted and started again; the operation's `forceStop` reports the restart. Without it, a running Windows source answers 409 `snapshot_requires_stop`. Ignored for Linux (snapshotted while running) and for a stopped source. */
             forceStop?: boolean;
@@ -2269,6 +2293,8 @@ export interface components {
         };
         /** @description Sets merge onto the sandbox's own and are stored even if the resume fails */
         ResumeSandboxRequest: {
+            /** @description Wait for capacity in the durable per-team FIFO queue, in seconds (default 0: fail immediately) */
+            capacityWaitSeconds?: number;
             env?: components["schemas"]["EnvVarsPatch"];
             secretFiles?: components["schemas"]["SecretFilesPatch"];
             secrets?: components["schemas"]["EnvVarsPatch"] & unknown;
@@ -3801,6 +3827,56 @@ export interface operations {
                 };
             };
             /** @description `invalid_state`: deleted */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "sandboxes.cancelStart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Sandbox id (`sb_...`) or slug */
+                sandbox: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued start cancelled */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SandboxAction"];
+                };
+            };
+            /** @description `not_found`: no such sandbox in the team (also for a malformed id) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `invalid_state` (details.state) or `operation_in_progress` (retryable; details.operationId, kind) */
             409: {
                 headers: {
                     [name: string]: unknown;

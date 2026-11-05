@@ -20,6 +20,7 @@ export * from "./routes.ts";
 export * from "./rows.ts";
 export * from "./secrets.ts";
 export * from "./service/index.ts";
+export * from "./service/start-queue.ts";
 export * from "./slug.ts";
 export * from "./slug-words.ts";
 export * from "./states.ts";

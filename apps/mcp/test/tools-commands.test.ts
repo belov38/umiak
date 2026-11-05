@@ -93,7 +93,7 @@ describe("tool list", () => {
 			"exec_list",
 			"exec_kill",
 		]);
-		expect(ALL_TOOLS.slice(11, 16).map((t) => t.name)).toEqual(
+		expect(ALL_TOOLS.slice(12, 17).map((t) => t.name)).toEqual(
 			COMMAND_TOOLS.map((t) => t.name),
 		);
 		const table: Record<string, [boolean, boolean, boolean, boolean]> = {
@@ -179,9 +179,7 @@ describe("tool list", () => {
 		const whole = await all.conn.client.listTools();
 		await all.close();
 		expect(whole.tools).toHaveLength(ALL_TOOLS.length);
-		expect(JSON.stringify(whole).length).toBeLessThanOrEqual(
-			Math.floor((ALL_TOOLS.length / 38) * 40_000),
-		);
+		expect(JSON.stringify(whole).length).toBeLessThanOrEqual(40_000);
 	});
 
 	it("pinned mode keeps all five without the sandbox argument", () => {

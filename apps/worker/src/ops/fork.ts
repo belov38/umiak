@@ -158,7 +158,7 @@ async function handOff(
 	const deadlineMs = operationDeadline("create", await osOf(tx, snapshotId));
 	const child = await tx.client.query<{ id: string; sandbox_id: string }>(
 		`UPDATE runtime.operations
-		 SET deadline_at = now() + make_interval(secs => $2::double precision / 1000),
+		 SET deadline_at = GREATEST(deadline_at, now() + make_interval(secs => $2::double precision / 1000)),
 		     version = version + 1
 		 WHERE parent_operation_id = $1 AND kind = 'create' AND state = 'pending'
 		 RETURNING id, sandbox_id`,

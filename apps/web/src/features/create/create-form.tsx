@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/dialog";
 import { LoadingState } from "@/components/ui/feedback";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { PageHeader } from "@/components/ui/panel";
 import {
 	Select,
@@ -146,6 +147,7 @@ export function CreateSandboxForm({
 	const [errors, setErrors] = useState<FormErrors>({});
 	const [submitError, setSubmitError] = useState<ErrorView | null>(null);
 	const [pending, setPending] = useState(false);
+	const [capacityWait, setCapacityWait] = useState("0");
 	const idempotency = useRef<IdempotencySlot | null>(null);
 	const patch = (p: Partial<CreateFormState>) =>
 		setForm((f) => ({ ...f, ...p }));
@@ -236,6 +238,8 @@ export function CreateSandboxForm({
 			return;
 		}
 		setErrors({});
+		if (Number(capacityWait) > 0)
+			r.body.capacityWaitSeconds = Number(capacityWait);
 		setPending(true);
 		// The same key while the body is unchanged, so a retry after an
 		// unknown outcome cannot create a second sandbox (lib/idempotency).
@@ -597,6 +601,22 @@ export function CreateSandboxForm({
 										/>
 									</Row>
 
+									<Row
+										label="Wait for capacity"
+										hint="Keep this request queued until capacity is available, or fail when the time is up."
+									>
+										<NativeSelect
+											aria-label="Wait for capacity"
+											className="border bg-background p-2 text-sm"
+											value={capacityWait}
+											onChange={(e) => setCapacityWait(e.target.value)}
+										>
+											<option value="0">Fail immediately</option>
+											<option value="600">10 minutes</option>
+											<option value="6000">100 minutes</option>
+											<option value="86400">1 day</option>
+										</NativeSelect>
+									</Row>
 									<Row label="Lifetime">
 										<div className="flex flex-wrap items-center gap-3 text-sm">
 											<span>TTL</span>

@@ -245,6 +245,9 @@ what was actually exercised. Coordinate live testing with S18 first.
 
 ## S21 successor
 
-S21 (`s21-portable-sandboxes.md`) replaces independent builds with verified
-replicas and node locality with journaled cold moves. Until those paths are
-implemented and enabled, the S19 local-only safety rules above remain in force.
+S21 (`s21-portable-sandboxes.md`) now replaces the independent builds and
+local-only fork/resume/snapshot rules above with verified template replicas and
+journaled cold moves. Home is preferred; capacity/cordon fallback stays within
+one provider and preserves VMID/MAC/IP. Unreachable source data must become
+available before a move can complete. Recover remains local; live migration is
+excluded. Optional FIFO capacity waits replace immediate refusal when requested.

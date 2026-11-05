@@ -20,7 +20,7 @@ only after their relevant gate passes. Implement inline without delegates.
 - [x] 3. Extend placement/admission and worker resume/fork/snapshot steps with
   durable cold-move fencing/config switch/cleanup. Test every crash boundary,
   unavailable source, same VMID/MAC, multi-disk and snapshot delete races.
-- [ ] 4. Add durable FIFO capacity tickets, cancellation and wakeup/reconcile.
+- [x] 4. Add durable FIFO capacity tickets, cancellation and wakeup/reconcile.
   Extend API schema, SDK, MCP, CLI duration options and dashboard progress.
   Test team FIFO, deadline persistence, cancellation, idempotency and quotas.
 - [ ] 5. Run full local gate, review diff, rebase origin/main and fast-forward
@@ -33,6 +33,9 @@ Never delete source on an ambiguous config switch. Never reserve RAM twice.
 Never log guest blocks or queue plaintext secrets. No live-host verification.
 
 ## Required live acceptance (coordinator only)
+
+Exact console/CLI/API/SDK/MCP commands and expected results:
+`docs/operations-s21-acceptance.md`.
 
 1. Fresh setup: build linux once, copy to pve2; compare manifest and every disk
    SHA-256, verify separate cluster-unique template VMIDs and create/exec on both.
@@ -124,3 +127,34 @@ snapshot create on another node, plus native guards and UUID reuse protection.
 Legacy sandbox cloud-init disks or additional unmanaged disks are refused by the
 config-switch helper, preserving the source. Fresh S5 templates do not use those
 legacy disks. No live acceptance has been run.
+
+
+Phase 4: `runtime.start_queue` stores a per-team sequence and original deadline,
+keyed to the existing operation. Placeholder machines have no VMID and consume
+no RAM. Transactional admission checks current quota and node RAM, removes the
+ticket and reserves once. Team locks prevent bypass (including fail-fast starts),
+and different teams proceed independently. One-second controller/pg-boss jobs
+recover waits after a worker restart; fork parent hand-off keeps the deadline.
+Timeout/cancel fail only unadmitted work and preserve source data. API, generated
+models, TS/Python facades, MCP, CLI and dashboard expose waits/cancellation.
+Dashboard create/resume offer explicit queue durations and queued requests have
+Cancel queued start. Readiness defaults include capacity budget. Tests cover
+FIFO, concurrent admission, cross-team independence, original deadlines,
+secrets/idempotency, cancellation, fork hand-off and queue expiry through real
+CLI/API/SDK and worker fakes.
+
+The phase-1 full-disk digest and local-scan risks above are historical and were
+replaced in phase 2: all data RPCs are bounded; thin metadata avoids scanning
+unchanged blocks; chunked SHA-256 readback and progress renewals verify long
+transfers without a whole-volume digest timeout.
+
+Phase 4 local evidence: core queue 6 PASS; worker queue/move regression 13 PASS;
+API full 1084 PASS; CLI full 191 PASS; TS SDK full 144 PASS; Python SDK full
+83 PASS; dashboard full 295 PASS; MCP sandbox/inventory/security/golden coverage
+updated for 39 tools. One full-workspace run hit the existing native MCP shutdown
+socket timing probe; its isolated full file rerun passed all 10 tests. The final
+whole-workspace gate is repeated after rebase, including the concurrent owner-only
+identity and recipe release work. Go tests/race/vet/golangci-lint/Linux build PASS;
+quickstart 203 PASS; installer pytest 248 PASS and ruff check PASS. Installer
+format-check is not an existing gate (30 pre-existing files differ from ruff's
+formatter); no bulk formatter changes were applied.

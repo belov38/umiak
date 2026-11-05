@@ -25,6 +25,7 @@ export interface CreateFlags {
 	ttl?: string;
 	idle?: string;
 	from?: string;
+	capacityWait?: string;
 	/** A name, or false for --no-environment. */
 	environment?: string | false;
 }
@@ -53,6 +54,10 @@ export function addCreateOptions(c: Command): Command {
 		)
 		.option("--ttl <duration>", "lifetime from ready: 3600, 90m, 2h, 7d")
 		.option("--idle <duration>", "stop after this long idle (at least 60 s)")
+		.option(
+			"--capacity-wait <duration>",
+			"queue for capacity for up to this duration (maximum 7d)",
+		)
 		.option("--from <snapshot>", "create from a saved snapshot")
 		.option("--environment <name>", "apply this environment (env-sets)")
 		.option("--no-environment", "apply no environment, not even the default");
@@ -61,6 +66,8 @@ export function addCreateOptions(c: Command): Command {
 /** The create request of the flags. */
 export function createBody(f: CreateFlags): CreateSandboxInput {
 	const body: CreateSandboxInput = {};
+	if (f.capacityWait !== undefined)
+		body.capacityWaitSeconds = parseDuration(f.capacityWait, "--capacity-wait");
 	if (f.template !== undefined) body.template = f.template;
 	if (f.size !== undefined) body.size = f.size;
 	if (f.name !== undefined) body.name = f.name;
@@ -94,20 +101,25 @@ export function register(program: Command, run: Runner): void {
 			"--wait",
 			"wait until it is ready (JSON Lines: accepted, state, ready)",
 		)
+		.option("--wait-ready", "wait until ready (same as --wait)")
 		.option("--wait-timeout <duration>", "limit of --wait (default 5m)")
 		.action(
 			run(async (ctx, _args, opts) => {
 				const f = opts as CreateFlags & {
 					wait?: boolean;
+					waitReady?: boolean;
 					waitTimeout?: string;
 				};
 				const timeout =
 					f.waitTimeout === undefined
-						? undefined
+						? f.capacityWait === undefined
+							? undefined
+							: parseDuration(f.capacityWait, "--capacity-wait") * 1000 +
+								300_000
 						: parseDuration(f.waitTimeout, "--wait-timeout") * 1000;
 				const res = await createSandbox(ctx, createBody(f));
 				writeCurrent(ctx, res.sandbox.id);
-				if (f.wait === true) {
+				if (f.wait === true || f.waitReady === true) {
 					await reportWait(ctx, res, "ready", timeout);
 					return;
 				}

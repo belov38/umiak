@@ -90,14 +90,14 @@ describe("inspector --cli against umiak mcp", () => {
 		});
 	}
 
-	it("tools/list: exit 0 and all 38 tools", async () => {
+	it("tools/list: exit 0 and all 39 tools", async () => {
 		const r = await inspect(["--method", "tools/list"]);
 		expect(r.code, r.stderr).toBe(0);
 		const names = (JSON.parse(r.stdout).tools as { name: string }[]).map(
 			(t) => t.name,
 		);
 		expect(names).toEqual(ALL_TOOLS.map((t) => t.name));
-		expect(names).toHaveLength(38);
+		expect(names).toHaveLength(39);
 	});
 
 	it("tools/call limits_get: exit 0 and a result that is not an error", async () => {

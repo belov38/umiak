@@ -20,6 +20,7 @@ describe("QUEUES (S6 §15.1)", () => {
 				"ctl-health",
 				"ctl-autostop",
 				"ctl-reconcile",
+				"ctl-start-queue",
 				"ctl-cleanup",
 			].sort(),
 		);
@@ -70,6 +71,7 @@ describe("QUEUES (S6 §15.1)", () => {
 			"ctl-health",
 			"ctl-autostop",
 			"ctl-reconcile",
+			"ctl-start-queue",
 			"ctl-cleanup",
 		] as const) {
 			expect(QUEUES[q].policy).toBe("exclusive");

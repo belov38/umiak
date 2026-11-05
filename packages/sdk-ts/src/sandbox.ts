@@ -220,11 +220,14 @@ export class Sandbox implements SandboxRef {
 			if (state === "ready") return this;
 			if (FAILED_STATES.has(state)) {
 				throw new SandboxFailedError({
-					status: 409,
-					code: "sandbox_failed",
+					status: data.error?.code === "out_of_capacity" ? 503 : 409,
+					code:
+						data.error?.code === "out_of_capacity"
+							? "out_of_capacity"
+							: "sandbox_failed",
 					message: `sandbox ${this.slug} is ${state}, not ready`,
-					retryable: false,
-					details: { state, sandboxId: this.id },
+					retryable: data.error?.code === "out_of_capacity",
+					details: { state, sandboxId: this.id, error: data.error },
 				});
 			}
 		}
@@ -285,6 +288,16 @@ export class Sandbox implements SandboxRef {
 		return this.#after(data, opts);
 	}
 
+	/** Cancels a start only while it is waiting for capacity. */
+	async cancelStart(opts: CallOptions = {}): Promise<OperationData> {
+		const { data } = await this.core.raw.POST(`${SANDBOX}/cancel-start`, {
+			params: this.#path(),
+			...callOf(opts),
+		});
+		this.data = data.sandbox;
+		return data.operation;
+	}
+
 	/** Resumes a stopped sandbox; `wait`: until it is ready. */
 	async resume(
 		input: ResumeInput = {},
@@ -296,7 +309,10 @@ export class Sandbox implements SandboxRef {
 			...callOf(opts),
 		});
 		const op = await this.#after(data, { ...opts, wait: false });
-		if (opts.wait) await this.#waitReady(opts);
+		if (opts.wait)
+			await this.#waitReady(
+				capacityWaitOptions(opts, input.capacityWaitSeconds),
+			);
 		return op;
 	}
 
@@ -321,7 +337,10 @@ export class Sandbox implements SandboxRef {
 			idempotencyKey: opts.idempotencyKey ?? newIdempotencyKey(),
 		});
 		const copy = new Sandbox(this.core, data.sandbox);
-		if (opts.wait) await copy.#waitReady(opts);
+		if (opts.wait)
+			await copy.#waitReady(
+				capacityWaitOptions(opts, input.capacityWaitSeconds),
+			);
 		return copy;
 	}
 
@@ -476,4 +495,13 @@ async function longPoll<T>(
 		if (timeout.aborted) return undefined;
 		throw err;
 	}
+}
+
+export function capacityWaitOptions(
+	opts: ActionOptions,
+	seconds?: number,
+): ActionOptions {
+	return seconds && opts.waitTimeoutMs === undefined
+		? { ...opts, waitTimeoutMs: seconds * 1000 + READY_TIMEOUT_MS }
+		: opts;
 }

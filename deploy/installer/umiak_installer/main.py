@@ -29,10 +29,9 @@ import time
 import urllib.parse
 from pathlib import Path
 
-from . import updater, update_timer
-from .update_console import Console as UpdateConsole
-from . import allocation, checklist, ct, day2, prepare_host, release, stack, state, style, tailnet
+from . import allocation, checklist, ct, day2, prepare_host, release, stack, state, style, tailnet, update_timer, updater
 from .pve import CommandError, InstallerError, Runner, bridges, get, lan_bridge, lvmthin_storages
+from .update_console import Console as UpdateConsole
 
 SECRETS_DIR = day2.SECRETS_DIR
 GUEST_DNS = "1.1.1.1"
@@ -525,9 +524,11 @@ class Flow:
         tailnet.serve(runner, ct_id)
         code = stack.wait_claim_code(runner, ct_id, sleep=self.sleep)
         self.save("complete", a)
-        UpdateConsole(self.runner, self.current).call(settings={"channel": self.current.channel, "auto": self.current.auto_update,
-                                                             "paused": False, "start": "03:00", "end": "04:00"}, status={"version": self.current.release,
-                                                            "channel": self.current.channel, "updating": False})
+        UpdateConsole(self.runner, self.current).call(
+            settings={"channel": self.current.channel, "auto": self.current.auto_update,
+                      "paused": False, "start": "03:00", "end": "04:00"},
+            status={"version": self.current.release, "channel": self.current.channel, "updating": False},
+        )
         update_timer.install(self.runner, self.bundle)
         return tailnet.claim_link(identity.dns_name, code)
 
@@ -588,7 +589,9 @@ class Flow:
                 self.progress(f"Downloading release {version}")
                 bundle = download(version, self.runner.path(prepare_host.STATE_DIR) / "releases")
             try:
-                self.current = updater.run_update(self.runner, current, bundle, ui=ui, sleep=self.sleep, state_path=self.state_path)
+                self.current = updater.run_update(
+                    self.runner, current, bundle, ui=ui, sleep=self.sleep, state_path=self.state_path,
+                )
             except updater.UpdateSkipped as error:
                 ui.say(str(error))
                 return 0

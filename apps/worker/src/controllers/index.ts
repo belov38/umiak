@@ -4,6 +4,7 @@ import { runAutostop } from "./autostop.ts";
 import { runCleanup } from "./cleanup.ts";
 import { runHealth } from "./health.ts";
 import { runReconcile } from "./reconcile.ts";
+import { runStartQueue } from "./start-queue.ts";
 
 // Periodic controllers (S6 §15.1). Each is an `exclusive` pg-boss queue whose
 // job runs `run(ctx)` and then sends itself again with `startAfter =
@@ -21,6 +22,7 @@ export interface ControllerSpec {
 }
 
 export const CONTROLLERS: readonly ControllerSpec[] = [
+	{ queue: "ctl-start-queue", intervalMs: 1000, run: runStartQueue },
 	{ queue: "ctl-health", intervalMs: 10_000, run: runHealth },
 	{ queue: "ctl-autostop", intervalMs: 15_000, run: runAutostop },
 	{ queue: "ctl-cleanup", intervalMs: 600_000, run: runCleanup },

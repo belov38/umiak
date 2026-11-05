@@ -34,6 +34,7 @@ export const RESERVED_SQL = `(m.state IN (${sqlList(RESERVED_MACHINE_STATES)})
       AND (o.kind IN ('resume', 'recover')
         OR (o.kind IN ('fork', 'save_snapshot') AND o.request->>'forceStop' = 'true'))
       AND o.state IN ('pending', 'running')
+ AND o.progress->>'phase' IS DISTINCT FROM 'queued'
  AND NOT EXISTS (SELECT 1 FROM runtime.move_reservations mr WHERE mr.machine_id=m.id AND mr.operation_id=o.id))))`;
 
 /** Outstanding target reservations while the home machine still belongs to its source node. */
@@ -313,7 +314,7 @@ export async function checkQuota(
 		const r = await tx.client.query<{ n: number; ram_mb: number }>(
 			`SELECT count(*)::int AS n, COALESCE(SUM(memory_mb), 0)::int AS ram_mb
 			 FROM runtime.sandboxes
-			 WHERE team_id = $1 AND state = ANY($2::text[])`,
+			 WHERE team_id = $1 AND state = ANY($2::text[]) AND NOT EXISTS (SELECT 1 FROM runtime.operations qo WHERE qo.sandbox_id=runtime.sandboxes.id AND qo.state IN ('pending','running') AND qo.progress->>'phase'='queued')`,
 			[teamId, QUOTA_ACTIVE_SANDBOX_STATES],
 		);
 		const n = r.rows[0]?.n ?? 0;

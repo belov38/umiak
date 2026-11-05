@@ -98,12 +98,12 @@ async function longRun(s: Setup) {
 }
 
 describe("runStdio", () => {
-	it("answers initialize and tools/list with all 38 tools for a person", async () => {
+	it("answers initialize and tools/list with all 39 tools for a person", async () => {
 		const { rpc } = await setup();
 		const init = await rpc.initialize();
 		expect(init.serverInfo).toMatchObject({ name: "umiak" });
 		expect(await toolNames(rpc)).toEqual(ALL_TOOLS.map((t) => t.name));
-		expect(ALL_TOOLS).toHaveLength(38);
+		expect(ALL_TOOLS).toHaveLength(39);
 		expect(rpc.garbage).toEqual([]);
 	});
 
@@ -115,7 +115,7 @@ describe("runStdio", () => {
 			ALL_TOOLS.filter((t) => t.annotations.readOnlyHint).map((t) => t.name),
 		);
 		expect(names.length).toBeGreaterThan(0);
-		expect(names.length).toBeLessThan(38);
+		expect(names.length).toBeLessThan(39);
 		for (const n of names) expect(readOnly.has(n)).toBe(true);
 		await toolNames(rpc);
 		expect(api.journal.filter((l) => l === "GET /v1/me")).toHaveLength(1);
@@ -131,7 +131,7 @@ describe("runStdio", () => {
 			},
 		});
 		await rpc.initialize();
-		expect(await toolNames(rpc)).toHaveLength(38);
+		expect(await toolNames(rpc)).toHaveLength(39);
 		const r = await rpc.callTool("limits_get");
 		expect(r.isError).toBe(true);
 		expect(r.text).toContain("error: not_logged_in");
@@ -168,7 +168,7 @@ describe("runStdio", () => {
 		const s = await setup({ umiak: () => umiak });
 		const started = Date.now();
 		await s.rpc.initialize();
-		expect(await toolNames(s.rpc)).toHaveLength(38);
+		expect(await toolNames(s.rpc)).toHaveLength(39);
 		const took = Date.now() - started;
 		expect(took).toBeGreaterThanOrEqual(PRINCIPAL_TIMEOUT_MS - 200);
 		expect(took).toBeLessThan(PRINCIPAL_TIMEOUT_MS + 3_000);

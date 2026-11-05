@@ -440,6 +440,15 @@ export const ROUTES: Record<string, Route> = {
 		resources: ["sandbox"],
 		request: (f) => ({ path: `${sb(f)}/stop` }),
 	},
+	"sandboxes.cancelStart": {
+		method: "POST",
+		path: "/v1/sandboxes/{sandbox}/cancel-start",
+		scope: "sandboxes:write",
+		destructive: true,
+		resources: ["sandbox"],
+		request: (f) => ({ path: `${sb(f)}/cancel-start` }),
+	},
+
 	"sandboxes.resume": {
 		method: "POST",
 		path: "/v1/sandboxes/{sandbox}/resume",

@@ -127,7 +127,9 @@ export class Umiak {
 					await sb.waitUntilReady({
 						...waitOf(o),
 						...(o.waitTimeoutMs === undefined
-							? {}
+							? input.capacityWaitSeconds
+								? { timeoutMs: input.capacityWaitSeconds * 1000 + 300_000 }
+								: {}
 							: { timeoutMs: o.waitTimeoutMs }),
 					});
 				}

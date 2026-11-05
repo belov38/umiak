@@ -15,7 +15,7 @@ import {
 	sandboxView,
 	waitSandbox,
 } from "../src/tools/index.ts";
-import { waitHint } from "../src/tools/sandbox-view.ts";
+import { sandboxResult, waitHint } from "../src/tools/sandbox-view.ts";
 import { sandboxCreate } from "../src/tools/sandboxes.ts";
 import { FAKE_TOKENS } from "./fake-api/index.ts";
 import { type Harness, startHarness } from "./helpers/harness.ts";
@@ -63,7 +63,7 @@ const VIEW_KEYS = [
 const TOOLS = [...CATALOG_TOOLS, ...SANDBOX_TOOLS];
 
 describe("tool list", () => {
-	it("has the 11 tools of 8.1-8.2 in spec order with the annotations of the tables", () => {
+	it("has the 12 tools of 8.1-8.2 in spec order with the annotations of the tables", () => {
 		expect(TOOLS.map((t) => t.name)).toEqual([
 			"limits_get",
 			"templates_list",
@@ -73,6 +73,7 @@ describe("tool list", () => {
 			"sandbox_update",
 			"sandbox_stop",
 			"sandbox_resume",
+			"sandbox_cancel_start",
 			"sandbox_fork",
 			"sandbox_recover",
 			"sandbox_delete",
@@ -87,6 +88,7 @@ describe("tool list", () => {
 			sandbox_update: [false, false, true, false],
 			sandbox_stop: [false, false, true, false],
 			sandbox_resume: [false, false, true, false],
+			sandbox_cancel_start: [false, false, true, false],
 			sandbox_fork: [false, false, false, false],
 			sandbox_recover: [false, false, true, false],
 			sandbox_delete: [false, true, true, false],
@@ -114,6 +116,7 @@ describe("tool list", () => {
 			sandbox_update: ["sandboxes:write"],
 			sandbox_stop: ["sandboxes:write"],
 			sandbox_resume: ["sandboxes:write"],
+			sandbox_cancel_start: ["sandboxes:write"],
 			sandbox_fork: ["sandboxes:write"],
 			sandbox_recover: ["sandboxes:write"],
 			sandbox_delete: ["sandboxes:delete"],
@@ -161,7 +164,7 @@ describe("tool list", () => {
 		const listed = await conn.client.listTools();
 		// 11 of the 38 tools; Task 13 checks the whole list against 40 000.
 		expect(JSON.stringify(listed).length).toBeLessThanOrEqual(
-			Math.floor((11 / 38) * 40_000),
+			Math.floor((12 / 39) * 40_000),
 		);
 		expect(JSON.stringify(listed)).not.toContain("9007199254740991");
 	});
@@ -178,6 +181,7 @@ describe("tool list", () => {
 			"sandbox_update",
 			"sandbox_stop",
 			"sandbox_resume",
+			"sandbox_cancel_start",
 			"sandbox_recover",
 		]);
 	});
@@ -885,6 +889,7 @@ describe("sandbox_resume", () => {
 			unset_env: ["B"],
 			size: "4gb",
 			ttl_seconds: 300,
+			capacity_wait_seconds: 6000,
 		});
 		expect(r.isError).toBe(false);
 		expect(r.json.state).toBe("ready");
@@ -897,6 +902,7 @@ describe("sandbox_resume", () => {
 			env: { A: "1", B: null },
 			size: "4gb",
 			ttlSeconds: 300,
+			capacityWaitSeconds: 6000,
 		});
 		expect(h?.api.state.sandboxes.get(c.json.id)?.env).toEqual({
 			A: "1",
@@ -1277,4 +1283,20 @@ describe("waitHint", () => {
 		expect(pinned).toContain("sandbox_recover");
 		expect(pinned).not.toContain("sandbox_delete");
 	});
+});
+
+it("reports a timed-out queued resume as an MCP error while retaining its out_of_capacity code", async () => {
+	const hh = await start();
+	const c = await hh.call("sandbox_create");
+	const sb = await hh.umiak.sandboxes.get(c.json.id);
+	const result = sandboxResult(
+		{
+			...sb.data,
+			state: "stopped",
+			error: { code: "out_of_capacity", message: "Capacity wait expired" },
+		},
+		{ target: "ready" },
+	);
+	expect(result.isError).toBe(true);
+	expect(JSON.stringify(result)).toContain("out_of_capacity");
 });

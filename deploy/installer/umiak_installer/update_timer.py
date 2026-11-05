@@ -1,6 +1,5 @@
 """Install/remove a host-only systemd polling timer and trusted Python runtime."""
 import shutil
-from pathlib import Path
 
 from . import release
 from .pve import private_dir, write_secret

@@ -669,3 +669,13 @@ export const moveReservations = runtime.table("move_reservations", {
 	storageId: uuid("storage_id").notNull(),
 	memoryMb: integer("memory_mb").notNull(),
 });
+
+export const startQueue = runtime.table("start_queue", {
+	operationId: uuid("operation_id").primaryKey(),
+	teamId: uuid("team_id").notNull(),
+	seq: bigint("seq", { mode: "number" })
+		.notNull()
+		.default(sql`nextval('runtime.start_queue_seq_seq'::regclass)`),
+	deadlineAt: tstz("deadline_at").notNull(),
+	createdAt: createdAt(),
+});

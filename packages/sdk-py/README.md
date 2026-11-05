@@ -101,3 +101,14 @@ Windows 11 uses the single `windows` template and includes the desktop (4gb by d
 ```python
 sb = umiak.sandboxes.create(template="windows", size="4gb", wait=True)
 ```
+
+## Capacity waits
+
+`create(capacity_wait_seconds=6000)`, `sb.resume(capacity_wait_seconds=6000)`
+and `sb.fork(capacity_wait_seconds=6000)` queue for capacity for up to 100 minutes.
+Default 0 fails immediately; maximum 604800 seconds. Add `wait=True` to wait
+for ready too; its default timeout includes the capacity budget. An explicit
+`wait_timeout` overrides that client limit. `sb.cancel_start()` cancels while
+still queued; disconnecting does not cancel. Both sync/async facades expose
+queued/moving states and operation progress; expiry keeps retryable
+`out_of_capacity`.

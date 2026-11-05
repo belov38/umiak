@@ -73,16 +73,19 @@ class Sandboxes:
         CreateSandboxRequest or a dict with API field names) and/or keyword
         fields: ``create(template="linux", labels={"a": "1"}, ttl_seconds=600)``.
         ``wait``: until it is ready (SandboxFailedError if it fails)."""
+        body = _fields(input, fields)
         action = self._core.call(
             sandboxes_create,
-            body=_fields(input, fields),
+            body=body,
             retry_budget=retry_budget,
             idempotency_key=idempotency_key or new_idempotency_key(),
         )
         sb = Sandbox(self._core, action.sandbox)
         if wait:
             sb.wait_until_ready(
-                timeout=READY_TIMEOUT if wait_timeout is None else wait_timeout,
+                timeout=READY_TIMEOUT + body.to_dict().get("capacityWaitSeconds", 0)
+                if wait_timeout is None
+                else wait_timeout,
                 retry_budget=retry_budget,
             )
         return sb

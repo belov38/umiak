@@ -17,6 +17,8 @@ import { reportWait, warnForceStop } from "../wait.ts";
 
 interface WaitFlags {
 	wait?: boolean;
+	waitReady?: boolean;
+	capacityWait?: string;
 	waitTimeout?: string;
 }
 
@@ -32,7 +34,9 @@ export const FORCE_STOP_HELP =
 
 function waitTimeout(f: WaitFlags): number | undefined {
 	return f.waitTimeout === undefined
-		? undefined
+		? f.capacityWait === undefined
+			? undefined
+			: parseDuration(f.capacityWait, "--capacity-wait") * 1000 + 300_000
 		: parseDuration(f.waitTimeout, "--wait-timeout") * 1000;
 }
 
@@ -42,6 +46,7 @@ function addWait(c: Command, what: string): Command {
 			"--wait",
 			`wait until it is ${what} (JSON Lines: accepted, state, ${what})`,
 		)
+		.option("--wait-ready", `wait until ${what} (same as --wait)`)
 		.option("--wait-timeout <duration>", "limit of --wait (default 5m)");
 }
 
@@ -90,7 +95,7 @@ async function action(
 					})
 				: await umiak.raw.POST("/v1/sandboxes/{sandbox}/recover", params);
 	if (ref.explicit) writeCurrent(ctx, data.sandbox.id);
-	if (f.wait === true) {
+	if (f.wait === true || f.waitReady === true) {
 		await reportWait(
 			ctx,
 			data,
@@ -103,6 +108,71 @@ async function action(
 }
 
 export function register(program: Command, run: Runner): void {
+	addSets(
+		program
+			.command("start")
+			.description("start a stopped sandbox, optionally waiting for capacity")
+			.argument("[sb]", "sandbox ID or slug (default: the current one)")
+			.option(
+				"--wait <duration>",
+				"queue for capacity and wait until ready, e.g. 100m",
+			)
+			.option(
+				"--capacity-wait <duration>",
+				"queue for capacity without waiting for ready",
+			)
+			.option("--wait-ready", "wait until ready")
+			.option(
+				"--wait-timeout <duration>",
+				"client wait limit (default: capacity wait + 5m)",
+			)
+			.option("--size <slug>", "another size allowed for the template")
+			.option("--ttl <duration>", "lifetime from ready"),
+	).action(
+		run(async (ctx, args, opts) => {
+			const f = opts as SetFlags & {
+				wait?: string;
+				capacityWait?: string;
+				waitReady?: boolean;
+				waitTimeout?: string;
+				size?: string;
+				ttl?: string;
+			};
+			const duration = f.wait ?? f.capacityWait;
+			const body: Record<string, unknown> = { ...setsPatch(f) };
+			if (duration !== undefined)
+				body.capacityWaitSeconds = parseDuration(
+					duration,
+					"--wait/--capacity-wait",
+				);
+			if (f.size !== undefined) body.size = f.size;
+			if (f.ttl !== undefined) body.ttlSeconds = parseDuration(f.ttl, "--ttl");
+			await action(ctx, "resume", args[0] as string | undefined, body, {
+				wait: f.wait !== undefined || f.waitReady === true,
+				...(duration === undefined ? {} : { capacityWait: duration }),
+				...(f.waitTimeout === undefined ? {} : { waitTimeout: f.waitTimeout }),
+			});
+		}),
+	);
+	program
+		.command("cancel-start")
+		.description("cancel a start that is still waiting for capacity")
+		.argument("[sb]", "sandbox ID or slug (default: the current one)")
+		.action(
+			run(async (ctx, args) => {
+				const ref = sandboxRef(ctx, args[0] as string | undefined);
+				const { data } = await ctx
+					.umiak()
+					.raw.POST("/v1/sandboxes/{sandbox}/cancel-start", {
+						params: { path: { sandbox: ref.ref } },
+					});
+				ctx.out.result(
+					data,
+					(v) => `Cancelled start: ${sandboxLine(v.sandbox)}`,
+				);
+			}),
+		);
+
 	addWait(
 		program
 			.command("stop")
@@ -119,6 +189,10 @@ export function register(program: Command, run: Runner): void {
 		addWait(
 			program
 				.command("resume")
+				.option(
+					"--capacity-wait <duration>",
+					"queue for capacity for up to this duration (maximum 7d)",
+				)
 				.description("start a stopped sandbox again")
 				.argument("[sb]", "sandbox ID or slug (default: the current one)")
 				.option("--size <slug>", "another size allowed for the template")
@@ -129,6 +203,11 @@ export function register(program: Command, run: Runner): void {
 		run(async (ctx, args, opts) => {
 			const f = opts as SetFlags & WaitFlags & { size?: string; ttl?: string };
 			const body: Record<string, unknown> = { ...setsPatch(f) };
+			if (f.capacityWait !== undefined)
+				body.capacityWaitSeconds = parseDuration(
+					f.capacityWait,
+					"--capacity-wait",
+				);
 			if (f.size !== undefined) body.size = f.size;
 			if (f.ttl !== undefined) body.ttlSeconds = parseDuration(f.ttl, "--ttl");
 			await action(ctx, "resume", args[0] as string | undefined, body, f);
@@ -157,6 +236,10 @@ export function register(program: Command, run: Runner): void {
 		addWait(
 			program
 				.command("fork")
+				.option(
+					"--capacity-wait <duration>",
+					"queue for capacity for up to this duration (maximum 7d)",
+				)
 				.description("copy a sandbox into a new one (the copy becomes current)")
 				.argument("[sb]", "sandbox ID or slug (default: the current one)")
 				.option("--name <name>", "display name of the copy")
@@ -185,6 +268,11 @@ export function register(program: Command, run: Runner): void {
 					forceStop?: boolean;
 				};
 			const body: Record<string, unknown> = { ...setsPatch(f) };
+			if (f.capacityWait !== undefined)
+				body.capacityWaitSeconds = parseDuration(
+					f.capacityWait,
+					"--capacity-wait",
+				);
 			if (f.name !== undefined) body.name = f.name;
 			if (f.slug !== undefined) body.slug = f.slug;
 			if (f.label !== undefined) body.labels = parsePairs(f.label, "--label");
@@ -203,7 +291,7 @@ export function register(program: Command, run: Runner): void {
 					idempotencyKey: newIdempotencyKey(),
 				});
 			writeCurrent(ctx, data.sandbox.id);
-			if (f.wait === true) {
+			if (f.wait === true || f.waitReady === true) {
 				await reportWait(ctx, data, "ready", waitTimeout(f));
 				if (data.sourceOperation.forceStop !== null) {
 					// Final by now: the fork succeeds before the copy is created.

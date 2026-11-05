@@ -2,7 +2,13 @@ import type { Tx } from "@umiak/db";
 import { requestHash } from "../canonical.ts";
 import { checkQuota } from "../capacity.ts";
 import { operationDeadline } from "../deadlines.ts";
-import { idempotencyKeyReused, notFound, poolExhausted } from "../errors.ts";
+import {
+	idempotencyKeyReused,
+	isUmiakError,
+	notFound,
+	outOfCapacity,
+	poolExhausted,
+} from "../errors.ts";
 import { claimIdempotencyKey } from "../idempotency.ts";
 import { uuidv7 } from "../ids.ts";
 import { idempotencyPrincipal, type Principal } from "../principal.ts";
@@ -12,6 +18,7 @@ import {
 	type SecretSets,
 	validateSecretSets,
 } from "../secrets.ts";
+import { enqueueCapacityWait, teamHasQueuedStarts } from "./capacity-wait.ts";
 import {
 	insertOperation,
 	insertSandboxEvent,
@@ -34,6 +41,7 @@ import {
 	POOL_EXHAUSTED_RETRY_SECONDS,
 } from "./create-placement.ts";
 import { insertSandboxRow } from "./sandbox-row.ts";
+import { queuedPlacement } from "./start-queue.ts";
 import { withServiceTx } from "./tx.ts";
 
 // Create (S6 §7.3): one transaction writes the idempotency key (first), the
@@ -163,33 +171,55 @@ export async function createSandbox(
 		});
 
 		let placement: Placement;
-		if (snap !== null) {
-			placement = await admitOnSnapshotNode(
-				tx,
-				deps,
-				snap,
-				pairKey,
-				size.memoryMb,
-			);
-		} else {
-			const claimed = opts.placementNodeId
-				? null
-				: await claimWarm(tx, sandboxId, template.slug, pairKey);
-			if (claimed !== null) placement = claimed;
-			// failFast/pool_exhausted: internal only, not in the public MVP
-			// contract (no pool controller until phase 2); S7 must not expose it.
-			else if (input.failFast === true) {
-				throw poolExhausted(POOL_EXHAUSTED_RETRY_SECONDS);
-			} else {
-				placement = await admitCold(
+		let queued = false;
+		try {
+			if (await teamHasQueuedStarts(tx, p.teamId)) throw outOfCapacity(30);
+			if (snap !== null) {
+				placement = await admitOnSnapshotNode(
 					tx,
 					deps,
-					template.slug,
+					snap,
 					pairKey,
 					size.memoryMb,
-					opts.placementNodeId,
 				);
+			} else {
+				const claimed = opts.placementNodeId
+					? null
+					: await claimWarm(tx, sandboxId, template.slug, pairKey);
+				if (claimed !== null) placement = claimed;
+				// failFast/pool_exhausted: internal only, not in the public MVP
+				// contract (no pool controller until phase 2); S7 must not expose it.
+				else if (input.failFast === true) {
+					throw poolExhausted(POOL_EXHAUSTED_RETRY_SECONDS);
+				} else {
+					placement = await admitCold(
+						tx,
+						deps,
+						template.slug,
+						pairKey,
+						size.memoryMb,
+						opts.placementNodeId,
+					);
+				}
 			}
+		} catch (error) {
+			if (
+				!isUmiakError(error, "out_of_capacity") ||
+				!(input.capacityWaitSeconds && input.capacityWaitSeconds > 0)
+			)
+				throw error;
+			queued = true;
+			placement = snap
+				? {
+						fromPool: false,
+						machineId: uuidv7(),
+						nodeId: snap.nodeId,
+						providerId: snap.providerId,
+						storageId: snap.storageId,
+						templateBuildId: snap.templateBuildId,
+						originSnapshotId: snap.id,
+					}
+				: await queuedPlacement(tx, template.slug);
 		}
 
 		const slug = await insertSandboxRow(tx, deps, input.slug, {
@@ -237,6 +267,12 @@ export async function createSandbox(
 			);
 		}
 
+		if (queued)
+			await tx.client.query(
+				"UPDATE runtime.machines SET state='stopped',power_observed='stopped' WHERE id=$1",
+				[placement.machineId],
+			);
+
 		const blob = deps.keys.encrypt(sandboxId, sets);
 		await tx.client.query(
 			`INSERT INTO runtime.sandbox_secrets (sandbox_id, key_version, nonce, ciphertext)
@@ -266,6 +302,15 @@ export async function createSandbox(
 				fromPool: placement.fromPool,
 			}),
 		});
+		if (queued)
+			await enqueueCapacityWait(
+				tx,
+				deps.jobs,
+				p.teamId,
+				operationId,
+				input.capacityWaitSeconds ?? 0,
+			);
+
 		await insertSandboxEvent(tx, {
 			sandboxId,
 			type: "state_changed",

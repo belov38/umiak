@@ -44,6 +44,7 @@ describe("drizzle schema", () => {
 				"runtime.template_builds",
 				"runtime.volume_transfers",
 				"runtime.move_reservations",
+				"runtime.start_queue",
 				"runtime.vmid_leases",
 				"runtime.machines",
 				"runtime.disks",

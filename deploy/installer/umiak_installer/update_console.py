@@ -10,14 +10,19 @@ from .ct import run_in
 
 SCRIPT = r"""
 import pg from '/app/packages/db/node_modules/pg/lib/index.js';
-const input=JSON.parse(await new Promise(resolve=>{let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>resolve(s));}));
+const input=JSON.parse(await new Promise(resolve=>{
+ let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>resolve(s));
+}));
 const pool=new pg.Pool({connectionString:process.env.DATABASE_URL});
 const c=await pool.connect();
 try {
  await c.query('BEGIN');
  await c.query("SELECT pg_advisory_xact_lock(hashtextextended('umiak-quickstart:setup',0))");
- await c.query(`CREATE TABLE IF NOT EXISTS quickstart.updates(id boolean PRIMARY KEY DEFAULT true CHECK(id), settings jsonb NOT NULL, status jsonb NOT NULL DEFAULT '{}', history jsonb NOT NULL DEFAULT '[]')`);
- await c.query('INSERT INTO quickstart.updates(id,settings) VALUES(true,$1) ON CONFLICT DO NOTHING',[JSON.stringify(input.defaults)]);
+ await c.query(`CREATE TABLE IF NOT EXISTS quickstart.updates(
+  id boolean PRIMARY KEY DEFAULT true CHECK(id), settings jsonb NOT NULL,
+  status jsonb NOT NULL DEFAULT '{}', history jsonb NOT NULL DEFAULT '[]')`);
+ await c.query('INSERT INTO quickstart.updates(id,settings) VALUES(true,$1) ON CONFLICT DO NOTHING',
+  [JSON.stringify(input.defaults)]);
  let row=(await c.query('SELECT * FROM quickstart.updates WHERE id=true')).rows[0];
  if(input.op==='fence') {
   let state=(await c.query('SELECT state FROM quickstart.setup WHERE id=true FOR UPDATE')).rows[0].state;
@@ -27,10 +32,14 @@ try {
  }
  if(input.op==='unfence') {
   await c.query("UPDATE quickstart.setup SET state=state-'platformMaintenance' WHERE id=true");
-  await c.query(`UPDATE quickstart.setup SET state=jsonb_set(state,'{platform}',COALESCE(state->'platform','{}') || $1::jsonb) WHERE id=true`,[JSON.stringify({channel:row.settings.channel})]);
+  await c.query(`UPDATE quickstart.setup SET state=jsonb_set(state,'{platform}',
+   COALESCE(state->'platform','{}') || $1::jsonb) WHERE id=true`,
+   [JSON.stringify({channel:row.settings.channel})]);
  }
  if(input.settings) {
-  await c.query(`UPDATE quickstart.setup SET state=jsonb_set(state,'{platform}',COALESCE(state->'platform','{}') || $1::jsonb) WHERE id=true`,[JSON.stringify({channel:input.settings.channel})]);
+  await c.query(`UPDATE quickstart.setup SET state=jsonb_set(state,'{platform}',
+   COALESCE(state->'platform','{}') || $1::jsonb) WHERE id=true`,
+   [JSON.stringify({channel:input.settings.channel})]);
   await c.query('UPDATE quickstart.updates SET settings=$1 WHERE id=true',[JSON.stringify(input.settings)]);
   row.settings=input.settings;
  }

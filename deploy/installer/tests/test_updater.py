@@ -141,6 +141,7 @@ def test_automatic_update_does_not_repeat_a_failed_rollout():
 @pytest.mark.parametrize("stage", ["preparing", "applying"])
 def test_restart_recovers_checkpoint_before_any_new_update(tmp_path,monkeypatch,stage):
     import dataclasses
+
     from test_state import sample
     from umiak_installer.pve import Runner
     runner=Runner(tmp_path)
@@ -148,7 +149,7 @@ def test_restart_recovers_checkpoint_before_any_new_update(tmp_path,monkeypatch,
     updater.atomic_json(path,{"current":dataclasses.asdict(sample(phase="complete")),"target":"1.3.0",
                               "stage":stage,"backup":"snapshot","restoreData":True})
     backend=Backend()
-    backend.helper=lambda op:backend.calls.append(op)
+    backend.helper=backend.calls.append
     monkeypatch.setattr(updater,"HostBackend",lambda *args,**kwargs:backend)
     updater.recover(runner,ui=None,state_path=tmp_path / "state",sleep=lambda _:None)
     if stage=="preparing":
@@ -162,6 +163,7 @@ def test_restart_recovers_checkpoint_before_any_new_update(tmp_path,monkeypatch,
 
 def test_busy_template_build_is_a_skip_without_backup_or_restart(tmp_path,monkeypatch):
     import json
+
     from test_state import sample
     from umiak_installer import day2, release
     from umiak_installer.pve import CommandError, Runner
@@ -177,10 +179,12 @@ def test_busy_template_build_is_a_skip_without_backup_or_restart(tmp_path,monkey
                                 ui=UI(),state_path=tmp_path / "state",sleep=lambda _:None)
     class Console:
         def call(self,op="read",**data):
-            if op=="fence":raise CommandError(["node"],1,stderr="A template build is running; skipping update")
+            if op=="fence":
+                raise CommandError(["node"],1,stderr="A template build is running; skipping update")
             return {}
     backend.console=Console()
-    with pytest.raises(updater.UpdateSkipped):backend.fence()
+    with pytest.raises(updater.UpdateSkipped):
+        backend.fence()
     assert not backend.path.exists()
     history=runner.path(updater.ROOT) / "update-history.jsonl"
     assert json.loads(history.read_text())["status"]=="skipped"

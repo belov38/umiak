@@ -17,6 +17,7 @@ from .._events import READY_TIMEOUT, Encoding, ExecResult, RunEvent
 from .._gen.api.operations import operations_get
 from .._gen.api.ports import ports_delete, ports_list, ports_put, ports_rotate_token
 from .._gen.api.sandboxes import (
+    sandboxes_cancel_start,
     sandboxes_delete,
     sandboxes_fork,
     sandboxes_get,
@@ -201,12 +202,14 @@ class AsyncSandbox:
             if self.state == "ready":
                 return self
             if self.state in FAILED_STATES:
+                error = self.data.error.to_dict() if hasattr(self.data.error, "to_dict") else {}
+                capacity = error.get("code") == "out_of_capacity"
                 raise SandboxFailedError(
-                    status=409,
-                    code="sandbox_failed",
+                    status=503 if capacity else 409,
+                    code="out_of_capacity" if capacity else "sandbox_failed",
                     message=f"sandbox {self.slug} is {self.state}, not ready",
-                    retryable=False,
-                    details={"state": self.state, "sandboxId": self.id},
+                    retryable=capacity,
+                    details={"state": self.state, "sandboxId": self.id, "error": error},
                 )
 
     async def wait_for_operation(
@@ -323,22 +326,34 @@ class AsyncSandbox:
         self.data = action.sandbox
         return await self._after(action.operation, wait, wait_timeout, retry_budget)
 
+    async def cancel_start(self, *, retry_budget: float | None = None) -> Operation:
+        """Cancel a start while it is waiting for capacity."""
+        action = await self.core.call(sandboxes_cancel_start, self.id, retry_budget=retry_budget)
+        self.data = action.sandbox
+        return action.operation
+
     async def resume(
         self,
         input: Mapping[str, Any] | Any = None,
         *,
+        capacity_wait_seconds: int | None = None,
         wait: bool = False,
         wait_timeout: float | None = None,
         retry_budget: float | None = None,
     ) -> Operation:
         """Resumes a stopped sandbox (``wait``: until it is ready)."""
+        body = input.to_dict() if hasattr(input, "to_dict") else dict(input or {})
+        if capacity_wait_seconds is not None:
+            body["capacityWaitSeconds"] = capacity_wait_seconds
         action = await self.core.call(
-            sandboxes_resume, self.id, body=body_of(input), retry_budget=retry_budget
+            sandboxes_resume, self.id, body=body_of(body), retry_budget=retry_budget
         )
         self.data = action.sandbox
         if wait:
             await self.wait_until_ready(
-                timeout=READY_TIMEOUT if wait_timeout is None else wait_timeout,
+                timeout=READY_TIMEOUT + body.get("capacityWaitSeconds", 0)
+                if wait_timeout is None
+                else wait_timeout,
                 retry_budget=retry_budget,
             )
         return action.operation
@@ -347,6 +362,7 @@ class AsyncSandbox:
         self,
         input: Mapping[str, Any] | Any = None,
         *,
+        capacity_wait_seconds: int | None = None,
         wait: bool = False,
         wait_timeout: float | None = None,
         retry_budget: float | None = None,
@@ -362,10 +378,11 @@ class AsyncSandbox:
         takes the snapshot and starts it again; the fork operation's
         ``force_stop`` reports the restart. Ignored for Linux and for a
         stopped sandbox."""
-        body = input
+        body = input.to_dict() if hasattr(input, "to_dict") else dict(input or {})
         if force_stop is not None:
-            body = input.to_dict() if hasattr(input, "to_dict") else dict(input or {})
             body["forceStop"] = force_stop
+        if capacity_wait_seconds is not None:
+            body["capacityWaitSeconds"] = capacity_wait_seconds
         fork = await self.core.call(
             sandboxes_fork,
             self.id,
@@ -376,7 +393,9 @@ class AsyncSandbox:
         copy = AsyncSandbox(self.core, fork.sandbox)
         if wait:
             await copy.wait_until_ready(
-                timeout=READY_TIMEOUT if wait_timeout is None else wait_timeout,
+                timeout=READY_TIMEOUT + body.get("capacityWaitSeconds", 0)
+                if wait_timeout is None
+                else wait_timeout,
                 retry_budget=retry_budget,
             )
         return copy

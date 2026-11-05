@@ -300,7 +300,7 @@ describe("(b) scope filter", () => {
 		});
 		const listed = await names(hh);
 		const hidden = ["snapshot_save", "snapshot_delete", ...DESKTOP_TOOLS];
-		expect(listed).toHaveLength(38 - hidden.length);
+		expect(listed).toHaveLength(39 - hidden.length);
 		for (const n of hidden) expect(listed, n).not.toContain(n);
 		for (const n of ["port_expose", "port_unexpose", "snapshot_list"]) {
 			expect(listed, n).toContain(n);
@@ -332,7 +332,7 @@ describe("(b) scope filter", () => {
 			},
 		});
 		const listed = await names(hh);
-		expect(listed).toHaveLength(36);
+		expect(listed).toHaveLength(37);
 		expect(listed).not.toContain("port_expose");
 		expect(listed).not.toContain("port_unexpose");
 		expect(listed).toContain("port_list");
@@ -368,7 +368,7 @@ describe("(b) scope filter", () => {
 		});
 		const ci = await http.connect("umiak_ci");
 		const ciNames = (await ci.client.listTools()).tools.map((t) => t.name);
-		expect(ciNames).toHaveLength(26);
+		expect(ciNames).toHaveLength(27);
 		expect(ciNames).not.toContain("snapshot_save");
 		expect(ciNames).not.toContain("computer_screenshot");
 		await expect(
@@ -377,7 +377,7 @@ describe("(b) scope filter", () => {
 
 		const np = await http.connect("umiak_noports");
 		const npNames = (await np.client.listTools()).tools.map((t) => t.name);
-		expect(npNames).toHaveLength(36);
+		expect(npNames).toHaveLength(37);
 		expect(npNames).not.toContain("port_expose");
 		await expect(
 			np.client.callTool({

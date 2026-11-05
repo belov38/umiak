@@ -200,6 +200,17 @@ const slugField = z.string().optional().openapi({
 
 export const CreateSandboxRequest = z
 	.strictObject({
+		capacityWaitSeconds: z
+			.number()
+			.int()
+			.min(0)
+			.max(604800)
+			.optional()
+			.openapi({
+				description:
+					"Wait for capacity in the durable per-team FIFO queue, in seconds (default 0: fail immediately)",
+			}),
+
 		template: z.string().optional().openapi({
 			description:
 				"Template slug (GET /v1/templates); `windows-desktop` is a compatibility alias for `windows`; ignored with `from`",
@@ -267,6 +278,17 @@ export const UpdateSandboxRequest = z
 
 export const ResumeSandboxRequest = z
 	.strictObject({
+		capacityWaitSeconds: z
+			.number()
+			.int()
+			.min(0)
+			.max(604800)
+			.optional()
+			.openapi({
+				description:
+					"Wait for capacity in the durable per-team FIFO queue, in seconds (default 0: fail immediately)",
+			}),
+
 		size: z.string().optional().openapi({
 			description: "Another size allowed for the template",
 		}),
@@ -280,6 +302,17 @@ export const ResumeSandboxRequest = z
 
 export const ForkSandboxRequest = z
 	.strictObject({
+		capacityWaitSeconds: z
+			.number()
+			.int()
+			.min(0)
+			.max(604800)
+			.optional()
+			.openapi({
+				description:
+					"Wait for capacity in the durable per-team FIFO queue, in seconds (default 0: fail immediately)",
+			}),
+
 		name: nameField,
 		slug: slugField,
 		labels: Labels.optional().openapi({

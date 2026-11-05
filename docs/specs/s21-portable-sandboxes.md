@@ -1,7 +1,7 @@
 # S21: Portable templates, cold moves and capacity waits
 
-Status: template replication and cold moves implemented; capacity waits in progress. Supersedes S19 locality only when the S21
-transfer and admission paths are enabled; existing paths remain local until then.
+Status: implemented; local verification recorded in the plan. Live acceptance
+on pve/pve2 remains with the coordinator. Replaces the S19 local-only rule.
 
 ## Decisions
 
@@ -74,12 +74,13 @@ capacity wait; `create --wait` keeps ready-wait compatibility. Both commands als
 accept `--capacity-wait 100m` and `--wait-ready` explicitly. Document the legacy
 asymmetry in help. Timeout returns existing retryable `out_of_capacity`.
 
-Persist queue tickets, arrival order per team, deadline, sanitized request and
+Persist queue tickets with operation/team IDs, arrival order and deadline. The
+existing operation and encrypted sandbox secret storage retain the request and
 idempotency identity; never persist raw secrets in a ticket. Queued work consumes
 no node RAM, but enforce current quota again at admission. Team FIFO uses a team
 lock: later tickets cannot bypass a blocked head. Different teams make progress
-independently. Stop/cleanup/autostop wake the scheduler; periodic reconciliation
-recovers lost wakeups. Queued sandbox/operation status is visible, cancellation
+independently. A one-second controller observes RAM freed by stop/cleanup/autostop; an immediate
+queue notification on enqueue and the pg-boss cron recover lost wakeups. Queued sandbox/operation status is visible, cancellation
 and delete are idempotent. Restart never resets a deadline or creates a duplicate
 sandbox. Admission reservation and ticket completion are one transaction.
 
@@ -91,3 +92,44 @@ cancel, concurrent reservations and stale template replicas. Run mise pnpm
 build/test/lint/typecheck, node-agent Go tests/vet/lint, installer pytest/ruff.
 No access to live hosts during implementation. Live acceptance belongs to the
 coordinator after fresh installation; the plan lists required scenarios.
+
+## Client contract
+
+```sh
+umiak start <sandbox> --wait 100m
+umiak resume <sandbox> --capacity-wait 100m --wait-ready
+umiak create --template linux --capacity-wait 100m --wait-ready
+umiak create --from <saved-snapshot> --capacity-wait 100m --wait-ready
+umiak fork <sandbox> --capacity-wait 100m --wait-ready
+umiak cancel-start <sandbox>
+```
+
+`create/resume/fork --wait` remains a boolean readiness wait; `start --wait`
+requires a capacity duration and waits for ready too. `--wait-ready` and
+`--capacity-wait` are explicit on all four commands. `--wait-timeout` overrides
+the client timeout; by default capacity wait adds to the five-minute boot budget.
+A client timeout/disconnect does not cancel the durable server request.
+
+POST `/v1/sandboxes` and `/v1/sandboxes/{sandbox}/resume|fork` accept
+`capacityWaitSeconds`. POST `/v1/sandboxes/{sandbox}/cancel-start` returns
+`{sandbox, operation}` (202) and is repeatable for an already cancelled ticket.
+After admission cancellation returns `invalid_state`; use stop/delete instead.
+TypeScript uses `create/resume/fork({capacityWaitSeconds:6000}, {wait:true})`
+and `sandbox.cancelStart()`. Python accepts `capacity_wait_seconds=6000`,
+`wait=True`, and `sandbox.cancel_start()` in both sync/async facades. MCP uses
+`capacity_wait_seconds` on `sandbox_create/resume/fork`, and
+`sandbox_cancel_start`. MCP's `wait_seconds` bounds only the tool call.
+
+Public states `queued` and `moving` derive from the active operation; internal
+lifecycle states remain `creating/starting`. Queued work holds no RAM or VMID.
+Quotas are checked at submission and admission; quota changes may hold the FIFO
+head until expiry. Queue timeout fails the operation with retryable
+`out_of_capacity`; a resume returns to stopped, an unadmitted create to error
+(with no VM), so it can be inspected/deleted. Cancellation behaves similarly
+with `cancelled` and never starts later. A fork's source snapshot may be prepared
+while its child waits; cancellation safely cleans the temporary snapshot.
+
+PVE config relocation follows the upstream
+[`PVE::AbstractConfig` lock/config move helpers](https://raw.githubusercontent.com/proxmox/pve-guest-common/master/src/PVE/AbstractConfig.pm).
+The bounded copy heartbeat uses an inactivity budget; completion restores the
+normal OS-specific boot deadline.

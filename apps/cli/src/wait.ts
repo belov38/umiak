@@ -56,10 +56,13 @@ export async function waitForState(
 		if (sb.state === target) return sb;
 		if (FAILED[target].has(sb.state)) {
 			throw new SandboxFailedError({
-				status: 409,
-				code: "sandbox_failed",
+				status: sb.error?.code === "out_of_capacity" ? 503 : 409,
+				code:
+					sb.error?.code === "out_of_capacity"
+						? "out_of_capacity"
+						: "sandbox_failed",
 				message: `sandbox ${sb.slug} is ${sb.state}, not ${target}${sb.error ? `: ${sb.error.message}` : ""}`,
-				retryable: false,
+				retryable: sb.error?.code === "out_of_capacity",
 				details: { state: sb.state, sandboxId: sb.id, error: sb.error },
 			});
 		}
@@ -95,7 +98,10 @@ async function poll(
 			params: {
 				path: { sandbox: sb.id },
 				query: {
-					waitFor: STATES.filter((s) => s !== sb.state).join(","),
+					waitFor:
+						sb.state === "queued" || sb.state === "moving"
+							? "ready,stopped"
+							: STATES.filter((s) => s !== sb.state).join(","),
 					waitSeconds,
 				},
 			},

@@ -3,8 +3,10 @@ import { checkQuota } from "../capacity.ts";
 import { operationDeadline } from "../deadlines.ts";
 import {
 	idempotencyKeyReused,
+	isUmiakError,
 	notFound,
 	operationInProgress,
+	outOfCapacity,
 	type ValidationIssue,
 	validation,
 } from "../errors.ts";
@@ -19,6 +21,11 @@ import {
 } from "../secrets.ts";
 import { validateSlug } from "../slug.ts";
 import { sandboxNext } from "../states.ts";
+import {
+	checkCapacityWait,
+	enqueueCapacityWait,
+	teamHasQueuedStarts,
+} from "./capacity-wait.ts";
 import {
 	activeOperation,
 	buildOs,
@@ -63,6 +70,7 @@ import {
 // (the fork schedules it when the snapshot is ready).
 
 export interface ForkInput extends SecretPatch {
+	capacityWaitSeconds?: number;
 	name?: string | null;
 	slug?: string;
 	/** Default: the source's labels. */
@@ -92,6 +100,7 @@ export interface ForkResult {
 export const FORK_SCOPE = "sandboxes.fork";
 
 const FORK_KEYS = [
+	"capacityWaitSeconds",
 	"name",
 	"slug",
 	"labels",
@@ -109,6 +118,7 @@ function validateForkInput(input: ForkInput): void {
 		throw validation([{ path: "", message: "must be an object" }]);
 	}
 	const issues: ValidationIssue[] = [];
+	checkCapacityWait(input.capacityWaitSeconds, issues);
 	checkKnownKeys(input as Record<string, unknown>, FORK_KEYS, issues);
 	if (input.name !== undefined) checkName("name", input.name, issues);
 	if (input.labels !== undefined) checkLabels("labels", input.labels, issues);
@@ -247,19 +257,37 @@ export async function forkSandbox(
 		// As create (§8.4): the fork's new disks go to the source's storage,
 		// which must be below its thresholds on an active node (a draining
 		// node takes no new machines, forks included).
-		const destination = await admitPortable(
-			tx,
-			deps,
-			{
-				nodeId: src.node_id,
-				storageId: srcMachine.storageId,
-				providerId: src.provider_id,
-				templateBuildId: src.template_build_id,
-				templateSlug: src.template_slug,
-			},
-			`${src.template_slug}/${size.slug}`,
-			size.memoryMb,
-		);
+		let queued = false;
+		let destination = {
+			nodeId: src.node_id,
+			storageId: srcMachine.storageId,
+			providerId: src.provider_id,
+			templateBuildId: src.template_build_id,
+		};
+		try {
+			if (await teamHasQueuedStarts(tx, p.teamId)) throw outOfCapacity(30);
+
+			destination = await admitPortable(
+				tx,
+				deps,
+				{
+					nodeId: src.node_id,
+					storageId: srcMachine.storageId,
+					providerId: src.provider_id,
+					templateBuildId: src.template_build_id,
+					templateSlug: src.template_slug,
+				},
+				`${src.template_slug}/${size.slug}`,
+				size.memoryMb,
+			);
+		} catch (error) {
+			if (
+				!isUmiakError(error, "out_of_capacity") ||
+				!(input.capacityWaitSeconds && input.capacityWaitSeconds > 0)
+			)
+				throw error;
+			queued = true;
+		}
 
 		const labels: Record<string, string> = input.labels ?? src.labels ?? {};
 		const slug = await insertSandboxRow(tx, deps, input.slug, {
@@ -302,6 +330,12 @@ export async function forkSandbox(
 				targetId,
 			],
 		);
+		if (queued)
+			await tx.client.query(
+				"UPDATE runtime.machines SET state='stopped',power_observed='stopped' WHERE id=$1",
+				[machineId],
+			);
+
 		await writeSandboxSecrets(tx, deps.keys, targetId, sets);
 
 		await insertOperation(tx, {
@@ -338,6 +372,15 @@ export async function forkSandbox(
 			deadlineMs: null,
 			parentOperationId: forkOpId,
 		});
+		if (queued)
+			await enqueueCapacityWait(
+				tx,
+				deps.jobs,
+				p.teamId,
+				createOpId,
+				input.capacityWaitSeconds ?? 0,
+			);
+
 		await insertSandboxEvent(tx, {
 			sandboxId: targetId,
 			type: "state_changed",

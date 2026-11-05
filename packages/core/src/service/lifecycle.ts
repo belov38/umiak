@@ -4,7 +4,9 @@ import { checkQuota, QUOTA_ACTIVE_SANDBOX_STATES } from "../capacity.ts";
 import { operationDeadline } from "../deadlines.ts";
 import {
 	invalidState,
+	isUmiakError,
 	operationInProgress,
+	outOfCapacity,
 	recoverRateLimited,
 	type ValidationIssue,
 	validation,
@@ -23,6 +25,11 @@ import {
 	type SandboxState,
 	sandboxNext,
 } from "../states.ts";
+import {
+	checkCapacityWait,
+	enqueueCapacityWait,
+	teamHasQueuedStarts,
+} from "./capacity-wait.ts";
 import {
 	activeOperation,
 	buildOs,
@@ -62,6 +69,7 @@ import {
 export type StopRequestReason = "user" | "ttl" | "idle";
 
 export interface ResumeInput extends SecretPatch {
+	capacityWaitSeconds?: number;
 	/** A size allowed for the sandbox's template; admission uses its RAM. */
 	size?: string;
 	/** Replaces `ttl_seconds` (null removes the TTL); the worker sets the deadline at ready. */
@@ -70,7 +78,14 @@ export interface ResumeInput extends SecretPatch {
 
 export const RESUME_SCOPE = "sandboxes.resume";
 
-const RESUME_KEYS = ["size", "ttlSeconds", "env", "secrets", "secretFiles"];
+const RESUME_KEYS = [
+	"capacityWaitSeconds",
+	"size",
+	"ttlSeconds",
+	"env",
+	"secrets",
+	"secretFiles",
+];
 
 /** Machine states whose RAM is already reserved (no admission for recover). */
 function machineReserved(m: MachineInfo): boolean {
@@ -195,6 +210,7 @@ function validateResumeInput(input: ResumeInput): SecretPatch | null {
 		throw validation([{ path: "", message: "must be an object" }]);
 	}
 	const issues: ValidationIssue[] = [];
+	checkCapacityWait(input.capacityWaitSeconds, issues);
 	checkKnownKeys(input as Record<string, unknown>, RESUME_KEYS, issues);
 	if (input.size !== undefined) checkString("size", input.size, issues);
 	if (input.ttlSeconds !== undefined) {
@@ -290,19 +306,37 @@ export async function resumeSandbox(
 			addSandboxes: 1,
 			addRamMb: size.memoryMb,
 		});
-		const destination = await admitPortable(
-			tx,
-			deps,
-			{
-				nodeId: row.node_id,
-				storageId: machine.storageId,
-				providerId: row.provider_id,
-				templateBuildId: row.template_build_id,
-				templateSlug: row.template_slug,
-			},
-			`${row.template_slug}/${size.slug}`,
-			size.memoryMb,
-		);
+		let queued = false;
+		let destination = {
+			nodeId: row.node_id,
+			storageId: machine.storageId,
+			providerId: row.provider_id,
+			templateBuildId: row.template_build_id,
+		};
+		try {
+			if (await teamHasQueuedStarts(tx, p.teamId)) throw outOfCapacity(30);
+
+			destination = await admitPortable(
+				tx,
+				deps,
+				{
+					nodeId: row.node_id,
+					storageId: machine.storageId,
+					providerId: row.provider_id,
+					templateBuildId: row.template_build_id,
+					templateSlug: row.template_slug,
+				},
+				`${row.template_slug}/${size.slug}`,
+				size.memoryMb,
+			);
+		} catch (error) {
+			if (
+				!isUmiakError(error, "out_of_capacity") ||
+				!(input.capacityWaitSeconds && input.capacityWaitSeconds > 0)
+			)
+				throw error;
+			queued = true;
+		}
 
 		if (size.slug !== row.size_slug || size.memoryMb !== machine.memoryMb) {
 			// The machine row is the reservation (RESERVED_SQL counts its
@@ -344,6 +378,17 @@ export async function resumeSandbox(
 			to,
 			reason: "resume",
 		});
+		if (queued) {
+			await enqueueCapacityWait(
+				tx,
+				deps.jobs,
+				row.team_id,
+				operation.id,
+				input.capacityWaitSeconds ?? 0,
+			);
+			return mustLoadOperation(tx.client, operation.id);
+		}
+
 		if (destination.nodeId !== row.node_id) {
 			await tx.client.query(
 				"INSERT INTO runtime.move_reservations(machine_id,operation_id,node_id,storage_id,memory_mb) VALUES($1,$2,$3,$4,$5)",

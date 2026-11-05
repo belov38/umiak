@@ -43,7 +43,10 @@ def backup(identity, release):
     BASE.chmod(0o700)
     target = BASE / identity
     paths = {name: volume_path(name) for name in VOLUMES}
-    size = int(subprocess.check_output(COMPOSE + ["exec", "-T", "postgres", "psql", "-U", "umiak", "-d", "umiak", "-Atc", "SELECT pg_database_size(current_database())"], text=True).strip())
+    size = int(subprocess.check_output(
+        COMPOSE + ["exec", "-T", "postgres", "psql", "-U", "umiak", "-d", "umiak", "-Atc",
+                   "SELECT pg_database_size(current_database())"], text=True,
+    ).strip())
     size += sum(p.stat().st_size for root in paths.values() for p in root.rglob("*") if p.is_file())
     # Conservative: an uncompressed dump + state tar and headroom for recovery.
     if shutil.disk_usage(BASE).free < size * 2 + 512 * 1024 * 1024:
@@ -110,7 +113,10 @@ def restore(identity, restore_data):
         run(COMPOSE + ["exec", "-T", "postgres", "dropdb", "-U", "umiak", "--force", "--if-exists", "umiak"], stdout=sys.stderr)
         run(COMPOSE + ["exec", "-T", "postgres", "createdb", "-U", "umiak", "umiak"], stdout=sys.stderr)
         with (target / "database.dump").open("rb") as source:
-            run(COMPOSE + ["exec", "-T", "postgres", "pg_restore", "-U", "umiak", "-d", "umiak", "--exit-on-error"], stdin=source, stdout=sys.stderr)
+            run(
+                COMPOSE + ["exec", "-T", "postgres", "pg_restore", "-U", "umiak", "-d", "umiak", "--exit-on-error"],
+                stdin=source, stdout=sys.stderr,
+            )
     run(COMPOSE + ["up", "-d"], stdout=sys.stderr)
     return metadata
 

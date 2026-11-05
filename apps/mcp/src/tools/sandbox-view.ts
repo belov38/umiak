@@ -18,10 +18,16 @@ export interface OperationView {
 	id: string;
 	kind: string;
 	state: string;
+	progress?: OperationData["progress"];
 }
 
 export function operationView(op: OperationData): OperationView {
-	return { id: op.id, kind: op.kind, state: op.state };
+	return {
+		id: op.id,
+		kind: op.kind,
+		state: op.state,
+		...(op.progress ? { progress: op.progress } : {}),
+	};
 }
 
 /**
@@ -205,9 +211,14 @@ function operationNow(
 	target: WaitTarget | undefined,
 ): OperationView {
 	const view = operationView(op);
-	if (op.state !== "pending" && op.state !== "running") return view;
+	if (op.state !== "pending" && op.state !== "running" && op.state !== "queued")
+		return view;
 	if (target !== undefined && s.state === target) view.state = "succeeded";
-	else if (s.state === "error") view.state = "failed";
+	else if (
+		s.state === "error" ||
+		(s.state === "stopped" && s.error?.code === "out_of_capacity")
+	)
+		view.state = "failed";
 	return view;
 }
 
@@ -240,7 +251,11 @@ export function sandboxResult(
 	lines.push(...(o.notes ?? []));
 	const result = toolText(header, lines.length > 0 ? [lines.join("\n")] : []);
 	// A failed wait is an error of the call; reading a failed sandbox is not.
-	return s.state === "error" && o.target !== undefined
+	return (s.state === "error" ||
+		(s.state === "stopped" &&
+			s.error?.code === "out_of_capacity" &&
+			o.target === "ready")) &&
+		o.target !== undefined
 		? { ...result, isError: true }
 		: result;
 }

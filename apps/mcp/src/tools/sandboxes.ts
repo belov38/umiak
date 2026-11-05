@@ -38,6 +38,15 @@ import { compact } from "./view.ts";
 
 /** `get` waits this long when `wait_for` is given and `wait_seconds` is not. */
 const GET_WAIT_SECONDS = 30;
+const capacityWaitShape = z
+	.number()
+	.int()
+	.min(0)
+	.max(604800)
+	.optional()
+	.describe(
+		"Queue timeout in seconds (0: fail immediately). Separate from wait_seconds.",
+	);
 
 const READ_ONLY = {
 	readOnlyHint: true,
@@ -138,7 +147,8 @@ async function refreshOperation(
 	ctx: ToolContext,
 	op: OperationData,
 ): Promise<OperationData> {
-	const active = op.state === "pending" || op.state === "running";
+	const active =
+		op.state === "pending" || op.state === "running" || op.state === "queued";
 	try {
 		const r = await ctx.umiak().raw.GET("/v1/operations/{operation}", {
 			params: {
@@ -185,6 +195,7 @@ export const sandboxCreate = defineTool({
 	sandboxArg: false,
 	hiddenWhenPinned: true,
 	shape: {
+		capacity_wait_seconds: capacityWaitShape,
 		template: z
 			.string()
 			.optional()
@@ -227,6 +238,7 @@ export const sandboxCreate = defineTool({
 			environment: args.environment,
 			excludeOwnerSecrets: args.exclude_owner_secrets,
 			ttlSeconds: args.ttl_seconds,
+			capacityWaitSeconds: args.capacity_wait_seconds,
 			idleTimeoutSeconds: args.idle_timeout_seconds,
 			from:
 				args.from_snapshot === undefined
@@ -254,7 +266,7 @@ export const sandboxList = defineTool({
 	name: "sandbox_list",
 	title: "List sandboxes",
 	description:
-		"Lists the team's sandboxes, newest first, one page per call; pass next_cursor as cursor for the next page. Filter by labels (created-via=mcp) to find your own.",
+		"Lists sandboxes newest first. Page with next_cursor; filter labels (created-via=mcp) to find yours.",
 	toolset: "core",
 	scopes: ["sandboxes:read"],
 	annotations: READ_ONLY,
@@ -325,7 +337,7 @@ export const sandboxGet = defineTool({
 	name: "sandbox_get",
 	title: "Get a sandbox",
 	description:
-		"Shows one sandbox (state, health, labels, deadline, running operation, error, endpoints). With wait_for (ready or stopped) it first waits up to wait_seconds (default 30). State error: sandbox_recover or sandbox_delete.",
+		"Shows state, health, labels, operation, errors and endpoints. wait_for=ready|stopped waits up to wait_seconds (default 30).",
 	toolset: "core",
 	scopes: ["sandboxes:read"],
 	annotations: READ_ONLY,
@@ -418,7 +430,7 @@ export const sandboxStop = defineTool({
 	name: "sandbox_stop",
 	title: "Stop a sandbox",
 	description:
-		"Stops a sandbox: processes end, the disk is kept, it stops counting against the quota. Answers at once unless wait=true. Start it again with sandbox_resume.",
+		"Stops processes, keeps disk, frees RAM. Answers at once unless wait=true; restart with sandbox_resume.",
 	toolset: "core",
 	scopes: ["sandboxes:write"],
 	annotations: REPEATABLE_WRITE,
@@ -441,12 +453,13 @@ export const sandboxResume = defineTool({
 	name: "sandbox_resume",
 	title: "Resume a sandbox",
 	description:
-		"Starts a stopped (or errored) sandbox again with its disk and waits until it is ready. If not ready in time, call sandbox_get with wait_for=ready and wait_seconds=50.",
+		"Starts a stopped sandbox with its disk. To continue waiting: sandbox_get(wait_for=ready, wait_seconds=50).",
 	toolset: "core",
 	scopes: ["sandboxes:write"],
 	annotations: REPEATABLE_WRITE,
 	sandboxArg: true,
 	shape: {
+		capacity_wait_seconds: capacityWaitShape,
 		env: envShape,
 		unset_env: unsetEnvShape,
 		size: z.string().optional().describe("Another size slug (templates_list)"),
@@ -460,6 +473,7 @@ export const sandboxResume = defineTool({
 				env: envPatch(args.env, args.unset_env),
 				size: args.size,
 				ttlSeconds: args.ttl_seconds,
+				capacityWaitSeconds: args.capacity_wait_seconds,
 			}),
 			...ctx.call,
 		});
@@ -482,6 +496,7 @@ export const sandboxFork = defineTool({
 	sandboxArg: true,
 	hiddenWhenPinned: true,
 	shape: {
+		capacity_wait_seconds: capacityWaitShape,
 		name: nameShape,
 		slug: slugShape,
 		labels: labelsShape,
@@ -510,6 +525,7 @@ export const sandboxFork = defineTool({
 			env: envPatch(args.env, args.unset_env),
 			size: args.size,
 			ttlSeconds: args.ttl_seconds,
+			capacityWaitSeconds: args.capacity_wait_seconds,
 			idleTimeoutSeconds: args.idle_timeout_seconds,
 			forceStop: args.force_stop,
 		});
@@ -595,6 +611,27 @@ export const sandboxDelete = defineTool({
 	},
 });
 
+export const sandboxCancelStart = defineTool({
+	name: "sandbox_cancel_start",
+	title: "Cancel a queued start",
+	description:
+		"Cancels a start waiting for capacity. Once admitted, use sandbox_stop or sandbox_delete.",
+	toolset: "core",
+	scopes: ["sandboxes:write"],
+	annotations: REPEATABLE_WRITE,
+	sandboxArg: true,
+	shape: {},
+	async handler(args, ctx) {
+		const { data } = await ctx
+			.umiak()
+			.raw.POST(`${SANDBOX_PATH}/cancel-start`, {
+				params: { path: { sandbox: args.sandbox } },
+				...ctx.call,
+			});
+		return sandboxResult(data.sandbox, { operation: data.operation });
+	},
+});
+
 export const SANDBOX_TOOLS = [
 	sandboxCreate,
 	sandboxList,
@@ -602,6 +639,7 @@ export const SANDBOX_TOOLS = [
 	sandboxUpdate,
 	sandboxStop,
 	sandboxResume,
+	sandboxCancelStart,
 	sandboxFork,
 	sandboxRecover,
 	sandboxDelete,

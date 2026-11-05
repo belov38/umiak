@@ -15,6 +15,7 @@ import {
 	validateSecretSets,
 } from "../secrets.ts";
 import { validateSlug } from "../slug.ts";
+import { checkCapacityWait } from "./capacity-wait.ts";
 import type { SandboxServiceDeps } from "./common.ts";
 import {
 	checkKnownKeys,
@@ -28,6 +29,7 @@ import {
 // Input of create (S7 §8.2): shape checks, template/size and duration defaults.
 
 export interface CreateInput {
+	capacityWaitSeconds?: number;
 	template?: string;
 	size?: string;
 	name?: string | null;
@@ -55,6 +57,7 @@ export interface CreateInput {
 }
 
 const CREATE_KEYS: readonly (keyof CreateInput)[] = [
+	"capacityWaitSeconds",
 	"template",
 	"size",
 	"name",
@@ -78,6 +81,7 @@ export function validateCreateInput(input: CreateInput): SecretSets {
 		throw validation([{ path: "", message: "must be an object" }]);
 	}
 	const issues: ValidationIssue[] = [];
+	checkCapacityWait(input.capacityWaitSeconds, issues);
 	checkKnownKeys(input as Record<string, unknown>, CREATE_KEYS, issues);
 	if (input.template !== undefined)
 		checkString("template", input.template, issues);

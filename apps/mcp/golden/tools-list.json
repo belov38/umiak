@@ -40,6 +40,12 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
+          "capacity_wait_seconds": {
+            "description": "Queue timeout in seconds (0: fail immediately). Separate from wait_seconds.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 604800
+          },
           "template": {
             "description": "Slug: linux (default), linux-desktop, windows (desktop; alias windows-desktop). Ignored with from_snapshot",
             "type": "string"
@@ -122,7 +128,7 @@
     {
       "name": "sandbox_list",
       "title": "List sandboxes",
-      "description": "Lists the team's sandboxes, newest first, one page per call; pass next_cursor as cursor for the next page. Filter by labels (created-via=mcp) to find your own.",
+      "description": "Lists sandboxes newest first. Page with next_cursor; filter labels (created-via=mcp) to find yours.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -169,7 +175,7 @@
     {
       "name": "sandbox_get",
       "title": "Get a sandbox",
-      "description": "Shows one sandbox (state, health, labels, deadline, running operation, error, endpoints). With wait_for (ready or stopped) it first waits up to wait_seconds (default 30). State error: sandbox_recover or sandbox_delete.",
+      "description": "Shows state, health, labels, operation, errors and endpoints. wait_for=ready|stopped waits up to wait_seconds (default 30).",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -261,7 +267,7 @@
     {
       "name": "sandbox_stop",
       "title": "Stop a sandbox",
-      "description": "Stops a sandbox: processes end, the disk is kept, it stops counting against the quota. Answers at once unless wait=true. Start it again with sandbox_resume.",
+      "description": "Stops processes, keeps disk, frees RAM. Answers at once unless wait=true; restart with sandbox_resume.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -296,7 +302,7 @@
     {
       "name": "sandbox_resume",
       "title": "Resume a sandbox",
-      "description": "Starts a stopped (or errored) sandbox again with its disk and waits until it is ready. If not ready in time, call sandbox_get with wait_for=ready and wait_seconds=50.",
+      "description": "Starts a stopped sandbox with its disk. To continue waiting: sandbox_get(wait_for=ready, wait_seconds=50).",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -305,6 +311,12 @@
             "type": "string",
             "minLength": 1,
             "description": "Sandbox id (sb_...) or slug; prefer the id"
+          },
+          "capacity_wait_seconds": {
+            "description": "Queue timeout in seconds (0: fail immediately). Separate from wait_seconds.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 604800
           },
           "env": {
             "description": "Environment variables, name -> value; non-secret values only (arguments appear in client logs)",
@@ -353,6 +365,31 @@
       }
     },
     {
+      "name": "sandbox_cancel_start",
+      "title": "Cancel a queued start",
+      "description": "Cancels a start waiting for capacity. Once admitted, use sandbox_stop or sandbox_delete.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "sandbox": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Sandbox id (sb_...) or slug; prefer the id"
+          }
+        },
+        "required": [
+          "sandbox"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
       "name": "sandbox_fork",
       "title": "Fork a sandbox",
       "description": "Copies a sandbox (disk, settings) to a new one, waits for ready. Overrides as in sandbox_create; env, unset_env merge onto source's.",
@@ -364,6 +401,12 @@
             "type": "string",
             "minLength": 1,
             "description": "Sandbox id (sb_...) or slug; prefer the id"
+          },
+          "capacity_wait_seconds": {
+            "description": "Queue timeout in seconds (0: fail immediately). Separate from wait_seconds.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 604800
           },
           "name": {
             "description": "Display name",

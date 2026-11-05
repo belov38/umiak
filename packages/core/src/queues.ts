@@ -14,6 +14,7 @@ export const QUEUE_NAMES = [
 	"ctl-autostop",
 	"ctl-reconcile",
 	"ctl-cleanup",
+	"ctl-start-queue",
 ] as const;
 export type QueueName = (typeof QUEUE_NAMES)[number];
 
@@ -96,6 +97,7 @@ export const QUEUES = {
 	"ctl-autostop": CONTROLLER,
 	"ctl-reconcile": CONTROLLER,
 	"ctl-cleanup": CONTROLLER,
+	"ctl-start-queue": CONTROLLER,
 } as const satisfies Record<QueueName, QueueOptions>;
 
 /** Dead-letter targets first: pg-boss requires them to exist. */

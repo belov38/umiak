@@ -80,6 +80,7 @@ export function SandboxHeader({
 	const router = useRouter();
 	const refreshAll = useRefreshSandboxes(teamId);
 	const [busy, setBusy] = useState(false);
+	const [capacityWait, setCapacityWait] = useState("0");
 	const [dialog, setDialog] = useState<
 		null | "rename" | "extend" | "snapshot" | "delete"
 	>(null);
@@ -139,6 +140,19 @@ export function SandboxHeader({
 					</div>
 				</div>
 				<ActionBar className="mb-4">
+					{s.state === "queued" && (
+						<Button
+							variant="outline"
+							disabled={busy}
+							onClick={() =>
+								act(`Cancelled start of ${s.slug}`, () =>
+									umiak.raw.POST("/v1/sandboxes/{sandbox}/cancel-start", path),
+								)
+							}
+						>
+							Cancel queued start
+						</Button>
+					)}
 					<Button
 						variant="ghost"
 						disabled={s.state !== "ready" || s.blocked}
@@ -168,6 +182,19 @@ export function SandboxHeader({
 							Desktop
 						</Button>
 					)}
+					{s.state === "stopped" && (
+						<NativeSelect
+							aria-label="Wait for start capacity"
+							className="border bg-background p-2 text-sm"
+							value={capacityWait}
+							onChange={(e) => setCapacityWait(e.target.value)}
+						>
+							<option value="0">Fail immediately</option>
+							<option value="600">Wait up to 10 minutes</option>
+							<option value="6000">Wait up to 100 minutes</option>
+							<option value="86400">Wait up to 1 day</option>
+						</NativeSelect>
+					)}
 					{s.state === "stopped" ? (
 						<Button
 							size="default"
@@ -177,7 +204,10 @@ export function SandboxHeader({
 								act(`Resuming ${s.slug}`, () =>
 									umiak.raw.POST("/v1/sandboxes/{sandbox}/resume", {
 										...path,
-										body: {},
+										body:
+											Number(capacityWait) > 0
+												? { capacityWaitSeconds: Number(capacityWait) }
+												: {},
 									}),
 								)
 							}

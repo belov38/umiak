@@ -132,7 +132,7 @@ describe("tool list", () => {
 			"files_stat",
 			"files_delete",
 		]);
-		expect(ALL_TOOLS.slice(16, 22).map((t) => t.name)).toEqual(
+		expect(ALL_TOOLS.slice(17, 23).map((t) => t.name)).toEqual(
 			FILE_TOOLS.map((t) => t.name),
 		);
 		const table: Record<string, [boolean, boolean, boolean, boolean]> = {
@@ -231,9 +231,7 @@ describe("tool list", () => {
 		const whole = await all.conn.client.listTools();
 		await all.close();
 		expect(whole.tools).toHaveLength(ALL_TOOLS.length);
-		expect(JSON.stringify(whole).length).toBeLessThanOrEqual(
-			Math.floor((ALL_TOOLS.length / 38) * 40_000),
-		);
+		expect(JSON.stringify(whole).length).toBeLessThanOrEqual(40_000);
 	});
 
 	it("pinned mode keeps all six without the sandbox argument", () => {
