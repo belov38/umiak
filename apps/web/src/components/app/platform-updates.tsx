@@ -1,6 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/choice";
+import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { Panel } from "@/components/ui/panel";
 
 type Policy = {
@@ -108,7 +111,7 @@ export function PlatformUpdates() {
 				Running {info.runningVersion} · {info.settings.channel}
 			</p>
 			{info.runningVersion.startsWith("dev-") && (
-				<p role="status" className="text-sm text-amber-600">
+				<p role="status" className="text-sm text-destructive">
 					Dev build: Update replaces this build with a published release.
 				</p>
 			)}
@@ -120,8 +123,8 @@ export function PlatformUpdates() {
 			)}
 			<label className="flex items-center gap-3 text-sm">
 				Channel
-				<select
-					className="rounded border bg-background p-2"
+				<NativeSelect
+					className="p-2"
 					value={policy.channel}
 					onChange={(e) =>
 						change({ channel: e.target.value as Policy["channel"] })
@@ -129,23 +132,21 @@ export function PlatformUpdates() {
 				>
 					<option value="stable">Stable</option>
 					<option value="edge">Edge</option>
-				</select>
+				</NativeSelect>
 			</label>
 			<p className="text-sm text-muted-foreground">
 				Template recipes follow this channel. Edge releases may be less
 				reliable. Changing channel takes effect on the next host check.
 			</p>
 			<label className="flex items-center gap-2 text-sm">
-				<input
-					type="checkbox"
+				<Checkbox
 					checked={policy.auto}
 					onChange={(e) => change({ auto: e.target.checked })}
 				/>
 				Automatically install platform updates
 			</label>
 			<label className="flex items-center gap-2 text-sm">
-				<input
-					type="checkbox"
+				<Checkbox
 					checked={policy.paused}
 					onChange={(e) => change({ paused: e.target.checked })}
 				/>
@@ -154,8 +155,8 @@ export function PlatformUpdates() {
 			<div className="flex flex-wrap items-center gap-3 text-sm">
 				<label>
 					From{" "}
-					<input
-						className="rounded border bg-background p-2"
+					<Input
+						className="p-2"
 						type="time"
 						required
 						value={policy.start}
@@ -164,8 +165,8 @@ export function PlatformUpdates() {
 				</label>
 				<label>
 					Until{" "}
-					<input
-						className="rounded border bg-background p-2"
+					<Input
+						className="p-2"
 						type="time"
 						required
 						value={policy.end}
@@ -203,7 +204,7 @@ export function PlatformUpdates() {
 							)}
 							{event.message && <p>{event.message}</p>}
 							{event.dataLoss && (
-								<p className="text-amber-600">
+								<p className="text-destructive">
 									Pre-update data restored; writes since the backup were lost.
 								</p>
 							)}

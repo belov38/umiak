@@ -19,7 +19,7 @@ On the node, as root, run the installer:
 curl -fsSL https://raw.githubusercontent.com/belov38/umiak/main/install.sh | sh
 ```
 
-To install a specific release, including a pre-release, set `UMIAK_VERSION` (for example `curl -fsSL https://raw.githubusercontent.com/belov38/umiak/main/install.sh | UMIAK_VERSION=0.1.0-rc.1 sh`). Without it the installer resolves GitHub's `/releases/latest`, which never points to a pre-release.
+To install a specific release, set `UMIAK_VERSION` (for example `curl -fsSL https://raw.githubusercontent.com/belov38/umiak/main/install.sh | UMIAK_VERSION=0.1.0 sh`). Otherwise the installer resolves the saved release channel, defaulting to stable.
 
 It downloads the latest release bundle, verifies it against `SHA256SUMS`, then creates the Umiak objects in Proxmox (the `umiak@pve` user and token, roles, pool `umiak`, SDN zone `umiak` with VNet `umiak0` on `10.88.0.0/24`, IPSet `umiak-gateway`, group `umiak-egress`), a restricted node-agent, and an unprivileged Debian 13 container with Docker and Tailscale. It pulls the release images from GHCR and prints a one-time claim link:
 
@@ -32,6 +32,83 @@ Open it from a device on your tailnet, claim the deployment, then finish the bro
 After the install, disable key expiry for the machine `umiak` in the Tailscale admin console (Machines → … → Disable key expiry). Otherwise the node key expires after about 180 days and the control plane drops off your tailnet. The installer prints the same reminder.
 
 Day 2: run the same command again. It shows a menu for the current state: Install, Resume install, Update, Sign in a new browser, Reset owner access, or Uninstall. For scripted runs use `--non-interactive --yes` with flags (`--action`, `--version`, `--storage`, `--ct-id`, `--ct-ip`, ...); `sh -s -- --help` lists them.
+
+## Platform and template updates
+
+There are exactly two release channels: **stable** (default, X.Y.Z) and **edge**
+(X.Y.Z-edge.YYYYMMDD.N). Stable follows GitHub latest. Edge follows the greatest
+semantic version among stable and edge releases; a stable version outranks edge
+versions with the same X.Y.Z base. Unrelated recipe releases are excluded.
+
+New installations enable automatic platform updates. Existing installations
+without saved update policy migrate to **stable with automatic updates off**;
+the installer and Settings show that automatic updates are available. A first
+upgrade uses the new installer; finish existing template builds before upgrading
+an old image that predates the maintenance fence.
+
+Select **Settings → Updates** to change channel, enable automatic installation
+(or leave notify-only mode), pause/resume platform updates, and choose a window
+in the **Proxmox host's local time**. The default is 03:00–04:00; windows may cross
+midnight. The host timer checks every 15 minutes, with up to a minute of jitter.
+The window controls when an update starts; a started transaction finishes even
+if it runs past the end of the window. A lower stable version requires an
+explicit manual Update; channel selection alone never downgrades automatically.
+Template recipes follow the platform channel and reuse the signed recipe
+verification and autonomous rollout service; their build progress and controls
+remain in Templates.
+
+To select edge during installation or a later manual Update:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/belov38/umiak/main/install.sh | sh -s -- --channel edge
+```
+
+Installer Update also accepts `--channel stable|edge`, `--auto-update on|off` and
+`--version X.Y.Z`. A manual Update uses the same backup and rollback transaction
+as automatic updates and bypasses the maintenance window and pause. A dev-<sha>
+build is identified in Settings and the installer; Update replaces it with a
+published release.
+
+The privileged updater lives on the original PVE node. The control plane stores
+only declarative policy; it receives no host root key, Docker socket or root
+command API. Another installer action holds an exclusive host lock, and an active
+template build prevents platform maintenance. A durable fence prevents new builds
+while the dashboard shows **Updating Umiak…**. Images are downloaded before that
+fence to keep maintenance short. Only control-plane services restart: sandbox VMs
+are never stopped, though gateway connections may need to reconnect.
+
+Before **every** update, writers pause while Postgres makes a logical dump and
+the small state volumes plus Compose configuration are archived. Complete backups
+carry source-release metadata and SHA256 checksums. The last three are retained
+inside the CT under `/var/lib/umiak-backups` (root-only); these are update recovery
+snapshots, not protection against loss of the entire CT. Backup failure or
+insufficient backup disk space leaves the current release in place and records a
+failure instead of applying the update.
+
+The release's database compatibility marker defaults to incompatible when
+missing. Compatible rollback restores old images/configuration and keeps database
+writes. Incompatible rollback restores the pre-update database/state as well:
+**writes made since the backup are lost**, and history explicitly records that.
+A rollback is reported only after the old stack passes health/bootstrap checks.
+A persistent host checkpoint lets the next timer or installer run recover an
+interrupted transaction. A release that rolled back is not retried automatically
+from the same source release: use manual Update to retry, or wait for a newer
+release, which remains automatic.
+
+Settings lists update history and the running version/channel. On the host,
+`journalctl -u umiak-update.service` shows diagnostics; the root-only
+`/var/lib/umiak-installer/update-history.jsonl` also survives database restoration.
+Uninstall removes the timer and service units.
+
+Maintainers publish stable/edge using the manual `release` workflow's channel
+input. Leave `db_compatible` false unless the new database is readable by all
+supported prior releases without restoration. Promote an edge release with
+`promote-release`: use the same X.Y.Z base. It copies exact image digests and
+repackages the original installer bundle, preserving its source and node-agent
+checksum. It does not rebuild images. Both workflows remain **workflow_dispatch
+only**. An optional future push-to-main trigger needs explicit owner approval;
+it would dispatch an edge build with a generated date/sequence version after
+checks, never publish stable or promote automatically.
 
 ## The model in one minute (owner)
 

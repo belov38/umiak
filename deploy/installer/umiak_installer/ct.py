@@ -37,7 +37,7 @@ DOCKER_SOURCES = (
 )
 TAILSCALE_SOURCES = f"deb [signed-by={TAILSCALE_KEY}] https://pkgs.tailscale.com/stable/debian trixie main\n"
 PACKAGES = ["docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin",
-            "tailscale", "iptables"]
+            "tailscale", "iptables", "python3"]
 APT = ["env", "DEBIAN_FRONTEND=noninteractive", "apt-get"]
 
 

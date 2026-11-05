@@ -542,7 +542,8 @@ class Flow:
         if action == "Update":
             self.step = "Choosing the release"
             console = UpdateConsole(self.runner, current)
-            settings = updater.validate_settings(console.call()["settings"])
+            update_info = console.call()
+            settings = updater.validate_settings(update_info["settings"])
             channel = args.channel or settings["channel"]
             if args.scheduled:
                 if settings["paused"]:
@@ -574,6 +575,9 @@ class Flow:
                 if not newer:
                     ui.say("Already running the newest release in this channel.")
                     return 0
+                if updater.quarantined(current.release, version, update_info.get("history", [])):
+                    ui.say("This release previously rolled back; waiting for a newer release or manual Update.")
+                    return 0
                 if not settings["auto"]:
                     console.call(record={"status": "available", "from": current.release, "to": version,
                                          "finishedAt": updater.timestamp()})
@@ -583,7 +587,11 @@ class Flow:
             else:
                 self.progress(f"Downloading release {version}")
                 bundle = download(version, self.runner.path(prepare_host.STATE_DIR) / "releases")
-            self.current = updater.run_update(self.runner, current, bundle, ui=ui, sleep=self.sleep, state_path=self.state_path)
+            try:
+                self.current = updater.run_update(self.runner, current, bundle, ui=ui, sleep=self.sleep, state_path=self.state_path)
+            except updater.UpdateSkipped as error:
+                ui.say(str(error))
+                return 0
             update_timer.install(self.runner, bundle)
             ui.say(f"Umiak is updated to {bundle.version}.")
         elif action == "Sign in a new browser":

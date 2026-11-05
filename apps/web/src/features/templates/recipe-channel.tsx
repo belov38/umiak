@@ -2,6 +2,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 type Build = {
 	id: string;
@@ -63,7 +64,7 @@ export function RecipeChannelPanel() {
 		return <p>{query.error?.message || "Loading recipe channel…"}</p>;
 	const { channel: c, builds } = query.data;
 	return (
-		<div className="space-y-3 rounded-lg border p-4">
+		<div className="space-y-3 border p-4">
 			<h2 className="font-semibold">
 				Recipe updates · {c.following || "stable"}
 			</h2>
@@ -91,7 +92,7 @@ export function RecipeChannelPanel() {
 				</Button>
 				<label>
 					Check every{" "}
-					<input
+					<Input
 						aria-label="Recipe check interval hours"
 						type="number"
 						min={1}

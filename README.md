@@ -19,6 +19,8 @@ curl -fsSL https://raw.githubusercontent.com/belov38/umiak/main/install.sh | sh
 
 The installer creates a Proxmox user, network and pool for Umiak, starts the control plane in a container and adds it to your tailnet. At the end it prints a link; open it on any device in your tailnet. Run the same command again to update, sign in from another browser or uninstall.
 
+New installs follow `stable` and update automatically; choose `edge`, pause updates or use notify-only in Settings → Updates ([guide](docs/getting-started.md#platform-and-template-updates)).
+
 Then:
 
 ```sh

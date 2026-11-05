@@ -4,6 +4,7 @@ No host mounts or credentials are added. Backup data stays root-only inside the
 CT; only bounded metadata is returned to the host. Never back up PostgreSQL's
 live data directory with tar: pg_dump provides the consistent logical snapshot.
 """
+import fcntl
 import hashlib
 import json
 import os
@@ -123,6 +124,12 @@ def retain():
 
 if __name__ == "__main__":
     os.umask(0o077)
+    BASE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    BASE.chmod(0o700)
+    # pct exec may outlive its host caller after a host interruption. A CT-local
+    # lock prevents recovery from racing a still-running backup/restore helper.
+    lock = (BASE / ".lock").open("a")
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     request = json.load(sys.stdin)
     identity = request.get("id", "")
     if request["op"] not in ("retain", "resume") and not re.fullmatch(r"[0-9]{14}-[a-f0-9]{12}", identity):

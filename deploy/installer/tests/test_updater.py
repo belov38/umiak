@@ -130,3 +130,57 @@ def test_timer_uses_target_release_installer_not_running_code(tmp_path):
     runtime = runner.path(updater.ROOT) / "runtime/1.9.0"
     assert (runtime / "umiak_installer/__main__.py").read_text() == "# next release"
     assert "runtime/1.9.0" in runner.path("/etc/systemd/system/umiak-update.service").read_text()
+
+
+def test_automatic_update_does_not_repeat_a_failed_rollout():
+    history=[{"from":"1.0.0","to":"1.1.0","status":"rolled_back"}]
+    assert updater.quarantined("1.0.0","1.1.0",history)
+    assert not updater.quarantined("1.0.0","1.2.0",history)
+
+
+@pytest.mark.parametrize("stage", ["preparing", "applying"])
+def test_restart_recovers_checkpoint_before_any_new_update(tmp_path,monkeypatch,stage):
+    import dataclasses
+    from test_state import sample
+    from umiak_installer.pve import Runner
+    runner=Runner(tmp_path)
+    path=runner.path(updater.ROOT) / "update-checkpoint.json"
+    updater.atomic_json(path,{"current":dataclasses.asdict(sample(phase="complete")),"target":"1.3.0",
+                              "stage":stage,"backup":"snapshot","restoreData":True})
+    backend=Backend()
+    backend.helper=lambda op:backend.calls.append(op)
+    monkeypatch.setattr(updater,"HostBackend",lambda *args,**kwargs:backend)
+    updater.recover(runner,ui=None,state_path=tmp_path / "state",sleep=lambda _:None)
+    if stage=="preparing":
+        assert "resume" in backend.calls
+        assert not any(isinstance(c,tuple) for c in backend.calls)
+    else:
+        assert ("rollback","snapshot",True) in backend.calls
+    assert "unfence" in backend.calls
+    assert backend.saved is None
+
+
+def test_busy_template_build_is_a_skip_without_backup_or_restart(tmp_path,monkeypatch):
+    import json
+    from test_state import sample
+    from umiak_installer import day2, release
+    from umiak_installer.pve import CommandError, Runner
+    class Fake(Runner):
+        def hostname(self):return "pve"
+        def run(self,argv,input=None):return ""
+    runner=Fake(tmp_path)
+    runner.path(day2.SECRETS_DIR).mkdir(parents=True)
+    monkeypatch.setattr(day2,"_umiak_ct",lambda *args:{"tags":"umiak"})
+    class UI:
+        def say(self,line):pass
+    backend=updater.HostBackend(runner,sample(phase="complete"),release.Release("1.3.0",tmp_path),
+                                ui=UI(),state_path=tmp_path / "state",sleep=lambda _:None)
+    class Console:
+        def call(self,op="read",**data):
+            if op=="fence":raise CommandError(["node"],1,stderr="A template build is running; skipping update")
+            return {}
+    backend.console=Console()
+    with pytest.raises(updater.UpdateSkipped):backend.fence()
+    assert not backend.path.exists()
+    history=runner.path(updater.ROOT) / "update-history.jsonl"
+    assert json.loads(history.read_text())["status"]=="skipped"
