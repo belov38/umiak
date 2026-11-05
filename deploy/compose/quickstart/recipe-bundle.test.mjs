@@ -230,7 +230,8 @@ test("retirement refuses machine, snapshot and transfer references before deleti
 		if (sql.includes("SELECT status FROM runtime.template_builds"))
 			return { rows: [{ status: "deprecated" }] };
 		if (sql.includes("UNION ALL SELECT 1 FROM runtime.snapshots")) {
-			assert.match(sql, /volume_transfers/);
+			assert.match(sql, /volume_transfers WHERE kind='template'/);
+			assert.match(sql, /phase NOT IN \('done','cancelled'\)/);
 			return { rowCount: 1, rows: [{}] };
 		}
 		if (sql.includes("INSERT") || sql.includes("UPDATE"))
