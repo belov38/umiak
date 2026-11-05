@@ -98,6 +98,11 @@ function setupInteractions() {
 			time.textContent = `at ${new Date(time.dateTime).toLocaleTimeString()}`;
 	let building = false;
 	let polling = false;
+	// A failure already rendered on page load is shown; reveal only new ones.
+	let revealedFailure =
+		$("#build-linux")?.dataset.jobStatus === "error"
+			? $("#build-linux").dataset.jobId
+			: undefined;
 	const value = (id) => $(id)?.value || "";
 	const post = async (path, data) => {
 		const response = await fetch(`/quickstart/setup/${path}`, {
@@ -185,11 +190,15 @@ function setupInteractions() {
 			plan = result.buildQueue;
 			showJob(result.buildJob);
 			showQueue();
+			// Reveal recovery once per failed job: re-opening the exclusive
+			// accordion on every poll would keep closing the step the user opened.
 			if (
 				result.buildJob?.status === "error" &&
 				!plan?.active &&
-				$("#build-recoveries")
+				$("#build-recoveries") &&
+				revealedFailure !== result.buildJob.id
 			) {
+				revealedFailure = result.buildJob.id;
 				$("#step-templates").open = true;
 				try {
 					const html = await (await fetch("/setup")).text();
