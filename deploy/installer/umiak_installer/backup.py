@@ -4,6 +4,7 @@ No host mounts or credentials are added. Backup data stays root-only inside the
 CT; only bounded metadata is returned to the host. Never back up PostgreSQL's
 live data directory with tar: pg_dump provides the consistent logical snapshot.
 """
+import hashlib
 import json
 import os
 import re
@@ -14,6 +15,7 @@ import tarfile
 from pathlib import Path
 
 BASE = Path("/var/lib/umiak-backups")
+CONFIG = Path("/opt/umiak")
 COMPOSE = ["docker", "compose", "--project-directory", "/opt/umiak"]
 WRITERS = ["quickstart", "worker", "api", "web", "mcp", "gateway", "gateway-renewal", "web-meta"]
 VOLUMES = ["database-secret", "secrets", "gateway-secrets", "network-config", "pve-secrets"]
@@ -56,8 +58,12 @@ def backup(identity, release):
             for name, path in paths.items():
                 archive.add(path, arcname=name)
         with tarfile.open(target / "compose.tar", "w") as archive:
-            archive.add("/opt/umiak", arcname="umiak")
-        (target / "metadata.json").write_text(json.dumps({"release": release, "complete": True}))
+            archive.add(CONFIG, arcname="umiak")
+        checksums = {}
+        for name in ("database.dump", "state.tar", "compose.tar"):
+            with (target / name).open("rb") as handle:
+                checksums[name] = hashlib.file_digest(handle, "sha256").hexdigest()
+        (target / "metadata.json").write_text(json.dumps({"release": release, "complete": True, "checksums": checksums}))
         return {"backup": identity, "release": release}
     except BaseException:
         shutil.rmtree(target)
@@ -72,10 +78,14 @@ def restore(identity, restore_data):
     metadata = json.loads((target / "metadata.json").read_text())
     if metadata.get("complete") is not True:
         raise RuntimeError("Incomplete backup")
+    for name in ("database.dump", "state.tar", "compose.tar"):
+        with (target / name).open("rb") as handle:
+            if hashlib.file_digest(handle, "sha256").hexdigest() != metadata.get("checksums", {}).get(name):
+                raise RuntimeError("Backup checksum mismatch; refusing destructive restore")
     stop()
     # Restore configuration even for image-only rollback. It pins old images.
     with tarfile.open(target / "compose.tar") as archive:
-        archive.extractall("/opt", filter="data")
+        archive.extractall(CONFIG.parent, filter="data")
     if restore_data:
         paths = {name: volume_path(name) for name in VOLUMES}
         with tarfile.open(target / "state.tar") as archive:
@@ -83,6 +93,11 @@ def restore(identity, restore_data):
             if staging.exists():
                 shutil.rmtree(staging)
             archive.extractall(staging, filter="data")
+            # The data filter intentionally discards ownership. Restore the
+            # original numeric IDs from our private archive without following
+            # symlinks; cp -a below carries them into the Docker volumes.
+            for member in archive.getmembers():
+                os.chown(staging / member.name, member.uid, member.gid, follow_symlinks=False)
             for name, path in paths.items():
                 for child in path.iterdir():
                     if child.is_dir() and not child.is_symlink():

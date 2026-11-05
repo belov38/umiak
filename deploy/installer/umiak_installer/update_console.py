@@ -25,8 +25,12 @@ try {
   state.platformMaintenance={startedAt:new Date().toISOString(),message:'Updating Umiak…'};
   await c.query('UPDATE quickstart.setup SET state=$1 WHERE id=true',[JSON.stringify(state)]);
  }
- if(input.op==='unfence') await c.query("UPDATE quickstart.setup SET state=state-'platformMaintenance' WHERE id=true");
+ if(input.op==='unfence') {
+  await c.query("UPDATE quickstart.setup SET state=state-'platformMaintenance' WHERE id=true");
+  await c.query(`UPDATE quickstart.setup SET state=jsonb_set(state,'{platform}',COALESCE(state->'platform','{}') || $1::jsonb) WHERE id=true`,[JSON.stringify({channel:row.settings.channel})]);
+ }
  if(input.settings) {
+  await c.query(`UPDATE quickstart.setup SET state=jsonb_set(state,'{platform}',COALESCE(state->'platform','{}') || $1::jsonb) WHERE id=true`,[JSON.stringify({channel:input.settings.channel})]);
   await c.query('UPDATE quickstart.updates SET settings=$1 WHERE id=true',[JSON.stringify(input.settings)]);
   row.settings=input.settings;
  }

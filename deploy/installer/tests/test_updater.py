@@ -91,3 +91,42 @@ def test_retain_keeps_last_three_complete_backups(tmp_path, monkeypatch):
     (tmp_path / "incomplete").mkdir()
     backup.retain()
     assert {p.name for p in tmp_path.iterdir()} == {"2", "3", "4", "incomplete"}
+
+
+def test_failed_restore_keeps_checkpoint_and_fence():
+    backend = Backend(fail=True)
+    def broken(*args, **kwargs):
+        raise InstallerError("restore failed")
+    backend.rollback = broken
+    with pytest.raises(InstallerError, match="restore failed"):
+        updater.transaction(backend)
+    assert backend.saved is not None
+    assert "unfence" not in backend.calls
+
+
+def test_checkpoint_cleared_only_after_unfence():
+    backend = Backend()
+    original = backend.checkpoint
+    def checkpoint(value):
+        if value is None:
+            assert "unfence" in backend.calls
+        original(value)
+    backend.checkpoint = checkpoint
+    updater.transaction(backend)
+
+
+def test_timer_uses_target_release_installer_not_running_code(tmp_path):
+    from umiak_installer import release, update_timer
+    from umiak_installer.pve import Runner
+    source = tmp_path / "bundle"
+    (source / "umiak_installer").mkdir(parents=True)
+    (source / "umiak_installer" / "__main__.py").write_text("# next release")
+    (source / "VERSION").write_text("1.9.0\n")
+    class Fake(Runner):
+        def run(self, argv, input=None):
+            return ""
+    runner = Fake(tmp_path / "host")
+    update_timer.install(runner, release.Release("1.9.0", source))
+    runtime = runner.path(updater.ROOT) / "runtime/1.9.0"
+    assert (runtime / "umiak_installer/__main__.py").read_text() == "# next release"
+    assert "runtime/1.9.0" in runner.path("/etc/systemd/system/umiak-update.service").read_text()

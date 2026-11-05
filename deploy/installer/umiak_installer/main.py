@@ -525,7 +525,8 @@ class Flow:
         tailnet.serve(runner, ct_id)
         code = stack.wait_claim_code(runner, ct_id, sleep=self.sleep)
         self.save("complete", a)
-        UpdateConsole(self.runner, self.current).call(status={"version": self.current.release,
+        UpdateConsole(self.runner, self.current).call(settings={"channel": self.current.channel, "auto": self.current.auto_update,
+                                                             "paused": False, "start": "03:00", "end": "04:00"}, status={"version": self.current.release,
                                                             "channel": self.current.channel, "updating": False})
         update_timer.install(self.runner, self.bundle)
         return tailnet.claim_link(identity.dns_name, code)

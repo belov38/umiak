@@ -21,6 +21,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type React from "react";
 import { useEffect, useState } from "react";
+import { PlatformUpdateBanner } from "@/components/app/platform-updates";
 import {
 	useAppSession,
 	useSingleOwner,
@@ -359,6 +360,7 @@ export function AppShell({
 			<main id="dashboard-content" className="dashboard-content" tabIndex={-1}>
 				<div className="dashboard-page">
 					<OwnerModeContext.Provider value={ownerMode}>
+						{quickstart && <PlatformUpdateBanner />}
 						{children}
 					</OwnerModeContext.Provider>
 				</div>

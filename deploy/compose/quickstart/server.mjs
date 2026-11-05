@@ -14,6 +14,10 @@ import {
 } from "./desktop-proxy.mjs";
 import { requestContext } from "./origin.mjs";
 import { OwnerStore, PgOwnerRepository } from "./owner.mjs";
+import {
+	PgPlatformUpdates,
+	validateUpdateSettings,
+} from "./platform-updates.mjs";
 import { signinContent, signinIssueContent } from "./signin-ui.mjs";
 import { renderPage, uiAsset } from "./ui.mjs";
 
@@ -134,6 +138,7 @@ function route(path, env) {
 
 export function createQuickstartServer({
 	store,
+	updates,
 	setupHandler,
 	assetsDir,
 	env = process.env,
@@ -336,6 +341,30 @@ export function createQuickstartServer({
 				return fail(res, 401, "owner_required");
 			}
 			await store.touch(token);
+			if (path === "/owner/updates") {
+				if (!(await store.canApprove(token)))
+					return fail(res, 403, "browser_session_required");
+				if (!updates) return fail(res, 503, "updates_unavailable");
+				if (req.method === "POST") {
+					if (req.headers.origin !== origin)
+						return fail(res, 403, "origin_required");
+					let policy;
+					try {
+						policy = validateUpdateSettings(await body(req));
+					} catch {
+						return fail(res, 400, "invalid_update_settings");
+					}
+					await updates.write(policy);
+				} else if (req.method !== "GET")
+					return fail(res, 405, "method_not_allowed");
+				const info = await updates.read();
+				res.setHeader("cache-control", "no-store");
+				return json(res, 200, {
+					...info,
+					runningVersion:
+						env.UMIAK_RUNNING_VERSION || info.status?.version || "unknown",
+				});
+			}
 			if (isDesktopRequest(req.url))
 				return handleDesktop(req, res, {
 					...desktop(),
@@ -552,8 +581,11 @@ async function main() {
 			secretsDir: process.env.UMIAK_SECRETS_DIR || "/pve-secrets",
 		});
 	}
+	const updates = new PgPlatformUpdates(pool, setupHandler.wizard.store);
+	await updates.init();
 	const options = {
 		store,
+		updates,
 		setupHandler,
 		assetsDir: process.env.UMIAK_QUICKSTART_ASSETS ?? "/app/quickstart-assets",
 	};

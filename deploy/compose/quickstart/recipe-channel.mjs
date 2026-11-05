@@ -64,6 +64,7 @@ export class RecipeChannel {
 			await this.update(() => {});
 			let state = await this.jobs.store.read();
 			let c = state.recipeChannel;
+			if (state.platformMaintenance) return;
 			const selectedChannel = platformReleaseChannel(state);
 			if (!c.enabled) return;
 			if (
@@ -132,6 +133,7 @@ export class RecipeChannel {
 			state = await this.jobs.store.read();
 			c = state.recipeChannel;
 			if (
+				!state.platformMaintenance &&
 				c.enabled &&
 				c.following === platformReleaseChannel(state) &&
 				c.auto &&

@@ -1,0 +1,85 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from umiak_installer import backup
+
+
+@pytest.fixture
+def fake_backup(tmp_path, monkeypatch):
+    monkeypatch.setattr(backup,"BASE",tmp_path / "backups")
+    config=tmp_path / "umiak"
+    config.mkdir()
+    (config / "compose.yaml").write_text("old images")
+    monkeypatch.setattr(backup,"CONFIG",config)
+    volumes={}
+    for name in backup.VOLUMES:
+        path=tmp_path / name;path.mkdir();(path / "state").write_text(name)
+        volumes[name]=path
+    monkeypatch.setattr(backup,"volume_path",lambda name:volumes[name])
+    monkeypatch.setattr(backup.subprocess,"check_output",lambda *a,**k:"100")
+    calls=[]
+    def run(argv,**kwargs):
+        calls.append(argv)
+        if "pg_dump" in argv:
+            kwargs["stdout"].write(b"logical dump")
+    monkeypatch.setattr(backup,"run",run)
+    return calls
+
+
+def test_backup_stops_only_stack_writers_and_marks_complete(fake_backup):
+    result=backup.backup("20261105030000-aaaaaaaaaaaa","1.2.0")
+    assert result["release"]=="1.2.0"
+    root=backup.BASE / result["backup"]
+    metadata=json.loads((root / "metadata.json").read_text())
+    assert metadata["release"]=="1.2.0" and metadata["complete"] is True
+    assert set(metadata["checksums"])=={"database.dump","state.tar","compose.tar"}
+    assert (root / "database.dump").read_bytes()==b"logical dump"
+    stop=next(c for c in fake_backup if "stop" in c)
+    assert "postgres" not in stop
+    assert fake_backup[-1][-len(backup.WRITERS):]==backup.WRITERS
+    assert all(c[0]=="docker" for c in fake_backup)
+
+
+def test_dump_failure_resumes_old_stack_and_removes_partial_backup(fake_backup,monkeypatch):
+    original=backup.run
+    def fail(argv,**kwargs):
+        if "pg_dump" in argv: raise RuntimeError("dump failed")
+        return original(argv,**kwargs)
+    monkeypatch.setattr(backup,"run",fail)
+    with pytest.raises(RuntimeError,match="dump failed"):
+        backup.backup("20261105030000-aaaaaaaaaaaa","1.2.0")
+    assert list(backup.BASE.iterdir())==[]
+    assert "start" in fake_backup[-1]
+
+
+def test_insufficient_disk_refuses_before_stopping_writers(fake_backup,monkeypatch):
+    from collections import namedtuple
+    usage=namedtuple("usage","total used free")
+    monkeypatch.setattr(backup.shutil,"disk_usage",lambda p:usage(100,99,1))
+    with pytest.raises(RuntimeError,match="Insufficient disk"):
+        backup.backup("20261105030000-aaaaaaaaaaaa","1.2.0")
+    assert not fake_backup
+
+
+def test_corrupt_backup_refuses_before_destructive_restore(fake_backup):
+    identity="20261105030000-aaaaaaaaaaaa"
+    backup.backup(identity,"1.2.0")
+    (backup.BASE / identity / "database.dump").write_bytes(b"corrupt")
+    fake_backup.clear()
+    with pytest.raises(RuntimeError,match="checksum"):
+        backup.restore(identity,True)
+    assert not fake_backup
+
+
+@pytest.mark.parametrize("restore_data",[False,True])
+def test_restore_data_only_for_incompatible_migrations(fake_backup,restore_data):
+    identity="20261105030000-aaaaaaaaaaaa"
+    backup.backup(identity,"1.2.0")
+    fake_backup.clear()
+    metadata=backup.restore(identity,restore_data)
+    assert metadata["release"]=="1.2.0"
+    assert any("dropdb" in c for c in fake_backup) is restore_data
+    assert any("pg_restore" in c for c in fake_backup) is restore_data
+    assert any("cp"==c[0] and "-a" in c for c in fake_backup) is restore_data

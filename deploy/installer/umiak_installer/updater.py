@@ -66,6 +66,7 @@ def transaction(backend):
             backend.apply()
         except Exception:
             fenced = False
+            record["dataLoss"] = not backend.compatible
             backend.rollback(backup, restore_data=not backend.compatible)
             fenced = True
             record.update(status="rolled_back", dataLoss=not backend.compatible)
@@ -74,8 +75,13 @@ def transaction(backend):
         else:
             record["status"] = "updated"
         backend.history(record | {"finishedAt": timestamp()})
+        backend.unfence()
+        fenced = False
         backend.checkpoint(None)
-        backend.retain()
+        try:
+            backend.retain()
+        except Exception:
+            backend.history(record | {"status": "warning", "message": "Update finished but backup retention failed; inspect the host journal."})
         return record
     except Exception:
         backend.history(record | {"finishedAt": timestamp(), "message": "Update failed; inspect host updater journal and recovery checkpoint."})
@@ -90,7 +96,15 @@ def atomic_json(path, value):
     private_dir(path.parent)
     temporary = path.with_suffix(".tmp")
     write_secret(temporary, json.dumps(value) + "\n")
+    import os
+    with temporary.open("rb") as handle:
+        os.fsync(handle.fileno())
     temporary.replace(path)
+    fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 class HostBackend:
@@ -110,6 +124,13 @@ class HostBackend:
         day2._require_complete(self.current)
         if day2._umiak_ct(self.runner, self.current.ct_id) is None:
             raise InstallerError("Recorded Umiak CT is missing")
+        from .ct import run_in
+        # Pull immutable release tags before fencing template work or stopping
+        # writers. Downloads dominate update duration on a home connection.
+        self.ui.say("Pulling the release images before maintenance…")
+        for name in ("quickstart", "web"):
+            run_in(self.runner, self.current.ct_id, "docker", "pull",
+                   f"ghcr.io/belov38/umiak-{name}:{self.bundle.version}")
         import hashlib
         import shutil
         from . import release, day2, prepare_host
@@ -140,6 +161,7 @@ class HostBackend:
         identity = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + secrets.token_hex(6)
         self.ui.say("Backing up the database and state (control plane briefly unavailable)…")
         self.helper("backup", id=identity, release=self.current.release)
+        self.helper("retain")
         return identity
 
     def apply(self):
@@ -152,10 +174,16 @@ class HostBackend:
         from . import day2, nodes, prepare_host, stack, state
         self.ui.say("Restoring the previous control plane…")
         self.helper("restore", id=backup, restoreData=restore_data)
-        stack.wait_healthy(self.runner, self.current.ct_id, sleep=self.sleep)
-        stack.wait_bootstrap(self.runner, self.current.ct_id, sleep=self.sleep)
         recovery = self.runner.path(ROOT) / "recovery"
         shutil.copytree(recovery / "secrets", self.runner.path(day2.SECRETS_DIR), dirs_exist_ok=True)
+        # Image-only rollback retains new owner data, but installer facts must
+        # describe the restored image rather than the failed target release.
+        stack.push_secrets(self.runner, self.current.ct_id,
+                           {"install.json": self.runner.path(day2.SECRETS_DIR) / "install.json"},
+                           stack.quickstart_image(self.current.release))
+        stack.restart(self.runner, self.current.ct_id, "quickstart")
+        stack.wait_healthy(self.runner, self.current.ct_id, sleep=self.sleep)
+        stack.wait_bootstrap(self.runner, self.current.ct_id, sleep=self.sleep)
         if self.source:
             public = (self.runner.path(day2.SECRETS_DIR) / "umiak-node_ed25519.pub").read_text().strip()
             prepare_host.install_node_agent(self.runner, recovery / "node-agent", self.source.node_agent_sha256, public)
@@ -215,8 +243,8 @@ def recover(runner, *, ui, state_path, sleep):
     backend.history({"status": "rolled_back", "dataLoss": saved["restoreData"],
                      "message": "Recovered interrupted host update; writes since backup may be lost.",
                      "finishedAt": timestamp(), "backup": saved["backup"]})
-    backend.checkpoint(None)
     backend.unfence()
+    backend.checkpoint(None)
 
 
 def run_update(runner, current, bundle, *, ui, state_path, sleep):

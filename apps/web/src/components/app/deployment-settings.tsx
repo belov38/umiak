@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { SshKeys } from "@/components/app/account-settings";
 import { ConnectionNotice } from "@/components/app/connection-notice";
+import { PlatformUpdates } from "@/components/app/platform-updates";
 import { QuotaSection } from "@/components/app/team-settings";
 import { Button } from "@/components/ui/button";
 import { PageHeader, Panel } from "@/components/ui/panel";
@@ -12,6 +13,7 @@ export function DeploymentSettings({ teamId }: { teamId: string }) {
 		<div className="max-w-4xl space-y-8">
 			<PageHeader title="Settings" />
 			<ConnectionNotice />
+			<PlatformUpdates />
 			<QuotaSection teamId={teamId} />
 			<Panel className="space-y-3">
 				<h2 className="font-semibold">Automation and environment</h2>
