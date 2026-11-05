@@ -191,8 +191,6 @@ export function sandboxNext(
 //
 //   allocated          allocating   -> provisioning
 //   provisioned_start  provisioning -> booting       (RAM check, then S1 start)
-//   pool_ready         booting      -> warm          (pool machine, no sandbox_id)
-//   claim              warm         -> claiming      (pool claim)
 //                      booting      -> claiming      (cold path, sandbox_id already set)
 //   claimed            claiming     -> running
 //   stop               running      -> stopping
@@ -206,7 +204,7 @@ export function sandboxNext(
 //   delete             any except deleting/deleted -> deleting
 //   deleted            deleting     -> deleted       (terminal)
 //
-// Nothing leads back to `warm` except `pool_ready` from `booting`, so a machine
+// Legacy `warm` rows are retained for quarantine; no transition produces them. A machine
 // that reached `claiming` never returns to the pool (§6.4 p. 2).
 
 export const MACHINE_EVENTS = [
@@ -246,11 +244,8 @@ const MACHINE_LIVE: readonly MachineState[] = MACHINE_STATES.filter(
 const MACHINE_RULES: Record<MachineEvent, readonly MachineRule[]> = {
 	allocated: [{ from: ["allocating"], to: "provisioning" }],
 	provisioned_start: [{ from: ["provisioning"], to: "booting" }],
-	pool_ready: [
-		{ from: ["booting"], to: "warm", when: (c) => c.hasSandbox !== true },
-	],
+	pool_ready: [],
 	claim: [
-		{ from: ["warm"], to: "claiming" },
 		{ from: ["booting"], to: "claiming", when: (c) => c.hasSandbox === true },
 	],
 	claimed: [{ from: ["claiming"], to: "running" }],

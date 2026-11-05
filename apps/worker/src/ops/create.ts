@@ -11,7 +11,6 @@ import {
 } from "../machine-prep.ts";
 import type { ClaimRequest } from "../ports.ts";
 import type { Fenced, Step } from "../steps.ts";
-import { retryClaim } from "./claim.ts";
 import {
 	beforeSecretDelivery,
 	bootTimeoutMs,
@@ -28,11 +27,8 @@ import { compensateCreate, compensateForkTarget } from "./compensate.ts";
 import type { SandboxOpHandler } from "./kind.ts";
 import { retireForkSources } from "./snapshot-step.ts";
 
-// Create (S6 §7.3). Cold path: provision (§7.4) → boot → rotate_token →
-// claim → finish. Claim path (the API claimed a warm machine, now
-// `claiming`): provision and boot are skipped. The "already done?" checks are
-// machine states, so a repeat after a crash, or after the pool claim retry
-// switched machines, starts from the right place.
+// Create: provision → boot → rotate_token → claim → finish.
+// State checks also allow already allocated legacy claiming machines to finish.
 
 /** Step names of create, in order (the last one is the final transition). */
 export const CREATE_STEPS = [
@@ -222,7 +218,6 @@ export const CREATE_OP: SandboxOpHandler = {
 				await retireForkSources(ctx, tx, fenced.sandboxId);
 			}
 		}),
-	retry: retryClaim,
 	compensate: (ctx, fenced, error) =>
 		isForkTarget(fenced)
 			? compensateForkTarget(ctx, fenced, error)

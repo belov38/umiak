@@ -10,13 +10,13 @@ import {
 	SCOPES,
 } from "@umiak/core";
 import { expect } from "vitest";
-import { handleMachineOp } from "../../src/handlers/machine-op.ts";
 import {
 	handleSandboxOp,
 	type SandboxOpResult,
 } from "../../src/handlers/sandbox-op.ts";
 import { handleSnapshotOp } from "../../src/handlers/snapshot-op.ts";
 import { insertMachine, type TestWorld } from "../fakes/world.ts";
+import { prepareFixture as handleMachineOp } from "./prepare.ts";
 
 export function principal(): Principal {
 	return {

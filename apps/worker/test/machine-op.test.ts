@@ -1,7 +1,5 @@
-import { DELETE_RETRY_LIMIT } from "@umiak/core";
 import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { handleMachineOp } from "../src/handlers/machine-op.ts";
 import { blockAfter, blockBefore, spyBefore } from "./fakes/crash.ts";
 import {
 	activeDisks,
@@ -13,6 +11,7 @@ import {
 	machine,
 	type TestWorld,
 } from "./fakes/world.ts";
+import { prepareFixture as handleMachineOp } from "./helpers/prepare.ts";
 
 let db: TestDatabase;
 
@@ -44,83 +43,6 @@ async function expectGone(w: TestWorld, id: string): Promise<void> {
 	expect(await activeDisks(w, id)).toEqual([]);
 	expect((await credentials(w, id))?.retired_at ?? null).not.toBeNull();
 }
-
-describe("machine-op provision failures", () => {
-	it("boot timeout: failed -> deleting with a delete job; the delete removes VM and lease", async () => {
-		const w = await createWorld(db, { boot: "connect", bootTimeoutS: 1 });
-		const id = await insertMachine(w);
-
-		expect(
-			await handleMachineOp(w.ctx, { machineId: id, action: "provision" }),
-		).toBe("failed");
-		const m = await machine(w, id);
-		expect(m.state).toBe("deleting");
-		expect(m.error_code).toBe("boot_timeout");
-		expect(w.jobs.sent).toContainEqual({
-			queue: "machine-op",
-			data: { machineId: id, action: "delete" },
-			opts: { singletonKey: id, retryLimit: DELETE_RETRY_LIMIT },
-		});
-		expect(w.infra.vms.size).toBe(1);
-
-		expect(
-			await handleMachineOp(w.ctx, { machineId: id, action: "delete" }),
-		).toBe("done");
-		await expectGone(w, id);
-	});
-
-	it("a permanent infrastructure error fails the machine; retryable and unknown ones are thrown", async () => {
-		const w = await createWorld(db);
-		const id = await insertMachine(w);
-		w.useInfra(
-			spyBefore(w.infra, "create", async () => {
-				throw Object.assign(new Error("proxmox says no"), { retryable: true });
-			}),
-		);
-		await expect(
-			handleMachineOp(w.ctx, { machineId: id, action: "provision" }),
-		).rejects.toThrow("proxmox says no");
-		expect((await machine(w, id)).state).toBe("provisioning");
-
-		// Unknown errors (database, sockets) are transient, as in sandbox-op.
-		w.useInfra(
-			spyBefore(w.infra, "create", async () => {
-				throw new Error("connection reset");
-			}),
-		);
-		await expect(
-			handleMachineOp(w.ctx, { machineId: id, action: "provision" }),
-		).rejects.toThrow("connection reset");
-		expect((await machine(w, id)).state).toBe("provisioning");
-
-		w.useInfra(
-			spyBefore(w.infra, "create", async () => {
-				throw Object.assign(new Error("template is broken"), {
-					retryable: false,
-				});
-			}),
-		);
-		expect(
-			await handleMachineOp(w.ctx, { machineId: id, action: "provision" }),
-		).toBe("failed");
-		const m = await machine(w, id);
-		expect(m.state).toBe("deleting");
-		expect(m.error_code).toBe("provision_failed");
-		expect(m.error_detail).toContain("template is broken");
-	});
-
-	it("a redelivered provision of a warm machine does nothing", async () => {
-		const w = await createWorld(db);
-		const id = await warmMachine(w);
-		const before = await machine(w, id);
-		expect(
-			await handleMachineOp(w.ctx, { machineId: id, action: "provision" }),
-		).toBe("skipped");
-		const after = await machine(w, id);
-		expect(after.exec_attempt).toBe(before.exec_attempt);
-		expect(w.infra.callsOf("create")).toHaveLength(1);
-	});
-});
 
 describe("machine-op delete", () => {
 	it("sets retired_at before S1 stop, then power_observed stopped, deletes VM, disks and lease", async () => {

@@ -18,7 +18,6 @@ import {
 	teamRowCounts,
 	testKeys,
 } from "./helpers/service.ts";
-import { insertMachine } from "./helpers/topology.ts";
 
 describe.skipIf(skipPg())("idempotency (S6 §14.1, S7 §5.7)", () => {
 	let t: TestDatabase;
@@ -175,20 +174,6 @@ describe.skipIf(skipPg())("idempotency (S6 §14.1, S7 §5.7)", () => {
 			expect(a.operation.id).toBe(b.operation.id);
 			expect((await teamRowCounts(t.pool, env.p.teamId)).sandboxes).toBe(1);
 			expect(await idempotencyRows(t.pool, env.p.apiKeyId as string)).toBe(1);
-		});
-
-		it("a failed create (pool_exhausted) leaves no key: a retry may succeed", async () => {
-			const env = await serviceEnv(t.pool);
-			await expectCode(
-				env.svc.create(env.p, { failFast: true }, "retry"),
-				"pool_exhausted",
-			);
-			await insertMachine(t.pool, env.topo, {
-				state: "warm",
-				poolKey: env.pairKey,
-			});
-			const ok = await env.svc.create(env.p, { failFast: true }, "retry");
-			expect(ok.sandbox.state).toBe("creating");
 		});
 
 		it("a key of the same user in another team does not replay its sandbox", async () => {

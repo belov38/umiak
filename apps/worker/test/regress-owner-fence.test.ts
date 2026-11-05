@@ -4,7 +4,6 @@
 import { randomUUID } from "node:crypto";
 import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { handleMachineOp } from "../src/handlers/machine-op.ts";
 import { handleSandboxOp } from "../src/handlers/sandbox-op.ts";
 import { blockBefore } from "./fakes/crash.ts";
 import { createWorld, insertMachine, type TestWorld } from "./fakes/world.ts";
@@ -15,6 +14,7 @@ import {
 	run,
 	stoppedSandbox,
 } from "./helpers/ops.ts";
+import { prepareFixture as handleMachineOp } from "./helpers/prepare.ts";
 
 let db: TestDatabase;
 

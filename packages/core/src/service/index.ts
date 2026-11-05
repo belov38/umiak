@@ -128,11 +128,9 @@ export {
 	type CreateOptions,
 	type CreateResult,
 	OUT_OF_CAPACITY_RETRY_SECONDS,
-	POOL_EXHAUSTED_RETRY_SECONDS,
 } from "./create.ts";
 export {
 	admitCold,
-	claimWarm,
 	type Placement,
 } from "./create-placement.ts";
 export { decodeCursor, encodeCursor } from "./cursor.ts";

@@ -189,8 +189,8 @@ function expectedMachine(
 	const pairs: Record<MachineEvent, [MachineState[], MachineState]> = {
 		allocated: [["allocating"], "provisioning"],
 		provisioned_start: [["provisioning"], "booting"],
-		pool_ready: [hasSandbox ? [] : ["booting"], "warm"],
-		claim: [hasSandbox ? ["warm", "booting"] : ["warm"], "claiming"],
+		pool_ready: [[], "warm"],
+		claim: [hasSandbox ? ["booting"] : [], "claiming"],
 		claimed: [["claiming"], "running"],
 		stop: [["running"], "stopping"],
 		stopped: [["stopping"], "stopped"],

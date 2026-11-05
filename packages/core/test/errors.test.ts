@@ -6,7 +6,6 @@ import {
 	notFound,
 	operationInProgress,
 	outOfCapacity,
-	poolExhausted,
 	quotaExceeded,
 	UmiakError,
 	validation,
@@ -74,11 +73,6 @@ describe("UmiakError", () => {
 			code: "out_of_capacity",
 			retryable: true,
 			details: { retryAfterSeconds: 30 },
-		});
-		expect(poolExhausted(15)).toMatchObject({
-			code: "pool_exhausted",
-			retryable: true,
-			details: { retryAfterSeconds: 15 },
 		});
 		expect(quotaExceeded("sandboxes", 5, 5)).toMatchObject({
 			code: "quota_exceeded",

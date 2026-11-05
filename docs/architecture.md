@@ -31,7 +31,7 @@ An API platform that gives AI agents and people isolated VMs (sandboxes) on Prox
  +-------------+-------------+       | /admin  /app        |
                |  Postgres           +---------------------+
  +-------------v-------------+
- | apps/worker (Node)        |  warm pool, lifecycle, snapshots, auto-stop
+ | apps/worker (Node)        |  lifecycle, snapshots, auto-stop
  | pg-boss jobs              |
  +------+-------------+------+
         | PVE API     | node ops (LVM-thin, QMP)
@@ -47,7 +47,7 @@ An API platform that gives AI agents and people isolated VMs (sandboxes) on Prox
 | Component | Language | Responsibility |
 |---|---|---|
 | `apps/api` | TS, Hono + `@hono/zod-openapi`, Node 24 | Public REST API, OpenAPI, authorization by owner sessions and scoped team API keys, NDJSON streams, terminal WebSocket. Source of OpenAPI for the SDKs |
-| `apps/worker` | TS, pg-boss | Sandbox and machine state machines, warm pool, Proxmox operations, snapshots and fork, auto-stop, cleanup |
+| `apps/worker` | TS, pg-boss | Sandbox and machine state machines, Proxmox operations, snapshots and fork, auto-stop, cleanup |
 | `apps/web` | TS, Next.js + Payload 3 | `/admin`: operators (users, teams, keys, templates, sizes, quotas). `/app`: customer dashboard (sandbox list, xterm.js terminal, desktop iframe, logs). Works with sandboxes only through `apps/api` |
 | `apps/cli` | TS (Bun compile) | Client of the public API |
 | `apps/mcp` | TS | MCP server on top of the public API and `@umiak/sdk`: stdio (`umiak mcp` in the CLI binary) and Streamable HTTP (`api.<domain>/mcp`, Deployment `mcp`); `docs/specs/s11-mcp.md` |
@@ -63,7 +63,7 @@ An API platform that gives AI agents and people isolated VMs (sandboxes) on Prox
 In detail: `docs/specs/s6-control-plane.md`.
 
 - **Sandbox** — the logical entity for the user: `id`, `slug` (for URL and hostname), `template`, `size`, `state`, `health`, `activity`, TTL and idle-stop, labels, current `machineId`. Env and secrets are in a separate table, encrypted (AES-256-GCM).
-- **Machine** — a concrete VM: `id` (= `machineId` in smbios), `vmid`, `node`, `provider` (cluster), MAC, `state` (provisioning / booting / warm / claiming / running / stopped / deleting …). The binding to a sandbox is set once and does not change; a sandbox may have several machines over its history (groundwork for migration).
+- **Machine** — a concrete VM: `id` (= `machineId` in smbios), `vmid`, `node`, `provider` (cluster), MAC, `state` (provisioning / booting / claiming / running / stopped / deleting …). The binding to a sandbox is set once and does not change; a sandbox may have several machines over its history (groundwork for migration).
 - **Provider / Node / Storage** — topology: Proxmox cluster, node, storage with a driver. The model is designed for several clusters and nodes; S19 enables several sandbox nodes in one cluster, while the PoC used one node.
 - **TemplateBuild** — a template build on a node (template VMID, disk layout, agent version, manifest), written by S5: `building → ready → active → deprecated → retired` (or `failed`), details in `docs/specs/s5-linux-template.md` §11–§12.
 - **Disk** — an LV on the node: belongs to a machine or a snapshot.
@@ -71,7 +71,7 @@ In detail: `docs/specs/s6-control-plane.md`.
 - **Operation** — an operation on a sandbox (create, fork, stop, resume, recover, delete, save_snapshot); one active per sandbox, delete preempts.
 - **Command** — a process: `id`, `sandboxId`, `cmd`, `cwd`, env variable names, `mode`, `status`, `exitCode`, `startedAt`, `endedAt`. The agent stores the output, later a copy goes to storage.
 - **HostedPort** — a sandbox port published at a URL: `port`, `label`, mode `token` / `sso` / `public`.
-- **User**, **Team**, **Membership** (`owner`/`member`), **ApiKey**, **SshKey** and configuration — **Template**, **Size**, team quotas, warm pool targets (empty in the MVP), `PlatformDefaults` — are in Payload (schema `payload`, `docs/specs/s8-web.md` §7); `api` and `worker` read them through the Payload Local API (`IdentityStore`, `ConfigReader`, cache 10–30 s, invalidated by `NOTIFY`).
+- **User**, **Team**, **Membership** (`owner`/`member`), **ApiKey**, **SshKey** and configuration — **Template**, **Size**, team quotas, `PlatformDefaults` — are in Payload (schema `payload`, `docs/specs/s8-web.md` §7); `api` and `worker` read them through the Payload Local API (`IdentityStore`, `ConfigReader`, cache 10–30 s, invalidated by `NOTIFY`).
 - **Environment** — a named set of env, secrets, and secret files of a team, plus a list of repositories (in the MVP only stored, the clone is S13, phase 2) and the flag `excludeOwnerSecrets`; stored in `runtime.environments` encrypted like `sandbox_secrets` (key rotation re-encrypts them too), managed through `/v1/environments`; on create the values are copied into the sandbox (S8 §10).
 
 **Sandbox states:** `creating → ready → stopping → stopped → starting → ready`. Plus `error` and `deleting → deleted`. `fork` creates a new sandbox in `creating`. Health (`health: ok | degraded`, degraded — no agent for more than 60 s) and activity (`activity: busy | idle`) are separate fields, not states.
@@ -81,7 +81,7 @@ In detail: `docs/specs/s6-control-plane.md`.
 In detail: `docs/specs/s3-guest-agent.md` (Linux), `docs/specs/s9-windows.md` §12 (Windows). Runs as root or SYSTEM. Commands by default run as the unprivileged `user` with NOPASSWD sudo (the trust boundary is the VM, S2 §16). Installed into the template.
 
 - **Transport.** The agent itself opens a WSS to `gateway`; inside it is HTTP/2 where the agent is the server. No inbound ports. RPC (exec, files) and TCP streams (ports, SSH, moonlight) go over the connection. See below and S2.
-- **Pool registration.** On boot the agent connects to the gateway and reports itself (machineId, bootId, vmgenid, version); it does not know its VMID. The machine becomes warm.
+- **Boot registration.** On boot the agent connects to the gateway and reports itself (machineId, bootId, vmgenid, version); it does not know its VMID. The worker waits for boot readiness before claim.
 - **Claim.** Receives env, secrets (in tmpfs without swap or in a protected directory; after every reboot the control plane sends them again), secret files, the gateway SSH CA public key (`TrustedUserCAKeys`; user keys are verified by the gateway, S4 §9), hostname. Reports readiness by phases.
 - **Exec.** sync / stream (NDJSON events `started`, `stdout`, `stderr`, `exit`) / detached + attach by offset / kill / timeout. Linux — bash, Windows — PowerShell. PTY/ConPTY for the terminal. Each command runs in its own systemd unit under a shim that writes its output to files.
 - **Files.** read, write (stream), list, stat, delete, mkdir, move, chmod, a directory as a single tar stream in both directions (`/files/archive`).
@@ -122,17 +122,18 @@ Driver interface: `cloneFromTemplate`, `snapshot`, `cloneFromSnapshot`, `delete`
 - **Saved snapshot / user template** = a named snapshot from which new sandboxes are created.
 - **Templates and capacity waits (S21):** Build once and copy base disks via restricted node-agent volume.sendTo: standard pvesm raw+size export/import, zstd and pinned cluster SSH. Streaming SHA-256 and UUID-bound receipts precede publication. Resume/fork/saved-snapshot create stay on the node holding disks; optional per-team FIFO waits reserve RAM only on admission. Sandbox cold moves are deferred (future options: pvesm, rsync over a base snapshot, or a ZFS driver with zfs send -i).
 
-## 6. Warm pool
+## 6. Cold create
 
-- For each (template, size) pair we keep N booted machines in the warm status. The agent is connected, the OS is ready.
-- **Create** = claim a warm machine (milliseconds + provisioning through the agent) → `ready`. If the pool is empty — cold start: template clone and boot, Linux ~15–30 s, Windows 3–5 min (specialize and first login). With `failFast` — pool only, otherwise `503 pool_exhausted`, nothing is created (phase 2: the MVP has no warm pool, `failFast` and `pool_exhausted` are not part of the public contract, S7 §23.1).
-- The pool is refilled in the background with a limit on parallel clones per node and storage.
-- Fork and resume bypass the pool: they have their own disks.
-- Windows pool machines sleep on disk (`qm suspend --todisk`) and take no RAM; claim = RAM admission, wake-up, clock sync, claim (S9 §14). The decision is confirmed by a spike during implementation.
-- RAM accounting on a node: running + warm + booting machines ≤ the node limit (8 GB in the PoC). The pool is refilled only from free RAM. Create or resume under shortage evicts warm machines of other (template, size) pairs, otherwise `503 out_of_capacity`.
-- The machine identity (`machineId`, bootstrap secret in smbios) is set when the machine is prepared for the pool; at claim the worker rotates the machine token and passes env, secrets, and SSH keys to the agent.
-- A new template build changes the pool generation: old warm machines are replaced, sandboxes on the old build are not touched.
-- In detail: `docs/specs/s6-control-plane.md` §9.
+Every create reserves RAM, clones the template (or saved snapshot), boots,
+rotates the machine token and claims through the agent. Claim injects environment,
+secrets and credentials before the sandbox becomes ready. Cold create latency of
+about one minute is acceptable. Warm pools, pool-only admission and eviction are
+not part of the product.
+
+Admission counts reserved and powered RAM; it never evicts another VM. Legacy
+unallocated pool rows remain quarantined and counted, with an operator-visible
+count in `umiak-admin node ram`. Allocated legacy machines may finish claim.
+Legacy storage remains for compatibility; no VM is deleted based on pool metadata.
 
 ## 7. Network
 
@@ -208,7 +209,7 @@ It needs no media relay service or separate media address.
 
 | Phase | Contents |
 |---|---|
-| **PoC** (homelab `pve`) | Template `linux`, guest-agent v0 (tunnel, exec, files), gateway (tunnels, HTTP ports), worker (claim from the warm pool, create, delete), lvmthin driver (clone from template, snapshot, fork), minimal API and CLI. Measurements: claim-to-ready, cold start, fork |
+| **PoC** (homelab `pve`) | Template `linux`, guest-agent v0 (tunnel, exec, files), gateway (tunnels, HTTP ports), worker (cold create, claim, delete), lvmthin driver (clone from template, snapshot, fork), minimal API and CLI. Measurements: claim-to-ready, cold start, fork |
 | **MVP** | + `windows`, `linux-desktop`; stop/resume, saved snapshots, SSH gateway, desktop, computer-use API (screenshot, mouse, keyboard, clipboard), Payload admin/dashboard, API keys, auto-stop, TS/Python SDKs, MCP |
 | **Phase 2** | `windows-core` (Windows Server Core, S9 §22), several nodes and clusters, PBS archive and migration, computer-use v2 and desktop v2 (S29), command history outside the VM, built-in coding agents, egress policies, OTel, webhooks |
 

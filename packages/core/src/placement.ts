@@ -13,10 +13,6 @@ export interface PlaceInput {
 	templateSlug: string;
 	providerId?: string;
 	needMb: number;
-	/** Count other pairs' warm machines as available (admission with eviction). */
-	evict?: boolean;
-	/** Pair of the request; its warm machines are not evictable. */
-	pairKey?: string | null;
 }
 
 export interface PlacementCandidate {
@@ -31,8 +27,7 @@ export interface PlacementCandidate {
 /**
  * Placement candidates (S6 §8.4), most free RAM first: provider and node
  * `active`, an `active` build of the template on the node, its storage below
- * the data/metadata thresholds, and RAM for `needMb` (free, plus evictable warm
- * machines of other pairs when `evict`). Storage without a usage sample yet
+ * the data/metadata thresholds, and RAM for `needMb`. Storage without a usage sample yet
  * counts as below the thresholds. RAM is read without node locks: the caller
  * confirms with `admit` on each candidate in order.
  */
@@ -83,24 +78,15 @@ export async function place(
 		 JOIN runtime.storages st ON st.id = tb.storage_id AND st.node_id = n.id AND st.provider_id = n.provider_id
 		 CROSS JOIN LATERAL (
 		   SELECT
-		     COALESCE(SUM(m.memory_mb) FILTER (WHERE ${RESERVED_SQL}), 0) AS reserved_mb,
-		     COALESCE(SUM(m.memory_mb) FILTER (
-		       WHERE m.state = 'warm' AND m.pool_key IS DISTINCT FROM $4), 0) AS evictable_mb
+		     COALESCE(SUM(m.memory_mb) FILTER (WHERE ${RESERVED_SQL}), 0) AS reserved_mb
 		   FROM runtime.machines m
 		   WHERE m.node_id = n.id AND m.state <> 'deleted'
 		 ) ram
-		 WHERE ($5::uuid IS NULL OR n.provider_id=$5) AND n.state = 'active' AND n.retired_at IS NULL AND ${NODE_NOT_BUILDING_SQL}
+		 WHERE ($3::uuid IS NULL OR n.provider_id=$3) AND n.state = 'active' AND n.retired_at IS NULL AND ${NODE_NOT_BUILDING_SQL}
 		   AND ${STORAGE_BELOW_THRESHOLDS_SQL}
-		   AND n.ram_cap_mb - ram.reserved_mb
-		       + CASE WHEN $3::boolean THEN ram.evictable_mb ELSE 0 END >= $2
+		   AND n.ram_cap_mb - ram.reserved_mb >= $2
 		 ORDER BY free_mb DESC, n.id`,
-		[
-			input.templateSlug,
-			input.needMb,
-			input.evict ?? false,
-			input.pairKey ?? null,
-			input.providerId ?? null,
-		],
+		[input.templateSlug, input.needMb, input.providerId ?? null],
 	);
 	return r.rows.map((row) => ({
 		nodeId: row.node_id,

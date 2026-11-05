@@ -1,15 +1,9 @@
-import { DELETE_RETRY_LIMIT } from "@umiak/core";
 import type { WorkerCtx } from "../context.ts";
-import {
-	ownedTeardown,
-	type PrepSource,
-	prepareMachine,
-	waitBooted,
-} from "../machine-prep.ts";
-import { isPermanent, type NodeInfra } from "../ports.ts";
+import { ownedTeardown } from "../machine-prep.ts";
+import type { NodeInfra } from "../ports.ts";
 import { FencedOut, type MachineAction, MachineFence } from "../steps.ts";
 
-// machine-op queue (S6 §9.3, §15.1): pool provisioning and machine delete.
+// machine-op queue (S6 §9.3, §15.1): machine delete (legacy provision jobs are quarantined).
 // Key machineId; fencing by machines.exec_attempt (MachineFence).
 
 export interface MachineOpData {
@@ -21,18 +15,37 @@ export interface MachineOpData {
  * - `done`: the action completed;
  * - `skipped`: nothing to do (unknown machine, already prepared or deleted);
  * - `fenced_out`: another executor or a delete took over;
- * - `failed`: provision failed, the machine is `deleting` with a delete job.
- * As in sandbox-op, errors are transient by default and thrown (pg-boss
- * repeats the job); only `retryable === false` fails the provision.
+ * Delete errors are thrown for pg-boss to retry; legacy provision jobs skip.
  */
-export type MachineOpResult = "done" | "skipped" | "fenced_out" | "failed";
+export type MachineOpResult = "done" | "skipped" | "fenced_out";
 
 export async function handleMachineOp(
 	ctx: WorkerCtx,
 	data: MachineOpData,
 ): Promise<MachineOpResult> {
-	if (data.action === "provision") return provision(ctx, data.machineId);
-	if (data.action === "delete") return deleteMachine(ctx, data.machineId);
+	if (data.action === "provision") {
+		// Old queued pool jobs must never produce a VM or delete an allocated one.
+		ctx.log.warn(
+			{ machineId: data.machineId },
+			"legacy pool provision quarantined; inspect node ram",
+		);
+		return "skipped";
+	}
+	if (data.action === "delete") {
+		const legacy = await ctx.pool.query(
+			`SELECT 1 FROM runtime.machines m
+          WHERE m.id=$1 AND (m.pool_key IS NOT NULL OR m.state='warm')`,
+			[data.machineId],
+		);
+		if (legacy.rowCount) {
+			ctx.log.warn(
+				{ machineId: data.machineId },
+				"legacy pool delete quarantined; inspect node ram",
+			);
+			return "skipped";
+		}
+		return deleteMachine(ctx, data.machineId);
+	}
 	throw new Error(`machine-op: unknown action ${String(data.action)}`);
 }
 
@@ -44,110 +57,6 @@ function fencedOut(
 	ctx.log.info({ err: e.message, action }, "machine-op fenced out");
 	ctx.metrics.inc("umiak_fenced_out_total", { queue: "machine-op", action });
 	return "fenced_out";
-}
-
-async function provision(
-	ctx: WorkerCtx,
-	machineId: string,
-): Promise<MachineOpResult> {
-	const fence = await MachineFence.begin(ctx, machineId, "provision");
-	if (fence === null) return "skipped";
-	const m = fence.machine;
-	try {
-		const source: PrepSource =
-			m.origin === "snapshot" && m.origin_snapshot_id !== null
-				? { kind: "snapshot", snapshotId: m.origin_snapshot_id }
-				: { kind: "template" };
-		await prepareMachine(ctx, fence, machineId, source);
-		const bootTimeoutS = await bootTimeoutOf(ctx, m.template_build_id);
-		await waitBooted(ctx, fence, machineId, bootTimeoutS * 1000);
-		// The events handler usually got here first (phase pool_ready).
-		await fence.tx(async (tx) => {
-			await tx.client.query(
-				`UPDATE runtime.machines
-				 SET state = 'warm', warm_at = COALESCE(warm_at, now()), state_changed_at = now(),
-				     version = version + 1
-				 WHERE id = $1 AND state = 'booting' AND pool_key IS NOT NULL AND sandbox_id IS NULL`,
-				[machineId],
-			);
-		});
-		return "done";
-	} catch (e) {
-		if (e instanceof FencedOut) return fencedOut(ctx, e, "provision");
-		if (!isPermanent(e)) return rethrowUnlessFenced(ctx, fence, e);
-		return failProvision(ctx, fence, e);
-	}
-}
-
-/**
- * A transient provision error is thrown for a redelivery, unless this
- * executor was fenced out meanwhile: then the error is a side effect of the
- * takeover and a redelivery has nothing to do.
- */
-async function rethrowUnlessFenced(
-	ctx: WorkerCtx,
-	fence: MachineFence,
-	err: unknown,
-): Promise<MachineOpResult> {
-	try {
-		await fence.check();
-	} catch (e) {
-		if (e instanceof FencedOut) return fencedOut(ctx, e, "provision");
-		throw e;
-	}
-	throw err;
-}
-
-async function bootTimeoutOf(ctx: WorkerCtx, buildId: string): Promise<number> {
-	const r = await ctx.pool.query<{ boot_timeout_s: number }>(
-		"SELECT boot_timeout_s FROM runtime.template_builds WHERE id = $1",
-		[buildId],
-	);
-	return r.rows[0]?.boot_timeout_s ?? 300;
-}
-
-/** §9.3: `failed -> deleting` and a delete job, in one fenced transaction. */
-async function failProvision(
-	ctx: WorkerCtx,
-	fence: MachineFence,
-	err: unknown,
-): Promise<MachineOpResult> {
-	const machineId = fence.machineId;
-	const code =
-		typeof (err as { code?: unknown })?.code === "string"
-			? (err as { code: string }).code
-			: "provision_failed";
-	const detail = err instanceof Error ? err.message : String(err);
-	try {
-		await fence.tx(async (tx) => {
-			await tx.client.query(
-				`UPDATE runtime.machines
-				 SET state = 'failed', error_code = $2, error_detail = $3,
-				     state_changed_at = now(), version = version + 1
-				 WHERE id = $1`,
-				[machineId, code, detail],
-			);
-			await tx.client.query(
-				`UPDATE runtime.machines
-				 SET state = 'deleting', state_changed_at = now(), version = version + 1
-				 WHERE id = $1 AND state = 'failed'`,
-				[machineId],
-			);
-			await ctx.jobs.send(
-				tx,
-				"machine-op",
-				{ machineId, action: "delete" },
-				{ singletonKey: machineId, retryLimit: DELETE_RETRY_LIMIT },
-			);
-		});
-	} catch (e) {
-		// Another executor or a delete took over; this error was a side effect of that.
-		if (e instanceof FencedOut) return fencedOut(ctx, e, "provision");
-		throw e;
-	}
-	ctx.log.warn({ machineId, code, err: detail }, "pool provision failed");
-	ctx.metrics.inc("umiak_machine_provision_failed_total", { code });
-	return "failed";
 }
 
 /**

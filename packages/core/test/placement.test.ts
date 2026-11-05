@@ -108,7 +108,7 @@ describe.skipIf(skipPg())("place (S6 §8.4)", () => {
 		expect(res.map((c) => c.nodeId)).toEqual([ok.nodeId]);
 	});
 
-	it("counts warm machines of other pairs as available when eviction is allowed", async () => {
+	it("does not reclaim quarantined warm machine RAM", async () => {
 		const templateSlug = slug();
 		const topo = await createTopology(t.pool, {
 			node: { ramCapMb: 4096 },
@@ -122,16 +122,6 @@ describe.skipIf(skipPg())("place (S6 §8.4)", () => {
 		});
 		const need = { templateSlug, needMb: 2048 };
 		expect(await withTx(t.pool, (tx) => place(tx, need))).toEqual([]);
-		// The warm machine belongs to the requested pair: not evictable.
-		expect(
-			await withTx(t.pool, (tx) =>
-				place(tx, { ...need, evict: true, pairKey: `${templateSlug}/2gb` }),
-			),
-		).toEqual([]);
-		const res = await withTx(t.pool, (tx) =>
-			place(tx, { ...need, evict: true, pairKey: `${templateSlug}/4gb` }),
-		);
-		expect(res.map((c) => [c.nodeId, c.freeMb])).toEqual([[topo.nodeId, 0]]);
 	});
 
 	it("returns an empty list for an unknown template", async () => {

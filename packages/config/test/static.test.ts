@@ -14,7 +14,6 @@ runConfigReaderContract(
 		StaticConfigReader.fromObject({
 			templates: fx.templates,
 			sizes: fx.sizes,
-			pools: fx.pools,
 			quotas: {
 				default: fx.defaultQuota,
 				teams: { [fx.team.id]: fx.team.quota },
@@ -45,12 +44,6 @@ describe("StaticConfigReader.fromFile(poc.yaml)", () => {
 		});
 		expect(await reader.template("nope")).toBeNull();
 		expect(await reader.size("nope")).toBeNull();
-	});
-
-	it("reads pool targets", async () => {
-		expect(await reader.poolTargets()).toEqual([
-			{ templateSlug: "linux", sizeSlug: "2gb", target: 1 },
-		]);
 	});
 
 	it("applies platform defaults", async () => {
@@ -133,7 +126,6 @@ describe("StaticConfigReader.fromObject", () => {
 	it("accepts a minimal config and fills defaults", async () => {
 		const r = StaticConfigReader.fromObject(base());
 		expect((await r.template("linux"))?.enabled).toBe(true);
-		expect(await r.poolTargets()).toEqual([]);
 		expect(await r.teamQuota("t")).toEqual({
 			maxActiveSandboxes: 3,
 			maxRamMb: 6144,
@@ -278,7 +270,7 @@ describe("StaticConfigReader.fromObject", () => {
 				...base(),
 				pools: [{ templateSlug: "windows", sizeSlug: "2gb", target: 1 }],
 			}),
-		).toThrow(/pools\.0\.templateSlug/);
+		).toThrow(/pools/);
 	});
 
 	it("rejects duplicate template slugs", () => {

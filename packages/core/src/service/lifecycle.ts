@@ -312,7 +312,6 @@ export async function resumeSandbox(
 
 			await admitLocalSource(
 				tx,
-				deps,
 				{
 					nodeId: row.node_id,
 					storageId: machine.storageId,
@@ -320,7 +319,6 @@ export async function resumeSandbox(
 					templateBuildId: row.template_build_id,
 					templateSlug: row.template_slug,
 				},
-				`${row.template_slug}/${size.slug}`,
 				size.memoryMb,
 			);
 		} catch (error) {
@@ -418,7 +416,6 @@ export async function requestSystemResume(
 	try {
 		await admitLocalSource(
 			tx,
-			{ jobs },
 			{
 				nodeId: row.node_id,
 				storageId: machine.storageId,
@@ -426,7 +423,6 @@ export async function requestSystemResume(
 				templateBuildId: row.template_build_id,
 				templateSlug: row.template_slug,
 			},
-			`${row.template_slug}/${row.size_slug}`,
 			machine.memoryMb,
 		);
 	} catch (error) {
@@ -501,13 +497,7 @@ export async function recoverSandbox(
 			});
 		}
 		if (!machineReserved(machine)) {
-			await admitOnNode(
-				tx,
-				deps,
-				row.node_id,
-				machine.memoryMb,
-				`${row.template_slug}/${row.size_slug}`,
-			);
+			await admitOnNode(tx, row.node_id, machine.memoryMb);
 		}
 		await setStarting(tx, row, to, { lastRecover: true });
 		return startOperation(tx, deps.jobs, row, {

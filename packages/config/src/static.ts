@@ -5,7 +5,6 @@ import { canonicalTemplateSlug } from "./template-slug.ts";
 import type {
 	ConfigReader,
 	PlatformDefaults,
-	PoolTarget,
 	Quota,
 	SizeConfig,
 	TemplateConfig,
@@ -67,14 +66,6 @@ const sizeSchema = z.strictObject({
 	slug,
 	vcpu: posInt,
 	memoryMb: posInt,
-});
-
-const poolSchema = z.strictObject({
-	templateSlug: slug,
-	sizeSlug: slug,
-	providerId: z.string().min(1).optional(),
-	target: nonNegInt,
-	maxAgeHours: posInt.optional(),
 });
 
 const quotaFields = {
@@ -181,7 +172,6 @@ const configSchema = z
 	.strictObject({
 		templates: z.array(templateSchema).default([]),
 		sizes: z.array(sizeSchema).default([]),
-		pools: z.array(poolSchema).default([]),
 		quotas: quotasSchema,
 		defaults: defaultsSchema,
 		topology: topologySchema,
@@ -225,22 +215,6 @@ const configSchema = z
 				});
 			}
 		});
-		cfg.pools.forEach((p, i) => {
-			if (!templates.has(p.templateSlug)) {
-				ctx.addIssue({
-					code: "custom",
-					path: ["pools", i, "templateSlug"],
-					message: `unknown template "${p.templateSlug}"`,
-				});
-			}
-			if (!sizes.has(p.sizeSlug)) {
-				ctx.addIssue({
-					code: "custom",
-					path: ["pools", i, "sizeSlug"],
-					message: `unknown size "${p.sizeSlug}"`,
-				});
-			}
-		});
 	});
 
 type ParsedConfig = z.output<typeof configSchema>;
@@ -268,7 +242,6 @@ function formatIssues(source: string, err: z.ZodError): string {
 export class StaticConfigReader implements ConfigReader {
 	readonly #templates: Map<string, TemplateConfig>;
 	readonly #sizes: Map<string, SizeConfig>;
-	readonly #pools: PoolTarget[];
 	readonly #defaultQuota: Quota;
 	readonly #teamQuotas: Map<string, Quota>;
 	readonly #defaults: PlatformDefaults;
@@ -277,13 +250,7 @@ export class StaticConfigReader implements ConfigReader {
 	private constructor(cfg: ParsedConfig) {
 		this.#templates = new Map(cfg.templates.map((t) => [t.slug, t]));
 		this.#sizes = new Map(cfg.sizes.map((s) => [s.slug, s]));
-		this.#pools = cfg.pools.map((p) => ({
-			templateSlug: p.templateSlug,
-			sizeSlug: p.sizeSlug,
-			target: p.target,
-			...(p.providerId !== undefined ? { providerId: p.providerId } : {}),
-			...(p.maxAgeHours !== undefined ? { maxAgeHours: p.maxAgeHours } : {}),
-		}));
+
 		this.#defaultQuota = mergeQuota(DEFAULT_QUOTA, cfg.quotas.default);
 		this.#teamQuotas = new Map(
 			Object.entries(cfg.quotas.teams).map(([id, q]) => [
@@ -343,10 +310,6 @@ export class StaticConfigReader implements ConfigReader {
 
 	async sizes(): Promise<SizeConfig[]> {
 		return [...this.#sizes.values()].map((s) => ({ ...s }));
-	}
-
-	async poolTargets(): Promise<PoolTarget[]> {
-		return this.#pools.map((p) => ({ ...p }));
 	}
 
 	async teamQuota(teamId: string): Promise<Quota> {
