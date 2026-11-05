@@ -27,6 +27,11 @@ rm -f /etc/netplan/50-cloud-init.yaml /etc/ssh/sshd_config.d/50-cloud-init.conf
 # GRUB: no recordfail wait after a hard stop (spec 8.5).
 if [ -f /boot/grub/grubenv ]; then grub-editenv /boot/grub/grubenv unset recordfail; fi
 
+# Generic clones must never inherit DHCP leases, Docker identity or desktop pairing.
+rm -rf /var/lib/dhcp/* /var/lib/dhcpcd/* /var/lib/systemd/network/*
+rm -f /var/lib/docker/engine-id
+rm -rf /var/lib/umiak-stream/* /home/user/.config/sunshine/* /home/user/.local/state/cua-driver/*
+
 # Machine state and caches.
 rm -f /var/lib/systemd/random-seed /var/lib/systemd/credential.secret
 for home in /root /home/user; do

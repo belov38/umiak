@@ -266,11 +266,15 @@ describe("buildTemplate: happy path", () => {
 		);
 		const cmd = s.guest.calls[i - 1]?.cmd;
 		expect(cmd).toEqual([
-			"bash",
-			"-c",
-			// The stop runs ExecStop (which saves a seed) before the files go; any failure stops the build.
-			"systemctl stop systemd-random-seed.service && ! systemctl is-active -q systemd-random-seed.service && rm -f /var/lib/systemd/random-seed /var/lib/systemd/credential.secret && sync",
+			"rm",
+			"-f",
+			"/var/lib/systemd/random-seed",
+			"/var/lib/systemd/credential.secret",
 		]);
+		// ExecStop must finish before removing the seed it writes.
+		expect(s.guest.calls[i - 2]?.cmd.join(" ")).toContain(
+			"systemctl stop systemd-random-seed.service && ! systemctl is-active",
+		);
 	});
 
 	it("a failing random seed stop fails the seal stage before seal", async () => {

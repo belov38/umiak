@@ -44,5 +44,8 @@ func Seal(ctx context.Context, l paths.Layout, stopAgent func() error) error {
 	if err := fsutil.WriteFileAtomic(l.MachineIDFile, nil, 0o644); err != nil {
 		return fmt.Errorf("ident: empty machine-id: %w", err)
 	}
+	if err := linkDbusMachineID(l); err != nil {
+		return err
+	}
 	return resetManagedFiles(l)
 }

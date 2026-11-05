@@ -344,6 +344,8 @@ export class FakeGuest implements GuestIo {
 			this.log.push(`guest:mv ${to}`);
 			return ok();
 		}
+		if (c0 === "rm" && c1 === "-rf" && cmd[2] === "/var/log/umiak-build")
+			this.log.push("guest:rm-build-logs");
 		if (c0 === "bash" && c1 === "-c") {
 			const s = String(cmd[2]);
 			if (s.includes("rm -rf /var/log/umiak-build"))

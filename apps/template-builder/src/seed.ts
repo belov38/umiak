@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
@@ -27,6 +28,8 @@ export const SEED_AGENT_PACKAGE = "build/umiak-agent.tar";
 /** Seed path of the update keys that verified the package (first-install trust anchor). */
 export const SEED_UPDATE_KEYS = "build/update-keys.pub";
 export interface SeedInput {
+	/** CA-free first install, authenticated by the outer offline-layer signature. */
+	genericAgent?: { binary: string; unitsDirectory: string };
 	recipe: Recipe;
 	versions: Versions;
 	buildId: string;
@@ -155,6 +158,16 @@ export function collectFiles(
 
 export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 	const { recipe } = i;
+	if (
+		i.genericAgent &&
+		(i.tunnelUrl !== undefined ||
+			i.apiUrl !== undefined ||
+			i.sshUserCa !== undefined ||
+			!/^[A-Za-z0-9_+-][A-Za-z0-9._+-]{0,63}$/.test(i.agentVersion))
+	)
+		throw new Error(
+			"Generic layer seed cannot contain installation trust/endpoints or unsafe versions",
+		);
 	const snapshot = i.versions.apt.snapshot;
 	const out = new Map<string, string | Buffer>();
 
@@ -195,7 +208,45 @@ export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 			.join(""),
 	);
 	// A fixed name; the version travels in build/env.
-	out.set(SEED_AGENT_PACKAGE, readFileSync(i.agentPackage));
+	if (i.genericAgent) {
+		const binary = readFileSync(i.genericAgent.binary);
+		out.set("build/generic-agent/umiak-agent", binary);
+		for (const unit of [
+			"umiak-agent.service",
+			"umiak-identity.service",
+			"umiak-agent-rollback.service",
+			"umiak-cmd.slice",
+		])
+			out.set(
+				`build/generic-agent/${unit}`,
+				readFileSync(join(i.genericAgent.unitsDirectory, unit)),
+			);
+		out.set(
+			"build/generic-agent/manifest.json",
+			JSON.stringify({
+				format: "umiak-agent-manifest/v1",
+				version: i.agentVersion,
+				os: "linux",
+				arch: "amd64",
+				files: {
+					"umiak-agent": createHash("sha256").update(binary).digest("hex"),
+					"trust/update-keys.pub": createHash("sha256")
+						.update(i.updateKeys)
+						.digest("hex"),
+				},
+			}),
+		);
+		out.set(
+			"build/generic-agent.sh",
+			readFileSync(
+				new URL(
+					"../../../infra/templates/linux/generic-agent.sh",
+					import.meta.url,
+				),
+			),
+		);
+		out.set("build/env", `${out.get("build/env")}UMIAK_GENERIC_IMAGE='1'\n`);
+	} else out.set(SEED_AGENT_PACKAGE, readFileSync(i.agentPackage));
 	out.set(SEED_UPDATE_KEYS, i.updateKeys);
 	out.set(
 		"build/agent.toml",
