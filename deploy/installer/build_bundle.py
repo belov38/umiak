@@ -12,6 +12,7 @@ import argparse
 import gzip
 import hashlib
 import io
+import json
 import re
 import sys
 import tarfile
@@ -43,10 +44,14 @@ def pinned_compose(text: str, version: str) -> str:
     return pinned
 
 
-def collect(repo: Path, version: str, node_agent_sha256: str, db_compatible: bool = False) -> dict[str, bytes]:
+def collect(repo: Path, version: str, node_agent_sha256: str, db_compatible: bool = False,
+            min_updater: str | None = None) -> dict[str, bytes]:
+    metadata = {"dbCompatible": db_compatible}
+    if min_updater is not None:
+        release.version_key(min_updater)
+        metadata["minUpdater"] = min_updater
     files: dict[str, bytes] = {
         "VERSION": (version + "\n").encode(),
-        "release.json": ('{"dbCompatible":true}\n' if db_compatible else '{"dbCompatible":false}\n').encode(),
         "node-agent.sha256": (node_agent_sha256 + "\n").encode(),
     }
     package = repo / "deploy" / "installer" / "umiak_installer"
@@ -59,6 +64,8 @@ def collect(repo: Path, version: str, node_agent_sha256: str, db_compatible: boo
             raise SystemExit("Missing stack file: " + name)
         data = source.read_bytes()
         files[name] = pinned_compose(data.decode(), version).encode() if name == "compose.yaml" else data
+    metadata["images"] = release.compose_images(files["compose.yaml"].decode(), version)
+    files["release.json"] = (json.dumps(metadata, separators=(",", ":")) + "\n").encode()
     return files
 
 
@@ -77,11 +84,12 @@ def write_archive(files: dict[str, bytes]) -> bytes:
     return raw.getvalue()
 
 
-def build(version: str, out_dir: Path, node_agent_sha256: str, repo: Path = REPO_ROOT, db_compatible: bool = False) -> Path:
+def build(version: str, out_dir: Path, node_agent_sha256: str, repo: Path = REPO_ROOT, db_compatible: bool = False,
+          min_updater: str | None = None) -> Path:
     version = release.valid_version(version)
     if not release.SHA.fullmatch(node_agent_sha256):
         raise SystemExit("--node-agent-sha256 must be 64 lowercase hex characters")
-    data = write_archive(collect(Path(repo), version, node_agent_sha256, db_compatible))
+    data = write_archive(collect(Path(repo), version, node_agent_sha256, db_compatible, min_updater))
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     bundle = out_dir / release.bundle_name(version)
@@ -96,8 +104,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("out_dir", type=Path)
     parser.add_argument("--node-agent-sha256", required=True)
     parser.add_argument("--db-compatible", action="store_true", help="declare image-only rollback to previous release safe")
+    parser.add_argument("--min-updater", help="minimum installed updater bundle version")
     args = parser.parse_args(argv)
-    print(build(args.version, args.out_dir, args.node_agent_sha256, db_compatible=args.db_compatible))
+    print(build(args.version, args.out_dir, args.node_agent_sha256, db_compatible=args.db_compatible,
+                min_updater=args.min_updater))
     return 0
 
 

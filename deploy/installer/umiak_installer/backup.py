@@ -18,7 +18,6 @@ from pathlib import Path
 BASE = Path("/var/lib/umiak-backups")
 CONFIG = Path("/opt/umiak")
 COMPOSE = ["docker", "compose", "--project-directory", "/opt/umiak"]
-WRITERS = ["quickstart", "worker", "api", "web", "mcp", "gateway", "gateway-renewal", "web-meta"]
 VOLUMES = ["database-secret", "secrets", "gateway-secrets", "network-config", "pve-secrets"]
 
 
@@ -34,8 +33,27 @@ def volume_path(name):
     return path
 
 
+def writers():
+    # Compose resolves trusted local configuration; never execute service names
+    # as shell text. Re-read on each operation, including the target on restore.
+    config = json.loads(subprocess.check_output(COMPOSE + ["config", "--format", "json"], text=True))
+    services = config["services"]
+    one_shots = {name for service in services.values()
+                 for name, dependency in service.get("depends_on", {}).items()
+                 if dependency.get("condition") == "service_completed_successfully"}
+    return [name for name in services if name != "postgres" and name not in one_shots]
+
+
 def stop():
-    run(COMPOSE + ["stop", "--timeout", "30", *WRITERS], stdout=sys.stderr)
+    services = writers()
+    if services:
+        run(COMPOSE + ["stop", "--timeout", "30", *services], stdout=sys.stderr)
+
+
+def resume():
+    services = writers()
+    if services:
+        run(COMPOSE + ["start", *services], stdout=sys.stderr)
 
 
 def backup(identity, release):
@@ -74,7 +92,7 @@ def backup(identity, release):
         raise
     finally:
         # No migration/init tasks are run while resuming the old stack.
-        run(COMPOSE + ["start", *WRITERS], stdout=sys.stderr)
+        resume()
 
 
 def restore(identity, restore_data):
@@ -145,7 +163,7 @@ if __name__ == "__main__":
     elif request["op"] == "restore":
         result = restore(identity, request["restoreData"] is True)
     elif request["op"] == "resume":
-        run(COMPOSE + ["start", *WRITERS], stdout=sys.stderr)
+        resume()
         result = {}
     elif request["op"] == "retain":
         result = retain()

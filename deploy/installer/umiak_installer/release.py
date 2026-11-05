@@ -41,10 +41,58 @@ class ReleaseError(InstallerError):
     pass
 
 
+def compose_images(text: str, version: str) -> list[str]:
+    """Read our bundle's plain, pinned image lines without evaluating YAML/env."""
+    images = re.findall(r"^[ \t]*image:[ \t]*(\S+)[ \t]*$", text, re.M)
+    if len(images) != len(re.findall(r"^[ \t]*image:", text, re.M)):
+        raise ReleaseError("Unsupported target Compose image syntax")
+    allowed = re.compile(r"ghcr\.io/belov38/umiak-[a-z0-9][a-z0-9-]*:" + re.escape(valid_version(version)))
+    postgres = re.compile(r"postgres:[0-9]+\.[0-9]+(?:\.[0-9]+)?-alpine")
+    if not images or len(images) > 128 or any(not (allowed.fullmatch(image) or postgres.fullmatch(image)) for image in images):
+        raise ReleaseError("Target Compose must contain pinned Umiak release images only")
+    return list(dict.fromkeys(images))
+
+
 @dataclass(frozen=True)
 class Release:
     version: str
     root: Path
+
+    def metadata(self) -> dict:
+        try:
+            value = json.loads((self.root / "release.json").read_text())
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError) as error:
+            raise ReleaseError("Invalid release metadata") from error
+        if not isinstance(value, dict):
+            raise ReleaseError("Invalid release metadata")
+        if "minUpdater" in value:
+            if not isinstance(value["minUpdater"], str):
+                raise ReleaseError("Invalid minUpdater release version")
+            version_key(value["minUpdater"])
+        if "images" in value and (not isinstance(value["images"], list) or not value["images"]
+                                  or any(not isinstance(i, str) for i in value["images"])):
+            raise ReleaseError("Invalid release image manifest")
+        if "dbCompatible" in value and type(value["dbCompatible"]) is not bool:
+            raise ReleaseError("Invalid database compatibility declaration")
+        return value
+
+    @property
+    def images(self) -> list[str]:
+        try:
+            images = compose_images((self.root / "compose.yaml").read_text(), self.version)
+        except OSError as error:
+            raise ReleaseError("Target bundle is missing Compose") from error
+        declared = self.metadata().get("images")
+        if declared is not None and declared != images:
+            raise ReleaseError("Release image manifest does not match target Compose")
+        return images
+
+    def require_updater(self, running: str | None) -> None:
+        required = self.metadata().get("minUpdater")
+        if required is not None and (running is None or version_key(running) < version_key(required)):
+            raise ReleaseError(f"Updater is too old; update to {required} first before installing {self.version}")
 
     @property
     def db_compatible(self) -> bool:
@@ -169,6 +217,7 @@ def release_channel(version: str) -> str:
 
 
 def version_key(version: str) -> tuple:
+    valid_version(version)
     release_channel(version)
     match = CHANNEL_VERSION.fullmatch(version)
     major, minor, patch, date, sequence = match.groups()

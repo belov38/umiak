@@ -100,6 +100,7 @@ def load(runner):
 
 def new_bundle(tmp_path, agent=AGENT, version="1.3.0"):
     bundle = make_bundle(tmp_path / ("bundle-" + version), version=version)
+    (bundle.root / "compose.yaml").write_text(f"services:\n  api:\n    image: ghcr.io/belov38/umiak-quickstart:{version}\n")
     (bundle.root / "node-agent.sha256").write_text(hashlib.sha256(agent).hexdigest() + "\n")
     return bundle
 

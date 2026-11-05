@@ -1,12 +1,13 @@
 """Repackage a verified edge bundle without rebuilding its images or installer."""
 import hashlib
 import io
+import json
 import sys
 import tarfile
 from pathlib import Path
 
 from build_bundle import write_archive
-from umiak_installer.release import bundle_name, expected_sha, release_channel
+from umiak_installer.release import bundle_name, compose_images, expected_sha, release_channel
 
 
 def repack(data: bytes, source: str, target: str) -> bytes:
@@ -24,6 +25,11 @@ def repack(data: bytes, source: str, target: str) -> bytes:
         raise ValueError("Wrong source bundle version")
     files["VERSION"] = (target + "\n").encode()
     files["compose.yaml"] = files["compose.yaml"].replace((":" + source).encode(), (":" + target).encode())
+    if "release.json" in files:
+        metadata = json.loads(files["release.json"])
+        if "images" in metadata:
+            metadata["images"] = compose_images(files["compose.yaml"].decode(), target)
+            files["release.json"] = (json.dumps(metadata, separators=(",", ":")) + "\n").encode()
     return write_archive(files)
 
 

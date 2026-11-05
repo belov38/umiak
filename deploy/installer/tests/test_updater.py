@@ -167,14 +167,18 @@ def test_busy_template_build_is_a_skip_without_backup_or_restart(tmp_path,monkey
     from test_state import sample
     from umiak_installer import day2, release
     from umiak_installer.pve import CommandError, Runner
+    calls = []
     class Fake(Runner):
         def hostname(self):return "pve"
-        def run(self,argv,input=None):return ""
+        def run(self,argv,input=None):
+            calls.append(argv)
+            return ""
     runner=Fake(tmp_path)
     runner.path(day2.SECRETS_DIR).mkdir(parents=True)
     monkeypatch.setattr(day2,"_umiak_ct",lambda *args:{"tags":"umiak"})
     class UI:
         def say(self,line):pass
+    (tmp_path / "compose.yaml").write_text("services:\n  api:\n    image: ghcr.io/belov38/umiak-spa:1.3.0\n")
     backend=updater.HostBackend(runner,sample(phase="complete"),release.Release("1.3.0",tmp_path),
                                 ui=UI(),state_path=tmp_path / "state",sleep=lambda _:None)
     class Console:
@@ -185,6 +189,7 @@ def test_busy_template_build_is_a_skip_without_backup_or_restart(tmp_path,monkey
     backend.console=Console()
     with pytest.raises(updater.UpdateSkipped):
         backend.fence()
+    assert [c[-1] for c in calls if "pull" in c] == ["ghcr.io/belov38/umiak-spa:1.3.0"]
     assert not backend.path.exists()
     history=runner.path(updater.ROOT) / "update-history.jsonl"
     assert json.loads(history.read_text())["status"]=="skipped"

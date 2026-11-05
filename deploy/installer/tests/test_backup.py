@@ -19,7 +19,14 @@ def fake_backup(tmp_path, monkeypatch):
         (path / "state").write_text(name)
         volumes[name] = path
     monkeypatch.setattr(backup, "volume_path", lambda name: volumes[name])
-    monkeypatch.setattr(backup.subprocess, "check_output", lambda *a, **k: "100")
+    def output(argv, **kwargs):
+        if "config" in argv:
+            names = ["api", "quickstart", "worker", "web", "web-meta"] if (config / "compose.yaml").read_text() == "old images" else ["api", "new-worker"]
+            return json.dumps({"services": {"postgres": {}, "migrate": {"restart": "no"},
+                                **{name: {"depends_on": {"migrate": {"condition": "service_completed_successfully"}}}
+                                   for name in names}}})
+        return "100"
+    monkeypatch.setattr(backup.subprocess, "check_output", output)
     calls = []
 
     def run(argv, **kwargs):
@@ -41,7 +48,7 @@ def test_backup_stops_only_stack_writers_and_marks_complete(fake_backup):
     assert (root / "database.dump").read_bytes() == b"logical dump"
     stop = next(c for c in fake_backup if "stop" in c)
     assert "postgres" not in stop
-    assert fake_backup[-1][-len(backup.WRITERS) :] == backup.WRITERS
+    assert fake_backup[-1][-5:] == ["api", "quickstart", "worker", "web", "web-meta"]
     assert all(c[0] == "docker" for c in fake_backup)
 
 
@@ -90,3 +97,17 @@ def test_restore_data_only_for_incompatible_migrations(fake_backup, restore_data
     assert any("dropdb" in c for c in fake_backup) is restore_data
     assert any("pg_restore" in c for c in fake_backup) is restore_data
     assert any("cp" == c[0] and "-a" in c for c in fake_backup) is restore_data
+
+
+def test_restore_stops_target_services_before_restoring_source_config(fake_backup):
+    identity = "20261105030000-aaaaaaaaaaaa"
+    backup.backup(identity, "1.2.0")
+    (backup.CONFIG / "compose.yaml").write_text("new images without web")
+    fake_backup.clear()
+    backup.restore(identity, True)
+    stop = next(c for c in fake_backup if "stop" in c)
+    assert stop[-2:] == ["api", "new-worker"]
+    assert "web" not in stop and "web-meta" not in stop
+    assert (backup.CONFIG / "compose.yaml").read_text() == "old images"
+    assert any("dropdb" in c for c in fake_backup)
+    assert any("pg_restore" in c for c in fake_backup)

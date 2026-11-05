@@ -1,4 +1,5 @@
 import hashlib
+import json
 import re
 import tarfile
 
@@ -83,4 +84,4 @@ def test_bundle_cli_declares_database_compatibility(tmp_path):
     assert build_bundle.main(["1.2.3", str(tmp_path), "--node-agent-sha256", SHA, "--db-compatible"]) == 0
     import tarfile
     with tarfile.open(tmp_path / "umiak-installer-1.2.3.tar.gz") as archive:
-        assert archive.extractfile("release.json").read() == b'{"dbCompatible":true}\n'
+        assert json.loads(archive.extractfile("release.json").read())["dbCompatible"] is True

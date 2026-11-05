@@ -147,9 +147,9 @@ class HostBackend:
         # Pull immutable release tags before fencing template work or stopping
         # writers. Downloads dominate update duration on a home connection.
         self.ui.say("Pulling the release images before maintenance…")
-        for name in ("quickstart", "web"):
+        for image in self.bundle.images:
             run_in(self.runner, self.current.ct_id, "docker", "pull",
-                   f"ghcr.io/belov38/umiak-{name}:{self.bundle.version}")
+                   image)
         import hashlib
         import shutil
 
@@ -298,6 +298,11 @@ def recover(runner, *, ui, state_path, sleep):
 
 
 def run_update(runner, current, bundle, *, ui, state_path, sleep):
+    from . import release
+    # Use the executing Python bundle, not the control-plane install version.
+    metadata = bundle.metadata()
+    bundle.require_updater(release.current().version if "minUpdater" in metadata else None)
+    _ = bundle.images  # Validate before any pull, maintenance fence or backup.
     backend = HostBackend(runner, current, bundle, ui=ui, state_path=state_path, sleep=sleep)
     record = transaction(backend)
     if record["status"] != "updated":
