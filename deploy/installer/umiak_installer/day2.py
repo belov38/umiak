@@ -568,6 +568,8 @@ def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: b
             _remove_zone_dnsmasq(runner)
         shutil.rmtree(runner.path(STATE_DIR_ON_PVE), ignore_errors=True)
         shutil.rmtree(runner.path(prepare_host.STATE_DIR), ignore_errors=True)
+    from . import update_timer
+    update_timer.remove(runner)
     (state_path or runner.path(str(state.DEFAULT_PATH))).unlink(missing_ok=True)
     style.action(ui.say, f"Remove the device {current.answers.get('hostname', 'umiak')} from your tailnet:",
                  tailnet.MACHINES_URL)

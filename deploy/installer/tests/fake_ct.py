@@ -111,6 +111,13 @@ class CtFake(FakeRunner):
         return ""
 
     def _in_ct(self, argv, input):
+        if input and 'CREATE TABLE IF NOT EXISTS quickstart.updates' in " ".join(argv):
+            request = json.loads(input)
+            self.update_settings = request.get("settings", getattr(self, "update_settings", request["defaults"]))
+            return json.dumps({"settings": self.update_settings, "status": request.get("status", {}), "history": []})
+        if argv[:2] == ["python3", "-c"] and input and 'CT-local backup helper' in argv[2]:
+            request = json.loads(input)
+            return json.dumps({"backup": request.get("id"), "release": request.get("release")})
         if argv[:1] == ["timeout"]:
             argv = argv[2:]
         if argv[:2] == ["getent", "hosts"] and self.dns_broken:

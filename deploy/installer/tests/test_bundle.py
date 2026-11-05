@@ -73,3 +73,11 @@ def test_rejects_bad_version(tmp_path, version):
 def test_rejects_bad_checksum(tmp_path):
     with pytest.raises(SystemExit):
         build_bundle.build("1.2.3", tmp_path, "nothex")
+
+
+def test_bundle_cli_declares_database_compatibility(tmp_path):
+    import build_bundle
+    assert build_bundle.main(["1.2.3", str(tmp_path), "--node-agent-sha256", SHA, "--db-compatible"]) == 0
+    import tarfile
+    with tarfile.open(tmp_path / "umiak-installer-1.2.3.tar.gz") as archive:
+        assert archive.extractfile("release.json").read() == b'{"dbCompatible":true}\n'

@@ -357,6 +357,8 @@ export class TemplateBuildJobs {
 			names: input.names || {},
 		};
 		await this.update((state) => {
+			if (state.platformMaintenance)
+				throw Error("Updating Umiak… Try the template build again shortly.");
 			if (state.buildQueue?.active || state.buildJob?.status === "running")
 				throw Error("A template build is already running");
 			state.buildQueue = queue;
@@ -462,6 +464,8 @@ export class TemplateBuildJobs {
 			startedAt: new Date().toISOString(),
 		};
 		await this.update(async (current) => {
+			if (current.platformMaintenance)
+				throw Error("Updating Umiak… Try the template build again shortly.");
 			if (
 				(current.buildQueue?.active &&
 					current.buildQueue.id !== context.queueId) ||

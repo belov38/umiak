@@ -361,3 +361,27 @@ test("full build log path accepts only job ids", () => {
 		null,
 	);
 });
+
+test("platform maintenance fences both queued and direct template builds", async () => {
+	const store = {
+		read: async () => ({
+			...state,
+			platformMaintenance: { message: "Updating Umiak…" },
+		}),
+		write: async () => {
+			throw Error("must not reserve a build");
+		},
+	};
+	const jobs = new TemplateBuildJobs({
+		store,
+		validate: async () => {},
+		run: async () => {
+			throw Error("must not run");
+		},
+	});
+	await assert.rejects(jobs.startQueue({ nodes: ["node"] }), /Updating Umiak/);
+	await assert.rejects(
+		jobs.start("linux", { templateVmid: 702 }),
+		/Updating Umiak/,
+	);
+});

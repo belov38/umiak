@@ -29,6 +29,8 @@ import time
 import urllib.parse
 from pathlib import Path
 
+from . import updater, update_timer
+from .update_console import Console as UpdateConsole
 from . import allocation, checklist, ct, day2, prepare_host, release, stack, state, style, tailnet
 from .pve import CommandError, InstallerError, Runner, bridges, get, lan_bridge, lvmthin_storages
 
@@ -60,6 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Install or manage Umiak on this Proxmox VE node. Rerun the same command for every later action.",
     )
     parser.add_argument("--non-interactive", action="store_true", help="never prompt; every missing answer is an error")
+    parser.add_argument("--scheduled", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--yes", action="store_true", help="apply listed host changes without asking")
     parser.add_argument("--storage", help="LVM-thin storage for sandboxes and the control-plane CT")
     parser.add_argument("--ct-id", type=int, help=f"control-plane CT ID (default {DEFAULT_CT_ID})")
@@ -522,6 +525,9 @@ class Flow:
         tailnet.serve(runner, ct_id)
         code = stack.wait_claim_code(runner, ct_id, sleep=self.sleep)
         self.save("complete", a)
+        UpdateConsole(self.runner, self.current).call(status={"version": self.current.release,
+                                                            "channel": self.current.channel, "updating": False})
+        update_timer.install(self.runner, self.bundle)
         return tailnet.claim_link(identity.dns_name, code)
 
     def start_stack(self, a: dict, result, identity: tailnet.TailnetInfo, out_dir: Path) -> None:
@@ -534,12 +540,24 @@ class Flow:
         common = {"ui": ui, "progress": self.progress}
         if action == "Update":
             self.step = "Choosing the release"
-            channel = args.channel or current.channel
+            console = UpdateConsole(self.runner, current)
+            settings = updater.validate_settings(console.call()["settings"])
+            channel = args.channel or settings["channel"]
+            if args.scheduled:
+                if settings["paused"]:
+                    ui.say("Updates paused; skipping.")
+                    return 0
+                if not updater.in_window(settings["start"], settings["end"]):
+                    ui.say("Outside the host maintenance window; skipping.")
+                    return 0
             if ui.interactive and not args.channel:
                 channel = ui.ask("Release channel (stable/edge)", channel, "--channel",
                                  lambda value: value if value in ("stable", "edge") else _bad_channel())
             current = dataclasses.replace(current, channel=channel,
-                                          auto_update=args.auto_update == "on" if args.auto_update else current.auto_update)
+                                          auto_update=args.auto_update == "on" if args.auto_update else settings["auto"])
+            settings.update(channel=channel, auto=current.auto_update)
+            console.call(settings=settings)
+            state.save(current, self.state_path)
             version = args.version
             if not version:
                 try:
@@ -550,12 +568,22 @@ class Flow:
                 if ui.interactive:
                     version = ui.ask("Release version", version, "--version")
             version = release.valid_version(version)
+            if args.scheduled:
+                newer = current.release.startswith("dev-") or updater.release_newer(version, current.release)
+                if not newer:
+                    ui.say("Already running the newest release in this channel.")
+                    return 0
+                if not settings["auto"]:
+                    console.call(record={"status": "available", "from": current.release, "to": version,
+                                         "finishedAt": updater.timestamp()})
+                    return 0
             if version == self.bundle.version:
                 bundle = self.bundle
             else:
                 self.progress(f"Downloading release {version}")
                 bundle = download(version, self.runner.path(prepare_host.STATE_DIR) / "releases")
-            day2.update(self.runner, current, bundle, sleep=self.sleep, state_path=self.state_path, **common)
+            self.current = updater.run_update(self.runner, current, bundle, ui=ui, sleep=self.sleep, state_path=self.state_path)
+            update_timer.install(self.runner, bundle)
             ui.say(f"Umiak is updated to {bundle.version}.")
         elif action == "Sign in a new browser":
             link = day2.signin(self.runner, current, **common)
@@ -614,7 +642,7 @@ def describe_failure(step: str, error: CommandError, tail: int = 20) -> str:
     return "\n".join(lines)
 
 
-def main(argv=None, runner: Runner | None = None, bundle: release.Release | None = None, out=print, input_fn=input,
+def _main(argv=None, runner: Runner | None = None, bundle: release.Release | None = None, out=print, input_fn=input,
          sleep=time.sleep, state_path: Path | None = None, download=release.download,
          latest=release.latest_version) -> int:
     args = build_parser().parse_args(argv)
@@ -631,7 +659,9 @@ def main(argv=None, runner: Runner | None = None, bundle: release.Release | None
 
     try:
         bundle = bundle or release.current()
-        flow = Flow(runner, ui, bundle, state_path or runner.path(str(state.DEFAULT_PATH)), sleep)
+        resolved_state_path = state_path or runner.path(str(state.DEFAULT_PATH))
+        updater.recover(runner, ui=ui, state_path=resolved_state_path, sleep=sleep)
+        flow = Flow(runner, ui, bundle, resolved_state_path, sleep)
         options = menu_options(flow.current)
         if args.action:
             action = ACTIONS[args.action]
@@ -678,6 +708,16 @@ def main(argv=None, runner: Runner | None = None, bundle: release.Release | None
     except KeyboardInterrupt:
         out("Interrupted. Rerun the installer to resume.")
         return 130
+
+
+def main(argv=None, runner=None, **kwargs):
+    runner = runner or Runner()
+    try:
+        with updater.action_lock(runner):
+            return _main(argv, runner=runner, **kwargs)
+    except InstallerError as error:
+        kwargs.get("out", print)(str(error))
+        return 1
 
 
 def run() -> int:

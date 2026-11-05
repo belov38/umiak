@@ -5,6 +5,10 @@ name: release
 on:
   workflow_dispatch:
     inputs:
+      db_compatible:
+        description: Previous release can read this release database without restoration
+        type: boolean
+        default: false
       channel:
         description: Release channel
         type: choice
@@ -165,9 +169,13 @@ jobs:
           sha256sum "$RUNNER_TEMP/umiak-node-linux-amd64" | cut -d ' ' -f 1 > "$RUNNER_TEMP/node-agent.sha256"
           cat "$RUNNER_TEMP/node-agent.sha256"
       - name: Build the installer bundle
+        env:
+          DB_COMPATIBLE: ${{ inputs.db_compatible }}
         run: |
           mkdir -p dist
-          uv run --project deploy/installer python deploy/installer/build_bundle.py "$VERSION" dist --node-agent-sha256 "$(cat "$RUNNER_TEMP/node-agent.sha256")"
+          compatibility=()
+          if [ "$DB_COMPATIBLE" = true ]; then compatibility+=(--db-compatible); fi
+          uv run --project deploy/installer python deploy/installer/build_bundle.py "$VERSION" dist --node-agent-sha256 "$(cat "$RUNNER_TEMP/node-agent.sha256")" "${compatibility[@]}"
           (cd dist && sha256sum -c SHA256SUMS)
       - name: Create the GitHub release
         env:
