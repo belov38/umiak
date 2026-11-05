@@ -4,7 +4,6 @@
 import { BasePayload, type Payload } from "payload";
 import { buildUmiakConfig, type UmiakPayloadOptions } from "./config.ts";
 import { dbPool } from "./db.ts";
-import { detachSessionCache } from "./identity/session-cache.ts";
 
 interface Entry {
 	instance: Promise<Payload>;
@@ -36,7 +35,7 @@ function growPool(payload: Payload, max: number): void {
  * Every call takes a reference; each must be released by one
  * `closeUmiakPayload(databaseUrl)`, and the instance is destroyed with the
  * last one. Later calls share the first call's config (secret, groups,
- * origin, session cache); a larger `poolMax` raises the pool's max.
+ * origin); a larger `poolMax` raises the pool's max.
  */
 export function getUmiakPayload(o: UmiakPayloadOptions): Promise<Payload> {
 	const poolMax = o.poolMax ?? DEFAULT_POOL_MAX;
@@ -87,7 +86,6 @@ export async function closeUmiakPayload(databaseUrl: string): Promise<void> {
 	const payload = await e.instance.catch(() => null);
 	if (!payload) return;
 	const pool = dbPool(payload);
-	await detachSessionCache(payload);
 	await payload.destroy();
 	// The adapter keeps one client checked out for good (connect), so end()
 	// settles only once that client is gone; idle clients close at once.

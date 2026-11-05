@@ -18,7 +18,6 @@ import { ConfirmButton } from "@/components/app/confirm-button";
 import { ConnectionNotice } from "@/components/app/connection-notice";
 import { QueryError } from "@/components/app/query-error";
 import { useAppSession } from "@/components/app/session-context";
-import { TeamNotices } from "@/components/app/team-notices";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LoadingState } from "@/components/ui/feedback";
@@ -70,12 +69,6 @@ export function TeamSettings({ data }: { data: TeamSettingsData }) {
 		<div className="space-y-6">
 			<PageHeader title="Team settings" />
 			<ConnectionNotice />
-			<TeamNotices
-				teamId={data.team.id}
-				notices={data.notices}
-				canAcknowledge={can(session, perm, "acknowledgeNotice")}
-				canRevoke={can(session, perm, "revokeApiKeys")}
-			/>
 			<NameSection data={data} canRename={can(session, perm, "renameTeam")} />
 			<QuotaSection teamId={data.team.id} />
 			<MembersSection

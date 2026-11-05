@@ -74,7 +74,7 @@ describe.skipIf(skipPg())("collection rules", () => {
 	}
 
 	const count = async (
-		collection: "memberships" | "team-notices" | "teams",
+		collection: "memberships" | "teams",
 		where: Record<string, unknown>,
 	) =>
 		(
@@ -274,14 +274,10 @@ describe.skipIf(skipPg())("collection rules", () => {
 			expect(await count("memberships", { team: { equals: tm.id } })).toBe(1);
 		});
 
-		it("a shared team: memberships and notices deleted, live keys revoked and kept", async () => {
+		it("a shared team: memberships deleted, live keys revoked and kept", async () => {
 			const tm = await team({ name: "shared" });
 			const owner = await member(tm.id, "owner");
 			await member(tm.id, "member");
-			await payload.create({
-				collection: "team-notices",
-				data: { team: tm.id, kind: "member_deactivated" },
-			});
 			const live = await payload.create({
 				collection: "api-keys",
 				data: keyData(tm.id),
@@ -318,7 +314,6 @@ describe.skipIf(skipPg())("collection rules", () => {
 
 			expect(await count("teams", { id: { equals: tm.id } })).toBe(0);
 			expect(await count("memberships", { team: { equals: tm.id } })).toBe(0);
-			expect(await count("team-notices", { team: { equals: tm.id } })).toBe(0);
 			expect(await count("memberships", { id: { equals: owner.id } })).toBe(0);
 			const liveBack = await payload.findByID({
 				collection: "api-keys",

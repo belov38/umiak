@@ -58,7 +58,6 @@ import { UmiakProvider } from "../src/lib/api.ts";
 import type { AppSession } from "../src/lib/app-session.ts";
 import { describeError } from "../src/lib/errors.ts";
 
-vi.mock("@/actions/notices", () => ({ acknowledgeNotice: vi.fn() }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/app" }));
 const session: AppSession = {
 	user: { id: "usr_local", name: "Local owner", email: "local@umiak.local" },
@@ -120,7 +119,7 @@ describe("single-owner dashboard", () => {
 	it("does not mention the internal team in API key headings, descriptions or ARIA", () => {
 		const html = markup(
 			"single",
-			createElement(KeysPage, { teamId: "team_local", notices: [] }),
+			createElement(KeysPage, { teamId: "team_local" }),
 		);
 		expect(visibleText(html)).not.toMatch(/\bteams?\b/i);
 		expect(html).toContain('aria-label="New API key"');

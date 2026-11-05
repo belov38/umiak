@@ -8,8 +8,8 @@ import * as m20261101_000000_windows_template from "./20261101_000000_windows_te
 import * as m20261101_010000_desktop_defaults from "./20261101_010000_desktop_defaults.ts";
 import * as m20261103_000000_windows_single from "./20261103_000000_windows_single.ts";
 import * as m20261104_000000_windows_name from "./20261104_000000_windows_name.ts";
-
-import * as ownerOnly from "./20261105_000000_owner_only.ts";
+import * as m20261105_000000_owner_only from "./20261105_000000_owner_only.ts";
+import * as m20261105_011533_retire_directory_notices from "./20261105_011533_retire_directory_notices.ts";
 
 export interface PayloadMigration {
 	name: string;
@@ -43,6 +43,19 @@ export const migrations: PayloadMigration[] = [
 		down: m20261103_000000_windows_single.down,
 		name: "20261103_000000_windows_single",
 	},
-	{ ...m20261104_000000_windows_name, name: "20261104_000000_windows_name" },
-	{ ...ownerOnly, name: "20261105_000000_owner_only" },
+	{
+		up: m20261104_000000_windows_name.up,
+		down: m20261104_000000_windows_name.down,
+		name: "20261104_000000_windows_name",
+	},
+	{
+		up: m20261105_000000_owner_only.up,
+		down: m20261105_000000_owner_only.down,
+		name: "20261105_000000_owner_only",
+	},
+	{
+		up: m20261105_011533_retire_directory_notices.up,
+		down: m20261105_011533_retire_directory_notices.down,
+		name: "20261105_011533_retire_directory_notices",
+	},
 ];

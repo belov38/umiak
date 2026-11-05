@@ -93,7 +93,6 @@ describe.skipIf(skipPg())("payload schema", () => {
 			"teams",
 			"memberships",
 			"api_keys",
-			"team_notices",
 			"ssh_keys",
 			"templates",
 			"sizes",

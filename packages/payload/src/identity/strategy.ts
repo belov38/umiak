@@ -6,8 +6,8 @@
 // missing login (401) from a refused one (403 pages "account disabled",
 // "identity conflict", S8 §5.3 item 4). So:
 // - authenticateHeaders() returns the outcome with the reason;
-// - authenticateRequest() is the same through the session cache of the
-//   instance (session-cache.ts, attached in web) plus the user document;
+// - authenticateRequest() resolves the owner on every
+//   request plus the user document;
 //   web's layouts and server actions call it and render the 401/403 pages
 //   themselves;
 // - the strategy calls authenticateRequest() too (so /admin and /app agree)
@@ -41,7 +41,7 @@ export type AuthDeniedReason =
 	| "identity_conflict";
 
 export type AuthOutcome =
-	/** No X-Auth-Request-Email: not behind owner ingress (S8 §5.1). */
+	/** No owner session available. */
 	| { kind: "anonymous"; status: 401 }
 	/** subject_required -> 401; user_disabled, identity_conflict -> 403. */
 	| { kind: "denied"; status: 401 | 403; reason: AuthDeniedReason }
@@ -60,7 +60,7 @@ export function operatorGroupsOf(payload: Payload): string[] {
 }
 
 /**
- * Parses the owner ingress headers and resolves the session. IdentityErrors
+ * Checks the owner ingress stamp and resolves the internal session. IdentityErrors
  * of the login become `denied`; anything else (database down) is thrown.
  */
 export async function authenticateHeaders(
@@ -126,9 +126,7 @@ async function resolveRequest(
 }
 
 /**
- * authenticateHeaders() plus the users document, through the session cache
- * of the instance when one is attached (only sessions are cached; refusals
- * and errors are not).
+ * authenticateHeaders() plus the current user document on every request.
  */
 export async function authenticateRequest(
 	payload: Payload,

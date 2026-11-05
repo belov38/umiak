@@ -1,5 +1,4 @@
-// Team API keys (S8 §9.8). The IdP-sync notices (§20.1) come from Payload
-// with the same rules as the settings page; the keys from the SDK.
+// Team API keys: authorize team access through Payload; load keys with the SDK.
 import { forbidden, notFound, unauthorized } from "next/navigation";
 import { KeysPage } from "@/features/keys/keys-page";
 import { requestActionCtx } from "@/lib/action-context";
@@ -18,5 +17,5 @@ export default async function TeamKeysPage({
 		if (r.error.code === "forbidden") forbidden();
 		notFound();
 	}
-	return <KeysPage teamId={team} notices={r.notices} />;
+	return <KeysPage teamId={team} />;
 }

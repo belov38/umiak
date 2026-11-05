@@ -13,7 +13,7 @@
 // Error codes: `forbidden`, `not_found`, `validation`, `last_owner`,
 // `team_limit`, `already_member`. A row the caller may not act on, or one
 // that does not exist, is `forbidden` for people: they never learn whether
-// a foreign team, membership or notice exists. Operators, who may see every
+// a foreign team or membership exists. Operators, who may see every
 // team, get `not_found` for a missing row. A malformed id is `validation`.
 import type { SessionIdentity } from "@umiak/auth";
 import { inTransaction, rows, sql, tbl, uniqueViolation } from "@umiak/payload";

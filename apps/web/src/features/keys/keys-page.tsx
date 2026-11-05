@@ -2,8 +2,7 @@
 // /app/t/<team>/keys (S8 §9.8): team API keys from GET /v1/api-keys. Every
 // member sees them; New and Rotate are for owners, Revoke for owners and
 // operators (§6.2). Keys whose creator left or was deactivated are marked;
-// the IdP-sync notice (§20.1) sits above the table. Revoked and expired
-// keys are collapsed at the bottom.
+// revoked and expired keys are collapsed at the bottom.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
@@ -14,7 +13,6 @@ import {
 	useSingleOwner,
 	useTeamPermission,
 } from "@/components/app/session-context";
-import { TeamNotices } from "@/components/app/team-notices";
 import { Badge } from "@/components/ui/badge";
 import { LoadingState } from "@/components/ui/feedback";
 import { PageHeader, Panel } from "@/components/ui/panel";
@@ -42,17 +40,10 @@ import {
 import { useAttempt } from "@/lib/client-call";
 import { formatAgo, formatDate } from "@/lib/format";
 import { can } from "@/lib/permissions";
-import type { TeamNoticeView } from "@/lib/team-actions/team-settings";
 import { NewKeyForm } from "./new-key-form";
 import { SecretDialog, type ShownSecret } from "./secret-dialog";
 
-export function KeysPage({
-	teamId,
-	notices,
-}: {
-	teamId: string;
-	notices: TeamNoticeView[];
-}) {
+export function KeysPage({ teamId }: { teamId: string }) {
 	const attempt = useAttempt();
 	const singleOwner = useSingleOwner();
 	const umiak = useUmiak(teamId);
@@ -103,14 +94,6 @@ export function KeysPage({
 
 	return (
 		<section className="space-y-4">
-			{!singleOwner && (
-				<TeamNotices
-					teamId={teamId}
-					notices={notices}
-					canAcknowledge={can(session, team, "acknowledgeNotice")}
-					canRevoke={canRevoke}
-				/>
-			)}
 			<PageHeader title="API keys" />
 			<Panel className="keys-card">
 				<div className="key-intro">

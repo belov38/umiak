@@ -31,16 +31,6 @@ export const membershipId = z.string().transform((v, c) => {
 	return id;
 });
 
-/** `ntc_…` → UUID. */
-export const noticeId = z.string().transform((v, c) => {
-	const id = decodeDashboardId("teamNotice", v);
-	if (id === null) {
-		c.addIssue({ code: "custom", message: "Not a notice id." });
-		return z.NEVER;
-	}
-	return id;
-});
-
 export const role = z.enum(["owner", "member"], {
 	message: "The role is owner or member.",
 });

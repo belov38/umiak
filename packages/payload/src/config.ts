@@ -12,12 +12,10 @@ import { Memberships } from "./collections/memberships.ts";
 import { PoolTargets } from "./collections/pool-targets.ts";
 import { Sizes } from "./collections/sizes.ts";
 import { SshKeys } from "./collections/ssh-keys.ts";
-import { TeamNotices } from "./collections/team-notices.ts";
 import { Teams } from "./collections/teams.ts";
 import { Templates } from "./collections/templates.ts";
 import { Users } from "./collections/users.ts";
 import { PlatformDefaults } from "./globals/platform-defaults.ts";
-import { attachSessionCache } from "./identity/session-cache.ts";
 
 export interface UmiakPayloadOptions {
 	databaseUrl: string;
@@ -29,17 +27,6 @@ export interface UmiakPayloadOptions {
 	appOrigin?: string;
 	/** Size of the pg pool of the adapter (default 10). */
 	poolMax?: number;
-	/**
-	 * Cache resolved browser sessions on the instance (web, plan decision 8):
-	 * attached in onInit, with LISTEN umiak_identity on its own connection
-	 * unless `listen` is false. api and worker leave it off.
-	 */
-	sessionCache?: {
-		ttlMs?: number;
-		listen?: boolean;
-		reconnectDelayMs?: number;
-		onListenError?: (err: unknown) => void;
-	};
 }
 
 /** Postgres schema owned by Payload. */
@@ -153,7 +140,6 @@ export async function buildUmiakConfig(
 			Teams,
 			Memberships,
 			ApiKeys,
-			TeamNotices,
 			SshKeys,
 			Templates,
 			Sizes,
@@ -161,32 +147,6 @@ export async function buildUmiakConfig(
 		],
 		globals: [PlatformDefaults],
 		custom: { umiak },
-		...(o.sessionCache === undefined
-			? {}
-			: { onInit: (payload) => sessionCacheOnInit(payload, o) }),
 	});
 	return restrictInternalCollections(config);
-}
-
-function sessionCacheOnInit(
-	payload: Parameters<typeof attachSessionCache>[0],
-	o: UmiakPayloadOptions,
-): Promise<void> {
-	const c = o.sessionCache ?? {};
-	return attachSessionCache(payload, {
-		...(c.ttlMs === undefined ? {} : { ttlMs: c.ttlMs }),
-		...(c.listen === false
-			? {}
-			: {
-					listen: {
-						databaseUrl: o.databaseUrl,
-						...(c.reconnectDelayMs === undefined
-							? {}
-							: { reconnectDelayMs: c.reconnectDelayMs }),
-					},
-				}),
-		...(c.onListenError === undefined
-			? {}
-			: { onListenError: c.onListenError }),
-	});
 }

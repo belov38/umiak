@@ -1,7 +1,7 @@
-// JIT of the user from IdP claims (S8 §5.3). One function for the Payload
+// Resolve the user from a trusted internal owner session. Used by the Payload
 // auth strategy in web, PayloadIdentityStore.resolveSession in api (browser
 // sessions) and the owner session of CLI, SDK and MCP: the identity is the
-// IdP `sub` everywhere.
+// internal subject everywhere (stored in the legacy idpSubject field).
 //
 // Everything runs in one Payload transaction: user rows are locked with
 // SELECT ... FOR UPDATE, writes go through the Local API with the same req
@@ -28,7 +28,7 @@ import {
 } from "./db.ts";
 
 export interface ResolveSessionOptions {
-	/** IdP groups that make a user an operator (UMIAK_OPERATOR_GROUPS). */
+	/** Trusted internal session groups that make a user an operator (UMIAK_OPERATOR_GROUPS). */
 	operatorGroups: readonly string[];
 	/**
 	 * Run in this request. With an open transaction the work joins it (the
@@ -177,11 +177,11 @@ async function resolveIn(
 			// 2. Known email. The row may have been bound to this very sub by a
 			// concurrent first login that committed while this one waited.
 			if (row.idp_subject !== null && row.idp_subject !== c.sub) {
-				// A new IdP account reusing the email must not get the old
+				// A new owner identity reusing the email must not get the old
 				// account's teams and keys.
 				throw new IdentityError(
 					"identity_conflict",
-					"the account is bound to another IdP identity",
+					"the account is bound to another session identity",
 				);
 			}
 			if (!row.active) throw new IdentityError("user_disabled");
@@ -225,7 +225,7 @@ async function resolveIn(
 }
 
 /**
- * The IdP changed the email of a known user: take it unless another account
+ * The owner session changed the email of a known user: take it unless another account
  * owns it. A stub (never logged in, S8 §6.3) gives its memberships to the
  * user and is deleted; any other account is identity_conflict.
  */

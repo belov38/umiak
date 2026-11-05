@@ -34,19 +34,6 @@ export {
 } from "./identity/resolve-session.ts";
 export { seedPayloadIdentity } from "./identity/seed.ts";
 export {
-	type AttachSessionCacheOptions,
-	attachSessionCache,
-	detachSessionCache,
-	flushesSessions,
-	IDENTITY_CHANNEL,
-	SESSION_CACHE_TTL_MS,
-	SESSION_LISTENER_APPLICATION_NAME,
-	SessionCache,
-	type SessionCacheOptions,
-	sessionCacheKey,
-	sessionCacheOf,
-} from "./identity/session-cache.ts";
-export {
 	PayloadIdentityStore,
 	type PayloadIdentityStoreOptions,
 } from "./identity/store.ts";

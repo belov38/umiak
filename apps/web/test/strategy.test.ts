@@ -6,10 +6,8 @@ import {
 import {
 	authenticateRequest,
 	dbPool,
-	detachSessionCache,
 	migrateUmiakPayload,
 	ownerStrategy,
-	sessionCacheOf,
 } from "@umiak/payload";
 import { getPayload, type Payload } from "payload";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -38,16 +36,14 @@ describe.skipIf(skipPg())("owner Payload strategy", () => {
 	afterAll(async () => {
 		if (payload) {
 			const pool = dbPool(payload);
-			await detachSessionCache(payload);
 			await payload.destroy();
 			void pool?.end().catch(() => {});
 		}
 		await db?.drop();
 	});
-	it("keeps the admin API private and attaches identity invalidation", () => {
+	it("keeps the admin API private", () => {
 		expect(payload.config.routes.api).toBe("/cms-api");
 		expect(payload.config.csrf).toEqual(["https://app.umiak.test"]);
-		expect(sessionCacheOf(payload)).not.toBeNull();
 	});
 	it("resolves the same owner/operator in admin and dashboard", async () => {
 		const app = await authenticateRequest(payload, ingress());

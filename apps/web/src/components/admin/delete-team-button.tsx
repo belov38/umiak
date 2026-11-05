@@ -75,7 +75,7 @@ export function DeleteTeamButton({
 			<ConfirmationModal
 				modalSlug={MODAL}
 				heading={`Delete team ${name}?`}
-				body="It has no sandboxes, saved snapshots or environments. Its memberships and notices are deleted and its API keys revoked. This cannot be undone."
+				body="It has no sandboxes, saved snapshots or environments. Its memberships are deleted and its API keys revoked. This cannot be undone."
 				confirmLabel="Delete team"
 				confirmingLabel="Deleting…"
 				onConfirm={confirm}

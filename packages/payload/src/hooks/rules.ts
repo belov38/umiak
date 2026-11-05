@@ -157,7 +157,7 @@ export const teamsBeforeDelete: CollectionBeforeDeleteHook = async ({
 	req.context[DELETING_TEAM] = String(id);
 
 	const byTeam = { team: { equals: id } };
-	for (const collection of ["memberships", "team-notices"] as const) {
+	for (const collection of ["memberships"] as const) {
 		const rows = await req.payload.find({
 			collection,
 			where: byTeam,
@@ -237,8 +237,7 @@ export const requiredOnCreate: Validate = (
 
 /**
  * active true -> false without a reason (an operator in /admin) records
- * deactivatedReason "operator" and deactivatedAt; ctl-idp-sync passes its
- * own reason. false -> true clears both.
+ * deactivatedReason "operator" and deactivatedAt. false -> true clears both.
  */
 export const usersDeactivationBeforeChange: CollectionBeforeChangeHook = ({
 	data,

@@ -3,7 +3,7 @@
 // (packages/auth/src/seed.ts). Upsert only: rows missing from the file are
 // kept, a revoked key stays revoked, JIT bindings (idpSubject, personal
 // teams) are not touched, and the email of a user who has logged in is the
-// IdP's, not the file's. One transaction; a row is written only when a
+// session's, not the file's. One transaction; a row is written only when a
 // value differs, so loading the same file again writes and sends nothing.
 //
 // Teams, users and keys keep the ids of the file. The Local API cannot
@@ -77,7 +77,7 @@ export async function seedPayloadIdentity(
 					await notify(req, "umiak_identity", `users:${u.id}`);
 				} else {
 					const patch: Record<string, unknown> = {};
-					// After the first login the IdP owns the email (S8 §5.3).
+					// After the first login the session owns the email (S8 §5.3).
 					if (row.idp_subject === null && row.email !== u.email) {
 						patch.email = u.email;
 					}

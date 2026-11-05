@@ -19,7 +19,6 @@ const COLLECTIONS: CollectionSlug[] = [
 	"teams",
 	"memberships",
 	"api-keys",
-	"team-notices",
 	"ssh-keys",
 	"templates",
 	"sizes",

@@ -123,10 +123,7 @@ export function upstreamHeaders(req, appOrigin) {
 	return out;
 }
 function route(path, env) {
-	if (
-		path.startsWith("/mcp") ||
-		path.startsWith("/.well-known/oauth-protected-resource")
-	)
+	if (path.startsWith("/mcp"))
 		return [env.UMIAK_QUICKSTART_MCP_HOST ?? "mcp", 8080, path];
 	if (path.startsWith("/api/"))
 		return [env.UMIAK_QUICKSTART_API_HOST ?? "api", 8081, path.slice(4)];

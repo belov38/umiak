@@ -24,7 +24,6 @@ import {
 	removeMemberImpl,
 	setRoleImpl,
 } from "../src/lib/team-actions/members.ts";
-import { acknowledgeNoticeImpl } from "../src/lib/team-actions/notices.ts";
 import { loadTeamSettingsImpl } from "../src/lib/team-actions/team-settings.ts";
 import {
 	createTeamImpl,
@@ -547,150 +546,8 @@ describe.skipIf(skipPg())("server actions (S8 §9.11)", () => {
 		});
 	});
 
-	describe("acknowledgeNotice", () => {
-		async function notice(teamId: string, about: string) {
-			const doc = await payload.create({
-				collection: "team-notices",
-				data: {
-					team: uuidOf(teamId),
-					kind: "member_deactivated",
-					user: about,
-					apiKeys: [],
-				},
-				depth: 0,
-			});
-			return {
-				id: String(doc.id),
-				publicId: encodeDashboardId("teamNotice", String(doc.id)),
-			};
-		}
-
-		it("member, non-member and a non-owner operator: forbidden; owner acknowledges", async () => {
-			const owner = await login();
-			const member = await login();
-			const stranger = await login();
-			const op = await login({ operator: true });
-			const teamId = await sharedTeam(owner, member);
-			const n = await notice(teamId, member.userId);
-			for (const ctx of [member.ctx, stranger.ctx, op.ctx]) {
-				expect(
-					await acknowledgeNoticeImpl(ctx, { noticeId: n.publicId }),
-				).toMatchObject({ error: { code: "forbidden" } });
-			}
-			const before = await payload.findByID({
-				collection: "team-notices",
-				id: n.id,
-				depth: 0,
-			});
-			expect(before.acknowledgedAt ?? null).toBe(null);
-
-			const settings = await loadTeamSettingsImpl(owner.ctx, { teamId });
-			if (!("ok" in settings)) throw new Error(JSON.stringify(settings));
-			expect(settings.notices.map((x) => x.id)).toEqual([n.publicId]);
-
-			expect(
-				await acknowledgeNoticeImpl(owner.ctx, { noticeId: n.publicId }),
-			).toEqual({ ok: true });
-			const after = await payload.findByID({
-				collection: "team-notices",
-				id: n.id,
-				depth: 0,
-			});
-			expect(after.acknowledgedBy).toBe(owner.userId);
-			expect(after.acknowledgedAt).toBeTruthy();
-			const again = await loadTeamSettingsImpl(owner.ctx, { teamId });
-			if (!("ok" in again)) throw new Error(JSON.stringify(again));
-			expect(again.notices).toEqual([]);
-		});
-
-		it("the settings page lists the notice keys with their revoked state", async () => {
-			const owner = await login();
-			const member = await login();
-			const teamId = await sharedTeam(owner, member);
-			const key = async (name: string, revoked: boolean) =>
-				payload.create({
-					collection: "api-keys",
-					data: {
-						name,
-						team: uuidOf(teamId),
-						createdBy: member.userId,
-						kind: "team",
-						secretHash: randomBytes(32).toString("hex"),
-						prefix: `p${randomBytes(3).toString("hex")}`,
-						last4: "abcd",
-						scopes: ["sandboxes:read"],
-						expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
-						createdVia: "api",
-						...(revoked ? { revokedAt: new Date().toISOString() } : {}),
-					},
-					depth: 0,
-				});
-			const live = await key("live", false);
-			const gone = await key("gone", true);
-			await payload.create({
-				collection: "team-notices",
-				data: {
-					team: uuidOf(teamId),
-					kind: "member_deactivated",
-					user: member.userId,
-					apiKeys: [live, gone].map((k) => ({
-						id: String(k.id),
-						publicId: encodeUuid("apiKey", String(k.id)),
-						name: k.name,
-						prefix: k.prefix,
-					})),
-				},
-				depth: 0,
-			});
-			// A key entry edited by hand in /admin with a non-UUID id.
-			await payload.create({
-				collection: "team-notices",
-				data: {
-					team: uuidOf(teamId),
-					kind: "member_deactivated",
-					user: member.userId,
-					apiKeys: [
-						{ id: "not-a-uuid", publicId: "key_bad", name: "bad", prefix: "x" },
-					],
-				},
-				depth: 0,
-			});
-			const s = await loadTeamSettingsImpl(owner.ctx, { teamId });
-			if (!("ok" in s)) throw new Error(JSON.stringify(s));
-			expect(s.notices).toHaveLength(2);
-			expect(s.notices[1]?.apiKeys).toEqual([]);
-			expect(s.notices[0]?.user?.email).toBe(member.session.user.email);
-			expect(s.notices[0]?.apiKeys).toEqual([
-				{
-					id: encodeUuid("apiKey", String(live.id)),
-					name: "live",
-					prefix: live.prefix,
-					revoked: false,
-				},
-				{
-					id: encodeUuid("apiKey", String(gone.id)),
-					name: "gone",
-					prefix: gone.prefix,
-					revoked: true,
-				},
-			]);
-		});
-
-		it("bad and unknown ids", async () => {
-			const a = await login();
-			expect(
-				await acknowledgeNoticeImpl(a.ctx, { noticeId: "ntc_x" }),
-			).toMatchObject({ error: { code: "validation" } });
-			expect(
-				await acknowledgeNoticeImpl(a.ctx, {
-					noticeId: encodeDashboardId("teamNotice", randomUUID()),
-				}),
-			).toMatchObject({ error: { code: "forbidden" } });
-		});
-	});
-
 	describe("loadTeamSettings", () => {
-		it("members see members, not notices; strangers are forbidden; operators see all", async () => {
+		it("members see members; strangers are forbidden; operators see all", async () => {
 			const owner = await login();
 			const member = await login();
 			const stranger = await login();
@@ -706,7 +563,6 @@ describe.skipIf(skipPg())("server actions (S8 §9.11)", () => {
 			expect(m.members[0]?.id).toMatch(/^mbr_[0-9a-z]{26}$/);
 			expect(m.members[0]?.userId).toMatch(/^usr_[0-9a-z]{26}$/);
 			expect(JSON.stringify(m)).not.toContain(owner.userId);
-			expect(m.notices).toEqual([]);
 			expect(
 				await loadTeamSettingsImpl(stranger.ctx, { teamId }),
 			).toMatchObject({ error: { code: "forbidden" } });

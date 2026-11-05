@@ -6,17 +6,10 @@ import {
 import { ACCESS_CSS } from "./access-style";
 import { APPEARANCE_BOOTSTRAP } from "./appearance";
 import { LOCKUP_SVG } from "./brand-markup";
-// Request checks of proxy.ts (S8 §5.1, §5.6), kept free of Next.js types so
-// they are unit-tested directly.
-//   - every path but /healthz needs X-Auth-Request-Email (only owner ingress
-//     sets it; without it the request did not come through the proxy): 401;
-//   - an unsafe method needs Origin == UMIAK_APP_ORIGIN (server actions,
-//     Payload REST, admin uploads): 403. A missing Origin is refused too;
-//   - /admin and /cms-api are for operators only (a group of
-//     UMIAK_OPERATOR_GROUPS in X-Auth-Request-Groups, S8 §5.5): 403 before
-//     Payload renders anything (its admin would send the field config);
-//   - Payload's password-login endpoints of `users` (local strategy is off,
-//     §5.4) are refused to everyone: 403.
+// Request checks shared with proxy.ts, kept free of Next.js types for tests.
+// The private owner ingress stamps the socket peer; unsafe methods also
+// require the dashboard origin. Payload resolves the current owner identity
+// and enforces operator access to admin. Password-login endpoints stay disabled.
 
 export interface GuardRequest {
 	method: string;

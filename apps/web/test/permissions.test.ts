@@ -36,7 +36,6 @@ const TABLE: Record<TeamAction, [boolean, boolean, boolean]> = {
 	deleteTeam: [false, false, true],
 	viewQuota: [true, true, true],
 	editQuota: [false, false, true],
-	acknowledgeNotice: [false, true, false],
 };
 
 describe("can(): S8 §6.2", () => {
@@ -68,9 +67,8 @@ describe("can(): S8 §6.2", () => {
 	it("an operator who is also a member keeps the operator rights", () => {
 		expect(can(operator, shared("member"), "renameTeam")).toBe(true);
 		expect(can(operator, shared("member"), "manageMembers")).toBe(true);
-		// Issuing keys and acknowledging notices are owner-only.
+		// Issuing keys is owner-only.
 		expect(can(operator, shared("member"), "issueApiKeys")).toBe(false);
-		expect(can(operator, shared("member"), "acknowledgeNotice")).toBe(false);
 		expect(can(operator, shared("owner"), "issueApiKeys")).toBe(true);
 		expect(can(operator, shared("member"), "leaveTeam")).toBe(true);
 	});

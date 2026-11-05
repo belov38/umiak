@@ -68,6 +68,20 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 			"SELECT e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='payload' AND t.typname='enum_users_deactivated_reason' ORDER BY e.enumsortorder",
 		);
 		expect(reasons.rows).toEqual([{ enumlabel: "operator" }]);
+		expect(
+			(
+				await t.pool.query(
+					"SELECT to_regclass('payload.team_notices') AS retired",
+				)
+			).rows,
+		).toEqual([{ retired: null }]);
+		expect(
+			(
+				await t.pool.query(
+					"SELECT column_name FROM information_schema.columns WHERE table_schema='payload' AND table_name='payload_locked_documents_rels' AND column_name='team_notices_id'",
+				)
+			).rows,
+		).toEqual([]);
 	});
 
 	it("applied migrations unknown to the code are allowed", async () => {

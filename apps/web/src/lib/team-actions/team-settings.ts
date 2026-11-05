@@ -1,10 +1,9 @@
-// Data of /app/t/<team>/settings (S8 §9.9): team, members and, for those
-// who may revoke keys (owners, operators), the open team notices (§20.1).
+// Data of /app/t/<team>/settings: team and members.
 // Public and dashboard ids only; no UUID reaches the browser.
 import { encodeUuid } from "@umiak/auth";
 import { z } from "zod";
 import { encodeDashboardId } from "../ids";
-import { can, type TeamRole } from "../permissions";
+import type { TeamRole } from "../permissions";
 import {
 	type ActionCtx,
 	type ActionResult,
@@ -30,29 +29,11 @@ export interface TeamMemberView {
 	active: boolean;
 }
 
-export interface NoticeKeyView {
-	/** `key_…` (DELETE /v1/api-keys/{id}) */
-	id: string;
-	name: string;
-	prefix: string;
-	revoked: boolean;
-}
-
-export interface TeamNoticeView {
-	/** `ntc_…` */
-	id: string;
-	kind: string;
-	user: { email: string; name: string | null } | null;
-	createdAt: string;
-	apiKeys: NoticeKeyView[];
-}
-
 export interface TeamSettingsData {
 	team: { id: string; name: string; personal: boolean };
 	/** Role of the caller; null for an operator outside the team. */
 	myRole: TeamRole | null;
 	members: TeamMemberView[];
-	notices: TeamNoticeView[];
 }
 
 type Doc = Record<string, unknown> & { id: string | number };
@@ -119,57 +100,6 @@ export async function loadTeamSettingsImpl(
 				x.email.localeCompare(y.email),
 		);
 
-	let notices: TeamNoticeView[] = [];
-	if (can(ctx.session, { role: myRole, personal }, "revokeApiKeys")) {
-		const ns = await p.find({
-			collection: "team-notices",
-			where: {
-				and: [{ team: { equals: tid } }, { acknowledgedAt: { exists: false } }],
-			},
-			sort: "createdAt",
-			depth: 1,
-			pagination: false,
-			overrideAccess: true,
-		});
-		const keyIds = ns.docs.flatMap((n) =>
-			noticeKeys(n.apiKeys).map((k) => k.id),
-		);
-		const revoked = new Set<string>();
-		if (keyIds.length > 0) {
-			const ks = await p.find({
-				collection: "api-keys",
-				where: {
-					and: [{ id: { in: keyIds } }, { revokedAt: { exists: true } }],
-				},
-				depth: 0,
-				pagination: false,
-				overrideAccess: true,
-			});
-			for (const k of ks.docs) revoked.add(String(k.id));
-		}
-		notices = ns.docs.map((n) => {
-			const u = n.user as Doc | null;
-			return {
-				id: encodeDashboardId("teamNotice", String(n.id)),
-				kind: String(n.kind),
-				user:
-					u && typeof u === "object"
-						? {
-								email: String(u.email),
-								name: typeof u.name === "string" ? u.name : null,
-							}
-						: null,
-				createdAt: iso(n.createdAt) ?? "",
-				apiKeys: noticeKeys(n.apiKeys).map((k) => ({
-					id: k.publicId,
-					name: k.name,
-					prefix: k.prefix,
-					revoked: revoked.has(k.id),
-				})),
-			};
-		});
-	}
-
 	return {
 		ok: true,
 		team: {
@@ -179,47 +109,5 @@ export async function loadTeamSettingsImpl(
 		},
 		myRole,
 		members,
-		notices,
 	};
-}
-
-interface StoredNoticeKey {
-	id: string;
-	publicId: string;
-	name: string;
-	prefix: string;
-}
-
-const UUID_RE =
-	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * `team-notices.apiKeys` as written by the IdP sync; anything else dropped,
- * a non-UUID id too (an operator's JSON in /admin): it would fail the
- * `id in [...]` query of the uuid column and the whole page with it.
- */
-function noticeKeys(v: unknown): StoredNoticeKey[] {
-	if (!Array.isArray(v)) return [];
-	const out: StoredNoticeKey[] = [];
-	for (const k of v) {
-		if (!k || typeof k !== "object") continue;
-		const r = k as Record<string, unknown>;
-		if (typeof r.id !== "string" || !UUID_RE.test(r.id)) continue;
-		let publicId: string;
-		try {
-			publicId =
-				typeof r.publicId === "string"
-					? r.publicId
-					: encodeUuid("apiKey", r.id);
-		} catch {
-			continue;
-		}
-		out.push({
-			id: r.id,
-			publicId,
-			name: typeof r.name === "string" ? r.name : "",
-			prefix: typeof r.prefix === "string" ? r.prefix : "",
-		});
-	}
-	return out;
 }

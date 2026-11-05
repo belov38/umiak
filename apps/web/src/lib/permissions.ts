@@ -35,8 +35,6 @@ export const TEAM_ACTIONS = [
 	"deleteTeam",
 	"viewQuota",
 	"editQuota",
-	/** Team notices (S8 §20.1): owners of the team. */
-	"acknowledgeNotice",
 ] as const;
 
 export type TeamAction = (typeof TEAM_ACTIONS)[number];
@@ -67,7 +65,6 @@ export function can(
 			// A personal team stays personal (§6.1).
 			return (owner || op) && !team.personal;
 		case "issueApiKeys":
-		case "acknowledgeNotice":
 			return owner;
 		case "leaveTeam":
 			return member && !team.personal;

@@ -32,7 +32,7 @@ import { resolveSession, userRecordOf } from "./resolve-session.ts";
 
 export interface PayloadIdentityStoreOptions {
 	payload: Payload;
-	/** IdP groups that make a user an operator (UMIAK_OPERATOR_GROUPS). */
+	/** Trusted internal session groups that make a user an operator (UMIAK_OPERATOR_GROUPS). */
 	operatorGroups: string[];
 }
 
