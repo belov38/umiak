@@ -99,7 +99,7 @@ async function poll(
 				path: { sandbox: sb.id },
 				query: {
 					waitFor:
-						sb.state === "queued" || sb.state === "moving"
+						sb.state === "queued"
 							? "ready,stopped"
 							: STATES.filter((s) => s !== sb.state).join(","),
 					waitSeconds,

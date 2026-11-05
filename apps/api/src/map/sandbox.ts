@@ -94,10 +94,7 @@ export function toSandboxResource(
 		size: s.sizeSlug,
 		vcpu: s.vcpu,
 		memoryMb: s.memoryMb,
-		state:
-			op && isPublicOperation(op) && (phase === "moving" || phase === "queued")
-				? phase
-				: s.state,
+		state: op && isPublicOperation(op) && phase === "queued" ? phase : s.state,
 		health: s.health,
 		healthReason: s.healthReason,
 		degradedSince: isoOrNull(s.degradedSince),

@@ -19,5 +19,5 @@ await queued.cancelStart(); // while still queued
 
 Readiness waits add the capacity budget unless `waitTimeoutMs` is explicit.
 Disconnecting does not cancel the server ticket. Inspect `state` and
-`activeOperation.progress` for queued/moving progress. Timeout preserves
+`activeOperation.progress` for queued progress. Timeout preserves
 retryable `out_of_capacity`.

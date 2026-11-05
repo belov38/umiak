@@ -65,8 +65,8 @@ def sync_detailed(
 ) -> Response[Error | SandboxAction]:
     """Cancel a queued start
 
-     Cancels only an unadmitted capacity wait. Idempotent; an admitted or moving start must be
-    stopped/deleted through its normal lifecycle.
+     Cancels only an unadmitted capacity wait. Idempotent; an admitted start must be stopped/deleted
+    through its normal lifecycle.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -97,8 +97,8 @@ def sync(
 ) -> Error | SandboxAction | None:
     """Cancel a queued start
 
-     Cancels only an unadmitted capacity wait. Idempotent; an admitted or moving start must be
-    stopped/deleted through its normal lifecycle.
+     Cancels only an unadmitted capacity wait. Idempotent; an admitted start must be stopped/deleted
+    through its normal lifecycle.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -124,8 +124,8 @@ async def asyncio_detailed(
 ) -> Response[Error | SandboxAction]:
     """Cancel a queued start
 
-     Cancels only an unadmitted capacity wait. Idempotent; an admitted or moving start must be
-    stopped/deleted through its normal lifecycle.
+     Cancels only an unadmitted capacity wait. Idempotent; an admitted start must be stopped/deleted
+    through its normal lifecycle.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -154,8 +154,8 @@ async def asyncio(
 ) -> Error | SandboxAction | None:
     """Cancel a queued start
 
-     Cancels only an unadmitted capacity wait. Idempotent; an admitted or moving start must be
-    stopped/deleted through its normal lifecycle.
+     Cancels only an unadmitted capacity wait. Idempotent; an admitted start must be stopped/deleted
+    through its normal lifecycle.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.

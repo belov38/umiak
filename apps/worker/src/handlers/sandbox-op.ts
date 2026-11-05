@@ -11,8 +11,8 @@ import { REPROVISION_OP } from "../ops/reprovision.ts";
 import { RESUME_OP } from "../ops/resume.ts";
 import { SAVE_SNAPSHOT_OP } from "../ops/save-snapshot.ts";
 import { STOP_OP } from "../ops/stop.ts";
-import { ensureMachineMove, withPortableLock } from "../portable.ts";
 import { isPermanent } from "../ports.ts";
+import { withSourceLock } from "../source-lock.ts";
 import {
 	DeadlineExceeded,
 	Fenced,
@@ -92,12 +92,12 @@ export async function handleSandboxOp(
 ): Promise<SandboxOpResult> {
 	const row = (
 		await ctx.pool.query<{ machine_id: string | null; portable: boolean }>(
-			`SELECT s.machine_id,EXISTS(SELECT 1 FROM runtime.start_queue q WHERE q.operation_id=o.id) OR EXISTS(SELECT 1 FROM runtime.move_reservations r WHERE r.machine_id=s.machine_id) OR EXISTS(SELECT 1 FROM runtime.volume_transfers v WHERE v.kind='machine' AND v.source_id=s.machine_id AND v.phase NOT IN ('done','cancelled')) AS portable FROM runtime.operations o JOIN runtime.sandboxes s ON s.id=o.sandbox_id WHERE o.id=$1`,
+			`SELECT s.machine_id,EXISTS(SELECT 1 FROM runtime.start_queue q WHERE q.operation_id=o.id) AS portable FROM runtime.operations o JOIN runtime.sandboxes s ON s.id=o.sandbox_id WHERE o.id=$1`,
 			[data.operationId],
 		)
 	).rows[0];
 	if (row?.portable && row.machine_id)
-		return withPortableLock(ctx, `machine:${row.machine_id}`, () =>
+		return withSourceLock(ctx, `machine:${row.machine_id}`, () =>
 			handleSandboxOpLocked(ctx, data),
 		);
 	return handleSandboxOpLocked(ctx, data);
@@ -121,15 +121,6 @@ async function handleSandboxOpLocked(
 				if (admission === "expired") return "failed";
 				if (admission === "admitted") await fenced.check();
 				if (fenced.deadlinePassed()) throw new DeadlineExceeded(fenced.id);
-				await ensureMachineMove(ctx, fenced);
-				if (fenced.op.progress.phase === "moving") {
-					await fenced.tx(async (tx) => {
-						await tx.client.query(
-							'UPDATE runtime.operations SET progress=progress || \'{"phase":"starting"}\'::jsonb WHERE id=$1',
-							[fenced.id],
-						);
-					});
-				}
 				await h.run(ctx, fenced);
 				return "succeeded";
 			} catch (e) {
@@ -179,7 +170,6 @@ async function compensate(
 	h: SandboxOpHandler,
 	error: OperationError,
 ): Promise<SandboxOpResult> {
-	await ensureMachineMove(ctx, fenced, true);
 	await h.compensate(ctx, fenced, error);
 	ctx.metrics.inc("umiak_operation_failed_total", {
 		kind: fenced.op.kind,

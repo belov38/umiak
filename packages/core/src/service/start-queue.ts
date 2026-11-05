@@ -21,8 +21,8 @@ import {
 import { resolveTemplate } from "./create-input.ts";
 import {
 	admitCold,
+	admitLocalSource,
 	admitOnSnapshotNode,
-	admitPortable,
 	claimWarm,
 	type Placement,
 } from "./create-placement.ts";
@@ -199,7 +199,7 @@ export async function tryAdmitQueuedStart(
 					[operationId, JSON.stringify({ fromPool: placement.fromPool })],
 				);
 			} else if (op.kind === "resume") {
-				const destination = await admitPortable(
+				await admitLocalSource(
 					tx,
 					deps,
 					{
@@ -212,17 +212,6 @@ export async function tryAdmitQueuedStart(
 					`${s.template_slug}/${s.size_slug}`,
 					s.memory_mb,
 				);
-				if (destination.nodeId !== s.node_id)
-					await tx.client.query(
-						"INSERT INTO runtime.move_reservations(machine_id,operation_id,node_id,storage_id,memory_mb) VALUES($1,$2,$3,$4,$5)",
-						[
-							m.id,
-							operationId,
-							destination.nodeId,
-							destination.storageId,
-							s.memory_mb,
-						],
-					);
 			} else
 				throw invalidState(s.state, {
 					reason: "operation cannot wait for capacity",
@@ -242,17 +231,11 @@ export async function tryAdmitQueuedStart(
 					[s.template_build_id],
 				)
 			).rows[0]?.os ?? "linux";
-		const moving = (
-			await tx.client.query(
-				"SELECT 1 FROM runtime.move_reservations WHERE operation_id=$1",
-				[operationId],
-			)
-		).rowCount;
 		await tx.client.query(
 			"UPDATE runtime.operations SET progress=(progress - 'queuedUntil') || $2::jsonb,deadline_at=now()+($3::int*interval '1 millisecond'),version=version+1 WHERE id=$1",
 			[
 				operationId,
-				JSON.stringify({ phase: moving ? "moving" : "starting" }),
+				JSON.stringify({ phase: "starting" }),
 				operationDeadline(op.kind, os) ?? 1200000,
 			],
 		);

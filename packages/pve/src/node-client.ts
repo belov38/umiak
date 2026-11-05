@@ -1,15 +1,8 @@
 import { createHmac, randomUUID } from "node:crypto";
-import type { Duplex } from "node:stream";
 import ssh2, { type Client as SshClient } from "ssh2";
 
-export interface TransferSession {
-	stream: Duplex;
-	closed: Promise<void>;
-}
 /** Transport-independent umiak-node interface; tests use a fake. */
 export interface NodeOps {
-	readonly deltaStreamEnabled?: boolean;
-	readonly portableFullStreamEnabled?: boolean;
 	call<T = unknown>(
 		op: string,
 		args?: object,
@@ -19,7 +12,6 @@ export interface NodeOps {
 		args: object,
 		onProgress?: (progress: Record<string, number>) => Promise<void>,
 	): Promise<T>;
-	openTransfer?(args: object): Promise<TransferSession>;
 	close(): void;
 }
 
@@ -74,9 +66,6 @@ export function parseKnownHosts(
 }
 
 export interface SshNodeOpsOptions {
-	/** Experimental; only opt in after a separate transfer-protocol design review. */
-	experimentalDeltaStream?: boolean;
-	experimentalPortableFullCopies?: boolean;
 	host: string;
 	port?: number;
 	username?: string;
@@ -108,15 +97,6 @@ const CLOSE_GRACE_MS = 5_000;
  * command, so the exec command string is ignored there.
  */
 export class SshNodeOps implements NodeOps {
-	#deltaReady: Promise<void> | undefined;
-	get deltaStreamEnabled() {
-		return this.#opts.experimentalDeltaStream === true;
-	}
-
-	get portableFullStreamEnabled() {
-		return this.#opts.experimentalPortableFullCopies === true;
-	}
-
 	readonly #opts: SshNodeOpsOptions;
 	readonly #pinned: Buffer[];
 	readonly #conns: (Promise<SshClient> | undefined)[];
@@ -302,44 +282,6 @@ export class SshNodeOps implements NodeOps {
 		}
 	}
 
-	async openTransfer(args: object): Promise<TransferSession> {
-		if (!this.deltaStreamEnabled)
-			throw Error("Experimental delta stream is disabled");
-		this.#deltaReady ??= this.call<{ transferProtocols?: string[] }>(
-			"version",
-		).then((v) => {
-			if (!v.transferProtocols?.includes("delta-stream-v1"))
-				throw Error("Node agent did not negotiate delta-stream-v1");
-		});
-		await this.#deltaReady;
-
-		const slot = await this.#acquire();
-		try {
-			const stream = await this.#exec(await this.#connect(slot));
-			const timer = setTimeout(() => {
-				stream.emit("error", new Error("delta stream inactivity timeout"));
-				stream.destroy();
-				stream.resume();
-			}, this.#opts.callTimeoutMs ?? 120000);
-			stream.on("readable", () => timer.refresh());
-			stream.on("error", () => {});
-			const closed = new Promise<void>((resolve) =>
-				stream.once("close", () => {
-					clearTimeout(timer);
-					this.#release(slot);
-					resolve();
-				}),
-			);
-			stream.write(
-				`${JSON.stringify({ op: "lv.deltaStream", args, requestId: randomUUID() })}\n`,
-			);
-			return { stream, closed };
-		} catch (error) {
-			this.#release(slot);
-			throw error;
-		}
-	}
-
 	async sendVolume<T = unknown>(
 		args: object,
 		onProgress?: (progress: Record<string, number>) => Promise<void>,
@@ -348,7 +290,6 @@ export class SshNodeOps implements NodeOps {
 	}
 
 	close(): void {
-		this.#deltaReady = undefined;
 		for (let i = 0; i < this.#conns.length; i++) {
 			void this.#conns[i]?.then((c) => c.end()).catch(() => {});
 			this.#conns[i] = undefined;

@@ -51,7 +51,6 @@ export function liveWaitFor(current: string | undefined): string | null {
 	if (
 		current === undefined ||
 		WAIT_END_STATES.has(current) ||
-		current === "moving" ||
 		current === "queued"
 	)
 		return null;

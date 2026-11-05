@@ -7,7 +7,7 @@ import {
 	tryAdmitQueuedStart,
 } from "../src/index.ts";
 import { machineRow, seedSandbox, serviceEnv } from "./helpers/service.ts";
-import { insertMachine } from "./helpers/topology.ts";
+import { createTopology, insertMachine } from "./helpers/topology.ts";
 
 let db: TestDatabase;
 beforeAll(async () => {
@@ -28,6 +28,38 @@ async function full() {
 }
 
 describe("durable capacity waits", () => {
+	it("keeps a stopped sandbox queued on its full home despite a free replica node", async () => {
+		const { env, blocker } = await full();
+		await createTopology(db.pool, {
+			providerId: env.topo.providerId,
+			build: { templateSlug: env.template },
+		});
+		const sb = await seedSandbox(db.pool, env, {
+			state: "stopped",
+			machineState: "stopped",
+		});
+		const op = await env.svc.resume(env.p, sb.slug, {
+			capacityWaitSeconds: 600,
+		});
+		expect(op.progress.phase).toBe("queued");
+		expect(await tryAdmitQueuedStart({ ...env, pool: db.pool }, op.id)).toBe(
+			"waiting",
+		);
+		await db.pool.query(
+			"UPDATE runtime.machines SET state='stopped',power_observed='stopped' WHERE id=$1",
+			[blocker],
+		);
+		expect(await tryAdmitQueuedStart({ ...env, pool: db.pool }, op.id)).toBe(
+			"admitted",
+		);
+		const home = (
+			await db.pool.query("SELECT node_id FROM runtime.sandboxes WHERE id=$1", [
+				sb.sandboxId,
+			])
+		).rows[0];
+		expect(home.node_id).toBe(env.topo.nodeId);
+	});
+
 	it("queues create idempotently without reserving RAM or persisting raw secrets", async () => {
 		const { env } = await full();
 		const input = {

@@ -153,7 +153,7 @@ export async function admitOnSnapshotNode(
 	pairKey: string,
 	needMb: number,
 ): Promise<Placement> {
-	const destination = await admitPortable(tx, deps, snap, pairKey, needMb);
+	const destination = await admitLocalSource(tx, deps, snap, pairKey, needMb);
 	return {
 		fromPool: false,
 		machineId: uuidv7(),
@@ -188,8 +188,8 @@ export async function admitOnNode(
 	if (!res.ok) throw outOfCapacity(OUT_OF_CAPACITY_RETRY_SECONDS);
 }
 
-/** Home-first admission, then a destination in the same provider. No disks move in this transaction. */
-export async function admitPortable(
+/** Admission stays on the node holding the immutable source disks. */
+export async function admitLocalSource(
 	tx: Tx,
 	deps: Pick<SandboxServiceDeps, "jobs">,
 	source: {
@@ -218,25 +218,6 @@ export async function admitPortable(
 			jobs: deps.jobs,
 		});
 		if (home.ok) return source;
-	}
-	const candidates = await place(tx, {
-		templateSlug: source.templateSlug,
-		providerId: source.providerId,
-		needMb,
-		pairKey,
-		evict: true,
-	});
-	for (const c of candidates) {
-		if (c.nodeId === source.nodeId) continue;
-		const admission = await admit(tx, {
-			nodeId: c.nodeId,
-			storageId: c.storageId,
-			needMb,
-			pairKey,
-			evict: true,
-			jobs: deps.jobs,
-		});
-		if (admission.ok) return { ...c, templateBuildId: source.templateBuildId };
 	}
 	throw outOfCapacity(
 		OUT_OF_CAPACITY_RETRY_SECONDS,

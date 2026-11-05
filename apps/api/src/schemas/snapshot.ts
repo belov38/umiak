@@ -43,13 +43,7 @@ export const SnapshotSchema = z
 			description: "The name; while creating, the name it will get",
 			example: "web-stack",
 		}),
-		state: extensibleEnum([
-			"creating",
-			"ready",
-			"failed",
-			"deleting",
-			"moving",
-		]),
+		state: extensibleEnum(["creating", "ready", "failed", "deleting"]),
 		progress: z
 			.object({
 				targetNode: z.string(),

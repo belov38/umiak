@@ -65,20 +65,13 @@ func run(cfgPath string) int {
 	if err != nil {
 		return fail("bad_request", err.Error())
 	}
-	var initial ops.Request
-	_ = json.Unmarshal(line, &initial)
-	var raw []byte
-	if initial.Op == "lv.deltaStream" {
-		raw = line
-	} else {
-		rest, e := io.ReadAll(io.LimitReader(reader, maxRequestBytes+1))
-		if e != nil {
-			return fail("bad_request", e.Error())
-		}
-		raw = append(line, rest...)
-		if len(raw) > maxRequestBytes {
-			return fail("bad_request", "request too large")
-		}
+	rest, err := io.ReadAll(io.LimitReader(reader, maxRequestBytes+1))
+	if err != nil {
+		return fail("bad_request", err.Error())
+	}
+	raw := append(line, rest...)
+	if len(raw) > maxRequestBytes {
+		return fail("bad_request", "request too large")
 	}
 	// The SSH channel closing (SIGHUP, broken stdout) must not kill lvcreate/lvremove half-way:
 	// finish the operation and let the caller verify the result.
@@ -91,12 +84,6 @@ func run(cfgPath string) int {
 		Host:    ops.Host{FS: os.DirFS("/"), Run: lvm.RunCommand, Now: time.Now, Replace: hostfs.ReplaceLocked},
 		Log:     logf,
 		Version: version,
-	}
-	if initial.Op == "lv.deltaStream" {
-		if err := srv.DeltaStream(ctx, initial.Args, reader, os.Stdout); err != nil {
-			return fail("delta_failed", err.Error())
-		}
-		return 0
 	}
 	srv.Progress = func(p map[string]any) error {
 		err := enc.Encode(map[string]any{"event": "progress", "progress": p})

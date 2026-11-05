@@ -102,7 +102,6 @@ export async function nodeRemovalBlockers(
 	const r = await tx.client.query<NodeRemovalBlocker>(
 		`
  SELECT 'machine' AS kind,id::text FROM runtime.machines WHERE node_id=$1 AND state <> 'deleted'
- UNION ALL SELECT 'machine',machine_id::text FROM runtime.move_reservations WHERE node_id=$1
  UNION ALL SELECT 'sandbox',id::text FROM runtime.sandboxes WHERE node_id=$1 AND state <> 'deleted'
  UNION ALL SELECT 'snapshot',id::text FROM runtime.snapshots WHERE node_id=$1 AND state <> 'deleted'
  UNION ALL SELECT 'template',id::text FROM runtime.template_builds WHERE node_id=$1 AND status <> 'retired'

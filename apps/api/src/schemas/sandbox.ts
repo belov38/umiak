@@ -22,7 +22,6 @@ import { OperationSchema } from "./operation.ts";
 
 export const SandboxStateSchema = extensibleEnum([
 	...SANDBOX_STATES,
-	"moving",
 	"queued",
 ] as const).openapi("SandboxState", {
 	description:

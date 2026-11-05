@@ -45,7 +45,7 @@ import {
 	sendSandboxOp,
 } from "./common.ts";
 import { resolveTemplate } from "./create-input.ts";
-import { admitOnNode, admitPortable } from "./create-placement.ts";
+import { admitLocalSource, admitOnNode } from "./create-placement.ts";
 import {
 	checkSecretPatch,
 	pickSecretPatch,
@@ -307,16 +307,10 @@ export async function resumeSandbox(
 			addRamMb: size.memoryMb,
 		});
 		let queued = false;
-		let destination = {
-			nodeId: row.node_id,
-			storageId: machine.storageId,
-			providerId: row.provider_id,
-			templateBuildId: row.template_build_id,
-		};
 		try {
 			if (await teamHasQueuedStarts(tx, p.teamId)) throw outOfCapacity(30);
 
-			destination = await admitPortable(
+			await admitLocalSource(
 				tx,
 				deps,
 				{
@@ -389,26 +383,6 @@ export async function resumeSandbox(
 			return mustLoadOperation(tx.client, operation.id);
 		}
 
-		if (destination.nodeId !== row.node_id) {
-			await tx.client.query(
-				"INSERT INTO runtime.move_reservations(machine_id,operation_id,node_id,storage_id,memory_mb) VALUES($1,$2,$3,$4,$5)",
-				[
-					machine.id,
-					operation.id,
-					destination.nodeId,
-					destination.storageId,
-					size.memoryMb,
-				],
-			);
-			await tx.client.query(
-				"UPDATE runtime.operations SET progress=progress || $2::jsonb WHERE id=$1",
-				[
-					operation.id,
-					JSON.stringify({ phase: "moving", targetNodeId: destination.nodeId }),
-				],
-			);
-			return mustLoadOperation(tx.client, operation.id);
-		}
 		return operation;
 	});
 }
@@ -441,9 +415,8 @@ export async function requestSystemResume(
 			machineState: machine?.state ?? null,
 		});
 	}
-	let destination: Awaited<ReturnType<typeof admitPortable>>;
 	try {
-		destination = await admitPortable(
+		await admitLocalSource(
 			tx,
 			{ jobs },
 			{
@@ -480,29 +453,6 @@ export async function requestSystemResume(
 		to,
 		reason: "unexpected_shutdown",
 	});
-	if (destination.nodeId !== row.node_id) {
-		await tx.client.query(
-			"INSERT INTO runtime.move_reservations(machine_id,operation_id,node_id,storage_id,memory_mb) VALUES($1,$2,$3,$4,$5)",
-			[
-				machine.id,
-				operation.id,
-				destination.nodeId,
-				destination.storageId,
-				machine.memoryMb,
-			],
-		);
-		await tx.client.query(
-			"UPDATE runtime.operations SET progress=progress || $2::jsonb WHERE id=$1",
-			[
-				operation.id,
-				JSON.stringify({ phase: "moving", targetNodeId: destination.nodeId }),
-			],
-		);
-		return {
-			ok: true,
-			operation: await mustLoadOperation(tx.client, operation.id),
-		};
-	}
 
 	return { ok: true, operation };
 }

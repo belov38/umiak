@@ -9,11 +9,6 @@ import type { SnapshotResource } from "../schemas/snapshot.ts";
 import { iso, isoOrNull } from "./operation.ts";
 
 interface SnapshotExtras {
-	movement?: {
-		targetNode: string;
-		verifiedBytes: number;
-		totalBytes: number;
-	} | null;
 	template: string | null;
 	templateVersion: string | null;
 	size: string | null;
@@ -33,18 +28,13 @@ async function loadExtras(
 		size_slug: string | null;
 		error_code: string | null;
 		error_message: string | null;
-		movement: {
-			targetNode: string;
-			verifiedBytes: number;
-			totalBytes: number;
-		} | null;
 	}>(
 		// The size of the machine the snapshot was taken from, else of the
 		// sandbox; the error of the failed save_snapshot operation that made it.
 		`SELECT sn.id, b.template_slug, b.version,
 		        COALESCE(m.size_slug, s.size_slug) AS size_slug,
-		        op.error_code, op.error_message,
- (SELECT jsonb_build_object('targetNode',n.name,'verifiedBytes',COALESCE((v.progress->>'verifiedBytes')::bigint,0),'totalBytes',COALESCE((v.progress->>'totalBytes')::bigint,0)) FROM runtime.volume_transfers v JOIN runtime.nodes n ON n.id=v.target_node_id WHERE v.kind='snapshot' AND v.source_id=sn.id AND v.phase IN ('preparing','copying','verified') ORDER BY v.created_at DESC LIMIT 1) AS movement
+		        op.error_code, op.error_message
+
 		 FROM runtime.snapshots sn
 		 LEFT JOIN runtime.template_builds b ON b.id = sn.template_build_id
 		 LEFT JOIN runtime.machines m ON m.id = sn.source_machine_id
@@ -60,7 +50,6 @@ async function loadExtras(
 	);
 	for (const row of r.rows) {
 		out.set(row.id, {
-			movement: row.movement,
 			template: row.template_slug,
 			templateVersion: row.version,
 			size: row.size_slug,
@@ -89,11 +78,7 @@ export function toSnapshotResource(
 	return {
 		id: encodeUuid("snapshot", s.id),
 		name: s.name ?? s.pendingName ?? "",
-		state:
-			s.state === "ready" && x?.movement
-				? "moving"
-				: (s.state as SnapshotResource["state"]),
-		...(x?.movement ? { progress: x.movement } : {}),
+		state: s.state as SnapshotResource["state"],
 		sourceSandboxId:
 			s.sourceSandboxId === null
 				? null

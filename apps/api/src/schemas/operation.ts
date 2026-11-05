@@ -27,7 +27,7 @@ export const OperationSchema = z
 
 		progress: z
 			.object({
-				phase: z.enum(["moving", "queued"]),
+				phase: z.enum(["queued"]),
 				targetNode: z.string().optional(),
 				verifiedBytes: z.number().nonnegative().optional(),
 				totalBytes: z.number().nonnegative().optional(),

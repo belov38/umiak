@@ -3,7 +3,7 @@ import type pg from "pg";
 import type { WorkerCtx } from "../context.ts";
 import { loadSnapshot, snapshotRef } from "../db.ts";
 import { CREATE_STEPS } from "../ops/create.ts";
-import { withPortableLock } from "../portable.ts";
+import { withSourceLock } from "../source-lock.ts";
 
 // snapshot-op queue (S6 §7.8, §15.1): delete of a snapshot in `deleting`
 // (or `failed`). Key snapshotId; unlimited retries.
@@ -34,7 +34,7 @@ export async function handleSnapshotOp(
 	ctx: WorkerCtx,
 	data: SnapshotOpData,
 ): Promise<SnapshotOpResult> {
-	return withPortableLock(ctx, `snapshot:${data.snapshotId}`, () =>
+	return withSourceLock(ctx, `snapshot:${data.snapshotId}`, () =>
 		handleSnapshotOpLocked(ctx, data),
 	);
 }

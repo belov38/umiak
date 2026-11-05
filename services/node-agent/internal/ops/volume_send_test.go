@@ -73,25 +73,38 @@ func TestVerifiedImportReceiptIsBoundToSourceAndLVGeneration(t *testing.T) {
 	}
 }
 
-func TestSnapshotExportsFreezeTheirSource(t *testing.T) {
-	h := newHarness(nil)
-	lv := lvm.LV{Name: "umiak-snap-" + strings.Repeat("a", 32) + "-scsi0", Attr: "Vwi-a-tz--"}
-	if err := h.srv.freezeTransferSource(t.Context(), lv); err != nil {
-		t.Fatal(err)
-	}
-	if len(h.run.calls) != 1 || strings.Join(h.run.calls[0], " ") != "lvchange -pr pve/"+lv.Name {
-		t.Fatal(h.run.calls)
-	}
-	if err := h.srv.freezeTransferSource(t.Context(), lvm.LV{Name: "base-599-disk-0", Attr: "Vwi-a-tz--"}); err == nil {
-		t.Fatal("writable template accepted as immutable")
-	}
-}
-
 func TestFullCopyRejectsStorageAliasesToOtherPools(t *testing.T) {
 	for _, config := range []string{"dir: local-lvm\n\tpath /foreign\n", "lvmthin: local-lvm\n\tvgname foreign\n\tthinpool data\n", "lvmthin: local-lvm\n\tvgname pve\n\tthinpool foreign\n"} {
 		h := newHarness(fstest.MapFS{"etc/pve/storage.cfg": {Data: []byte(config)}})
 		if err := h.srv.validateTransferStorage(); err == nil {
 			t.Fatal("accepted", config)
 		}
+	}
+}
+
+func TestOnlyReadOnlyTemplatesCanBeExported(t *testing.T) {
+	for _, lv := range []lvm.LV{
+		{Name: "umiak-snap-" + strings.Repeat("a", 32) + "-scsi0", Attr: "Vri---tz-k"},
+		{Name: "base-599-disk-0", Attr: "Vwi---tz-k"},
+	} {
+		if requireReadOnlyTemplate(lv) == nil {
+			t.Fatal("accepted non-template or writable source")
+		}
+	}
+	if err := requireReadOnlyTemplate(lvm.LV{Name: "base-599-disk-0", Attr: "Vri---tz-k"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRemovedTransferOpsAreUnknown(t *testing.T) {
+	h := newHarness(nil)
+	for _, op := range []string{"lv.transferRead", "lv.transferWrite", "lv.transferMap", "lv.transferPrepare", "lv.transferDigest", "lv.deltaStream", "vm.transferSwitch", "vm.transferUnlock"} {
+		r := h.call(t, op, map[string]any{})
+		if r.OK || r.Error == nil || !strings.Contains(r.Error.Message, "unknown op") {
+			t.Fatalf("%s: %#v", op, r)
+		}
+	}
+	if len(h.run.calls) != 0 {
+		t.Fatal("removed operations ran commands")
 	}
 }

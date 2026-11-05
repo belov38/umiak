@@ -1,5 +1,5 @@
 import type { Tx } from "@umiak/db";
-import { MOVE_RESERVED_SQL, RESERVED_SQL } from "./capacity.ts";
+import { RESERVED_SQL } from "./capacity.ts";
 import { NODE_NOT_BUILDING_SQL } from "./node-maintenance.ts";
 
 /**
@@ -83,7 +83,7 @@ export async function place(
 		 JOIN runtime.storages st ON st.id = tb.storage_id AND st.node_id = n.id AND st.provider_id = n.provider_id
 		 CROSS JOIN LATERAL (
 		   SELECT
-		     COALESCE(SUM(m.memory_mb) FILTER (WHERE ${RESERVED_SQL}), 0) + ${MOVE_RESERVED_SQL} AS reserved_mb,
+		     COALESCE(SUM(m.memory_mb) FILTER (WHERE ${RESERVED_SQL}), 0) AS reserved_mb,
 		     COALESCE(SUM(m.memory_mb) FILTER (
 		       WHERE m.state = 'warm' AND m.pool_key IS DISTINCT FROM $4), 0) AS evictable_mb
 		   FROM runtime.machines m

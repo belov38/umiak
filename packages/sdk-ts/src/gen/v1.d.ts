@@ -323,7 +323,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel a queued start
-         * @description Cancels only an unadmitted capacity wait. Idempotent; an admitted or moving start must be stopped/deleted through its normal lifecycle.
+         * @description Cancels only an unadmitted capacity wait. Idempotent; an admitted start must be stopped/deleted through its normal lifecycle.
          */
         post: operations["sandboxes.cancelStart"];
         delete?: never;
@@ -2243,7 +2243,7 @@ export interface components {
             /** @description Portable data transfer or capacity queue progress; no credentials or request bodies */
             progress?: {
                 /** @enum {string} */
-                phase: "moving" | "queued";
+                phase: "queued";
                 /**
                  * Format: date-time
                  * @description ISO 8601 UTC with milliseconds
@@ -2489,7 +2489,7 @@ export interface components {
          * @description `ready` means usable; creating, stopping, stopped, starting, error, deleting, deleted
          * @enum {string}
          */
-        SandboxState: "creating" | "ready" | "stopping" | "stopped" | "starting" | "error" | "deleting" | "deleted" | "moving" | "queued" | (string & {});
+        SandboxState: "creating" | "ready" | "stopping" | "stopped" | "starting" | "error" | "deleting" | "deleted" | "queued" | (string & {});
         /** @description A secret file on tmpfs in the guest: up to 32 files, 8 MiB in total */
         SecretFileInput: {
             /** @description File content, base64 (up to 1 MiB decoded) */
@@ -2575,7 +2575,7 @@ export interface components {
             /** @description The sandbox it was taken from (`sb_...`) */
             sourceSandboxId: string | null;
             /** @enum {string} */
-            state: "creating" | "ready" | "failed" | "deleting" | "moving" | (string & {});
+            state: "creating" | "ready" | "failed" | "deleting" | (string & {});
             template: string | null;
             templateVersion: string | null;
         };

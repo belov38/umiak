@@ -7,7 +7,7 @@ export * from "./qga.ts";
 export * from "./state-sqlite.ts";
 export * from "./storage/full-copy.ts";
 export * from "./storage/lvmthin.ts";
-export * from "./storage/transfer.ts";
+export * from "./storage/transfer-progress.ts";
 export * from "./storage/types.ts";
 export * from "./template-replication.ts";
 export * from "./vm-lock.ts";

@@ -54,11 +54,7 @@ export function StateCell({ sandbox }: { sandbox: SandboxData }) {
 			<div className="flex flex-col gap-0.5" data-testid="sandbox-state">
 				<span className="inline-flex items-center gap-1">
 					<LoaderCircleIcon className="size-3.5 animate-spin text-muted-foreground" />
-					{sandbox.state === "moving"
-						? `Moving to ${op?.progress?.targetNode || "another node"}…`
-						: sandbox.state === "queued"
-							? "Waiting for capacity…"
-							: sandbox.state}
+					{sandbox.state === "queued" ? "Waiting for capacity…" : sandbox.state}
 				</span>
 				{op && (
 					<span className="text-xs text-muted-foreground">

@@ -343,7 +343,7 @@ const cancelStart = createRoute({
 		operationId: "sandboxes.cancelStart",
 		summary: "Cancel a queued start",
 		description:
-			"Cancels only an unadmitted capacity wait. Idempotent; an admitted or moving start must be stopped/deleted through its normal lifecycle.",
+			"Cancels only an unadmitted capacity wait. Idempotent; an admitted start must be stopped/deleted through its normal lifecycle.",
 	}),
 	middleware: [requireScope("sandboxes:write")] as const,
 	request: { params: SandboxParams },

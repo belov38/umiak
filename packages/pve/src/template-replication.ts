@@ -1,7 +1,7 @@
 import type { NodeOps } from "./node-client.ts";
 import type { PveClient } from "./pve-api.ts";
 import { fullVolumeCopy } from "./storage/full-copy.ts";
-import type { TransferProgress } from "./storage/transfer.ts";
+import type { TransferProgress } from "./storage/transfer-progress.ts";
 
 export interface TemplateReplicaInput {
 	api: PveClient;

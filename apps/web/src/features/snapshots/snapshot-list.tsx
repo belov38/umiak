@@ -58,10 +58,7 @@ export function SnapshotList({ teamId }: { teamId: string }) {
 		// Poll only while one is being saved or deleted.
 		refetchInterval: (q) =>
 			(q.state.data ?? []).some(
-				(s) =>
-					s.state === "creating" ||
-					s.state === "deleting" ||
-					s.state === "moving",
+				(s) => s.state === "creating" || s.state === "deleting",
 			)
 				? POLL_MS
 				: false,
@@ -204,17 +201,11 @@ export function SnapshotList({ teamId }: { teamId: string }) {
 }
 
 function SnapshotState({ snapshot: s }: { snapshot: SnapshotData }) {
-	if (
-		s.state === "creating" ||
-		s.state === "deleting" ||
-		s.state === "moving"
-	) {
+	if (s.state === "creating" || s.state === "deleting") {
 		return (
 			<span className="inline-flex items-center gap-1">
 				<LoaderCircleIcon className="size-3.5 animate-spin text-muted-foreground" />
-				{s.state === "moving"
-					? `Moving to ${s.progress?.targetNode || "another node"}… ${Math.floor((s.progress?.verifiedBytes || 0) / 1048576)} MiB`
-					: s.state}
+				{s.state}
 			</span>
 		);
 	}

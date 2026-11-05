@@ -44,7 +44,7 @@ import {
 	resolveDurations,
 	resolveTemplate,
 } from "./create-input.ts";
-import { admitPortable } from "./create-placement.ts";
+import { admitLocalSource } from "./create-placement.ts";
 import { insertSandboxRow } from "./sandbox-row.ts";
 import {
 	checkSecretPatch,
@@ -267,7 +267,7 @@ export async function forkSandbox(
 		try {
 			if (await teamHasQueuedStarts(tx, p.teamId)) throw outOfCapacity(30);
 
-			destination = await admitPortable(
+			destination = await admitLocalSource(
 				tx,
 				deps,
 				{

@@ -47,10 +47,10 @@ export function toOperationResource(op: Operation): OperationResource {
 			["pending", "running"].includes(op.state)
 				? "queued"
 				: op.state,
-		...(["moving", "queued"].includes(String(op.progress.phase))
+		...(op.progress.phase === "queued"
 			? {
 					progress: {
-						phase: op.progress.phase as "moving" | "queued",
+						phase: op.progress.phase as "queued",
 						...(typeof op.progress.targetNode === "string"
 							? { targetNode: op.progress.targetNode }
 							: {}),

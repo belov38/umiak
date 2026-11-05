@@ -188,18 +188,6 @@ func (p *progressWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-// Freeze immutable snapshot exports before caching by LV UUID. A staging LV
-// subsequently offered as a source can no longer be modified by transferWrite.
-func (s *Server) freezeTransferSource(ctx context.Context, lv lvm.LV) error {
-	if baseRe.MatchString(lv.Name) {
-		if len(lv.Attr) < 2 || lv.Attr[1] != 'r' {
-			return forbidden("template export requires a read-only LV")
-		}
-		return nil
-	}
-	_, err := s.Host.Run(ctx, "lvchange", "-pr", s.Cfg.VG+"/"+lv.Name)
-	return err
-}
 func (s *Server) volumeSendTo(ctx context.Context, raw json.RawMessage) (any, error) {
 	var a struct {
 		Volume     string `json:"volume"`
@@ -211,7 +199,7 @@ func (s *Server) volumeSendTo(ctx context.Context, raw json.RawMessage) (any, er
 		return nil, err
 	}
 	storage, name, ok := strings.Cut(a.Volume, ":")
-	if !ok || storage != s.Cfg.Storage {
+	if !ok || storage != s.Cfg.Storage || !baseRe.MatchString(name) {
 		return nil, forbidden("source storage is not configured Umiak storage")
 	}
 	lv, err := s.transferTarget(ctx, name)
@@ -259,7 +247,7 @@ func (s *Server) volumeSendTo(ctx context.Context, raw json.RawMessage) (any, er
 	if !prior.OK {
 		return nil, fmt.Errorf("target preflight refused: %v", prior.Error)
 	}
-	if err = s.freezeTransferSource(ctx, lv); err != nil {
+	if err = requireReadOnlyTemplate(lv); err != nil {
 		return nil, err
 	}
 	if prior.Result.Verified && prior.Result.SourceUUID == lv.UUID && prior.Result.SizeBytes == lv.SizeBytes {
@@ -289,14 +277,7 @@ func (s *Server) volumeSendTo(ctx context.Context, raw json.RawMessage) (any, er
 	if err != nil {
 		return nil, err
 	}
-	var exporter *exec.Cmd
-	if baseRe.MatchString(name) {
-		exporter = exec.CommandContext(ctx, "pvesm", "export", a.Volume, "raw+size", "-", "--with-snapshots", "0") //nolint:gosec // fixed executables; storage, owned LV and staging identifiers validated above
-	} else {
-		// PVE does not parse umiak-snap names. Emit its exact raw+size framing for
-		// validated immutable snapshots, using the same fixed device reader.
-		exporter = exec.CommandContext(ctx, "dd", "if="+filepath.Join("/dev", s.Cfg.VG, name), "bs=8M", "status=none") //nolint:gosec // fixed executables; storage, owned LV and staging identifiers validated above
-	}
+	exporter := exec.CommandContext(ctx, "pvesm", "export", a.Volume, "raw+size", "-", "--with-snapshots", "0") //nolint:gosec // fixed executables; storage, owned LV and staging identifiers validated above
 	var exportLog boundedLog
 	exporter.Stderr = &exportLog
 	exported, err := exporter.StdoutPipe()
@@ -318,11 +299,6 @@ func (s *Server) volumeSendTo(ctx context.Context, raw json.RawMessage) (any, er
 		return nil, err
 	}
 	var reader io.Reader = exported
-	if !baseRe.MatchString(name) {
-		header := make([]byte, 8)
-		binary.LittleEndian.PutUint64(header, lv.SizeBytes)
-		reader = io.MultiReader(bytes.NewReader(header), reader)
-	}
 	hash := sha256.New()
 	progress := &progressWriter{s: s, total: lv.SizeBytes, started: started}
 	n, copyErr := io.CopyBuffer(zin, io.TeeReader(reader, io.MultiWriter(hash, progress)), make([]byte, 8<<20))
@@ -617,4 +593,14 @@ func (s *Server) volumeCleanupImport(ctx context.Context, raw json.RawMessage) (
 		return nil, err
 	}
 	return map[string]any{"removed": true}, nil
+}
+
+var nodeNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.-]{0,62}$`)
+var storageNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]{0,63}$`)
+
+func requireReadOnlyTemplate(lv lvm.LV) error {
+	if !baseRe.MatchString(lv.Name) || len(lv.Attr) < 2 || lv.Attr[1] != 'r' {
+		return forbidden("export requires a read-only template")
+	}
+	return nil
 }

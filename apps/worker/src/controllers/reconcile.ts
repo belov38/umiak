@@ -20,7 +20,6 @@ import {
 	sandboxToError,
 	transitionSandbox,
 } from "../ops/common.ts";
-import { reconcilePortableCleanup } from "../portable.ts";
 import type { InfraLv, InfraVm, NodeInfra } from "../ports.ts";
 
 // Controller `reconcile` (S6 §11.2, §11.3; every 60 s). Compares Proxmox
@@ -159,7 +158,6 @@ export async function runReconcile(
 	ctx: WorkerCtx,
 	o: ReconcileOptions,
 ): Promise<ReconcileAction[]> {
-	if (!o.dryRun) await reconcilePortableCleanup(ctx);
 	const jobs = o.jobs ?? pgBossLiveJobs(ctx.pool);
 	const p = await ctx.pool.query<ProviderRow>(
 		`SELECT id, vmid_min, vmid_max FROM runtime.providers

@@ -1,5 +1,5 @@
 import type { NodeOps } from "../node-client.ts";
-import type { TransferProgress } from "./transfer.ts";
+import type { TransferProgress } from "./transfer-progress.ts";
 export interface FullCopyReceipt {
 	name: string;
 	uuid: string;

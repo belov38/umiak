@@ -662,14 +662,6 @@ export const volumeTransfers = runtime.table("volume_transfers", {
 	updatedAt: updatedAt(),
 });
 
-export const moveReservations = runtime.table("move_reservations", {
-	machineId: uuid("machine_id").primaryKey(),
-	operationId: uuid("operation_id").notNull(),
-	nodeId: uuid("node_id").notNull(),
-	storageId: uuid("storage_id").notNull(),
-	memoryMb: integer("memory_mb").notNull(),
-});
-
 export const startQueue = runtime.table("start_queue", {
 	operationId: uuid("operation_id").primaryKey(),
 	teamId: uuid("team_id").notNull(),

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"strings"
 	"time"
 
@@ -57,8 +56,6 @@ type Server struct {
 	Version  string
 	// ScanOpen opens LV devices for lv.scan; nil reads /dev/<vg>/<lv>.
 	ScanOpen ScanOpener
-	// TransferOpen opens a validated staging device; nil uses os.OpenFile.
-	TransferOpen func(string) (*os.File, error)
 	// OnHash is called each time media.sha256 reads a file instead of using its cache; tests count it.
 	OnHash func(name string)
 }
@@ -89,14 +86,7 @@ var handlers = map[string]handler{
 	"lv.usage":             (*Server).lvUsage,
 	"lv.tagTemplate":       (*Server).lvTagTemplate,
 	"lv.transferRemove":    (*Server).lvTransferRemove,
-	"vm.transferSwitch":    (*Server).vmTransferSwitch,
-	"vm.transferUnlock":    (*Server).vmTransferUnlock,
 	"lv.transferPublish":   (*Server).lvTransferPublish,
-	"lv.transferMap":       (*Server).lvTransferMap,
-	"lv.transferDigest":    (*Server).lvTransferDigest,
-	"lv.transferRead":      (*Server).lvTransferRead,
-	"lv.transferPrepare":   (*Server).lvTransferPrepare,
-	"lv.transferWrite":     (*Server).lvTransferWrite,
 	"lv.adopt":             (*Server).lvAdopt,
 }
 
@@ -161,7 +151,7 @@ func redactArgs(op string, raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return "{}"
 	}
-	secret := map[string]string{"inventory": "search", "lv.scan": "patterns", "lv.transferWrite": "data"}[op]
+	secret := map[string]string{"inventory": "search", "lv.scan": "patterns"}[op]
 	if secret == "" {
 		return string(raw)
 	}
@@ -181,5 +171,5 @@ func redactArgs(op string, raw json.RawMessage) string {
 
 func (s *Server) version(context.Context, json.RawMessage) (any, error) {
 	kernel, _ := fs.ReadFile(s.Host.FS, "proc/sys/kernel/osrelease")
-	return map[string]any{"version": s.Version, "transferProtocols": []string{"pvesm-raw+size-zstd-v1", "delta-stream-v1"}, "config": s.Cfg, "kernel": strings.TrimSpace(string(kernel))}, nil
+	return map[string]any{"version": s.Version, "transferProtocols": []string{"pvesm-raw+size-zstd-v1"}, "config": s.Cfg, "kernel": strings.TrimSpace(string(kernel))}, nil
 }

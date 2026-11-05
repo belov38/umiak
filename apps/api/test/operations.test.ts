@@ -36,7 +36,7 @@ describe.skipIf(skipPg())("GET /v1/operations/{operation}", () => {
 		return body(r).operation;
 	};
 
-	it("exposes moving state and only allowlisted transfer progress", async () => {
+	it("keeps historical moving operations readable without advertising a moving state", async () => {
 		const op = await createOp();
 		await db.pool.query(
 			"UPDATE runtime.operations SET progress=$2 WHERE id=$1",
@@ -53,15 +53,10 @@ describe.skipIf(skipPg())("GET /v1/operations/{operation}", () => {
 			],
 		);
 		const progress = await h.request("GET", `/v1/operations/${op.id}`);
-		expect(body(progress).progress).toEqual({
-			phase: "moving",
-			targetNode: "pve2",
-			verifiedBytes: 512,
-			totalBytes: 1024,
-		});
+		expect(body(progress).progress).toBeUndefined();
 		expect(progress.text).not.toMatch(/hidden-host|hidden-secret|sshHost/);
 		const sandbox = await h.request("GET", `/v1/sandboxes/${op.sandboxId}`);
-		expect(body(sandbox).state).toBe("moving");
+		expect(body(sandbox).state).toBe("creating");
 	});
 
 	it("returns the operation (§8.4) without its stored request", async () => {
