@@ -35,7 +35,7 @@ and measurements before product changes.
   steady/one-shot service counts and logical secrets, with exact commands.
 - [ ] Prepare populated source with owner, personal/shared teams, memberships,
   live/revoked/expired keys, SSH keys, edited/disabled templates, custom size,
-  providerless pool target, null retention and nondefault quotas; include revoked
+  legacy unread pool rows, null retention and nondefault quotas; include revoked
   keys with deleted/NULL teams, nullable audit links and self-revocation links.
 - [ ] Write failing assertions for IDs/hashes/all fields, rerun no-op, unsupported
   source failure and target conflict rollback. Preserve fixture without requiring
@@ -84,7 +84,7 @@ the documented settings endpoints in the spec using public IDs/API envelopes.
 - [ ] Write failing owner-success, all-scope key denial, wrong Origin/peer/host,
   no-hash disclosure, bad ID and oversized body tests.
 - [ ] Move account/team/template action logic to transactional API services;
-  implement catalog/default/pool settings and runtime deletion guards.
+  implement catalog/default settings and runtime deletion guards.
 - [ ] Test immutable slugs, default-size membership, size-in-use, personal-team
   deletion, malformed quotas and concurrent owner/team mutation.
 - [ ] Generate OpenAPI with `mise exec -- pnpm --filter @umiak/api openapi`;
@@ -100,7 +100,7 @@ features/components/session/API helpers. Consumes SDK/settings; produces dist.
 - [ ] Port shell/session/team routes, navigation, lazy loading and fonts; retain
   visual components and existing sandbox/key/environment/snapshot URLs.
 - [ ] Replace server actions/loaders with SDK queries/mutations. Add owner
-  settings catalog/defaults/keys/quotas/pool-target pages and admin redirects.
+  settings catalog/defaults/keys/quotas pages and admin redirects.
 - [ ] Remove obsolete multi-user/operator screens; preserve owner workspaces.
 - [ ] Test team query isolation, mutation errors, one-time secret clearing,
   deep links, 401/403, terminal reconnect and desktop links.

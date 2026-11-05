@@ -27,8 +27,8 @@ An API platform that gives AI agents and people isolated VMs (sandboxes) on Prox
    v                                           |
  +---------------------------+       +---------v-----------+
  | apps/api   (Hono, Node)   |<----->| apps/web            |
- | public API, auth, keys    |       | Next.js + Payload 3 |
- +-------------+-------------+       | /admin  /app        |
+ | public API, auth, keys    |       | Vite + React 19 SPA |
+ +-------------+-------------+       | /app + settings     |
                |  Postgres           +---------------------+
  +-------------v-------------+
  | apps/worker (Node)        |  lifecycle, snapshots, auto-stop
@@ -48,15 +48,15 @@ An API platform that gives AI agents and people isolated VMs (sandboxes) on Prox
 |---|---|---|
 | `apps/api` | TS, Hono + `@hono/zod-openapi`, Node 24 | Public REST API, OpenAPI, authorization by owner sessions and scoped team API keys, NDJSON streams, terminal WebSocket. Source of OpenAPI for the SDKs |
 | `apps/worker` | TS, pg-boss | Sandbox and machine state machines, Proxmox operations, snapshots and fork, auto-stop, cleanup |
-| `apps/web` | TS, Next.js + Payload 3 | `/admin`: operators (users, teams, keys, templates, sizes, quotas). `/app`: customer dashboard (sandbox list, xterm.js terminal, desktop iframe, logs). Works with sandboxes only through `apps/api` |
+| `apps/web` | TS, Vite + React 19 SPA | `/app/settings`: owner settings (templates, sizes, defaults, workspaces, keys). `/app`: dashboard (sandbox list, xterm.js terminal, desktop iframe, logs). Works with sandboxes only through `apps/api` |
 | `apps/cli` | TS (Bun compile) | Client of the public API |
 | `apps/mcp` | TS | MCP server on top of the public API and `@umiak/sdk`: stdio (`umiak mcp` in the CLI binary) and Streamable HTTP (`api.<domain>/mcp`, Deployment `mcp`); `docs/specs/s11-mcp.md` |
 | `packages/sdk-ts`, `sdk-py` | generation + facades | From OpenAPI; helpers for waiting, reconnecting streams, uploads, PTY |
-| `packages/auth` | TS | API key format, scopes, the `IdentityStore` interface (shared by `api` and `web`) |
+| `packages/auth` | TS | API key format, scopes, the `IdentityStore` interface (used by `api`) |
 | `services/guest-agent` | Go | Agent inside the VM (Linux: systemd unit, Windows: service) |
 | `services/gateway` | Go | Agent tunnel intake, HTTP port proxy, SSH gateway, TLS edge for `*.umiak`, `tunnel`, `ssh` (S2, S4). Desktop uses the agent tunnel |
 | `services/node-agent` | Go | On each Proxmox node: LVM-thin operations, QMP, node metrics. In the PoC it can be replaced by an SSH executor with the same interface |
-| Postgres | — | One DB: the Payload schema (configuration) + the API schema (runtime) |
+| Postgres | — | One DB: API-owned configuration and operations in schema `runtime`; legacy `payload` retained unread for upgrades |
 
 ## 3. Data model (runtime, schema `runtime`)
 
@@ -71,7 +71,7 @@ In detail: `docs/specs/s6-control-plane.md`.
 - **Operation** — an operation on a sandbox (create, fork, stop, resume, recover, delete, save_snapshot); one active per sandbox, delete preempts.
 - **Command** — a process: `id`, `sandboxId`, `cmd`, `cwd`, env variable names, `mode`, `status`, `exitCode`, `startedAt`, `endedAt`. The agent stores the output, later a copy goes to storage.
 - **HostedPort** — a sandbox port published at a URL: `port`, `label`, mode `token` / `sso` / `public`.
-- **User**, **Team**, **Membership** (`owner`/`member`), **ApiKey**, **SshKey** and configuration — **Template**, **Size**, team quotas, `PlatformDefaults` — are in Payload (schema `payload`, `docs/specs/s8-web.md` §7); `api` and `worker` read them through the Payload Local API (`IdentityStore`, `ConfigReader`, cache 10–30 s, invalidated by `NOTIFY`).
+- **User**, **Team**, **Membership** (`owner`/`member`), **ApiKey**, **SshKey** and configuration — **Template**, **Size**, team quotas, `PlatformDefaults` — are in the API-owned schema `runtime` (`docs/specs/s24-spa-no-payload.md`); `api` and `worker` use shared SQL `IdentityStore`/`ConfigReader` adapters, invalidated by transactional `NOTIFY` with a TTL fallback.
 - **Environment** — a named set of env, secrets, and secret files of a team, plus a list of repositories (in the MVP only stored, the clone is S13, phase 2) and the flag `excludeOwnerSecrets`; stored in `runtime.environments` encrypted like `sandbox_secrets` (key rotation re-encrypts them too), managed through `/v1/environments`; on create the values are copied into the sandbox (S8 §10).
 
 **Sandbox states:** `creating → ready → stopping → stopped → starting → ready`. Plus `error` and `deleting → deleted`. `fork` creates a new sandbox in `creating`. Health (`health: ok | degraded`, degraded — no agent for more than 60 s) and activity (`activity: busy | idle`) are separate fields, not states.
@@ -183,7 +183,8 @@ private API, MCP and web listeners. Those listeners verify their trusted ingress
 peer or the ingress's client stamp and enforce Origin checks. Public metadata
 advertises `authMode: owner` and `tenancy: single`.
 
-Payload remains the dashboard/admin configuration store. The owner has a stable
+The API owns configuration and serves the static React dashboard through the
+existing owner ingress. Setup/claim/pairing/recovery stay in quickstart (S24b). The owner has a stable
 internal session subject (`umiak:local`), operator rights and a personal team.
 Teams, memberships, scoped team API keys and their quotas remain part of the
 internal authorization model. They are not a second login mechanism.
@@ -200,7 +201,7 @@ It needs no media relay service or separate media address.
 
 ## 11. Security
 
-- Team API keys with "resource × action" scopes (`sandboxes:read`, `commands:exec`, …) and a mandatory lifetime, stored as hashes in Payload. People have no long-lived keys: the CLI works with short-lived owner sessions. The key type `sandbox` (one sandbox, for the CLI inside the VM) is reserved and not issued in the MVP (S7 §7.2–7.3).
+- Team API keys with "resource × action" scopes (`sandboxes:read`, `commands:exec`, …) and a mandatory lifetime, stored as hashes in `runtime.api_keys`. People have no long-lived keys: the CLI works with short-lived owner sessions. The key type `sandbox` (one sandbox, for the CLI inside the VM) is reserved and not issued in the MVP (S7 §7.2–7.3).
 - Each machine has its own bootstrap secret in `smbios1` and a machine token for the tunnel only in agent memory; the token is reissued at claim. A machine is not reused between sandboxes (S2).
 - Secrets in the guest are in tmpfs (Linux). On Windows `secret_env` is in memory only, `secret_files` are in a directory with an ACL (SYSTEM and `user`), wiped on every boot before user login, at stop, and before a saved snapshot; pagefile cleared at shutdown. Remnants in the pagefile and NTFS metadata of a snapshot of a running VM are an accepted risk (S9 §12.8).
 - Proxmox: a separate user and API token with rights only on the pool `umiak` and the needed storages.
@@ -210,7 +211,7 @@ It needs no media relay service or separate media address.
 | Phase | Contents |
 |---|---|
 | **PoC** (homelab `pve`) | Template `linux`, guest-agent v0 (tunnel, exec, files), gateway (tunnels, HTTP ports), worker (cold create, claim, delete), lvmthin driver (clone from template, snapshot, fork), minimal API and CLI. Measurements: claim-to-ready, cold start, fork |
-| **MVP** | + `windows`, `linux-desktop`; stop/resume, saved snapshots, SSH gateway, desktop, computer-use API (screenshot, mouse, keyboard, clipboard), Payload admin/dashboard, API keys, auto-stop, TS/Python SDKs, MCP |
+| **MVP** | + `windows`, `linux-desktop`; stop/resume, saved snapshots, SSH gateway, desktop, computer-use API (screenshot, mouse, keyboard, clipboard), owner settings/dashboard, API keys, auto-stop, TS/Python SDKs, MCP |
 | **Phase 2** | `windows-core` (Windows Server Core, S9 §22), several nodes and clusters, PBS archive and migration, computer-use v2 and desktop v2 (S29), command history outside the VM, built-in coding agents, egress policies, OTel, webhooks |
 
 ## 13. Open questions

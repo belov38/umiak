@@ -43,7 +43,7 @@ static server keeps an avoidable container/image. Owner approved API delivery; g
 ## Storage and API ownership
 
 Create `runtime.users`, `teams`, `memberships`, `api_keys`, `ssh_keys`, `templates`,
-`sizes`, `pool_targets`, `platform_defaults`. Reserve SQL range `0800–0899` for
+`sizes`, `platform_defaults`. Reserve SQL range `0800–0899` for
 S24 in the roadmap. Use the existing SQL journal, checksum enforcement, advisory
 lock and one Compose `migrate` job. Never rewrite applied migrations.
 
@@ -78,7 +78,6 @@ Add these documented zod-openapi routes using existing errors/public IDs:
 | `GET, POST /v1/settings/sizes` | Full size config list/create |
 | `PATCH, DELETE /v1/settings/sizes/{slug}` | Validated edits/guarded deletion |
 | `GET, PUT /v1/settings/platform-defaults` | Global settings |
-| `GET, PUT /v1/settings/pool-targets` | Stored targets; does not implement warm pools |
 
 All settings routes require owner session/operator authority. Team API keys,
 including all-scope keys, cannot use them. Paired CLI owner sessions intentionally
@@ -102,7 +101,8 @@ include team IDs; team switches discard prior team data. Mutations invalidate
 affected queries. One-time key secrets never enter persistent storage/query cache.
 
 Settings replace owner-facing admin: templates, sizes, defaults, quotas, keys,
-stored pool targets. `/admin` redirects to `/app/settings`; recognized former
+owner workspaces. Pool targets are excluded following S26a; legacy
+`payload.pool_targets` rows remain unread. `/admin` redirects to `/app/settings`; recognized former
 collection/global deep links redirect to the matching settings section. Unknown
 CMS paths return 404/410. Drop invitation/member-role editing, user provisioning,
 operator cross-user sandbox/blocking screens. Keep owner workspaces (create,
@@ -139,7 +139,7 @@ upstreams and proves setup can reach the new dashboard.
 `0800_api_configuration.sql` creates owned tables;
 `0801_import_payload.sql` imports source data transactionally. A subsequent
 `0802_pending_catalog_changes.sql` translates pending source data migrations:
-in particular, the checked-in Debian deferral removes its pool targets/catalog
+in particular, the checked-in Debian deferral removes its catalog
 entry, resets a Debian default to Linux and retires matching builds. Test both
 the published source with Debian and already-updated sources; preserve unrelated
 operator edits. Support the
@@ -150,7 +150,7 @@ must never be treated as a fresh install and seeded over.
 
 Copy all eight collections and the global, including owner subject and
 personal/default team pointers, all memberships, hashes/scopes/audit/revocation
-timestamps, SSH keys/fingerprints, template operator edits, sizes, pool targets,
+timestamps, SSH keys/fingerprints, template operator edits, sizes,
 nullable retention and quota fields. Use explicit mappings and enum conversion,
 dependency-ordered inserts and deferred cyclic references. Preserve UUIDs and
 runtime references. Validate row counts, relationships and hash equality before

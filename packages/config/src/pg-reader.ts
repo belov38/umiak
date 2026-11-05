@@ -180,9 +180,6 @@ export class PgConfigReader implements ConfigReader {
 		return (await this.#sizes()).map((s) => ({ ...s }));
 	}
 
-	async poolTargets() {
-		return [];
-	}
 
 	async teamExists(teamId: string, client: pg.PoolClient): Promise<boolean> {
 		return (
