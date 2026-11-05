@@ -242,7 +242,11 @@ function setupBrowser(
 	const timers = [];
 	let reloads = 0;
 	runInNewContext(script, {
-		document: { querySelector: element, querySelectorAll: () => [] },
+		document: {
+			querySelector: element,
+			querySelectorAll: () => [],
+			addEventListener: () => {},
+		},
 		sessionStorage: {
 			getItem: (key) => storage.get(key),
 			setItem: (key, value) => storage.set(key, value),
@@ -355,7 +359,7 @@ test("several nodes: one Linux action builds on every node that lacks it", () =>
 	});
 	assert.match(html, /data-nodes="node_1,node_2"/);
 	assert.match(html, /Build Linux template on all nodes \(pve, pve2\)/);
-	assert.match(html, /per node; nodes are built one after another/);
+	assert.match(html, /Build once on pve, then copy to pve2, pve3/);
 	// The node selector belongs to the optional single-template build only.
 	assert.ok(
 		html.indexOf('<select id="build-node"') >

@@ -132,7 +132,9 @@ function setupInteractions() {
 		}
 		syncTest();
 		$("#build-error").textContent = job.error
-			? `Last build failed at ${new Date(job.finishedAt || job.startedAt).toLocaleTimeString()} on ${[...document.querySelectorAll("[data-queue-node]")].find((r) => r.dataset.queueNode === job.nodeId)?.dataset.name || job.nodeId}: ${briefError(job.error)}`
+			? job.replication?.phase === "failed"
+				? briefError(job.error)
+				: `Last build failed at ${new Date(job.finishedAt || job.startedAt).toLocaleTimeString()} on ${[...document.querySelectorAll("[data-queue-node]")].find((r) => r.dataset.queueNode === job.nodeId)?.dataset.name || job.nodeId}: ${briefError(job.error)}`
 			: "";
 		const elapsed = Math.max(
 			0,
@@ -178,6 +180,17 @@ function setupInteractions() {
 			plan = result.buildQueue;
 			showJob(result.buildJob);
 			showQueue();
+			if (result.buildJob?.status === "error" && $("#build-recoveries")) {
+				$("#step-templates").open = true;
+				try {
+					const html = await (await fetch("/setup")).text();
+					const fresh = new DOMParser()
+						.parseFromString(html, "text/html")
+						.querySelector("#build-recoveries");
+					if (fresh && $("#build-recoveries"))
+						$("#build-recoveries").innerHTML = fresh.innerHTML;
+				} catch {}
+			}
 			if (
 				result.buildJob?.status === "ready" &&
 				!plan?.active &&
@@ -291,41 +304,41 @@ function setupInteractions() {
 			$("#build-error").textContent = briefError(error.message);
 		}
 	});
-	for (const button of document.querySelectorAll("[data-recover-build]")) {
-		button.addEventListener("click", async () => {
-			const error = button.parentElement.querySelector("[data-recovery-error]");
-			button.disabled = true;
-			error.textContent = "";
-			try {
-				const input = {
-					nodeId: button.dataset.nodeId,
-					jobId: button.dataset.recoverBuild,
-				};
-				const info = await post("build/recover", { ...input, inspect: true });
-				const remains = [
-					...info.vms.map((v) => `VM ${v.vmid}`),
-					...info.disks.map((d) => d.name),
-				];
-				if (
-					remains.length &&
-					!confirm(
-						`Remove this build's Umiak resources: ${remains.join(", ")}? Other resources will be kept.`,
-					)
+	document.addEventListener("click", async (event) => {
+		const button = event.target.closest?.("[data-recover-build]");
+		if (!button) return;
+		const error = button.parentElement.querySelector("[data-recovery-error]");
+		button.disabled = true;
+		error.textContent = "";
+		try {
+			const input = {
+				nodeId: button.dataset.nodeId,
+				jobId: button.dataset.recoverBuild,
+			};
+			const info = await post("build/recover", { ...input, inspect: true });
+			const remains = [
+				...info.vms.map((v) => `VM ${v.vmid}`),
+				...info.disks.map((d) => d.name),
+			];
+			if (
+				remains.length &&
+				!confirm(
+					`Remove this build's Umiak resources: ${remains.join(", ")}? Other resources will be kept.`,
 				)
-					return;
-				await post("build/recover", {
-					...input,
-					confirmRemove: remains.length > 0,
-					retry: true,
-				});
-				location.reload();
-			} catch (e) {
-				error.textContent = briefError(e.message);
-			} finally {
-				button.disabled = false;
-			}
-		});
-	}
+			)
+				return;
+			await post("build/recover", {
+				...input,
+				confirmRemove: remains.length > 0,
+				retry: true,
+			});
+			location.reload();
+		} catch (e) {
+			error.textContent = briefError(e.message);
+		} finally {
+			button.disabled = false;
+		}
+	});
 	$("#smoke-node")?.addEventListener("change", syncTest);
 	const media = () => ({
 		iso: value("#build-iso"),
@@ -468,7 +481,7 @@ export function renderSetup(state) {
 		(name) => steps[name]?.status === "ready",
 	).length;
 	const section = (name, summary, body) =>
-		`<details name="setup-step" id="step-${name}"${!state.complete && ((name === "templates" && state.buildJob?.status === "running") || (name === current && state.buildJob?.status !== "running")) ? " open" : ""}><summary>${steps[name]?.status === "ready" ? "✓ " : ""}${summary}</summary>${body}</details>`;
+		`<details name="setup-step" id="step-${name}"${!state.complete && ((name === "templates" && ["running", "error"].includes(state.buildJob?.status)) || (name === current && state.buildJob?.status !== "running")) ? " open" : ""}><summary>${steps[name]?.status === "ready" ? "✓ " : ""}${summary}</summary>${body}</details>`;
 	const form = (name, fields, button = "Verify and save") =>
 		`<form data-step="${name}">${fields}<button type="submit"${name === "smoke" ? ` id="smoke-submit"${!(nodes[0]?.templates || []).some((t) => t.templateSlug === "linux") || state.buildJob?.status === "running" ? " disabled" : ""}` : ""}>${button}</button><div data-result role="status">${status(name)}</div></form>`;
 	const linuxReady = steps.templates?.status === "ready";
@@ -494,24 +507,33 @@ ${section(
 	"templates",
 	"3. Prepare your first sandbox image",
 	`
-${status("templates")}
+<style>#step-templates p,#step-templates li,#step-templates code{overflow-wrap:anywhere}</style>${status("templates")}
 <p>A template is the reusable VM image your sandboxes start from. Build the Linux template to continue. Desktop and Windows templates can be added later.</p>
 <button type="button" id="build-linux" data-job-id="${escapeHtml(state.buildJob?.id || "")}" data-job-status="${escapeHtml(state.buildJob?.status || "")}" data-job-node="${escapeHtml(state.buildJob?.nodeId || "")}" data-nodes="${escapeHtml(needLinux.map((n) => n.nodeId).join(","))}"${running ? " disabled" : ""}>${needLinux.length > 1 ? `Build Linux template on all nodes (${escapeHtml(needLinux.map((n) => n.name).join(", "))})` : needLinux.length === 1 && nodes.length > 1 ? `Build Linux template on ${escapeHtml(needLinux[0].name)}` : "Build Linux template"}</button>
 <ul aria-label="Sandbox node template availability">${nodes.map((n) => `<li data-queue-node="${escapeHtml(n.nodeId)}" data-name="${escapeHtml(n.name)}">${escapeHtml(n.name)} · Node ${n.state === "active" || n.state === "ready" ? "online" : escapeHtml(n.state)} · Template ${(n.templates || []).some((t) => t.templateSlug === "linux") ? "ready" : "missing"} · <span data-node-build-state>${state.buildJob?.nodeId === n.nodeId && running ? "Building" : (n.templates || []).some((t) => t.templateSlug === "linux") ? "Ready" : "Waiting"}</span></li>`).join("")}</ul>
-${nodes
-	.filter((n) => n.buildJobId && !running)
-	.map((n) => {
-		const recovery = state.buildRecovery?.[n.nodeId] || {};
-		const resources = [
-			...(recovery.vms || []).map((v) => `VM ${v.vmid}`),
-			...(recovery.disks || []).map((d) => d.name),
-			...(recovery.unknown || []).map((v) => `Unknown VM ${v.vmid}`),
-		];
-		return `<section class="build-recovery"><p>The last build on ${escapeHtml(n.name)} ${state.buildJob?.nodeId === n.nodeId && !/interrupted by restart/i.test(state.buildJob?.error || "") ? "failed" : "was interrupted"} <time data-local-time datetime="${escapeHtml((state.buildJob?.nodeId === n.nodeId && state.buildJob?.finishedAt) || recovery.createdAt || "")}"></time>.</p><p>${escapeHtml(resources.length ? `Remaining: ${resources.join(", ")}` : recovery.error || "No leftover build VMs or disks found.")}</p><button type="button" data-recover-build="${escapeHtml(n.buildJobId)}" data-node-id="${escapeHtml(n.nodeId)}">Clean up and retry</button><p class="error" role="alert" data-recovery-error></p><a href="/quickstart/setup/build/log?jobId=${escapeHtml(n.buildJobId)}" target="_blank" rel="noopener">Open build log</a></section>`;
-	})
-	.join("")}
+<div id="build-recoveries">${nodes
+		.filter((n) => n.buildJobId && !running)
+		.map((n) => {
+			const recovery = state.buildRecovery?.[n.nodeId] || {};
+			const resources = [
+				...(recovery.vms || []).map((v) => `VM ${v.vmid}`),
+				...(recovery.disks || []).map((d) => d.name),
+				...(recovery.unknown || []).map((v) => `Unknown VM ${v.vmid}`),
+			];
+			return `<section class="build-recovery"><p>The last build on ${escapeHtml(n.name)} ${state.buildJob?.nodeId === n.nodeId && !/interrupted by restart/i.test(state.buildJob?.error || "") ? "failed" : "was interrupted"} <time data-local-time datetime="${escapeHtml((state.buildJob?.nodeId === n.nodeId && state.buildJob?.finishedAt) || recovery.createdAt || "")}"></time>.</p><p>${escapeHtml(resources.length ? `Remaining: ${resources.join(", ")}` : recovery.error || "No leftover build VMs or disks found.")}</p><button type="button" data-recover-build="${escapeHtml(n.buildJobId)}" data-node-id="${escapeHtml(n.nodeId)}">Clean up and retry</button><p class="error" role="alert" data-recovery-error></p><a href="/quickstart/setup/build/log?jobId=${escapeHtml(n.buildJobId)}" target="_blank" rel="noopener">Open build log</a></section>`;
+		})
+		.join("")}</div>
 <p id="queue-progress" role="status"></p><button type="button" id="stop-queue" class="outline" hidden>Stop queue after current build</button>
-<p>Allow about 10 minutes${needLinux.length > 1 ? " per node; nodes are built one after another" : ""}; download speed and hardware affect the time.</p>
+<p>${
+		nodes.length > 1
+			? `Build once on ${escapeHtml(nodes[0].name)}, then copy to ${escapeHtml(
+					nodes
+						.slice(1)
+						.map((n) => n.name)
+						.join(", "),
+				)}. Allow about 10 minutes for the build; copying adds time.`
+			: "Allow about 10 minutes; download speed and hardware affect the time."
+	}</p>
 ${buildProgress}
 ${nodes.some((n) => n.templates?.length || n.buildJobId) ? `<details><summary>Node details</summary>${nodes.map((n) => `<p>${escapeHtml(n.name)} · ${escapeHtml((n.templates || []).map((t) => `${t.templateSlug} · ${t.version} · VM ${t.pveVmid}`).join(", "))}${n.buildJobId ? ` · Unfinished reservation: <code>${escapeHtml(n.buildJobId)}</code>` : ""}</p>`).join("")}</details>` : ""}
 
