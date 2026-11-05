@@ -62,6 +62,96 @@ class Listener {
 	}
 }
 
+describe.skipIf(skipPg())("configuration notifications", () => {
+	it("notifies on commit, stays silent on rollback/bookkeeping, and revokes rotated keys", async () => {
+		const db = await createTestDatabase();
+		const listener = new Listener(db.url);
+		await listener.start([
+			"umiak_identity",
+			"umiak_config",
+			"umiak_routes",
+			"umiak_ssh_revoke",
+		]);
+		try {
+			const transaction = await db.pool.connect();
+			try {
+				await transaction.query(
+					"BEGIN; UPDATE runtime.templates SET name='Changed' WHERE slug='linux'",
+				);
+				await db.pool.query("SELECT pg_notify('umiak_routes','before-commit')");
+				expect(await listener.waitFor(1)).toEqual([
+					{ channel: "umiak_routes", payload: "before-commit" },
+				]);
+				await transaction.query("COMMIT");
+				expect(
+					(await listener.waitFor(2)).some((n) => n.channel === "umiak_config"),
+				).toBe(true);
+				await listener.reset(db.pool);
+				await transaction.query(
+					"BEGIN; UPDATE runtime.platform_defaults SET public_ports_enabled=false; ROLLBACK",
+				);
+			} finally {
+				transaction.release();
+			}
+			await db.pool.query("SELECT pg_notify('umiak_routes','after-rollback')");
+			expect(await listener.waitFor(1)).toEqual([
+				{ channel: "umiak_routes", payload: "after-rollback" },
+			]);
+			await listener.reset(db.pool);
+			const user = (
+				await db.pool.query(
+					"INSERT INTO runtime.users(email) VALUES('notify@example.test') RETURNING id",
+				)
+			).rows[0].id;
+			await listener.waitFor(1);
+			await listener.reset(db.pool);
+			await db.pool.query(
+				"UPDATE runtime.users SET last_login_at=now(),updated_at=now() WHERE id=$1",
+				[user],
+			);
+			// A separate committed sentinel proves all preceding notifications arrived.
+			await db.pool.query(
+				"SELECT pg_notify('umiak_routes','bookkeeping-sentinel')",
+			);
+			expect(await listener.waitFor(1)).toEqual([
+				{ channel: "umiak_routes", payload: "bookkeeping-sentinel" },
+			]);
+			await listener.reset(db.pool);
+			const key = (
+				await db.pool.query(
+					"INSERT INTO runtime.api_keys(name,secret_hash,prefix,last4,scopes,expires_at,created_via) VALUES('key',repeat('a',64),'prefix','last','[]',now()+interval '1 day','api') RETURNING id",
+				)
+			).rows[0].id;
+			await listener.waitFor(1);
+			await listener.reset(db.pool);
+			await db.pool.query(
+				"UPDATE runtime.api_keys SET secret_hash=repeat('b',64) WHERE id=$1",
+				[key],
+			);
+			const expected = (
+				await db.pool.query("SELECT identity.public_id('key',$1::uuid) AS id", [
+					key,
+				])
+			).rows[0].id;
+			expect(await listener.waitFor(2)).toContainEqual({
+				channel: "umiak_ssh_revoke",
+				payload: `key:${expected}`,
+			});
+			await listener.reset(db.pool);
+			await db.pool.query(
+				"UPDATE runtime.platform_defaults SET public_ports_enabled=false",
+			);
+			expect(await listener.waitFor(2)).toContainEqual({
+				channel: "umiak_routes",
+				payload: "*",
+			});
+		} finally {
+			await listener.stop();
+			await db.drop();
+		}
+	});
+});
+
 describe.skipIf(skipPg())("runtime triggers", () => {
 	let db: TestDatabase;
 	let listener: Listener;

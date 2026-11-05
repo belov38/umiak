@@ -72,3 +72,18 @@ incomplete-source rejection, FK-failure rollback, and pending Debian deferral.
 `mise exec -- pnpm --filter @umiak/db test`: 91 passed (local Postgres Docker).
 `mise exec -- pnpm --filter @umiak/db typecheck`: passed.
 Runtime adapters/notifications and published-image upgrade acceptance remain pending.
+
+## Shared reader and notification layer
+
+SQL PgConfigReader reads runtime configuration with the former reader's cache,
+quota and fresh-default behavior. Copied generic channel listener retains TTL
+fallback and reconnect cache invalidation. Registry checked pg/@types/pg 8.23.1
+before adding them to packages/config. Notification triggers now live in unified
+SQL migrations: commit-only delivery, rollback silence, bookkeeping silence, key
+rotation SSH revocation and global policy route invalidation are tested against
+local Postgres. Reader integration covers canonical aliases, numeric conversion,
+nullable quotas, defensive copies and uncached policy defaults.
+
+Latest gates: db 95 Vitest tests, config 27 tests, both typechecks and Biome pass
+(one pre-existing informational MCP lint). These components are not wired into
+API/worker yet; no application cutover or full upgrade claim.

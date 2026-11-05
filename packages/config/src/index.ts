@@ -1,3 +1,4 @@
+export { PgConfigReader, type PgConfigReaderOptions } from "./pg-reader.ts";
 export { ConfigError, StaticConfigReader } from "./static.ts";
 export { canonicalTemplateSlug } from "./template-slug.ts";
 export type {
