@@ -236,6 +236,10 @@ export async function replicateActiveTemplates({
 						continue;
 					}
 
+					if (journal.phase === "cancel_requested")
+						throw Error(
+							"Template copy cancelled; clean up its owned resources before retrying",
+						);
 					const progress = journal.progress ?? {};
 					await onProgress({
 						phase: "copying",
@@ -257,6 +261,16 @@ export async function replicateActiveTemplates({
 						id: journal.id,
 						progress,
 						checkpoint: async (slot, p) => {
+							const intent = (
+								await pool.query(
+									"SELECT phase FROM runtime.volume_transfers WHERE id=$1",
+									[journal.id],
+								)
+							).rows[0];
+							if (intent?.phase === "cancel_requested")
+								throw Error(
+									"Template copy cancelled; clean up its owned resources before retrying",
+								);
 							progress[slot] = p.verifiedBytes;
 							await pool.query(
 								"UPDATE runtime.volume_transfers SET phase='copying',progress=$2,updated_at=now() WHERE id=$1",

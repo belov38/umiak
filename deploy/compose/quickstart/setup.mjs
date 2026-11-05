@@ -1293,6 +1293,29 @@ export function createSetupHandler({
 			}
 			return true;
 		}
+		if (
+			req.method === "POST" &&
+			path === "/quickstart/setup/build/cancel-copy"
+		) {
+			try {
+				const input = await body(req);
+				const result = await query(
+					"UPDATE runtime.volume_transfers SET phase='cancel_requested',updated_at=now() WHERE id=$1 AND kind='template' AND phase IN ('preparing','copying','failed','cancel_requested') RETURNING id",
+					[input.id],
+				);
+				if (!result.rowCount) throw Error("No cancellable template copy");
+				await jobs.stopQueue();
+				json(res, 202, {
+					ok: true,
+					message:
+						"Copy cancellation requested; use recovery cleanup after the runner stops",
+				});
+			} catch (error) {
+				json(res, 400, { error: error.message });
+			}
+			return true;
+		}
+
 		if (req.method === "POST" && path === "/quickstart/setup/build/recover") {
 			let input;
 			try {
