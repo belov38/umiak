@@ -44,3 +44,16 @@ def test_rejects_unknown_phase(tmp_path):
 
 def test_default_path():
     assert str(state.DEFAULT_PATH) == "/etc/pve/umiak/install-state.json"
+
+
+def test_legacy_state_defaults_stable_and_auto_off(tmp_path):
+    import dataclasses
+    import json
+    data = dataclasses.asdict(sample())
+    del data["channel"]
+    del data["auto_update"]
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps(data))
+    loaded = state.load(path)
+    assert loaded.channel == "stable"
+    assert loaded.auto_update is False

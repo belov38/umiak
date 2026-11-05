@@ -28,7 +28,7 @@ def test_bundle_layout(built):
     assert "umiak_installer/__init__.py" in contents
     assert "umiak_installer/stack.py" in contents
     assert not [n for n in contents if "__pycache__" in n or n.endswith(".pyc") or "tests" in n.split("/")]
-    assert all(n == "VERSION" or n == "node-agent.sha256" or n in stack.STACK_FILES or n.startswith("umiak_installer/")
+    assert all(n == "VERSION" or n in ("node-agent.sha256", "release.json") or n in stack.STACK_FILES or n.startswith("umiak_installer/")
                for n in contents)
 
 

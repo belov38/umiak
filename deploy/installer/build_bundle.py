@@ -46,6 +46,7 @@ def pinned_compose(text: str, version: str) -> str:
 def collect(repo: Path, version: str, node_agent_sha256: str) -> dict[str, bytes]:
     files: dict[str, bytes] = {
         "VERSION": (version + "\n").encode(),
+        "release.json": b'{"dbCompatible":false}\n',
         "node-agent.sha256": (node_agent_sha256 + "\n").encode(),
     }
     package = repo / "deploy" / "installer" / "umiak_installer"

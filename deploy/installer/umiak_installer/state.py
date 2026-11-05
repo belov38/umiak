@@ -27,7 +27,12 @@ class InstallState:
     # Bookkeeping only; runtime.nodes is authoritative.
     sandbox_nodes: list[str] = field(default_factory=list)
 
+    channel: str = "stable"
+    auto_update: bool = False
+
     def __post_init__(self):
+        if self.channel not in ("stable", "edge"):
+            raise ValueError("Unknown release channel")
         if self.phase not in PHASES:
             raise ValueError("Unknown install phase: " + str(self.phase))
 

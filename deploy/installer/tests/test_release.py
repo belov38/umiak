@@ -95,3 +95,39 @@ def test_node_agent_sha_is_required(tmp_path):
     (tmp_path / "VERSION").write_text("1.2.3\n")
     with pytest.raises(release.ReleaseError):
         _ = release.current(tmp_path).node_agent_sha256
+
+
+def test_edge_resolution_semver_and_pagination():
+    import json
+    pages = [[{"tag_name": "v1.2.0-edge.20261105.9", "prerelease": True},
+              {"tag_name": "v1.2.0-edge.20261105.10", "prerelease": True},
+              {"tag_name": "v99.0.0-rc.1", "prerelease": True}],
+             [{"tag_name": "v1.2.0", "prerelease": False}], []]
+    calls = []
+    def fetch(url):
+        calls.append(url)
+        return json.dumps(pages[len(calls)-1]).encode()
+    assert release.channel_version("edge", fetch=fetch) == "1.2.0"
+    assert len(calls) == 3
+
+
+def test_edge_numeric_order_and_ignore_drafts():
+    import json
+    rows = [{"tag_name": "v1.3.0-edge.20261105.10", "prerelease": True},
+            {"tag_name": "v1.3.0-edge.20261105.9", "prerelease": True},
+            {"tag_name": "v9.0.0", "draft": True}]
+    assert release.channel_version("edge", fetch=lambda url: json.dumps(rows if "&page=1" in url else []).encode()) == "1.3.0-edge.20261105.10"
+
+
+def test_stable_channel_redirect_and_unknown_channel():
+    assert release.channel_version("stable", resolve=lambda url: "https://github.com/belov38/umiak/releases/tag/v1.4.0") == "1.4.0"
+    with pytest.raises(release.ReleaseError):
+        release.channel_version("beta")
+
+
+def test_channel_format_and_compatibility_default(tmp_path):
+    assert release.release_channel("1.2.3") == "stable"
+    assert release.release_channel("1.2.3-edge.20261105.10") == "edge"
+    with pytest.raises(release.ReleaseError):
+        release.release_channel("1.2.3-rc.1")
+    assert not release.Release("1.2.3", tmp_path).db_compatible

@@ -18,6 +18,7 @@ Update and keeps the format in one place.
 
 import hashlib
 import io
+import json
 import os
 import re
 import shutil
@@ -44,6 +45,14 @@ class ReleaseError(InstallerError):
 class Release:
     version: str
     root: Path
+
+    @property
+    def db_compatible(self) -> bool:
+        # Missing declarations are deliberately treated as incompatible.
+        try:
+            return json.loads((self.root / "release.json").read_text()).get("dbCompatible") is True
+        except (OSError, ValueError, AttributeError):
+            return False
 
     @property
     def node_agent_sha256(self) -> str:
@@ -148,3 +157,52 @@ def current(root: Path = BUNDLE_ROOT) -> Release:
     except FileNotFoundError as error:
         raise ReleaseError("Run the installer from a release bundle (VERSION file missing)") from error
     return Release(valid_version(version), Path(root))
+
+
+CHANNEL_VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-edge\.([0-9]{8})\.(0|[1-9][0-9]*))?")
+
+
+def release_channel(version: str) -> str:
+    if not CHANNEL_VERSION.fullmatch(version):
+        raise ReleaseError("Expected X.Y.Z or X.Y.Z-edge.YYYYMMDD.N")
+    return "edge" if "-" in version else "stable"
+
+
+def version_key(version: str) -> tuple:
+    release_channel(version)
+    match = CHANNEL_VERSION.fullmatch(version)
+    major, minor, patch, date, sequence = match.groups()
+    return (int(major), int(minor), int(patch), date is None, int(date or 0), int(sequence or 0))
+
+
+def channel_version(channel: str, *, fetch=_fetch, resolve=_resolve) -> str:
+    if channel == "stable":
+        version = latest_version(resolve=resolve)
+        if release_channel(version) != "stable":
+            raise ReleaseError("GitHub latest is not a stable release")
+        return version
+    if channel != "edge":
+        raise ReleaseError("Unknown release channel")
+    candidates = []
+    # Do not trust creation order or GitHub's latest flag to order prereleases.
+    for page in range(1, 101):
+        rows = json.loads(fetch(f"https://api.github.com/repos/{REPO}/releases?per_page=100&page={page}"))
+        if not isinstance(rows, list):
+            raise ReleaseError("Invalid GitHub release listing")
+        if not rows:
+            break
+        for row in rows:
+            if row.get("draft"):
+                continue
+            version = row.get("tag_name", "").removeprefix("v")
+            try:
+                kind = release_channel(version)
+            except ReleaseError:
+                continue
+            if bool(row.get("prerelease")) == (kind == "edge"):
+                candidates.append(version)
+    else:
+        raise ReleaseError("Release listing exceeded pagination limit")
+    if not candidates:
+        raise ReleaseError("No release in the edge channel")
+    return max(candidates, key=version_key)

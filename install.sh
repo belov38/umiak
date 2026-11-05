@@ -34,15 +34,46 @@ if [ "$interactive" -eq 1 ] && ! (true <"$tty") 2>/dev/null; then
  die 'Run this in an interactive shell or pass --non-interactive with flags (see --help)' 2
 fi
 
+# The bootstrap reads only the channel; it never evaluates saved state as shell.
+channel=$(python3 -c 'import json,pathlib; p=pathlib.Path("/etc/pve/umiak/install-state.json"); print(json.loads(p.read_text()).get("channel","stable") if p.exists() else "stable")')
+next_channel=0
+for arg in "$@"; do
+ if [ "$next_channel" -eq 1 ]; then channel=$arg; next_channel=0; continue; fi
+ case "$arg" in
+  --channel) next_channel=1 ;;
+  --channel=*) channel=${arg#--channel=} ;;
+ esac
+done
+case "$channel" in stable|edge) ;; *) die 'Channel must be stable or edge.' ;; esac
 version=${UMIAK_VERSION:-}
 if [ -z "$version" ]; then
  [ -z "${UMIAK_INSTALL_DRY_RUN:-}" ] || die 'Set UMIAK_VERSION for a dry run.'
  command -v curl >/dev/null 2>&1 || die 'curl is required.'
+ if [ "$channel" = edge ]; then
+  version=$(python3 - <<'PYEDGE'
+import json,re,urllib.request
+pattern=re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-edge\.([0-9]{8})\.(0|[1-9][0-9]*))?")
+versions=[]
+for page in range(1,101):
+ with urllib.request.urlopen(f"https://api.github.com/repos/belov38/umiak/releases?per_page=100&page={page}",timeout=30) as response:
+  rows=json.load(response)
+ if not rows: break
+ for row in rows:
+  version=row.get("tag_name", "").removeprefix("v"); match=pattern.fullmatch(version)
+  if match and not row.get("draft") and bool(row.get("prerelease")) == (match[4] is not None):
+   a,b,c,d,n=match.groups();versions.append(((int(a),int(b),int(c),d is None,int(d or 0),int(n or 0)),version))
+else: raise SystemExit("Release listing exceeded pagination limit")
+if not versions: raise SystemExit("No edge or stable release available")
+print(max(versions)[1])
+PYEDGE
+  ) || die 'Could not resolve the edge release.'
+ else
  # The /releases/latest redirect names the newest tag without the rate-limited API.
  latest=$(curl -fsSIL --proto '=https' -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest") \
   || die 'Could not resolve the latest Umiak release.'
  version=${latest##*/tag/v}
  [ "$version" != "$latest" ] || die 'Could not resolve the latest Umiak release.'
+ fi
 fi
 # Strict semver with an optional pre-release suffix (no "+": Docker tags cannot contain it).
 printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || die 'Invalid UMIAK_VERSION.'

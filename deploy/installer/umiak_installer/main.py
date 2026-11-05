@@ -21,6 +21,7 @@ ready in --non-interactive mode, 130 interrupted.
 """
 
 import argparse
+import dataclasses
 import ipaddress
 import json
 import sys
@@ -35,6 +36,10 @@ SECRETS_DIR = day2.SECRETS_DIR
 GUEST_DNS = "1.1.1.1"
 DEFAULT_CT_ID = 590
 DEFAULT_RAM_CAP = 8192
+
+
+def _bad_channel():
+    raise UsageError("Choose stable or edge")
 
 
 class UsageError(InstallerError):
@@ -70,6 +75,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--action", choices=sorted(ACTIONS), help="day-2 action without the menu (non-interactive)")
     parser.add_argument("--node", help="Sandbox node name from this cluster")
     parser.add_argument("--node-action", choices=["add", "remove"], help="Action for --action nodes")
+    parser.add_argument("--channel", choices=["stable", "edge"], help="platform and recipe release channel")
+    parser.add_argument("--auto-update", choices=["on", "off"], help="enable or disable automatic updates")
     parser.add_argument("--version", help="Update: release version (default: the latest release)")
     parser.add_argument("--remove-guests", action="store_true",
                         help="Uninstall: also destroy Umiak sandboxes and templates in pool umiak")
@@ -397,6 +404,7 @@ class Flow:
             version=1, ct_id=answers["ct_id"], ct_ip=answers["ct_ip"], node=self.runner.hostname(),
             release=self.bundle.version, tailnet_host=tailnet_host or (self.current and self.current.tailnet_host),
             phase=phase, answers=answers,
+            channel=answers.get("channel", "stable"), auto_update=answers.get("auto_update", True),
         )
         state.save(self.current, self.state_path)
 
@@ -462,6 +470,8 @@ class Flow:
                 self.ui.say("")
                 self.ui.say(style.step("Questions"))
             a = gather(self.runner, args, self.ui, saved)
+        a["channel"] = args.channel or a.get("channel", "stable")
+        a["auto_update"] = args.auto_update == "on" if args.auto_update else a.get("auto_update", True)
         # Validate allocations before even prerequisite repairs change this host.
         if saved and self.reached("ct-created"):
             gather_args = argparse.Namespace(**vars(args))
@@ -524,10 +534,16 @@ class Flow:
         common = {"ui": ui, "progress": self.progress}
         if action == "Update":
             self.step = "Choosing the release"
+            channel = args.channel or current.channel
+            if ui.interactive and not args.channel:
+                channel = ui.ask("Release channel (stable/edge)", channel, "--channel",
+                                 lambda value: value if value in ("stable", "edge") else _bad_channel())
+            current = dataclasses.replace(current, channel=channel,
+                                          auto_update=args.auto_update == "on" if args.auto_update else current.auto_update)
             version = args.version
             if not version:
                 try:
-                    version = latest()
+                    version = latest() if channel == "stable" else release.channel_version(channel)
                 except (InstallerError, OSError) as error:
                     if not ui.interactive:
                         raise InstallerError(f"Cannot determine the latest release ({error}); pass --version") from error
@@ -622,7 +638,13 @@ def main(argv=None, runner: Runner | None = None, bundle: release.Release | None
             if action not in options:
                 raise UsageError(f"{action} is not available now; available: {', '.join(options)}")
         elif ui.interactive:
-            out(style.bold(f"Umiak installer {bundle.version}"))
+            running = flow.current.release if flow.current else bundle.version
+            channel = flow.current.channel if flow.current else args.channel or "stable"
+            out(style.bold(f"Umiak {running} · {channel} (installer {bundle.version})"))
+            if running.startswith("dev-"):
+                out("Dev build: Update replaces it with a published release.")
+            if flow.current and not flow.current.auto_update:
+                out("Automatic updates are available: enable in Settings or Update (--auto-update on).")
             action = ui.choose(options) if len(options) > 1 else options[0]
         elif options[0] in ("Install", "Resume install"):
             action = options[0]
