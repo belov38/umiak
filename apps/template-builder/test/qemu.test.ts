@@ -25,12 +25,15 @@ it("uses local QGA/QMP, explicit KVM, readonly layer and no network on replay", 
 	const args = qemuArguments({
 		disk: "/tmp/disk.qcow2",
 		seed: "/tmp/seed.raw",
+		layer: "/tmp/layer.raw",
 		qga: "/tmp/qga",
 		qmp: "/tmp/qmp",
 		network: false,
 	});
 	expect(args).toContain("q35,accel=kvm");
-	expect(args.join(" ")).toContain("readonly=on");
+	expect(args.join(" ")).toContain(
+		"file=/tmp/layer.raw,format=raw,if=virtio,readonly=on",
+	);
 	expect(args).toContain("none");
 	expect(args.join(" ")).not.toContain("accel=tcg");
 	expect(args.join(" ")).toContain("org.qemu.guest_agent.0");

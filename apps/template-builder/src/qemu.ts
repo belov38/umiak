@@ -207,11 +207,18 @@ export class QemuGuestIo implements GuestIo {
 export function qemuArguments(o: {
 	disk: string;
 	seed: string;
+	layer?: string;
 	qga: string;
 	qmp: string;
 	network: boolean;
 }): string[] {
-	for (const value of [o.disk, o.seed, o.qga, o.qmp])
+	for (const value of [
+		o.disk,
+		o.seed,
+		o.qga,
+		o.qmp,
+		...(o.layer ? [o.layer] : []),
+	])
 		if (
 			!value.startsWith("/") ||
 			value.includes(",") ||
@@ -246,6 +253,9 @@ export function qemuArguments(o: {
 		`file=${o.disk},format=qcow2,if=virtio,discard=unmap`,
 		"-drive",
 		`file=${o.seed},format=raw,if=virtio,readonly=on`,
+		...(o.layer
+			? ["-drive", `file=${o.layer},format=raw,if=virtio,readonly=on`]
+			: []),
 		"-smbios",
 		"type=1,serial=ds=nocloud",
 		...(o.network ? ["-nic", "user,model=virtio-net-pci"] : ["-nic", "none"]),
