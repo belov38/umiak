@@ -37,9 +37,7 @@ export class PgPlatformUpdates {
 		Object.assign(this, { pool, setupStore });
 	}
 	async init() {
-		await this.pool.query(
-			`CREATE TABLE IF NOT EXISTS quickstart.updates(id boolean PRIMARY KEY DEFAULT true CHECK(id), settings jsonb NOT NULL, status jsonb NOT NULL DEFAULT '{}', history jsonb NOT NULL DEFAULT '[]')`,
-		);
+		// The SQL journal owns the table; policy remains lazily inserted by write().
 	}
 	async read() {
 		const row = (

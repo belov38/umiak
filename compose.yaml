@@ -342,6 +342,7 @@ services:
       control: { ipv4_address: 172.29.116.10 }
       web-internal: {}
     depends_on:
+      migrate: { condition: service_completed_successfully }
       web-migrate: { condition: service_completed_successfully }
       api: { condition: service_healthy }
       web: { condition: service_started }

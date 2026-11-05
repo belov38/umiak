@@ -200,10 +200,6 @@ export class PgSetupStore {
 		this.pool = pool;
 	}
 	async init() {
-		await this.pool.query("CREATE SCHEMA IF NOT EXISTS quickstart");
-		await this.pool.query(
-			`CREATE TABLE IF NOT EXISTS quickstart.setup (id boolean PRIMARY KEY DEFAULT true CHECK(id),state jsonb NOT NULL DEFAULT '{"steps":{},"complete":false}')`,
-		);
 		await this.pool.query(
 			"INSERT INTO quickstart.setup(id) VALUES(true) ON CONFLICT DO NOTHING",
 		);

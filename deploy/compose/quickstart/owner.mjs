@@ -35,10 +35,6 @@ export class PgOwnerRepository {
 		this.pool = pool;
 	}
 	async init() {
-		await this.pool.query(`CREATE SCHEMA IF NOT EXISTS quickstart`);
-		await this.pool.query(
-			`CREATE TABLE IF NOT EXISTS quickstart.owner (id integer PRIMARY KEY CHECK(id=1),state jsonb NOT NULL)`,
-		);
 		await this.pool.query(
 			`INSERT INTO quickstart.owner VALUES(1,$1) ON CONFLICT DO NOTHING`,
 			[empty()],
