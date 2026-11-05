@@ -154,7 +154,7 @@ function setupInteractions() {
 		);
 		const activity =
 			r?.phase === "copying"
-				? `Copying to ${r.node} · ${Math.floor((r.verifiedBytes || 0) / 1048576)} / ${Math.ceil((r.totalBytes || 0) / 1048576)} MiB`
+				? `Copying to ${r.node} · ${Math.floor((r.processedBytes || r.verifiedBytes || 0) / 1048576)} / ${Math.ceil((r.totalBytes || 0) / 1048576)} MiB`
 				: `Building on ${nodeRow?.dataset.name || job.nodeId || "selected node"} · ${clipped}`;
 
 		$("#build-progress").textContent =

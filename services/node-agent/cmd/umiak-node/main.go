@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -27,9 +28,13 @@ var version = "dev"
 const maxRequestBytes = 1 << 20
 
 func main() {
+	receive := flag.String("receive-volume", "", "internal cluster volume import")
 	stdio := flag.Bool("stdio", false, "read one JSON request from stdin and write the response to stdout")
 	cfgPath := flag.String("config", config.DefaultPath, "config file")
 	flag.Parse()
+	if *receive != "" {
+		os.Exit(receiveVolume(*cfgPath, *receive))
+	}
 	if !*stdio {
 		fmt.Fprintln(os.Stderr, "usage: umiak-node --stdio [--config /etc/umiak-node.toml]")
 		os.Exit(2)
@@ -62,7 +67,8 @@ func run(cfgPath string) int {
 	// The SSH channel closing (SIGHUP, broken stdout) must not kill lvcreate/lvremove half-way:
 	// finish the operation and let the caller verify the result.
 	signal.Ignore(syscall.SIGHUP, syscall.SIGPIPE)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	srv := &ops.Server{
 		Cfg:     cfg,
 		LVM:     &lvm.Exec{VG: cfg.VG, Run: lvm.RunCommand},
@@ -70,8 +76,43 @@ func run(cfgPath string) int {
 		Log:     logf,
 		Version: version,
 	}
+	srv.Progress = func(p map[string]any) error {
+		err := enc.Encode(map[string]any{"event": "progress", "progress": p})
+		if err != nil {
+			cancel()
+		}
+		return err
+	}
 	resp := srv.Handle(ctx, raw)
 	if err := enc.Encode(resp); err != nil || !resp.OK {
+		return 1
+	}
+	return 0
+}
+
+func receiveVolume(cfgPath, encoded string) int {
+	enc := json.NewEncoder(os.Stdout)
+	fail := func(err error) int {
+		_ = enc.Encode(ops.Response{Error: &ops.Error{Code: "import_failed", Message: err.Error()}})
+		return 1
+	}
+	if len(encoded) > 8192 {
+		return fail(fmt.Errorf("import metadata too large"))
+	}
+	raw, err := base64.RawStdEncoding.DecodeString(encoded)
+	if err != nil {
+		return fail(err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return fail(err)
+	}
+	srv := &ops.Server{Cfg: cfg, LVM: &lvm.Exec{VG: cfg.VG, Run: lvm.RunCommand}, Host: ops.Host{FS: os.DirFS("/"), Run: lvm.RunCommand, Now: time.Now, Replace: hostfs.ReplaceLocked}, Log: func(s string) { fmt.Fprintln(os.Stderr, s) }}
+	result, err := srv.ReceiveVolume(context.Background(), raw, os.Stdin)
+	if err != nil {
+		return fail(err)
+	}
+	if err = enc.Encode(ops.Response{OK: true, Result: result}); err != nil {
 		return 1
 	}
 	return 0

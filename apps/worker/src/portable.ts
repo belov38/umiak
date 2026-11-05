@@ -4,7 +4,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
 import { lockNode, operationDeadline } from "@umiak/core";
 import { withTx } from "@umiak/db";
-import { relayVolume } from "@umiak/pve";
+import { fullVolumeCopy, relayVolume } from "@umiak/pve";
 import type { WorkerCtx } from "./context.ts";
 import { loadMachine, loadSnapshot } from "./db.ts";
 import type { InfraDisk, NodeInfra } from "./ports.ts";
@@ -240,49 +240,68 @@ async function copyDisks(
 		const targetBase = identical
 			? `base-${bases.target?.pve_vmid}-disk-${bases.target?.disk_layout[disk.slot]?.index ?? 0}`
 			: "";
-		const staging = await dst.node.call<{ name: string }>(
-			"lv.transferPrepare",
-			{ id: j.id, slot: disk.slot, sizeBytes: size, base: targetBase },
-		);
-		await relayVolume({
-			source: src.node,
-			target: dst.node,
-			sourceName: name,
-			targetName: staging.name,
-			sizeBytes: size,
-			verifiedBytes: j.progress[disk.slot] ?? 0,
-			...(sourceBase && a ? { sourceBase, baseChecksum: a.sha256 } : {}),
-			onProgress: async (p) => {
-				await fence.check();
-				j.progress[disk.slot] = p.verifiedBytes;
-				j.progress.verifiedBytes = p.verifiedBytes;
-				j.progress.totalBytes = p.totalBytes;
+		const useFull = !sourceBase && Boolean(src.node.sendVolume);
+		const staging = useFull
+			? { name: `umiak-snap-${j.id}-${disk.slot}` }
+			: await dst.node.call<{ name: string }>("lv.transferPrepare", {
+					id: j.id,
+					slot: disk.slot,
+					sizeBytes: size,
+					base: targetBase,
+				});
+		const onProgress: NonNullable<
+			Parameters<typeof relayVolume>[0]["onProgress"]
+		> = async (p) => {
+			await fence.check();
+			j.progress[disk.slot] = p.verifiedBytes;
+			j.progress.verifiedBytes = p.verifiedBytes;
+			j.progress.totalBytes = p.totalBytes;
+			await ctx.pool.query(
+				"UPDATE runtime.volume_transfers SET progress=$2,phase='copying',updated_at=now() WHERE id=$1 AND phase IN ('preparing','copying')",
+				[j.id, JSON.stringify(j.progress)],
+			);
+			if ("id" in fence) {
+				const id = (fence as Fenced).id;
+				const deadline = new Date(Date.now() + 300000);
 				await ctx.pool.query(
-					"UPDATE runtime.volume_transfers SET progress=$2,phase='copying',updated_at=now() WHERE id=$1 AND phase IN ('preparing','copying')",
-					[j.id, JSON.stringify(j.progress)],
+					"UPDATE runtime.operations SET progress=progress || $2::jsonb,deadline_at=$3 WHERE id=$1 AND attempt=$4 AND state='running'",
+					[
+						id,
+						JSON.stringify({
+							phase: "moving",
+							targetNode: dst.name,
+							targetNodeId: j.target_node_id,
+							slot: disk.slot,
+							...p,
+						}),
+						deadline,
+						(fence as Fenced).attempt,
+					],
 				);
-				if ("id" in fence) {
-					const id = (fence as Fenced).id;
-					const deadline = new Date(Date.now() + 300000);
-					await ctx.pool.query(
-						"UPDATE runtime.operations SET progress=progress || $2::jsonb,deadline_at=$3 WHERE id=$1 AND attempt=$4 AND state='running'",
-						[
-							id,
-							JSON.stringify({
-								phase: "moving",
-								targetNode: dst.name,
-								targetNodeId: j.target_node_id,
-								slot: disk.slot,
-								...p,
-							}),
-							deadline,
-							(fence as Fenced).attempt,
-						],
-					);
-					(fence as Fenced).op.deadlineAt = deadline;
-				}
-			},
-		});
+				(fence as Fenced).op.deadlineAt = deadline;
+			}
+		};
+		if (useFull)
+			await fullVolumeCopy({
+				source: src.node,
+				sourceStorage: src.storage,
+				sourceName: name,
+				targetNode: dst.name,
+				targetName: staging.name,
+				sizeBytes: size,
+				onProgress,
+			});
+		else
+			await relayVolume({
+				source: src.node,
+				target: dst.node,
+				sourceName: name,
+				targetName: staging.name,
+				sizeBytes: size,
+				verifiedBytes: j.progress[disk.slot] ?? 0,
+				...(sourceBase && a ? { sourceBase, baseChecksum: a.sha256 } : {}),
+				onProgress,
+			});
 		await fence.check();
 		const final = finalNames(disk);
 		await dst.node.call("lv.transferPublish", {

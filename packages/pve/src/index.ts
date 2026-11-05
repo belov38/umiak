@@ -5,6 +5,7 @@ export * from "./node-client.ts";
 export * from "./pve-api.ts";
 export * from "./qga.ts";
 export * from "./state-sqlite.ts";
+export * from "./storage/full-copy.ts";
 export * from "./storage/lvmthin.ts";
 export * from "./storage/transfer.ts";
 export * from "./storage/types.ts";

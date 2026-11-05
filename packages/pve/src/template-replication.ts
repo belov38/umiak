@@ -1,6 +1,7 @@
 import type { NodeOps } from "./node-client.ts";
 import type { PveClient } from "./pve-api.ts";
-import { relayVolume, type TransferProgress } from "./storage/transfer.ts";
+import { fullVolumeCopy } from "./storage/full-copy.ts";
+import type { TransferProgress } from "./storage/transfer.ts";
 
 export interface TemplateReplicaInput {
 	api: PveClient;
@@ -102,21 +103,18 @@ export async function replicateTemplate(
 		const lv = lvs.find((v) => v.name === vol?.split(":")[1]);
 		if (!lv || !Number.isSafeInteger(lv.sizeBytes) || lv.sizeBytes < 1)
 			throw new Error("template LV size unavailable");
-		const stage = await p.target.call<{ name: string }>("lv.transferPrepare", {
-			id: p.id,
-			slot,
-			sizeBytes: lv.sizeBytes,
-			base: "",
-		});
-		const result = await relayVolume({
+		const stage = { name: `umiak-snap-${p.id}-${slot}` };
+		const result = await fullVolumeCopy({
 			source: p.source,
-			target: p.target,
+			sourceStorage: p.sourceStorage,
 			sourceName: lv.name,
+			targetNode: p.targetNode,
 			targetName: stage.name,
+			targetVmid: p.targetVmid,
 			sizeBytes: lv.sizeBytes,
-			verifiedBytes: p.progress?.[slot] ?? 0,
 			onProgress: (progress) => p.checkpoint(slot, progress),
 		});
+
 		checksums[slot] = {
 			sha256: result.sha256,
 			sizeBytes: lv.sizeBytes,
@@ -140,22 +138,27 @@ export async function replicateTemplate(
 	cfg = await p.api.get(`${path}/config`);
 	if (Number(cfg.template) !== 1)
 		throw new Error("replica template conversion incomplete");
+	// PVE creates a COW clone of the already verified staging device and renames
+	// it on template conversion. Prove that identity rather than rereading data.
+	const published = await p.target.call<{
+		lvs: { name: string; origin: string; sizeBytes: number; tags: string[] }[];
+	}>("lv.list", { tags: ["umiak-tpl"] });
 	for (const [slot, checksum] of Object.entries(checksums)) {
 		const original = String(src[slot]).split(",")[0]?.split(":")[1];
 		const index = original?.match(/-disk-([0-9]+)$/)?.[1];
-		if (!original || index === undefined)
-			throw new Error("invalid published template layout");
-		const proof = await relayVolume({
-			source: p.source,
-			target: p.target,
-			sourceName: original,
-			targetName: `base-${p.targetVmid}-disk-${index}`,
-			sizeBytes: checksum.sizeBytes,
-			verifiedBytes: checksum.sizeBytes,
-			onProgress: (progress) => p.checkpoint(slot, progress),
-		});
-		if (proof.sha256 !== checksum.sha256)
-			throw new Error("published template checksum mismatch");
+		const name = `base-${p.targetVmid}-disk-${index}`;
+		const disk = published.lvs.find((l) => l.name === name);
+		if (
+			index === undefined ||
+			String(cfg[slot]).split(",")[0] !== `${p.targetStorage}:${name}` ||
+			!disk ||
+			disk.origin !== `umiak-snap-${p.id}-${slot}` ||
+			disk.sizeBytes !== checksum.sizeBytes ||
+			!disk.tags.includes(`umiak-transfer-${p.id}`)
+		)
+			throw Error(
+				"Published template does not reference the verified staging clone",
+			);
 	}
 
 	// Retain staging until durable registry promotion. The caller cleans it only

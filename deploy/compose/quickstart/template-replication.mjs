@@ -61,7 +61,7 @@ export async function replicateActiveTemplates({
 	const channels = new Map();
 	const call = (node) => ({
 		close() {},
-		async call(op, args) {
+		async call(op, args, onProgress) {
 			if (nodeCheck !== checkNode)
 				return nodeCheck(
 					scopedNodeState(state, node).steps.connection.data,
@@ -84,7 +84,7 @@ export async function replicateActiveTemplates({
 				);
 				channels.set(node.nodeId, client);
 			}
-			return (await client).call(op, args);
+			return (await client).call(op, args, onProgress);
 		},
 	});
 	try {

@@ -3,7 +3,15 @@ import ssh2, { type Client as SshClient } from "ssh2";
 
 /** Transport-independent umiak-node interface; tests use a fake. */
 export interface NodeOps {
-	call<T = unknown>(op: string, args?: object): Promise<T>;
+	call<T = unknown>(
+		op: string,
+		args?: object,
+		onProgress?: (progress: Record<string, number>) => Promise<void>,
+	): Promise<T>;
+	sendVolume?<T = unknown>(
+		args: object,
+		onProgress?: (progress: Record<string, number>) => Promise<void>,
+	): Promise<T>;
 	close(): void;
 }
 
@@ -179,9 +187,13 @@ export class SshNodeOps implements NodeOps {
 		stream: ssh2.ClientChannel,
 		op: string,
 		args: object,
+		onProgress?: (progress: Record<string, number>) => Promise<void>,
 	): Promise<string> {
 		return new Promise<string>((resolve, reject) => {
 			let stdout = "";
+			let partial = "";
+			let callbacks = Promise.resolve();
+			let progressError: unknown;
 			let stderr = "";
 			let timedOut = false;
 			let grace: NodeJS.Timeout | undefined;
@@ -192,15 +204,43 @@ export class SshNodeOps implements NodeOps {
 				grace = setTimeout(fail, CLOSE_GRACE_MS);
 			}, this.#opts.callTimeoutMs ?? 120_000);
 			stream.on("data", (d: Buffer) => {
-				stdout += d.toString("utf8");
+				partial += d.toString("utf8");
+				if (partial.length > 24 * 1024 * 1024) {
+					stream.close();
+					reject(new Error("node-agent response too large"));
+					return;
+				}
+				let end = partial.indexOf("\n");
+				while (end >= 0) {
+					const line = partial.slice(0, end);
+					partial = partial.slice(end + 1);
+					try {
+						const event = JSON.parse(line);
+						if (event.event === "progress") {
+							timer.refresh();
+							callbacks = callbacks
+								.then(() => onProgress?.(event.progress))
+								.catch((error) => {
+									progressError = error;
+									stream.close();
+								});
+						} else stdout += line;
+					} catch {
+						stdout += line;
+					}
+					end = partial.indexOf("\n");
+				}
 			});
 			stream.stderr.on("data", (d: Buffer) => {
 				stderr += d.toString("utf8");
 			});
-			stream.on("close", () => {
+			stream.on("close", async () => {
 				clearTimeout(timer);
 				clearTimeout(grace);
-				if (timedOut) fail();
+				await callbacks;
+				stdout += partial;
+				if (progressError) reject(progressError);
+				else if (timedOut) fail();
 				else if (stdout.trim()) resolve(stdout);
 				else
 					reject(
@@ -211,11 +251,20 @@ export class SshNodeOps implements NodeOps {
 		});
 	}
 
-	async call<T = unknown>(op: string, args: object = {}): Promise<T> {
+	async call<T = unknown>(
+		op: string,
+		args: object = {},
+		onProgress?: (progress: Record<string, number>) => Promise<void>,
+	): Promise<T> {
 		const slot = await this.#acquire();
 		try {
 			const conn = await this.#connect(slot);
-			const out = await this.#roundTrip(await this.#exec(conn), op, args);
+			const out = await this.#roundTrip(
+				await this.#exec(conn),
+				op,
+				args,
+				onProgress,
+			);
 			const resp = JSON.parse(out) as {
 				ok: boolean;
 				result?: T;
@@ -231,6 +280,13 @@ export class SshNodeOps implements NodeOps {
 		} finally {
 			this.#release(slot);
 		}
+	}
+
+	async sendVolume<T = unknown>(
+		args: object,
+		onProgress?: (progress: Record<string, number>) => Promise<void>,
+	): Promise<T> {
+		return this.call<T>("volume.sendTo", args, onProgress);
 	}
 
 	close(): void {

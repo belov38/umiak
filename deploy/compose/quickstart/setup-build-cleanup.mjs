@@ -229,6 +229,14 @@ export async function cleanupBuild({
 			node: node.name,
 			sshHost: node.sshHost,
 		};
+		if (copyId)
+			for (const slot of ["scsi0", "efidisk0", "tpmstate0"]) {
+				await probe(connection, secretsDir, {
+					op: "volume.cleanupImport",
+					args: { name: `umiak-snap-${copyId}-${slot}` },
+				});
+			}
+
 		const remaining = await probe(connection, secretsDir, {
 			op: "lv.list",
 			args: {},

@@ -42,6 +42,9 @@ it("copies a base once, verifies it before publication, and retries without rebu
 			if (path.endsWith("/qemu")) return created ? [{ vmid: 601 }] : [];
 			return {
 				template: converted ? 1 : 0,
+				scsi0: converted
+					? "local-lvm:base-601-disk-0"
+					: "local-lvm:vm-601-disk-0",
 				name: `umiak-replica-${"a".repeat(32)}`,
 				...(tagged ? { tags: `umiak-tpl;umiak-copy-${"a".repeat(32)}` } : {}),
 			};
@@ -83,6 +86,28 @@ it("copies a base once, verifies it before publication, and retries without rebu
 	const source = {
 		close() {},
 		async call<T>(op: string, args?: object): Promise<T> {
+			if (op === "volume.sendTo") {
+				if (!stage.equals(bytes)) {
+					bytes.copy(stage);
+					writes++;
+				}
+				const header = Buffer.alloc(8);
+				header.writeBigUInt64LE(512n);
+				return {
+					name: `umiak-snap-${"a".repeat(32)}-scsi0`,
+					uuid: "stage-uuid",
+					sourceUUID: "source-uuid",
+					sha256: createHash("sha256")
+						.update(header)
+						.update(bytes)
+						.digest("hex"),
+					algorithm: "sha256-pvesm-raw+size-v1",
+					sizeBytes: 512,
+					verified: true,
+					wireBytes: 512,
+					elapsedSeconds: 1,
+				} as T;
+			}
 			if (op === "lv.list")
 				return { lvs: [{ name: "base-600-disk-0", sizeBytes: 512 }] } as T;
 			if (op === "lv.transferMap")
@@ -97,6 +122,17 @@ it("copies a base once, verifies it before publication, and retries without rebu
 	const target = {
 		close() {},
 		async call<T>(op: string, args?: object): Promise<T> {
+			if (op === "lv.list")
+				return {
+					lvs: [
+						{
+							name: "base-601-disk-0",
+							origin: `umiak-snap-${"a".repeat(32)}-scsi0`,
+							tags: ["umiak-tpl", `umiak-transfer-${"a".repeat(32)}`],
+							sizeBytes: 512,
+						},
+					],
+				} as T;
 			const a = args as { data: string; offset: number; length: number };
 			if (op === "lv.transferPrepare")
 				return { name: `umiak-snap-${"a".repeat(32)}-scsi0` } as T;

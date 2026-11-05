@@ -49,11 +49,12 @@ type Host struct {
 
 // Server executes whitelisted operations.
 type Server struct {
-	Cfg     config.Config
-	LVM     lvm.LVM
-	Host    Host
-	Log     func(string)
-	Version string
+	Cfg      config.Config
+	LVM      lvm.LVM
+	Host     Host
+	Log      func(string)
+	Progress func(map[string]any) error
+	Version  string
 	// ScanOpen opens LV devices for lv.scan; nil reads /dev/<vg>/<lv>.
 	ScanOpen ScanOpener
 	// TransferOpen opens a validated staging device; nil uses os.OpenFile.
@@ -71,30 +72,32 @@ func badReq(format string, args ...any) error { return badRequest{fmt.Sprintf(fo
 type handler func(s *Server, ctx context.Context, args json.RawMessage) (any, error)
 
 var handlers = map[string]handler{
-	"version":            (*Server).version,
-	"lv.snapshot":        (*Server).lvSnapshot,
-	"lv.remove":          (*Server).lvRemove,
-	"lv.list":            (*Server).lvList,
-	"pool.usage":         (*Server).poolUsage,
-	"dhcp.leases":        (*Server).dhcpLeases,
-	"dhcp.release":       (*Server).dhcpRelease,
-	"inventory":          (*Server).inventory,
-	"media.list":         (*Server).mediaList,
-	"media.remove":       (*Server).mediaRemove,
-	"media.sha256":       (*Server).mediaSHA256,
-	"lv.scan":            (*Server).lvScan,
-	"lv.usage":           (*Server).lvUsage,
-	"lv.tagTemplate":     (*Server).lvTagTemplate,
-	"lv.transferRemove":  (*Server).lvTransferRemove,
-	"vm.transferSwitch":  (*Server).vmTransferSwitch,
-	"vm.transferUnlock":  (*Server).vmTransferUnlock,
-	"lv.transferPublish": (*Server).lvTransferPublish,
-	"lv.transferMap":     (*Server).lvTransferMap,
-	"lv.transferDigest":  (*Server).lvTransferDigest,
-	"lv.transferRead":    (*Server).lvTransferRead,
-	"lv.transferPrepare": (*Server).lvTransferPrepare,
-	"lv.transferWrite":   (*Server).lvTransferWrite,
-	"lv.adopt":           (*Server).lvAdopt,
+	"volume.cleanupImport": (*Server).volumeCleanupImport,
+	"volume.sendTo":        (*Server).volumeSendTo,
+	"version":              (*Server).version,
+	"lv.snapshot":          (*Server).lvSnapshot,
+	"lv.remove":            (*Server).lvRemove,
+	"lv.list":              (*Server).lvList,
+	"pool.usage":           (*Server).poolUsage,
+	"dhcp.leases":          (*Server).dhcpLeases,
+	"dhcp.release":         (*Server).dhcpRelease,
+	"inventory":            (*Server).inventory,
+	"media.list":           (*Server).mediaList,
+	"media.remove":         (*Server).mediaRemove,
+	"media.sha256":         (*Server).mediaSHA256,
+	"lv.scan":              (*Server).lvScan,
+	"lv.usage":             (*Server).lvUsage,
+	"lv.tagTemplate":       (*Server).lvTagTemplate,
+	"lv.transferRemove":    (*Server).lvTransferRemove,
+	"vm.transferSwitch":    (*Server).vmTransferSwitch,
+	"vm.transferUnlock":    (*Server).vmTransferUnlock,
+	"lv.transferPublish":   (*Server).lvTransferPublish,
+	"lv.transferMap":       (*Server).lvTransferMap,
+	"lv.transferDigest":    (*Server).lvTransferDigest,
+	"lv.transferRead":      (*Server).lvTransferRead,
+	"lv.transferPrepare":   (*Server).lvTransferPrepare,
+	"lv.transferWrite":     (*Server).lvTransferWrite,
+	"lv.adopt":             (*Server).lvAdopt,
 }
 
 // decodeArgs decodes optional args strictly.
