@@ -88,6 +88,7 @@ export async function streamDelta(
 	};
 	const sessions: TransferSession[] = [];
 	let inFlight: Promise<unknown> = Promise.resolve();
+	let writeTail = Promise.resolve();
 	try {
 		const source = await input.source.openTransfer({
 			...args,
@@ -142,9 +143,14 @@ export async function streamDelta(
 					throw Error("Unexpected delta frame sequence");
 				const payload =
 					f.flags & (ZERO | PREFIX) ? undefined : await src.read(f.length);
-				await write(target.stream, header);
-				if (payload) await write(target.stream, payload);
+				const sending = writeTail.then(async () => {
+					await write(target.stream, header);
+					if (payload) await write(target.stream, payload);
+				});
+				sending.catch(() => {});
+				writeTail = sending;
 				const ack = ackTail.then(async () => {
+					await sending;
 					const proof = frame(await dst.read(HEADER));
 					if (
 						proof.flags !== ACK ||
@@ -203,6 +209,10 @@ export async function streamDelta(
 			s.stream.destroy();
 			s.stream.resume();
 		}
-		await Promise.allSettled([inFlight, ...sessions.map((s) => s.closed)]);
+		await Promise.allSettled([
+			inFlight,
+			writeTail,
+			...sessions.map((s) => s.closed),
+		]);
 	}
 }

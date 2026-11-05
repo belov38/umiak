@@ -38,6 +38,9 @@ function harness(start = 0, corrupt = false, truncated = false) {
 	}
 	const digest = tree.digest();
 	if (!truncated) chunks.push(header(SIZE, 0, 2, digest));
+	let producedFrames = 0,
+		producedBeforeDrain = 0,
+		delayed = false;
 	let sourceOpens = 0,
 		targetOpens = 0,
 		unacked = 0,
@@ -47,6 +50,8 @@ function harness(start = 0, corrupt = false, truncated = false) {
 	const source = new Duplex({
 		read() {
 			const chunk = chunks.shift();
+			if (chunk?.length === 48 && chunk.readUInt32BE(12) !== 2)
+				producedFrames++;
 			this.push(chunk ?? null);
 		},
 		write(_chunk, _encoding, callback) {
@@ -81,7 +86,13 @@ function harness(start = 0, corrupt = false, truncated = false) {
 					}, 15),
 				);
 			}
-			callback();
+			if (chunk.length > 48 && !delayed) {
+				delayed = true;
+				setTimeout(() => {
+					producedBeforeDrain = producedFrames;
+					callback();
+				}, 100);
+			} else callback();
 		},
 		final(callback) {
 			this.push(null);
@@ -148,7 +159,12 @@ function harness(start = 0, corrupt = false, truncated = false) {
 			verifiedBytes: start,
 		},
 		digest: digest.toString("hex"),
-		stats: () => ({ sourceOpens, targetOpens, maxUnacked }),
+		stats: () => ({
+			sourceOpens,
+			targetOpens,
+			maxUnacked,
+			producedBeforeDrain,
+		}),
 	};
 }
 describe("bounded delta sessions", () => {
@@ -167,6 +183,7 @@ describe("bounded delta sessions", () => {
 		expect(h.stats().sourceOpens).toBe(1);
 		expect(h.stats().targetOpens).toBe(1);
 		expect(h.stats().maxUnacked).toBeLessThanOrEqual(4);
+		expect(h.stats().producedBeforeDrain).toBeGreaterThanOrEqual(4);
 		expect(progress).toEqual([...progress].sort((a, b) => a - b));
 	});
 	it("revalidates the prefix without retransmitting it or zero payloads", async () => {
