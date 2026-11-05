@@ -134,6 +134,10 @@ function cleanupFixture({
 	cfg = { tags: "umiak-tpl", name: "umiak-tpl-test" },
 	runner = true,
 	tasks = [],
+	published = [],
+	leases = [{ vmid: 701 }],
+	status = "interrupted",
+	journal = [],
 } = {}) {
 	const queries = [];
 	const mutations = [];
@@ -143,12 +147,16 @@ function cleanupFixture({
 			return {
 				rowCount: 1,
 				rows: sql.includes("SELECT status")
-					? [{ status: "interrupted", template_slug: "linux" }]
+					? [{ status, template_slug: "linux" }]
 					: sql.includes("AS ok")
 						? [{ ok: runner }]
 						: sql.startsWith("SELECT vmid")
-							? [{ vmid: 701 }]
-							: [],
+							? leases
+							: sql.startsWith("SELECT pve_vmid")
+								? published
+								: sql.startsWith("SELECT target_vmid")
+									? journal
+									: [],
 			};
 		},
 	};
@@ -444,4 +452,38 @@ test("restart during copying never interrupts an already completed source reserv
 	});
 	await jobs.init();
 	assert.equal((await store.read()).buildJob.status, "error");
+});
+
+test("registered source recovery retains template and active lease, fails closed if VM missing", async () => {
+	for (const present of [true, false]) {
+		const f = cleanupFixture({
+			published: [{ pve_vmid: 701 }],
+			vms: present ? [{ vmid: 701, status: "stopped" }] : [],
+			cfg: { name: "umiak-linux", tags: "umiak-tpl", template: 1 },
+		});
+		if (!present) {
+			await assert.rejects(cleanupBuild(f.options), /missing/);
+			continue;
+		}
+		const result = await cleanupBuild(f.options);
+		assert.equal(result.registered, true);
+		assert.deepEqual(f.mutations, []);
+		assert.ok(!f.queries.some((q) => q.startsWith("DELETE")));
+	}
+});
+test("legacy failed copy recovers via journal after old cleanup lost its lease", async () => {
+	const id = "b".repeat(32);
+	const f = cleanupFixture({
+		status: "failed",
+		leases: [],
+		journal: [{ target_vmid: 701 }],
+		vms: [{ vmid: 701, status: "stopped" }],
+		cfg: { name: `umiak-replica-${id}` },
+	});
+	await cleanupBuild({
+		...f.options,
+		request: { jobId: `copy-${id}`, confirmRemove: true },
+	});
+	assert.deepEqual(f.mutations, ["delete"]);
+	assert.ok(f.queries.some((q) => q.includes("phase='cancelled'")));
 });

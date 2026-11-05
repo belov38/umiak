@@ -103,6 +103,12 @@ export async function cleanupBuild({
 		);
 		if (published.rows.length) {
 			// Recover the old registration-before-copy crash boundary without deleting the template.
+			if (
+				published.rows.some(
+					(p) => !vms.some((v) => Number(v.vmid) === Number(p.pve_vmid)),
+				)
+			)
+				throw Error("Registered template VM is missing; reservation retained");
 			for (const vm of vms.filter((v) =>
 				leases.some((l) => Number(l.vmid) === Number(v.vmid)),
 			)) {
