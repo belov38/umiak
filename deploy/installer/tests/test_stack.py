@@ -210,6 +210,7 @@ def test_install_json_matches_bootstrap_contract():
     assert data == {
         "version": 1,
         "release": "1.2.3",
+        "channel": "stable",
         "connection": {"apiUrl": "https://192.168.68.10:8006", "node": "pve", "tokenId": "umiak@pve!umiak",
                        "fingerprint": "ab" * 32, "tlsName": "pve", "sshHost": "192.168.68.10"},
         "limits": {"storage": "local-lvm", "vmidMin": 500, "vmidMax": 589, "ramCapMb": 8192,

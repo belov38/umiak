@@ -1,3 +1,4 @@
+import { releaseChannel } from "../release-channel.mjs";
 // Import the installer's facts (install.json + host-report.json in the secrets
 // dir) into quickstart setup state, so the browser wizard starts at Templates.
 
@@ -157,6 +158,12 @@ export async function bootstrapFromInstall({
 					(name) => next.steps[name]?.status === "ready",
 				);
 		delete next.bootstrapError;
+		next.platform = {
+			...next.platform,
+			channel: releaseChannel(
+				install.channel ?? next.platform?.channel ?? "stable",
+			),
+		};
 		next.bootstrap = {
 			digest,
 			importedAt: stamp,

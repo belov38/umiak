@@ -116,7 +116,7 @@ def apply_stack(runner: Runner, ct_id: int, bundle, a: dict, node_ip: str, publi
     stack.write_install_json(stack.install_json(
         release=bundle.version, node=node, node_ip=node_ip, fingerprint=stack.pve_fingerprint(runner),
         ct_ip=a["ct_ip"], guest_dns=a["guest_dns"], tailnet_dns=identity.dns_name, tailnet_ip=identity.ipv4,
-        limits=limits, guest_subnet=a.get("guest_subnet", "10.88.0.0/24"),
+        limits=limits, guest_subnet=a.get("guest_subnet", "10.88.0.0/24"), channel=a.get("channel", "stable"),
     ), out_dir)
     stack.write_network(runner, ct_id,
                         stack.network_json(a["ct_ip"], preview, a["guest_dns"], a.get("guest_subnet", "10.88.0.0/24")),
@@ -194,7 +194,7 @@ def update(runner: Runner, current: state.InstallState, bundle, *, ui, sleep=tim
     progress = progress or ui.say
     _require_node(runner, current)
     _require_complete(current)
-    a, ct_id = current.answers, current.ct_id
+    a, ct_id = {**current.answers, "channel": current.channel}, current.ct_id
     progress(f"Checking control-plane container {ct_id}")
     if _umiak_ct(runner, ct_id) is None:
         raise InstallerError(f"Control-plane container {ct_id} is gone; uninstall and install again")

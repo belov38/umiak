@@ -195,6 +195,7 @@ test("first import records bootstrap, limits and network; second is unchanged", 
 	assert.equal(s.complete, false);
 	assert.deepEqual(s.steps.connection.data.deniedAddresses, ["192.168.68.116"]);
 	assert.equal(s.bootstrap.release, "0.2.0");
+	assert.equal(s.platform.channel, "stable");
 	assert.equal(s.bootstrap.sshHost, "100.64.10.20");
 	assert.equal(s.bootstrap.publicUrl, install.publicUrl);
 	assert.match(s.bootstrap.digest, /^[0-9a-f]{64}$/);
@@ -333,4 +334,10 @@ test("installer imports nondefault sandbox range and guest subnet", async () => 
 		(await options.store.read()).steps.network.data.guestSubnet,
 		"172.20.8.0/24",
 	);
+});
+
+test("installer channel is shared with recipe consumption", async () => {
+	const t = await setup({ install: { ...install, channel: "edge" } });
+	assert.equal(await bootstrapFromInstall(t.options()), "imported");
+	assert.equal(t.state().platform.channel, "edge");
 });
