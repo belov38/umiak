@@ -16,3 +16,8 @@ apply before tool execution. Credentials and results are never logged.
 
 See [getting started](../../docs/getting-started.md) for client configuration,
 including Claude Code and Codex, and [architecture](../../docs/architecture.md).
+
+Capacity waits: `sandbox_create`, `sandbox_resume` and `sandbox_fork` accept
+`capacity_wait_seconds` (0..604800). `wait_seconds` bounds the tool call; the
+server keeps its ticket after that call returns. Inspect queued/moving progress
+with `sandbox_get`; `sandbox_cancel_start` cancels an unadmitted request.

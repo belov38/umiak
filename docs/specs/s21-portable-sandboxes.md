@@ -133,3 +133,8 @@ PVE config relocation follows the upstream
 [`PVE::AbstractConfig` lock/config move helpers](https://raw.githubusercontent.com/proxmox/pve-guest-common/master/src/PVE/AbstractConfig.pm).
 The bounded copy heartbeat uses an inactivity budget; completion restores the
 normal OS-specific boot deadline.
+
+Unknown metadata elements (including shared-map references unsupported by the
+parser) invalidate the optimization and select safe comparison. Metadata
+reservation ownership is kernel-serialized; a busy reservation is never released
+by another transfer.

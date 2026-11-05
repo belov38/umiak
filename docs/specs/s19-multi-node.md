@@ -40,10 +40,11 @@ on 2026-11-04 through the coordinator, subject to the live restrictions below.
 - Removal refuses with a useful blocker list; it never automatically deletes
   sandboxes, snapshots or templates to make removal succeed.
 
-No live migration, cross-node fork/snapshot copy, shared storage driver,
-multi-cluster installer, HA control plane, automatic failover, public node
-selection, warm-pool enablement, or new root shell access from control plane.
-Existing corporate authentication is unchanged.
+S19 originally excluded cross-node data transfer; S21 now provides verified
+template copies and journaled cold fork/resume/snapshot moves. Live migration,
+shared storage drivers, multi-cluster installation, HA/automatic failover, public
+node selection, warm pools and a root shell from the control plane remain excluded.
+Authentication follows the current owner-only architecture.
 
 ## Existing foundation and gaps
 
@@ -88,11 +89,13 @@ creating disks. If a stale candidate is no longer eligible, release its lock
 through the existing admission savepoint and try the next candidate. If
 none succeeds, return existing retryable `out_of_capacity`.
 
-Fork and saved-snapshot create also recheck eligibility under the same node
-lock. Resume/recover keep existing semantics on a cordoned node with local
-disks; such machines block final removal. No operation redirects a recorded
-VM to another node when its home node is unavailable. VMIDs remain unique
-cluster-wide through the provider allocator, including template VMIDs.
+Fork and saved-snapshot create recheck eligibility under the same node lock.
+S21 supersedes S19 locality: resume/fork/saved-snapshot create prefer home, then
+reserve capacity on another eligible node in the same provider and cold-move
+stopped data before starting. A cordoned source can export; an unreachable
+source must return before copying can complete. Recover stays local. Machines
+and unfinished transfers block final removal. VMIDs remain cluster-unique
+through the provider allocator, including distinct template replica VMIDs.
 Production template and verification VMs use that same PostgreSQL allocator,
 scoped to their durable node build job. Reconcile must protect both unfinished
 jobs and retained builder leases; local SQLite holds builder snapshot metadata
@@ -124,14 +127,14 @@ storage, RAM cap and media storage server-side from trusted inventory;
 reject unknown, retired or ineligible nodes. Single-node requests may omit
 node for compatibility; ambiguous multi-node requests require selection.
 
-Builds remain sequential initially. No replication: Linux, Linux desktop
-and Windows builds produce independent manifests with their actual node,
-storage and unique VMID. Windows ISO discovery/upload refers to the target
-node's media store; never infer that another node has the same ISO.
-Match build completion to its job/node/VMID and verified manifest (including a durable job ID in new manifests), and
-promote only that node's build. A rebuild on pve2 leaves pve's active build
-and all existing sandbox disks unchanged. Failure preserves the previous
-active build. Historical versions need not be identical across nodes.
+S21 builds Linux, Linux desktop and Windows once, then replicates all base
+disks byte-identically and verifies checksums before promotion on each target.
+Replicas share version/original manifest/root build identity; physical node,
+storage and cluster-unique template VMID differ. Node add copies existing active
+templates. Windows ISO discovery/upload applies only to the build node. Match
+completion to its durable job/node/VMID and verified manifest. A failed replica
+keeps the previous active destination build. Existing sandbox disks remain
+independent; legacy historical builds need not be identical.
 
 Catalog and operator setup expose per-node availability and version, while
 preserving existing summary fields for compatibility (newest active build,

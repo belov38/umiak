@@ -36,6 +36,11 @@ sql "BEGIN; SELECT pg_advisory_xact_lock(hashtextextended('node:'||id::text,0)) 
 sql "BEGIN; SELECT pg_advisory_xact_lock(hashtextextended('node:'||id::text,0)) FROM runtime.nodes WHERE name='pve'; UPDATE runtime.nodes SET state='active' WHERE name='pve'; COMMIT"
 ```
 
+Before sparse/delta measurement, verify on each operator console:
+`command -v thin_dump thin_delta dmsetup`; install the distro
+`thin-provisioning-tools` package if missing. Metadata failure remains a safe
+comparison fallback, but that fallback does more local IO.
+
 ## 1. Build once, replicas, node add
 
 - In Setup build linux on pve. Observe **Building on pve**, then **Copying to

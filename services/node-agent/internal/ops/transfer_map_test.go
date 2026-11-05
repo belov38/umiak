@@ -38,3 +38,18 @@ func TestTransferMapUsesOnlyTrustedInventoryAndReleasesReservation(t *testing.T)
 		t.Fatal("caller device ID accepted")
 	}
 }
+
+func TestThinRangesRejectUnknownMappings(t *testing.T) {
+	for _, tc := range []struct {
+		delta bool
+		xml   string
+	}{
+		{true, `<superblock data_block_size="128"><diff><new_delta begin="0" length="1"/></diff></superblock>`},
+		{false, `<superblock data_block_size="128"><device><ref name="shared-blocks"/></device></superblock>`},
+		{false, `<superblock data_block_size="128"><device><new_mapping origin_begin="0" length="1"/></device></superblock>`},
+	} {
+		if _, err := thinRanges([]byte(tc.xml), tc.delta, 1<<20); err == nil {
+			t.Fatal("unknown metadata layout must trigger safe block comparison")
+		}
+	}
+}

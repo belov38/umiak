@@ -23,7 +23,7 @@ only after their relevant gate passes. Implement inline without delegates.
 - [x] 4. Add durable FIFO capacity tickets, cancellation and wakeup/reconcile.
   Extend API schema, SDK, MCP, CLI duration options and dashboard progress.
   Test team FIFO, deadline persistence, cancellation, idempotency and quotas.
-- [ ] 5. Run full local gate, review diff, rebase origin/main and fast-forward
+- [x] 5. Run full local gate, review diff, rebase origin/main and fast-forward
   push `git push origin HEAD:main`; record final SHA and remaining live checks.
 
 ## Review focus
@@ -158,3 +158,41 @@ identity and recipe release work. Go tests/race/vet/golangci-lint/Linux build PA
 quickstart 203 PASS; installer pytest 248 PASS and ruff check PASS. Installer
 format-check is not an existing gate (30 pre-existing files differ from ruff's
 formatter); no bulk formatter changes were applied.
+
+
+Phase 5: reviewed the complete decision checklist and transfer/admission trust
+boundaries inline. Unknown thin metadata elements/shared references now reject
+the map and use safe block comparison, rather than silently omitting data. The
+new regression failed before the parser change and passed afterward. Chunked
+verification remains anchored to immutable verified template bases; neither
+full-disk digest nor unchanged-block scans are required on the metadata path.
+Copy completion restores the normal OS-specific lifecycle budget, tested with a
+Windows resume retaining its 15-minute boot deadline.
+
+Rebased onto the owner-only authentication removal and recipe/platform updater
+work through `ec7da199`, preserving both. Conflict resolution retained removed
+OIDC/TURN paths and added only the start-queue controller. Updated stale cleanup
+fixtures to the current interrupted-runner recovery contract; fixed shared UI
+primitive/style and installer ruff issues introduced by parallel release work.
+No CI triggers, arbitrary host shell transport, live hosts or PRs were used.
+Phase 4 pushed to main as `db59a57f` after verification.
+
+Final local evidence (2026-11-05): full `mise exec -- pnpm test` PASS (worker:
+7 existing skips; MCP: 1 existing skip). Relevant totals after owner-only rebase:
+PVE 211, core 383, API 1034, worker 443, TS SDK 144, Python SDK 83, web 276,
+MCP 699 and CLI 172 passing tests. `pnpm lint`, `pnpm typecheck`, `pnpm build`
+PASS. After the last upstream recovery/UI changes, full web 276, installer 276,
+ruff check, lint/typecheck/build PASS again; quickstart Node tests 226 PASS.
+Node-agent Go tests, native race tests, vet, golangci-lint and Linux amd64 build
+PASS after the metadata-parser regression fix. OpenAPI and both SDK generators
+produce no uncommitted differences. `git diff --check` PASS.
+
+Remaining live risks: the real PVE config-lock/relocation and thin-pool metadata
+protocol need the coordinator's two-node acceptance. Sparse comparison fallback
+is safe but increases local IO/RPC overhead; check thin_dump/thin_delta availability
+and measure a large sparse disk. Legacy cloud-init/unmanaged extra disk slots
+are refused, preserving the source. An inaccessible source cannot be copied
+until its channel/data return. A killed node-agent can leave a kernel metadata
+snapshot reservation requiring operator inspection; a busy reservation falls
+back safely without releasing another process's snapshot. No live acceptance
+has been claimed. Exact commands/scenarios: `docs/operations-s21-acceptance.md`.

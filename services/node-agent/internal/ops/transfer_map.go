@@ -41,6 +41,9 @@ func thinRanges(raw []byte, delta bool, size uint64) ([]byteRange, error) {
 		}
 		number := func(k string) (uint64, error) { return strconv.ParseUint(attrs[k], 10, 64) }
 		if e.Name.Local == "superblock" {
+			if block != 0 {
+				return nil, fmt.Errorf("multiple metadata superblocks")
+			}
 			b, err := number("data_block_size")
 			if err != nil || b == 0 || b > 1<<21 {
 				return nil, fmt.Errorf("invalid metadata block size")
@@ -50,8 +53,12 @@ func thinRanges(raw []byte, delta bool, size uint64) ([]byteRange, error) {
 		}
 		var off, n uint64
 		if delta {
-			if e.Name.Local != "left_only" && e.Name.Local != "right_only" && e.Name.Local != "different" {
+			switch e.Name.Local {
+			case "diff", "same":
 				continue
+			case "left_only", "right_only", "different":
+			default:
+				return nil, fmt.Errorf("unsupported delta metadata element %q", e.Name.Local)
 			}
 			off, err = number("begin")
 			if err == nil {
@@ -59,6 +66,8 @@ func thinRanges(raw []byte, delta bool, size uint64) ([]byteRange, error) {
 			}
 		} else {
 			switch e.Name.Local {
+			case "device":
+				continue
 			case "range_mapping":
 				off, err = number("origin_begin")
 				if err == nil {
@@ -68,7 +77,8 @@ func thinRanges(raw []byte, delta bool, size uint64) ([]byteRange, error) {
 				off, err = number("origin_block")
 				n = 1
 			default:
-				continue
+				// Shared references and future mapping formats require a safe full scan.
+				return nil, fmt.Errorf("unsupported thin metadata element %q", e.Name.Local)
 			}
 		}
 		if err != nil || block == 0 || n == 0 || off > size/block || n > (size-off*block+block-1)/block {
