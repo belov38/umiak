@@ -35,7 +35,7 @@ export function addCreateOptions(c: Command): Command {
 	return c
 		.option(
 			"--template <slug>",
-			"template: linux, linux-desktop, windows (with desktop); windows-desktop is an alias (default: platform default)",
+			"template: linux (Ubuntu 26.04), debian (Debian 13), linux-desktop, windows (with desktop); windows-desktop is an alias (default: platform default)",
 		)
 		.option("--size <slug>", "size (default: the template's default)")
 		.option("--name <name>", "display name")

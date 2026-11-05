@@ -11,7 +11,7 @@ plan: `docs/plans/s5-linux-template.md`). The build VM is driven only through th
 - Host runbook steps done: `infra/pve/setup.sh media` (role `UmiakTemplateMedia` on `/storage/local`) and
   `infra/pve/setup.sh node` (an `umiak-node` with `media.list`/`media.remove` and template origins in its range).
 - The S1 client config (`UMIAK_PVE_URL`, `UMIAK_PVE_TLS_NAME`, `UMIAK_NODE_SSH_HOST`, `~/.config/umiak/`).
-- Dev template slots: `linux` 597, `linux-desktop` 596, `windows` 595. Templates 595–597 are read-only on the active stand: no rebuilds or deletes. VM 598 (old headless Windows) was deleted on 2026-11-04; slots 598 and 599 are free.
+- Dev template slots: `debian` 594, `linux` 597, `linux-desktop` 596, `windows` 595. Templates 595–597 are read-only on the active stand: no rebuilds or deletes. VM 598 (old headless Windows) was deleted on 2026-11-04; slots 598 and 599 are free.
 
 ## Build
 
@@ -103,3 +103,40 @@ template build; a user can still update a CLI with `sudo`.
 
 All four have a system-wide switch. Whether OpenCode and Codex read these files at the pinned versions is
 taken from their docs and release binaries, not observed in a running image.
+
+## Debian 13 (S23)
+
+`debian` inherits the headless Linux steps and seed; its own pins select trixie
+apt snapshots, Docker CE's Debian repository and the official genericcloud image.
+Node/Go/Bun/uv/gh/Rust/Chrome/npm pins initially match Ubuntu. Java is 21 instead
+of 25; the kernel is Debian amd64 instead of Ubuntu generic. Snapshot pins are
+removed at cleanup so sandbox users can use normal Debian repositories.
+
+Trust is HTTPS TOFU at pin time: metadata is fetched from cloud.debian.org with
+redirects disabled. Image bytes may follow at most five HTTPS redirects and are
+checked against SHA512 before SHA256 is recorded. Builds verify both signed
+recipe pins, including cached files. Debian publishes no cloud checksum signing
+key/signatures; switch to signature verification when upstream provides them.
+
+### Deferred live build (only after the stand is released)
+
+Use the configured stand credentials and CA paths from the Linux instructions.
+Do not rebuild occupied template slots; 594 is the dedicated Debian slot.
+
+```sh
+# Optional pin refresh (downloads and hashes the base image; commit reviewed pins).
+mise exec -- node apps/template-builder/src/main.ts versions debian --update
+mise exec -- node apps/template-builder/src/main.ts preflight debian
+pkg=$(infra/templates/agent-package.sh --os linux --tunnel-ca ~/.config/umiak/dev-ca/ca.pem --out /tmp/umiak-debian-agent)
+mise exec -- node apps/template-builder/src/main.ts build debian --agent-package "$pkg" --connect-url wss://tunnel.192-168-68-90.sslip.io/v1/connect --dev-cp-ssh umiak@192.168.68.90
+# build runs full verification automatically; use its printed buildId to rerun:
+mise exec -- node apps/template-builder/src/main.ts verify <buildId> --connect-url wss://tunnel.192-168-68-90.sslip.io/v1/connect --dev-cp-ssh umiak@192.168.68.90
+mise exec -- node apps/template-builder/src/main.ts show <buildId>
+```
+
+Use the stand's actual tunnel URL and control-plane SSH alias for `--connect-url`
+and `--dev-cp-ssh`. A PASS includes guest checks/tools, Docker, agent/tunnel, raw-disk
+secret scan, hard restart and fork identity. Then register/promote that build via
+Templates, create `umiak create --template debian --wait`, and smoke-test exec,
+files, Docker, SSH and stop/resume. Replicate the verified build to another node
+through the Templates S21 path; do not build a second copy independently.

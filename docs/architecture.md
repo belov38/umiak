@@ -11,6 +11,7 @@ An API platform that gives AI agents and people isolated VMs (sandboxes) on Prox
 | Template | OS | Access |
 |---|---|---|
 | `linux` | Ubuntu 26.04 LTS (build: `docs/specs/s5-linux-template.md`) | exec, files, SSH |
+| `debian` | Debian 13 trixie (S23) | exec, files, SSH |
 | `linux-desktop` | Ubuntu + X11/openbox + Chrome (build: `docs/specs/s10-desktop.md`) | + desktop in the browser, computer-use |
 | `windows` | Windows 11 (user-supplied image and license; build: `docs/specs/s9-windows.md`) | exec (PowerShell), files, SSH, desktop |
 | `windows-core` | Windows Server 2025 Core (user-supplied image and license), **phase 2** (S9 §22) | exec (PowerShell), files, SSH |

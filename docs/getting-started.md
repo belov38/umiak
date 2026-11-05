@@ -33,6 +33,19 @@ After the install, disable key expiry for the machine `umiak` in the Tailscale a
 
 Day 2: run the same command again. It shows a menu for the current state: Install, Resume install, Update, Sign in a new browser, Reset owner access, or Uninstall. For scripted runs use `--non-interactive --yes` with flags (`--action`, `--version`, `--storage`, `--ct-id`, `--ct-ip`, ...); `sh -s -- --help` lists them.
 
+## Linux distributions
+
+Ubuntu 26.04 (`linux`) remains the default. To build Debian 13 trixie, choose
+**Other operating systems → Debian 13** in Setup → Templates, then create with
+`umiak create --template debian --wait`, `{ "template": "debian" }` in the API/SDK,
+or `template: "debian"` in MCP. Both offer the same agent, Docker and coding tools.
+Debian uses Java 21 and the Debian amd64 kernel; Ubuntu uses Java 25 and generic.
+A built and registered template is required before it can be selected.
+
+Debian base images use HTTPS SHA512 checksums at pin time (TOFU), carried with
+SHA256 in signed Umiak recipe bundles; Ubuntu verifies vendor-signed checksums.
+See [S23](specs/s23-debian-template.md) for the explicit trust policy.
+
 ## Platform and template updates
 
 There are exactly two release channels: **stable** (default, X.Y.Z) and **edge**

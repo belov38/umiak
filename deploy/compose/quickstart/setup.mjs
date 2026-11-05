@@ -500,7 +500,9 @@ export function createSetupHandler({
 							: inputBuild.templateSlug,
 				};
 				requireValue(
-					["linux", "linux-desktop", "windows"].includes(build.templateSlug),
+					["linux", "debian", "linux-desktop", "windows"].includes(
+						build.templateSlug,
+					),
 					"Unknown template",
 				);
 				requireValue(
@@ -1121,6 +1123,7 @@ export function createSetupHandler({
 									.find((tag) =>
 										[
 											"linux",
+											"debian",
 											"linux-desktop",
 											"windows",
 											"windows-desktop",
@@ -1130,9 +1133,11 @@ export function createSetupHandler({
 									? "windows-desktop"
 									: String(vm.name || "").includes("windows")
 										? "windows"
-										: String(vm.name || "").includes("desktop")
-											? "linux-desktop"
-											: "linux");
+										: String(vm.name || "").includes("debian")
+											? "debian"
+											: String(vm.name || "").includes("desktop")
+												? "linux-desktop"
+												: "linux");
 							if (slug === "windows-desktop") slug = "windows";
 							if (
 								slug === "windows" &&

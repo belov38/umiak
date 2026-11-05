@@ -49,7 +49,7 @@ jobs:
       - name: Refresh pins
         if: inputs.refresh
         run: |
-          for os in linux linux-desktop windows; do pnpm --filter @umiak/template-builder umiak-tpl versions "$os" --update; done
+          for os in linux debian linux-desktop windows; do pnpm --filter @umiak/template-builder umiak-tpl versions "$os" --update; done
           git config user.name github-actions[bot]
           git config user.email github-actions[bot]@users.noreply.github.com
           git add infra/templates
