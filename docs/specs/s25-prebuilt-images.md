@@ -76,20 +76,27 @@ resume/restart, fork and saved-snapshot restore; do not let a snapshot restore
 another install's trust. Rotation updates firmware on next boot; existing agents
 retain their boot trust until restart. Windows keeps its existing trust path.
 
-PVE currently caps the whole base64 `smbios1` property at 512 characters. The
-existing 200-byte maximum tunnel URL plus a new pin can exceed it. Validate the
-complete serialized descriptor before creating a VM; never truncate or drop the
-pin. A shorter configured tunnel hostname is the proposed remedy; this visible
-length constraint needs master review before implementation. Include boundary
-tests and clear setup error text.
+PVE caps the full base64 `smbios1` property at 512 characters. With a 36-byte
+UUID, 32-byte bootstrap secret (43 base64url characters), `umiak1:` serial,
+`umiakt1:wss://<hostname>/v1/connect` family, and `umiakca1:` plus 64 hex digest
+SKU, maximum hostname is **143 ASCII bytes**: serialized length 511; 144 bytes
+produces 515. This assumes no explicit port; a port consumes the same authority
+budget. DNS labels still obey their own limits. Normalize IDNs to ASCII before
+counting. Nonstandard paths/ports must use the exact serializer to derive their
+smaller maximum rather than applying 143 blindly.
 
-The builder must support a CA-free generic agent installation while preserving
-legacy signed packages. Initial generic binary integrity is authenticated by the
-outer recipe-publisher-signed image. Later agent updates remain authenticated
-only by global agent-update keys. Proposed bootstrap: install the compiled
-production binary, units and global update keys directly in the isolated CI VM;
-never relax existing update-package verification or reuse the recipe key as a
-per-install update key. This first-install boundary needs explicit security review.
+Approved behavior: validate at configuration time in the setup network step and
+the API with “tunnel hostname too long; use a shorter name (max N chars)”. Also
+retain the final serializer guard. Never truncate, drop the pin or wait until
+VM start to discover this constraint. Document N = 143 for the standard endpoint
+and calculate N for a nonstandard endpoint. Typical sslip.io/tailnet names fit.
+
+Approved bootstrap boundary: CA-free generic agent first installation in isolated
+CI is authenticated by the outer recipe-publisher-signed image. Install the
+compiled production binary, units and global update keys directly. Later agent
+updates stay under the existing distinct global agent-update authority. Legacy
+signed package verification remains unchanged; no new signing secret and no
+recipe key reuse for agent updates.
 
 ## Artifact and signature contract
 
@@ -253,7 +260,7 @@ route for a future public offering; for a cleared Debian derivative, prebuilt
 images best satisfy the original install-speed/reliability goal. Keep the offline-layer route documented for a future distribution decision;
 implementing it requires a separate approved scope. It
 cannot be just debs: current recipes also fetch Docker keys, npm native optional
-packages, Rust components, Chrome, toolchain archives, Sigstore bundles and desktop
+packages, Rust components, browser packages, toolchain archives, Sigstore bundles and desktop
 assets. A viable layer must capture and hash all transitive inputs, retain apt
 Release/Packages signatures, stage an offline local apt repository, and replay
 with network disabled. Check full final package manifests against CI. Fetch the
@@ -281,7 +288,7 @@ is a bounded CI problem, not an installer archive dependency.
 The reverted recipe is headless. Desktop needs Debian-specific Sunshine package
 compatibility and dependency resolution, kernel/input/video/desktop smoke tests,
 and fresh immutable pins; do not install an Ubuntu-specific deb blindly. Check
-Chrome's supported dependencies and every binary's glibc baseline. Avoid adding
+Chromium's supported dependencies and every binary's glibc baseline. Avoid adding
 a new catalog slug/migration unless master chooses that behavior. Record distro
 in signed metadata and manifests, show it in template details, and keep existing
 Ubuntu builds usable until unreferenced retirement. A distro change affects new
@@ -291,6 +298,34 @@ sandboxes only and remains a master decision.
 derived works; [Debian trademarks](https://www.debian.org/trademark) still require
 accurate naming/no implied endorsement. Use Umiak product names and factual
 base attribution. This does not waive individual package/non-free licensing.
+
+## Approved bundled-tool policy
+
+Replace Google Chrome with the selected distro's Chromium package, retaining
+browser automation/CDP and computer-use behavior. Update executable discovery,
+Chrome-named desktop defaults/policies and verification to test Chromium. Debian
+package and dependencies need fresh snapshot pins. Ubuntu's Chromium packaging
+may depend on snap, which the current recipe removes; do not silently restore
+snap or download a third-party browser binary. If Ubuntu is selected, resolve
+this packaging constraint with master before implementation.
+
+Exclude Claude Code and every other proprietary/unresolved-redistribution CLI
+from the published disk. A first-boot optional installer uses the vendor's
+official source, exact version and checksum where published, with bounded retries
+and visible status. If no vendor checksum exists, record that fact and the exact
+HTTPS source; do not fabricate an integrity guarantee. Do not bundle the
+proprietary payload inside the installer. Offline failure is nonfatal to agent,
+sandbox and desktop readiness; explain that the tool is unavailable and permit
+an explicit retry. No user credentials, license acceptance or login is automated.
+This optional internet access is separate from template import: import itself
+needs no snapshot archive and must not wait for a proprietary tool install.
+
+Apache/MIT tools may stay with required notices. Sunshine/moonlight remain with
+GPLv3 license texts and source links/offer in the image and signed manifest;
+retain exact corresponding source/build instructions and meet the applicable
+source-delivery obligations, not merely an unversioned upstream homepage.
+The signed inventory distinguishes bundled packages from optional external tools
+and includes each version, license, notices, source correspondence and hashes.
 
 ## License inventory and publication gate
 
@@ -305,8 +340,8 @@ by themselves clear the modified aggregate. See [Canonical policy §2–4](https
 | Shipped component | Finding / obligation / unresolved evidence |
 | --- | --- |
 | Ubuntu packages, kernel, desktop fonts/Xorg/LightDM/Openbox/PipeWire | Mixed licenses; collect each `/usr/share/doc/*/copyright`, source package/version, notices and corresponding-source material as required. Kernel/GPL obligations remain for binary conveyance; apply the same inventory to Debian if selected |
-| Google Chrome `.deb` | Proprietary product; [Chrome terms](https://www.google.com/chrome/terms/) incorporate Google's general terms. Do not infer redistribution rights from downloadable debs. Verify exact package EULA/permission; public inclusion blocked pending clearance or a separately approved browser change |
-| Claude Code npm package | [Anthropic legal docs](https://code.claude.com/docs/en/legal-and-compliance) govern product use; not an assumption of permissive source licensing. Capture pinned package license and resolve redistribution permission before public inclusion |
+| Google Chrome `.deb` | Exclude from images; replace with distro Chromium. Proprietary product; [Chrome terms](https://www.google.com/chrome/terms/) incorporate Google's general terms. Do not infer redistribution rights from downloadable debs. Verify exact package EULA/permission; do not bundle pending any future permission |
+| Claude Code npm package | Exclude from images; optional first-boot vendor install. [Anthropic legal docs](https://code.claude.com/docs/en/legal-and-compliance) govern product use; not an assumption of permissive source licensing. Record the external installer/version policy; do not redistribute unresolved payloads |
 | Codex / Gemini CLI | Upstream [Codex](https://github.com/openai/codex/blob/main/docs/license.md) and [Gemini](https://github.com/google-gemini/gemini-cli/blob/main/docs/resources/tos-privacy.md) identify Apache-2.0; retain licenses/notices and audit bundled native dependencies. Service credentials/terms remain per user |
 | OpenCode | [Pinned 1.19.5 license](https://github.com/anomalyco/opencode/blob/v1.19.5/LICENSE) is MIT; retain copyright/license and inspect native bundles |
 | Sunshine / moonlight-web | Pinned [Sunshine](https://github.com/LizardByte/Sunshine/blob/v2026.914.233613/LICENSE) and [moonlight-web](https://github.com/MrCreativ3001/moonlight-web-stream/blob/v3.0.1/LICENSE) carry GPLv3 texts; retain exact corresponding source/build material and notices; audit linked codecs/dependencies |

@@ -82,8 +82,10 @@ Port runtime changes into S24's current owning module after rebase.
 `umiakca1:<SHA256 DER hex>`. Production dialer accepts explicit pinned-CA verifier
 without changing the semantics of ordinary `RootCAs` callers.
 
-- [ ] Ask master to resolve serialized SMBIOS size behavior and generic initial
-  agent-install trust boundary from the spec; continue Task 1 while waiting.
+- [ ] Implement approved configuration-time descriptor validation in setup network
+  and API: standard hostname maximum 143 ASCII bytes, exact serialization for
+  nonstandard ports/paths, clear max-N error before creating a VM. Keep generic
+  first-install trust under the outer signed image, later update trust distinct.
 - [ ] Write failing tests for two installation CAs, unrelated valid certificate,
   wrong hostname/expiry/constraints, missing CA in chain, malformed/unknown pin,
   absent-pin legacy bundle, and total 512-character descriptor boundary.
@@ -114,6 +116,12 @@ never return install-bound PVE identities or publish directly.
   local builder defaults and legacy signed agent package tests remain intact.
 - [ ] Implement Linux-only generic build using existing recipe step/fact/seal
   helpers, user-mode networking and isolated QGA/QMP Unix sockets. No TCG fallback.
+- [ ] Replace Chrome with distro Chromium; update browser executable discovery,
+  CDP/computer-use tests, desktop defaults/policies and verification. Exclude
+  Claude Code/unresolved tools; implement optional first-boot official vendor
+  installer with exact version/checksum where available, bounded retries, visible
+  status and nonfatal offline behavior. Test Chromium CDP and tool-install failure
+  independently of sandbox readiness. Resolve Ubuntu snap packaging if selected.
 - [ ] Keep exact snapshot pins and bound network/step timeouts. Audit all non-apt
   downloads; retain integrity/provenance and record exact installed versions.
 - [ ] Eliminate CI zero-fill peak allocation via cold sparse export/compaction;
@@ -170,7 +178,9 @@ and raw+size disk proofs while using existing reserve/register/finish/replicate.
   fence, use node-agent receipt, create allowlisted template VM and verify clone.
 - [ ] Register/promote only verified results; use S21 replication once for every
   other eligible node. A failed replica retains old active build and can retry.
-- [ ] Run quickstart tests from root and relevant builder/PVE Vitest.
+- [ ] Prepare workspace with `mise exec -- pnpm install` and required dependency
+  builds; run quickstart tests from root and relevant builder/PVE Vitest. Resolve
+  baseline build/assets prerequisites before reporting implementation green.
 - [ ] Commit `feat(setup): download Linux templates by default`.
 
 ## Task 6: S22 autonomous image rollout
