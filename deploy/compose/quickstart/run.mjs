@@ -11,11 +11,6 @@ const password = readFileSync(
 if (!/^[0-9a-f]{64}$/.test(password))
 	throw new Error("Invalid generated database password");
 env.DATABASE_URL = `postgres://umiak:${password}@postgres:5432/umiak`;
-if (env.UMIAK_PAYLOAD_SECRET_FILE)
-	env.PAYLOAD_SECRET = readFileSync(
-		env.UMIAK_PAYLOAD_SECRET_FILE,
-		"utf8",
-	).trim();
 if (env.UMIAK_API_CURSOR_KEY_FILE)
 	env.UMIAK_API_CURSOR_KEY = readFileSync(
 		env.UMIAK_API_CURSOR_KEY_FILE,

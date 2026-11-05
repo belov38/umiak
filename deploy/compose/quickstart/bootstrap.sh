@@ -16,7 +16,6 @@ cp "$root/database/password" "$root/database/gateway-password"
 chown 65532:65532 "$root/database/gateway-password"
 chmod 600 "$root/database/gateway-password"
 chmod 711 "$root/database" "$root"
-chown 1000:1000 "$root/payload-secret"
 
 # Worker receives only its gateway token and public SSH user CA.
 cp "$root/gateway/worker-gateway-token" "$root/worker/worker-gateway-token"

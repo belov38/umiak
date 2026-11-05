@@ -33,14 +33,11 @@ describe("homelab MCP compose", () => {
 		expect(mcp.depends_on.api.condition).toBe("service_healthy");
 		expect(Object.keys(stack.services).sort()).toEqual(
 			[
-				"web-meta",
 				"secrets-init",
 				"postgres",
 				"migrate",
-				"web-migrate",
 				"worker",
 				"api",
-				"web",
 				"mcp",
 				"gateway",
 				"gateway-renewal",

@@ -49,8 +49,9 @@ test("offline bootstrap preserves identity and hands each consumer its secret co
    test "$(stat -c %u /secrets/gateway/ssh_user_ca)" = 65532
    test "$(stat -c %u:%g:%a /secrets/gateway/ingress-desktop-key)" = 65532:1000:640
    cmp /secrets/worker/worker-gateway-token /secrets/gateway/worker-gateway-token
-   cmp /secrets/web/payload-secret /secrets/api/payload-secret
-   sha256sum /secrets/gateway/ca.key /secrets/gateway/ca.pem /secrets/gateway/ssh_user_ca /secrets/api/cursor-key /secrets/database/password /secrets/web/payload-secret
+   test ! -e /secrets/api/payload-secret
+   test ! -e /secrets/web
+   sha256sum /secrets/gateway/ca.key /secrets/gateway/ca.pem /secrets/gateway/ssh_user_ca /secrets/api/cursor-key /secrets/database/password
   `,
 			);
 		init();

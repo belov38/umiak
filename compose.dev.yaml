@@ -17,19 +17,9 @@ services:
     build: *quickstart-build
   mcp:
     build: *quickstart-build
-  web-meta:
-    build: *quickstart-build
   gateway:
     build: *quickstart-build
   gateway-renewal:
     build: *quickstart-build
   quickstart:
     build: *quickstart-build
-  web:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
-  web-migrate:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile

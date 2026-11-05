@@ -133,7 +133,7 @@ function route(path, env) {
 		return [env.UMIAK_QUICKSTART_API_HOST ?? "api", 8081, path.slice(4)];
 	if (path.startsWith("/v1/"))
 		return [env.UMIAK_QUICKSTART_API_HOST ?? "api", 8080, path];
-	return [env.UMIAK_QUICKSTART_WEB_HOST ?? "web", 3000, path];
+	return [env.UMIAK_QUICKSTART_API_HOST ?? "api", 8081, path];
 }
 
 export function createQuickstartServer({

@@ -44,11 +44,10 @@ def test_stack_files_are_exactly_compose_and_its_bind_mounts():
     assert set(stack.STACK_FILES) == {"compose.yaml", *mounts}
 
 
-def test_web_meta_presents_the_public_api_host():
+def test_metadata_uses_the_owner_api_without_a_web_proxy():
     compose = (REPO_ROOT / "compose.yaml").read_text()
-    block = compose.split("\n  web-meta:\n", 1)[1].split("\n\n", 1)[0]
-    assert "UMIAK_API_URL: ${UMIAK_PUBLIC_URL:-http://localhost:4180}" in block
-    assert not re.search(r"UMIAK_API_URL: http", compose)
+    assert "web-meta:" not in compose
+    assert "web-migrate:" not in compose
 
 
 def test_network_json_is_byte_identical_to_quickstart_network_step():

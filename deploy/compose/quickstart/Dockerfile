@@ -36,7 +36,6 @@ COPY packages/auth/package.json packages/auth/
 COPY packages/config/package.json packages/config/
 COPY packages/core/package.json packages/core/
 COPY packages/db/package.json packages/db/
-COPY packages/payload/package.json packages/payload/
 COPY packages/proto/package.json packages/proto/
 COPY packages/pve/package.json packages/pve/
 COPY packages/sdk-py/package.json packages/sdk-py/
@@ -49,6 +48,15 @@ COPY apps/template-builder/package.json apps/template-builder/
 COPY apps/web/package.json apps/web/
 COPY apps/worker/package.json apps/worker/
 
+
+FROM manifests AS web-build
+RUN pnpm install --frozen-lockfile --filter "@umiak/web..." --filter "."
+COPY packages/sdk-ts/src packages/sdk-ts/src
+COPY packages/auth/src packages/auth/src
+COPY apps/web/src apps/web/src
+COPY apps/web/public apps/web/public
+COPY apps/web/index.html apps/web/vite.config.ts apps/web/postcss.config.mjs apps/web/
+RUN pnpm --filter @umiak/web build
 
 FROM manifests AS production-deps
 RUN pnpm install --frozen-lockfile --prod --filter-prod "@umiak/api..." --filter-prod "@umiak/worker..." --filter-prod "@umiak/mcp..." --filter-prod "@umiak/template-builder..." --filter-prod "@umiak/db..."
@@ -109,7 +117,6 @@ COPY packages/auth/src packages/auth/src
 COPY packages/config/src packages/config/src
 COPY packages/core/src packages/core/src
 COPY packages/db/src packages/db/src
-COPY packages/payload/src packages/payload/src
 COPY packages/pve/src packages/pve/src
 COPY packages/sdk-ts/src packages/sdk-ts/src
 COPY apps/api/src apps/api/src
@@ -123,10 +130,11 @@ COPY infra/templates infra/templates
 COPY deploy/compose/quickstart/*.mjs deploy/compose/quickstart/
 COPY deploy/compose/quickstart/*.sh deploy/compose/quickstart/
 COPY deploy/compose/quickstart/THIRD_PARTY_NOTICES.md deploy/compose/quickstart/
-COPY deploy/compose/meta-proxy.mjs deploy/compose/canonical-fetch.mjs deploy/compose/release-channel.mjs deploy/compose/
+COPY deploy/compose/canonical-fetch.mjs deploy/compose/release-channel.mjs deploy/compose/
 COPY deploy/compose/quickstart/service-secrets.sh /service-secrets.sh
 COPY deploy/compose/quickstart/bootstrap.sh /bootstrap.sh
-COPY apps/web/src/app/globals.css apps/web/src/app/globals.css
+COPY apps/web/src/styles.css apps/web/src/styles.css
+COPY --from=web-build /app/apps/web/dist apps/web/dist
 COPY apps/web/public/brand/lockup-inter-light.svg apps/web/public/brand/lockup-inter-light.svg
 RUN mkdir -p /app/quickstart-assets && cp deploy/compose/quickstart/install.sh /app/quickstart-assets/install.sh && ln -s /app/packages/db/node_modules/pg /app/node_modules/pg
 COPY --from=cli-build /app/apps/cli/dist/ /app/quickstart-assets/

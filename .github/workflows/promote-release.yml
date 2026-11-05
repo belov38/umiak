@@ -47,10 +47,10 @@ jobs:
           uv run --project deploy/installer python deploy/installer/promote_release.py "$SOURCE" "$VERSION" dist
       - name: Promote exact image digests (no build)
         run: |
-          for name in quickstart web; do
+          for name in quickstart; do
             if docker buildx imagetools inspect "$REGISTRY/umiak-$name:$VERSION" >/dev/null 2>&1; then echo 'Target image exists'; exit 1; fi
           done
-          for name in quickstart web; do
+          for name in quickstart; do
             ref="$REGISTRY/umiak-$name"
             digest=$(docker buildx imagetools inspect "$ref:$SOURCE" --format '{{.Manifest.Digest}}')
             docker buildx imagetools create --prefer-index=false --tag "$ref:$VERSION" --tag "$ref:latest" "$ref@$digest"

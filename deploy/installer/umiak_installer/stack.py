@@ -34,7 +34,7 @@ STACK_FILES = (
 SECRET_NAMES = ("install.json", "pve-token", "pve-token-id", "pve-root-ca.pem", "umiak-node_ed25519", "known_hosts",
                 "host-report.json")
 QUICKSTART_IMAGE = "ghcr.io/belov38/umiak-quickstart:{version}"
-ONESHOT = frozenset({"gateway-secrets", "secrets-init", "migrate", "web-migrate"})
+ONESHOT = frozenset({"gateway-secrets", "secrets-init", "migrate"})
 NODE_AGENT_IN_IMAGE = "/app/quickstart-assets/umiak-node-linux-amd64"
 EXTRACT_NAME = "umiak-node-extract"
 EXTRACT_PATH = "/root/umiak-node-linux-amd64"

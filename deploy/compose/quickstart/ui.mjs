@@ -1,10 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// The standalone owner gate must render before Next or an owner session exists.
+// The standalone owner gate must render before the SPA or an owner session exists.
 // Consume the dashboard's tokens directly: there is no second colour palette.
 const dashboard = readFileSync(
-	new URL("../../../apps/web/src/app/globals.css", import.meta.url),
+	new URL("../../../apps/web/src/styles.css", import.meta.url),
 	"utf8",
 );
 const tokens = [":root", ".dark"]

@@ -7,7 +7,7 @@ S=${UMIAK_SECRETS_ROOT:-/secrets}
 GW=$S/gateway
 NODE_UID=1000
 
-mkdir -p "$S/api" "$S/worker" "$S/web"
+mkdir -p "$S/api" "$S/worker"
 
 # Base64 of N random bytes.
 rand() { head -c "$1" /dev/urandom | base64 | tr -d '\n'; }
@@ -77,13 +77,6 @@ new "$S/data-keys.json" data_keys
 synced "$S/api/data-keys.json" cat "$S/data-keys.json"
 synced "$S/worker/data-keys.json" cat "$S/data-keys.json"
 
-# PAYLOAD_SECRET of the Payload config (S8): one value for web, web-migrate,
-# api and worker, which load the same config.
-new "$S/payload-secret" line "$(token)"
-synced "$S/api/payload-secret" cat "$S/payload-secret"
-synced "$S/worker/payload-secret" cat "$S/payload-secret"
-synced "$S/web/payload-secret" cat "$S/payload-secret"
-
 # api: HMAC key of list cursors (UMIAK_API_CURSOR_KEY).
 new "$S/api/cursor-key" line "$(rand 32)"
 
@@ -121,7 +114,6 @@ own() {
 }
 own "$NODE_UID" "$S/api"
 own "$NODE_UID" "$S/worker"
-own "$NODE_UID" "$S/web"
 if [ "$(id -u)" = 0 ]; then
 	chown "$NODE_UID:$NODE_UID" "$S/data-keys.json"
 	chmod 600 "$S/data-keys.json"

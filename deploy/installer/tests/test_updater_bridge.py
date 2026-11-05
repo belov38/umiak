@@ -63,8 +63,7 @@ def test_bundle_declares_images_and_min_updater(tmp_path):
     metadata = json.loads(files["release.json"])
     assert metadata["minUpdater"] == "1.2.0"
     assert metadata["dbCompatible"] is False
-    assert metadata["images"] == ["ghcr.io/belov38/umiak-quickstart:1.3.0", "postgres:18.6-alpine",
-                                  "ghcr.io/belov38/umiak-web:1.3.0"]
+    assert metadata["images"] == ["ghcr.io/belov38/umiak-quickstart:1.3.0", "postgres:18.6-alpine"]
 
 
 def test_backup_discovers_actual_writers_and_skips_removed_services(monkeypatch):

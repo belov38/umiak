@@ -20,7 +20,7 @@ test("owner and setup share dashboard tokens, fonts, frame and persisted appeara
 		assert.doesNotMatch(html, /border-radius:(?:8|12)px/);
 	}
 	const source = readFileSync(new URL("./ui.mjs", import.meta.url), "utf8");
-	assert.match(source, /apps\/web\/src\/app\/globals.css/);
+	assert.match(source, /apps\/web\/src\/styles.css/);
 	assert.doesNotMatch(source, /--(?:background|foreground|primary):\s*#/);
 });
 

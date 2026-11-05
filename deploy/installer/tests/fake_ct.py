@@ -11,9 +11,8 @@ from umiak_installer.pve import CommandError
 
 AGENT = b"fake-node-agent-binary"
 CODE = "AbCdEf123456"
-SERVICES = ["web-meta", "gateway-secrets", "secrets-init", "postgres", "migrate", "web-migrate", "worker", "api",
-            "web", "mcp", "gateway", "gateway-renewal", "quickstart"]
-ONESHOT = {"gateway-secrets", "secrets-init", "migrate", "web-migrate"}
+SERVICES = ["secrets-init", "postgres", "migrate", "worker", "api", "mcp", "gateway", "gateway-renewal", "quickstart"]
+ONESHOT = {"secrets-init", "migrate"}
 CERT_DER = b"fake-der-certificate"
 TS_STATUS = {
     "BackendState": "Running",

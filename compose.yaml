@@ -36,22 +36,6 @@ x-restart: &restart
     options: { max-size: 10m, max-file: "3" }
 
 services:
-  web-meta:
-    image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:?}
-    user: "1000:1000"
-    restart: unless-stopped
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    entrypoint: [node]
-    command: [deploy/compose/meta-proxy.mjs]
-    # Connects to api:8080 but presents the public API host, which owner mode requires.
-    environment:
-      UMIAK_API_URL: ${UMIAK_PUBLIC_URL:-http://localhost:4180}
-    networks: [control, web-internal]
-    depends_on:
-      api: { condition: service_healthy }
-
   secrets-init:
     image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:?}
     user: "0:0"
@@ -103,28 +87,6 @@ services:
       postgres: { condition: service_healthy }
     restart: "no"
 
-  web-migrate:
-    image: ghcr.io/belov38/umiak-web:${UMIAK_VERSION:?}
-    working_dir: /app/migrate
-    entrypoint: [node, /quickstart/run.mjs]
-    command: [node, packages/payload/src/migrate.ts]
-    environment:
-      <<: *app-env
-      UMIAK_PAYLOAD_SECRET_FILE: /all-secrets/payload-secret
-    volumes:
-      - ./deploy/compose/quickstart/run.mjs:/quickstart/run.mjs:ro
-      - database-secret:/quickstart-db:ro
-      - type: volume
-        source: secrets
-        target: /all-secrets
-        read_only: true
-        volume: { subpath: web }
-    networks: [control]
-    depends_on:
-      migrate: { condition: service_completed_successfully }
-    healthcheck: { disable: true }
-    restart: "no"
-
   worker:
     <<: *restart
     image: ghcr.io/belov38/umiak-quickstart:${UMIAK_VERSION:?}
@@ -132,7 +94,6 @@ services:
     command: [node, apps/worker/src/main.ts]
     environment:
       <<: *app-env
-      UMIAK_PAYLOAD_SECRET_FILE: /all-secrets/payload-secret
       UMIAK_DATA_KEYS_FILE: /all-secrets/data-keys.json
       UMIAK_GATEWAY_SERVICE_TOKEN_FILE: /all-secrets/worker-gateway-token
       UMIAK_SSH_USER_CA_KEYS_FILE: /all-secrets/ssh_user_ca.pub
@@ -151,7 +112,7 @@ services:
       - pve-secrets:/pve-secrets:ro
     networks: [control]
     depends_on:
-      web-migrate: { condition: service_completed_successfully }
+      migrate: { condition: service_completed_successfully }
     healthcheck:
       test:
         [
@@ -172,7 +133,6 @@ services:
     command: [node, apps/api/src/main.ts]
     environment:
       <<: *app-env
-      UMIAK_PAYLOAD_SECRET_FILE: /all-secrets/payload-secret
       UMIAK_API_CURSOR_KEY_FILE: /all-secrets/cursor-key
       UMIAK_IDENTITY_FILE: /identity.yaml
       UMIAK_DATA_KEYS_FILE: /all-secrets/data-keys.json
@@ -195,7 +155,7 @@ services:
         volume: { subpath: api }
     networks: [control]
     depends_on:
-      web-migrate: { condition: service_completed_successfully }
+      migrate: { condition: service_completed_successfully }
     healthcheck:
       test:
         [
@@ -207,30 +167,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-    stop_grace_period: 30s
-
-  web:
-    <<: *restart
-    image: ghcr.io/belov38/umiak-web:${UMIAK_VERSION:?}
-    entrypoint: [node, /quickstart/run.mjs]
-    command: [node, server.js]
-    environment:
-      <<: *app-env
-      # Web checks the client address stamped by the ingress, not its peer.
-      UMIAK_LOCAL_ALLOWED_CIDRS: *client-cidrs
-      UMIAK_PAYLOAD_SECRET_FILE: /all-secrets/payload-secret
-    volumes:
-      - network-config:/network-config:ro
-      - ./deploy/compose/quickstart/run.mjs:/quickstart/run.mjs:ro
-      - database-secret:/quickstart-db:ro
-      - type: volume
-        source: secrets
-        target: /all-secrets
-        read_only: true
-        volume: { subpath: web }
-    networks: [web-internal]
-    depends_on:
-      web-migrate: { condition: service_completed_successfully }
     stop_grace_period: 30s
 
   mcp:
@@ -343,9 +279,7 @@ services:
       web-internal: {}
     depends_on:
       migrate: { condition: service_completed_successfully }
-      web-migrate: { condition: service_completed_successfully }
       api: { condition: service_healthy }
-      web: { condition: service_started }
 
 volumes:
   postgres-data: {}
