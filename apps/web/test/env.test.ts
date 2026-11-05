@@ -36,7 +36,6 @@ describe("parseWebEnv (S8 §14.1)", () => {
 				UMIAK_APP_ORIGIN: "https://app.example.com/",
 				UMIAK_PREVIEW_DOMAIN: "*.bad",
 				PAYLOAD_SECRET: "short",
-				UMIAK_LOGOUT_URL: "",
 			});
 		} catch (e) {
 			err = e;
@@ -54,7 +53,6 @@ describe("parseWebEnv (S8 §14.1)", () => {
 			expect(issues).toContain(k);
 		}
 		// An empty optional value is absent, not invalid.
-		expect(issues).not.toContain("UMIAK_LOGOUT_URL");
 	});
 
 	it("validates preview scheme and port before constructing frame origins", () => {

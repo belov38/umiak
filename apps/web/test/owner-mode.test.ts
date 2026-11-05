@@ -94,7 +94,6 @@ describe("owner web transport boundary", () => {
 			UMIAK_API_PUBLIC_URL: "http://192.168.1.10:8080",
 			UMIAK_AUTH_MODE: "owner",
 			UMIAK_LOCAL_ALLOWED_CIDRS: "192.168.1.0/24",
-			UMIAK_LOGOUT_URL: "https://idp/logout",
 		});
 		expect(env.authMode).toBe("owner");
 	});

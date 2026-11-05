@@ -92,7 +92,7 @@ export async function ownerAuthenticate(
 				? null
 				: decodeTeamRef(header, "header.umiak-team")
 			: requested,
-		true,
+		s.isOperator,
 	);
 	return personAuth("session", s, team, null);
 }
