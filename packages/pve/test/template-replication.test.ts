@@ -29,6 +29,7 @@ it("copies a base once, verifies it before publication, and retries without rebu
 	let published = false;
 	let converted = false;
 	let created = false;
+	let tagged = false;
 	let writes = 0;
 	const srcConfig = {
 		template: 1,
@@ -41,18 +42,27 @@ it("copies a base once, verifies it before publication, and retries without rebu
 			if (path.endsWith("/qemu")) return created ? [{ vmid: 601 }] : [];
 			return {
 				template: converted ? 1 : 0,
-				tags: `umiak-tpl;umiak-copy-${"a".repeat(32)}`,
+				name: `umiak-replica-${"a".repeat(32)}`,
+				...(tagged ? { tags: `umiak-tpl;umiak-copy-${"a".repeat(32)}` } : {}),
 			};
 		},
-		async post(path: string) {
-			if (path.endsWith("/qemu")) created = true;
+		async post(path: string, params?: Record<string, unknown>) {
+			if (path.endsWith("/qemu")) {
+				// PVE refuses tags on create for a pool-scoped token (live 403).
+				expect(params?.tags).toBeUndefined();
+				created = true;
+			}
 			if (path.endsWith("/template")) {
 				expect(published).toBe(true);
 				converted = true;
 			}
 			return "task";
 		},
-		async put() {
+		async put(_path: string, params: Record<string, unknown>) {
+			if (params.tags !== undefined) {
+				tagged = true;
+				return;
+			}
 			expect(published).toBe(true);
 		},
 		async delete() {},

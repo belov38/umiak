@@ -65,7 +65,6 @@ export async function replicateTemplate(
 			...hw,
 			vmid: p.targetVmid,
 			name: `umiak-replica-${p.id}`,
-			tags: `umiak-tpl;${proof}`,
 			memory: 512,
 			cores: 1,
 			pool: "umiak",
@@ -73,12 +72,17 @@ export async function replicateTemplate(
 		if (task) await p.api.waitTask(p.targetNode, task);
 	}
 	let cfg = await p.api.get<Record<string, string | number>>(`${path}/config`);
-	if (
-		!String(cfg.tags ?? "")
-			.split(/[;, ]/)
-			.includes(proof)
-	)
-		throw new Error("template replica VMID collision");
+	const tagged = String(cfg.tags ?? "")
+		.split(/[;, ]/)
+		.includes(proof);
+	if (!tagged) {
+		// PVE checks tag permissions on /vms/<id> before the new VM joins the pool,
+		// so a pool-scoped token cannot tag in the create call: tag right after it.
+		if (cfg.name !== `umiak-replica-${p.id}`)
+			throw new Error("template replica VMID collision");
+		await p.api.put(`${path}/config`, { tags: `umiak-tpl;${proof}` });
+		cfg = await p.api.get<Record<string, string | number>>(`${path}/config`);
+	}
 	const lvs = await p.source.call<{ name: string; sizeBytes: number }[]>(
 		"lv.list",
 		{ tags: ["umiak-tpl"] },
