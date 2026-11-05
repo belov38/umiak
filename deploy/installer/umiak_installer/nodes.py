@@ -189,7 +189,8 @@ def _ask_storage(runner, node, fallback, ui):
 
 
 @_serialized
-def add_node(runner, current, bundle, node, *, ui, storage=None, ram_cap_mb=None, console=None, host=None):
+def add_node(runner, current, bundle, node, *, ui, storage=None, ram_cap_mb=None, console=None, host=None,
+             confirmed=False):
     day2._require_node(runner, current)
     day2._require_complete(current)
     _target(runner, node)
@@ -198,7 +199,7 @@ def add_node(runner, current, bundle, node, *, ui, storage=None, ram_cap_mb=None
     inventory = console.call("list")["nodes"]
     existing = next((n for n in inventory if n["name"] == node), {})
     storage = storage or existing.get("storage") or _ask_storage(runner, node, current.answers["storage"], ui)
-    ram_cap_mb = ram_cap_mb or existing.get("ramCapMb") or 4096
+    ram_cap_mb = ram_cap_mb or existing.get("ramCapMb") or current.answers.get("ram_cap_mb") or 4096
     if not isinstance(ram_cap_mb, int) or not 2048 <= ram_cap_mb <= 8192:
         raise InstallerError("Sandbox node RAM cap must be 2048-8192 MiB")
     cfg = {
@@ -218,19 +219,22 @@ def add_node(runner, current, bundle, node, *, ui, storage=None, ram_cap_mb=None
     secrets = runner.path(day2.SECRETS_DIR)
     known = secrets / "known_hosts"
     merged = _pinned(known.read_text(), node, report["sshHost"], report["hostKey"])
-    ui.say(f"Add sandbox node {node}: SSH {report['sshHost']}, storage {storage}, RAM cap {ram_cap_mb} MiB")
-    for check in report["checks"]:
-        if not check["ok"]:
-            ui.say(check["fix"]["description"])
-            for path, text in check["fix"]["files"].items():
-                ui.say(f"  write {path}: {text.strip()}")
-            for argv in check["fix"]["commands"]:
-                ui.say("  run: " + " ".join(argv))
-    ui.say(
-        "Install restricted umiak-node/config, extend Umiak ACLs/SDN membership, pin SSH host key; "
-        "no root key enters the control plane."
-    )
-    if not ui.confirm("Apply these node changes?"):
+    ui.say(f"Sandbox node {node} ({report['sshHost']}): storage {storage}, RAM limit {ram_cap_mb // 1024} GiB")
+    host_fixes = [check for check in report["checks"] if not check["ok"]]
+    for check in host_fixes:
+        ui.say(check["fix"]["description"])
+        for path, text in check["fix"]["files"].items():
+            ui.say(f"  write {path}: {text.strip()}")
+        for argv in check["fix"]["commands"]:
+            ui.say("  run: " + " ".join(argv))
+    ui.say(f"The installer adds the restricted Umiak node agent to {node} and joins it to the Umiak network.")
+    # The user already said yes to this node: ask again only for host fixes, and default to yes.
+    if confirmed and not host_fixes:
+        pass
+    elif confirmed and hasattr(ui, "ask_yes") and not getattr(ui, "yes", False):
+        if not ui.ask_yes("Apply the host changes above?"):
+            raise InstallerError("Cancelled; no sandbox node changes were applied")
+    elif not ui.confirm("Apply these node changes?"):
         raise InstallerError("Cancelled; no sandbox node changes were applied")
     staged_node = {
         "name": node,

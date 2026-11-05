@@ -419,7 +419,7 @@ class Flow:
                 continue
             self.step = f"Adding sandbox node {node}"
             try:
-                nodes.add_node(self.runner, self.current, self.bundle, node, ui=ui)
+                nodes.add_node(self.runner, self.current, self.bundle, node, ui=ui, confirmed=True)
                 ui.say(style.ok(f"Sandbox node {node} added."))
             except CommandError as error:
                 ui.say(style.error(describe_failure(self.step, error)))

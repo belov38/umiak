@@ -445,3 +445,20 @@ def test_new_node_storage_is_asked_from_that_nodes_lvm_thin_storages(tmp_path):
     assert any("No LVM-thin storage named vmdata on pve2; available: local-lvm, fast" in line for line in said)
     # Non-interactive: the control plane's storage, checked later by the node's inspect report.
     assert nodes._ask_storage(runner, "pve2", "vmdata", FakeUi(interactive=False)) == "vmdata"
+
+
+
+def test_node_offered_after_install_needs_no_second_confirmation(tmp_path):
+    # The offer's "Add pve2? [Y/n]" already confirmed: without host fixes there is no second prompt.
+    runner = FakeRunner(tmp_path)
+    secrets = runner.path("/var/lib/umiak-installer/secrets")
+    secrets.mkdir(parents=True)
+    (secrets / "known_hosts").write_text("")
+    host = Host()
+    host.call = lambda node, op, **data: {"checks": [], "sshHost": "192.168.68.11", "hostKey": "ssh-ed25519 new",
+                                          "mediaStorage": "local"}
+    ui = FakeUi()
+    with pytest.raises(InstallerError) as error:
+        nodes.add_node(runner, installed(), None, "pve2", ui=ui, console=Console(), host=host, confirmed=True)
+    assert "Cancelled" not in str(error.value)  # it went past the confirmation to the reservation
+    assert ui.prompts == []

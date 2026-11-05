@@ -374,7 +374,7 @@ def test_interactive_install_offers_the_other_cluster_nodes(env, monkeypatch):
     added = []
     monkeypatch.setattr(nodes, "candidates", lambda runner, current: ["pve2", "pve3"])
 
-    def add(runner, current, bundle, node, *, ui):
+    def add(runner, current, bundle, node, *, ui, confirmed=False):
         if node == "pve3":
             raise main.InstallerError("no LVM-thin storage")
         added.append(node)
