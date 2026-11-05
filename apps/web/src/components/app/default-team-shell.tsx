@@ -20,7 +20,6 @@ export async function DefaultTeamShell({
 			quickstart={process.env.UMIAK_QUICKSTART === "1"}
 			team={team}
 			member
-			logoutUrl={webEnv().logoutUrl}
 			ownerMode={webEnv().authMode === "owner"}
 		>
 			{children}

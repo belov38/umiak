@@ -21,8 +21,6 @@ describe("QUEUES (S6 §15.1)", () => {
 				"ctl-autostop",
 				"ctl-reconcile",
 				"ctl-cleanup",
-				"ctl-idp-sync",
-				"ctl-desktop-turn",
 			].sort(),
 		);
 		expect(Object.keys(QUEUES).sort()).toEqual([...QUEUE_NAMES].sort());
@@ -73,7 +71,6 @@ describe("QUEUES (S6 §15.1)", () => {
 			"ctl-autostop",
 			"ctl-reconcile",
 			"ctl-cleanup",
-			"ctl-idp-sync",
 		] as const) {
 			expect(QUEUES[q].policy).toBe("exclusive");
 			// A pod that dies mid-run must not block the queue until expiry.

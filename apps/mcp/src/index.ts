@@ -6,12 +6,10 @@ export {
 	type HttpOptions,
 } from "./http/app.ts";
 export {
-	EXP_MARGIN_MS,
 	MeCache,
 	type Principal,
 } from "./http/auth.ts";
 export { MAX_BODY_BYTES, MAX_CALLS_PER_PRINCIPAL } from "./http/limits.ts";
-export { protectedResourceMetadata } from "./http/prm.ts";
 export {
 	apiCallLogger,
 	createLogger,

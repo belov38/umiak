@@ -26,7 +26,6 @@
 		"@umiak/payload": "workspace:*",
 		"@umiak/proto": "workspace:*",
 		"hono": "4.13.14",
-		"jose": "6.2.14",
 		"pg": "8.23.1",
 		"pg-boss": "12.38.0",
 		"pino": "10.4.0",

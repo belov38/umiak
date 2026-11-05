@@ -1,6 +1,6 @@
 // Operator endpoints of S8 C3 and the block semantics over HTTP: block and
 // unblock of a sandbox and of a port, the all-teams list, 403 for everyone
-// but an operator's browser session (keys, Keycloak JWT of an operator,
+// but an operator's browser session (keys, owner session of an operator,
 // owners), `sandbox_blocked` / `port_blocked` on the forbidden actions, reads,
 // stop and delete still working, and the gateway's route answer.
 import { randomUUID } from "node:crypto";
@@ -95,7 +95,9 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 		ownerB = await personOf(w, teamB, "owner", opDeps);
 		owner = caller(ownerB.h, ownerB.headers);
 		// An operator who is a member of yet another team: no Umiak-Team needed.
-		const o = await personOf(w, await newTeam(db.pool), "member", opDeps);
+		const o = await personOf(w, await newTeam(db.pool), "member", opDeps, [
+			OPERATORS,
+		]);
 		operator = {
 			...o,
 			headers: { ...o.headers, "x-auth-request-groups": OPERATORS },

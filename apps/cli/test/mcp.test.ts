@@ -2,10 +2,10 @@
 // talked to over its stdio with a bare JSON-RPC peer. Every byte of its
 // stdout must be JSON-RPC. Against the MCP fake API (apps/mcp/test/fake-api)
 // for the list, filters, pinning and cancellation; against the CLI test world
-// (api + test OIDC) for the token refresh of parallel calls.
+// (API + owner ingress) for paired credentials.
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { generateApiKeySecret } from "@umiak/auth/api-key";
@@ -31,17 +31,15 @@ import {
 	type Json,
 	type RpcLines,
 	rpcLines,
-	toolAnswer,
 } from "../../mcp/test/helpers/rpc-lines.ts";
 import type { Bearer } from "../src/auth/token.ts";
 import { mcpCredentials } from "../src/commands/mcp-auth.ts";
 import { CLI_VERSION } from "../src/commands/version.ts";
-import { type CliWorld, startWorld } from "./helpers/api.ts";
 import { type CliHome, cliHome, runCli } from "./helpers/run-cli.ts";
 
 const CLI_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-function jwtClaims(token: string): Record<string, unknown> {
+function _jwtClaims(token: string): Record<string, unknown> {
 	return JSON.parse(
 		Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"),
 	);
@@ -530,88 +528,4 @@ describe("mcpCredentials", () => {
 		fail = false;
 		expect(await c.tokenProvider({ force: false })).toBe("k");
 	});
-});
-
-describe("umiak mcp with a Keycloak login", () => {
-	let w: CliWorld;
-	beforeAll(async () => {
-		// Fresh for 2 s only (the CLI refreshes 90 s before expiry).
-		w = await startWorld({ oidc: { deviceInterval: 0, accessTokenTtl: 92 } });
-	});
-	afterAll(async () => {
-		await w?.close();
-	});
-
-	async function loggedIn() {
-		const h = home();
-		const sub = `kc-${crypto.randomUUID()}`;
-		const claims = { sub, email: `${sub}@example.com` };
-		const login = await runCli(["login", "--no-browser", "--api-url", w.url], {
-			env: h.env,
-		});
-		expect(login.code, login.stderr).toBe(0);
-		const credFile = join(h.configDir, "credentials.json");
-		const entry = `default@${w.oidc.issuer}`;
-		const stored = () =>
-			JSON.parse(JSON.parse(readFileSync(credFile, "utf8"))[entry]) as {
-				accessToken: string;
-				expiresAt: string;
-			};
-		const store = (accessToken: string, expiresAt: string) => {
-			const all = JSON.parse(readFileSync(credFile, "utf8"));
-			all[entry] = JSON.stringify({ ...stored(), accessToken, expiresAt });
-			writeFileSync(credFile, JSON.stringify(all), { mode: 0o600 });
-		};
-		return { h, claims, stored, store };
-	}
-
-	async function twoParallelCalls(m: McpChild): Promise<void> {
-		const [a, b] = await Promise.all([
-			m.rpc.request("tools/call", { name: "templates_list", arguments: {} }),
-			m.rpc.request("tools/call", { name: "templates_list", arguments: {} }),
-		]);
-		const ra = toolAnswer(a);
-		const rb = toolAnswer(b);
-		expect(ra.isError, ra.text).toBe(false);
-		expect(rb.isError, rb.text).toBe(false);
-	}
-
-	it("two parallel calls with an access token due for refresh make exactly one refresh and both succeed", async () => {
-		const { h, stored } = await loggedIn();
-		const m = startMcp([], h.env);
-		await m.rpc.initialize();
-		expect(await toolNames(m.rpc)).toHaveLength(38);
-		// Wait until the newest stored access token is due for a refresh.
-		const due = Date.parse(stored().expiresAt) - 90_000;
-		await new Promise((r) =>
-			setTimeout(r, Math.max(0, due - Date.now()) + 300),
-		);
-		const refreshes = w.oidc.stats.refresh;
-		await twoParallelCalls(m);
-		expect(w.oidc.stats.refresh).toBe(refreshes + 1);
-		expect(await m.close()).toBe(0);
-		expectOnlyJsonRpc(m);
-	});
-
-	it("two parallel calls rejected with 401 token_expired (token fresh by its stored expiry) make exactly one forced refresh", async () => {
-		const { h, claims, store } = await loggedIn();
-		// The api accepts it for about 10 s more (60 s clock tolerance); the
-		// stored expiry says it is fresh for an hour, so only a 401 tells.
-		const token = await w.oidc.token(claims, { expiresIn: -50 });
-		store(token, new Date(Date.now() + 3_600_000).toISOString());
-		const refreshes = w.oidc.stats.refresh;
-		const m = startMcp([], h.env);
-		await m.rpc.initialize();
-		expect(await toolNames(m.rpc)).toHaveLength(38);
-		// GET /v1/me at the start still went through with this token.
-		expect(w.oidc.stats.refresh).toBe(refreshes);
-		const exp = Number(jwtClaims(token).exp) * 1000;
-		await new Promise((r) =>
-			setTimeout(r, Math.max(0, exp + 60_000 - Date.now()) + 1_000),
-		);
-		await twoParallelCalls(m);
-		expect(w.oidc.stats.refresh).toBe(refreshes + 1);
-		expect(await m.close()).toBe(0);
-		expectOnlyJsonRpc(m);
-	}, 60_000);
 });

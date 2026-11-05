@@ -303,10 +303,16 @@ describe.skipIf(skipPg())("environments (S8 §10.2)", () => {
 
 	it("an operator session writes the environments of a team it is not in (S8 §6.2, §6.4)", async () => {
 		const OPS = "umiak-operators";
-		const o = await personOf(w, await newTeam(db.pool), "member", {
-			identity: new PgIdentityStore({ pool: db.pool, operatorGroups: [OPS] }),
-			settings: testSettings({ UMIAK_OPERATOR_GROUPS: OPS }),
-		});
+		const o = await personOf(
+			w,
+			await newTeam(db.pool),
+			"member",
+			{
+				identity: new PgIdentityStore({ pool: db.pool, operatorGroups: [OPS] }),
+				settings: testSettings({ UMIAK_OPERATOR_GROUPS: OPS }),
+			},
+			[OPS],
+		);
 		const headers = {
 			...o.headers,
 			"x-auth-request-groups": OPS,
@@ -327,9 +333,13 @@ describe.skipIf(skipPg())("environments (S8 §10.2)", () => {
 		expect((await req("DELETE", `/v1/environments/${name}`)).status).toBe(204);
 		expect(await w.environments.get(w.teamId, name)).toBeNull();
 
-		// The same person without the operator group is refused.
-		const plain = await o.h.request("POST", "/v1/environments", {
-			headers: { ...o.headers, "umiak-team": encodeUuid("team", w.teamId) },
+		// A non-operator session is still refused.
+		const nonOperator = await personOf(w, await newTeam(db.pool), "member");
+		const plain = await nonOperator.h.request("POST", "/v1/environments", {
+			headers: {
+				...nonOperator.headers,
+				"umiak-team": encodeUuid("team", w.teamId),
+			},
 			json: { name: uniqueName("op") },
 		});
 		expect(plain.status).toBe(403);

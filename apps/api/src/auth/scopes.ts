@@ -87,8 +87,7 @@ export function requireOwnerUnlessKey(): MiddlewareHandler<ApiEnv> {
 
 /**
  * Operator-only routes (S8 C3): 403 `operator_required` unless the caller is
- * a platform operator's browser session (C6: never a key or a Keycloak
- * token). Runs before the path is resolved, so nothing about the sandbox
+ * a platform operator's browser session (C6: never a team key). Runs before the path is resolved, so nothing about the sandbox
  * leaks; core checks again.
  */
 export function requireOperator(): MiddlewareHandler<ApiEnv> {

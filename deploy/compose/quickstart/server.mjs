@@ -220,7 +220,6 @@ export function createQuickstartServer({
 					...meta,
 					authMode: "owner",
 					tenancy: "single",
-					oidc: null,
 					apiUrl: publicOrigin,
 					appUrl: publicOrigin,
 					ownerClaimed: await store.claimed(),

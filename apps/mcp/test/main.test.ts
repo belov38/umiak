@@ -25,17 +25,17 @@ const MAIN = join(
 
 describe("loadSettings", () => {
 	const base = {
+		UMIAK_LOCAL_ALLOWED_CIDRS: "127.0.0.0/8",
 		UMIAK_MCP_API_URL: "http://api:8080/",
 		UMIAK_MCP_PUBLIC_URL: "https://api.example.com/mcp",
 	};
 
 	it("has the defaults of spec 16.3", () => {
-		expect(loadSettings(base)).toEqual({
+		expect(loadSettings(base)).toMatchObject({
 			port: 8080,
 			opsPort: 9090,
 			apiUrl: "http://api:8080",
 			publicUrl: "https://api.example.com/mcp",
-			issuer: null,
 			allowedOrigins: [],
 			allowedHosts: [],
 			logLevel: "info",
@@ -65,7 +65,6 @@ describe("loadSettings", () => {
 			...base,
 			UMIAK_MCP_PORT: "18080",
 			UMIAK_MCP_OPS_PORT: "19090",
-			UMIAK_OIDC_ISSUER: "https://kc.example.com/realms/umiak/",
 			UMIAK_MCP_ALLOWED_ORIGINS:
 				"https://app.example.com, http://localhost:3000",
 			UMIAK_MCP_ALLOWED_HOSTS: "mcp.internal:8080,mcp",
@@ -74,7 +73,6 @@ describe("loadSettings", () => {
 		expect(s).toMatchObject({
 			port: 18080,
 			opsPort: 19090,
-			issuer: "https://kc.example.com/realms/umiak",
 			allowedOrigins: ["https://app.example.com", "http://localhost:3000"],
 			allowedHosts: ["mcp.internal:8080", "mcp"],
 			logLevel: "debug",
@@ -120,7 +118,11 @@ describe("node src/main.ts", () => {
 
 	async function start(env: Record<string, string>) {
 		const p = spawn(process.execPath, [MAIN], {
-			env: { PATH: process.env.PATH ?? "", ...env },
+			env: {
+				PATH: process.env.PATH ?? "",
+				UMIAK_LOCAL_ALLOWED_CIDRS: "127.0.0.0/8,::1/128",
+				...env,
+			},
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		child = p;
@@ -172,9 +174,7 @@ describe("node src/main.ts", () => {
 			body: "{}",
 		});
 		expect(noBearer.status).toBe(401);
-		expect(noBearer.headers.get("www-authenticate")).toBe(
-			'Bearer resource_metadata="http://127.0.0.1/.well-known/oauth-protected-resource/mcp"',
-		);
+		expect(noBearer.headers.has("www-authenticate")).toBe(false);
 
 		const client = new Client(TEST_CLIENT_INFO);
 		await client.connect(
@@ -229,11 +229,11 @@ describe("startMcp", () => {
 
 	function settings(apiUrl: string): Settings {
 		return {
+			ownerEnv: { UMIAK_LOCAL_ALLOWED_CIDRS: "127.0.0.0/8,::1/128" },
 			port: 0,
 			opsPort: 0,
 			apiUrl,
 			publicUrl: "http://127.0.0.1/mcp",
-			issuer: null,
 			allowedOrigins: [],
 			allowedHosts: ["127.0.0.1"],
 			logLevel: "info",

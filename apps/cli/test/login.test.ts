@@ -135,7 +135,7 @@ describe("umiak login", () => {
 		expect(r.code, r.stderr).toBe(0);
 		expect(r.last()).toMatchObject({
 			event: "logged_in",
-			me: { user: null, team: { id: w.teamId }, auth: { kind: "team_key" } },
+			me: { user: null, auth: { kind: "team_key" } },
 		});
 		const config = JSON.parse(
 			readFileSync(join(home.configDir, "config.json"), "utf8"),
@@ -144,7 +144,7 @@ describe("umiak login", () => {
 			apiUrl: w.url,
 			auth: "key",
 			credentialStore: "file",
-			tenancy: "teams",
+			tenancy: "single",
 			tenancyCheckedAt: expect.any(Number),
 		});
 		const t = await runCli(["auth", "token", "--json"], { env: home.env });
@@ -318,7 +318,7 @@ describe("umiak login", () => {
 	});
 });
 
-describe("--cacert / UMIAK_CA_FILE (self-signed TLS front for api and Keycloak)", () => {
+describe("--cacert / UMIAK_CA_FILE (self-signed TLS front for api and owner)", () => {
 	let tls: TlsFront;
 	let w: CliWorld;
 	let home: CliHome;

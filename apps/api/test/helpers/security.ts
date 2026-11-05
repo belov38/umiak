@@ -16,6 +16,7 @@ import {
 	createHarness,
 	type Harness,
 	type HarnessResponse,
+	harnessDeps,
 } from "./harness.ts";
 import { type Fixture, fresh, type RouteRequest } from "./route-table.ts";
 import { ed25519PublicKey } from "./ssh.ts";
@@ -59,6 +60,11 @@ export async function listen(app: Harness["app"]): Promise<{
 }> {
 	const { server } = createApiServer(app);
 	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+	harnessDeps
+		.get(app)
+		?.settings.ownerHosts.push(
+			`127.0.0.1:${(server.address() as AddressInfo).port}`,
+		);
 	return {
 		base: `ws://127.0.0.1:${(server.address() as AddressInfo).port}`,
 		async close() {
@@ -90,6 +96,7 @@ export async function personOf(
 	teamId: string,
 	role: "owner" | "member",
 	deps: Partial<ApiDeps> = {},
+	groups: string[] = [],
 ): Promise<Person> {
 	const sub = `sub-${randomUUID()}`;
 	const email = `${sub}@example.com`;
@@ -103,7 +110,11 @@ export async function personOf(
 		"INSERT INTO identity.memberships (user_id, team_id, role) VALUES ($1, $2, $3)",
 		[userId, teamId, role],
 	);
-	const h = createHarness({ listener: "proxied", deps: w.deps(deps) });
+	const h = createHarness({
+		listener: "proxied",
+		deps: w.deps(deps),
+		session: { user: sub, email, groups },
+	});
 	return {
 		userId,
 		h,

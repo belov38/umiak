@@ -65,6 +65,7 @@ describe("body limit", () => {
 		const res = await h.app.request(
 			new Request("http://api.test/v1/sandboxes", {
 				method: "POST",
+				headers: { authorization: "Bearer invalid" },
 				body: endless,
 				duplex: "half",
 			} as RequestInit),

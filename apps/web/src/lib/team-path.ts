@@ -27,10 +27,3 @@ export function switchTeamPath(pathname: string, teamId: string): string {
 			: undefined,
 	);
 }
-
-/** The sign-out link: oauth2-proxy, then the IdP logout page if configured (S8 §5.4). */
-export function signOutHref(logoutUrl: string | null): string {
-	return logoutUrl === null
-		? "/oauth2/sign_out"
-		: `/oauth2/sign_out?rd=${encodeURIComponent(logoutUrl)}`;
-}

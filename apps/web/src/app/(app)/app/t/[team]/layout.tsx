@@ -44,7 +44,6 @@ export default async function TeamLayout({
 			quickstart={process.env.UMIAK_QUICKSTART === "1"}
 			team={current}
 			member={session.teams.some((t) => t.id === team)}
-			logoutUrl={env.logoutUrl}
 			ownerMode={env.authMode === "owner"}
 		>
 			{children}

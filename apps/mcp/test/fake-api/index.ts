@@ -94,8 +94,8 @@ export interface FakeApi {
 export const FAKE_TOKENS = {
 	/** Team key, all scopes, team FAKE_TEAM. */
 	full: "umiak_fake_full",
-	/** A person (Keycloak token), all scopes, team FAKE_TEAM. */
-	oidc: "fake_oidc_user",
+	/** A person (paired owner credential), all scopes, team FAKE_TEAM. */
+	owner: "fake_owner_user",
 	/** Team key with the `read-only` preset. */
 	readOnly: "umiak_fake_readonly",
 	/** Team key, all scopes, team OTHER_TEAM. */
@@ -168,9 +168,9 @@ export async function startFakeApi(o: FakeApiOptions = {}): Promise<FakeApi> {
 			},
 		],
 		[
-			FAKE_TOKENS.oidc,
+			FAKE_TOKENS.owner,
 			{
-				kind: "oidc",
+				kind: "session",
 				scopes: [...FULL_SCOPES],
 				teamId: FAKE_TEAM,
 				userEmail: "user@example.com",
@@ -333,7 +333,7 @@ export async function startFakeApi(o: FakeApiOptions = {}): Promise<FakeApi> {
 		) {
 			throw new FakeApiError(
 				401,
-				principal.kind === "oidc" ? "token_expired" : "api_key_expired",
+				principal.kind === "session" ? "token_expired" : "api_key_expired",
 				"the credential has expired",
 			);
 		}

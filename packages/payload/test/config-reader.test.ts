@@ -44,7 +44,6 @@ async function setDefaults(
 		data: { ...rest, defaultQuota },
 		overrideAccess: true,
 	});
-
 }
 
 /**
@@ -305,7 +304,6 @@ describe.skipIf(skipPg())("PayloadConfigReader", () => {
 			});
 			expect((await r.defaults()).publicPortsEnabled).toBe(true);
 			expect((await r.defaults()).publicDesktopEnabled).toBe(true);
-
 		});
 
 		it("drops the cache when LISTEN is re-established", async () => {

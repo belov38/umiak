@@ -36,7 +36,7 @@ export interface ApiDeps {
 	identityEvents: IdentityListener;
 	/** Team keys by secret hash (30 s / 5 s, flushed by identityEvents). */
 	keyCache: KeyCache;
-	/** Cached resolveSession for browser sessions and Keycloak tokens. */
+	/** Cached resolveSession for browser sessions and team keys. */
 	sessions: SessionResolver;
 	/** Accepted service tokens of the internal listener. */
 	serviceTokens: ServiceTokens;

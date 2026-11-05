@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { parseWebEnv, WebEnvError } from "../src/lib/env.ts";
-import { signOutHref, switchTeamPath } from "../src/lib/team-path.ts";
+import { switchTeamPath } from "../src/lib/team-path.ts";
 
 const OK = {
+	UMIAK_LOCAL_ALLOWED_CIDRS: "127.0.0.0/8",
 	DATABASE_URL: "postgres://web:pw@postgres:5432/umiak",
 	PAYLOAD_SECRET: "0123456789abcdef0123",
 	UMIAK_APP_ORIGIN: "https://app.umiak.example.com",
@@ -14,7 +15,9 @@ const OK = {
 describe("parseWebEnv (S8 §14.1)", () => {
 	it("parses and normalizes", () => {
 		expect(parseWebEnv(OK)).toEqual({
-			authMode: "oidc",
+			authMode: "owner",
+			localAllowedCidrs: "127.0.0.0/8",
+			localDeniedCidrs: "10.88.0.0/24",
 			databaseUrl: OK.DATABASE_URL,
 			payloadSecret: OK.PAYLOAD_SECRET,
 			appOrigin: "https://app.umiak.example.com",
@@ -23,12 +26,7 @@ describe("parseWebEnv (S8 §14.1)", () => {
 			previewScheme: "https",
 			previewPort: 443,
 			apiPublicUrl: "https://api.umiak.example.com",
-			logoutUrl: null,
 		});
-		expect(
-			parseWebEnv({ ...OK, UMIAK_LOGOUT_URL: "https://kc.example.com/logout" })
-				.logoutUrl,
-		).toBe("https://kc.example.com/logout");
 	});
 
 	it("reports every problem at once", () => {
@@ -90,12 +88,5 @@ describe("team paths (S8 §9.2)", () => {
 			"/app/t/team_b",
 		);
 		expect(switchTeamPath("/app/account", "team_b")).toBe("/app/t/team_b");
-	});
-
-	it("sign-out goes through oauth2-proxy, then the IdP logout", () => {
-		expect(signOutHref(null)).toBe("/oauth2/sign_out");
-		expect(signOutHref("https://kc.example.com/logout?x=1")).toBe(
-			"/oauth2/sign_out?rd=https%3A%2F%2Fkc.example.com%2Flogout%3Fx%3D1",
-		);
 	});
 });

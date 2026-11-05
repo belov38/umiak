@@ -8,7 +8,7 @@ import { APPEARANCE_BOOTSTRAP } from "./appearance";
 import { LOCKUP_SVG } from "./brand-markup";
 // Request checks of proxy.ts (S8 §5.1, §5.6), kept free of Next.js types so
 // they are unit-tested directly.
-//   - every path but /healthz needs X-Auth-Request-Email (only oauth2-proxy
+//   - every path but /healthz needs X-Auth-Request-Email (only owner ingress
 //     sets it; without it the request did not come through the proxy): 401;
 //   - an unsafe method needs Origin == UMIAK_APP_ORIGIN (server actions,
 //     Payload REST, admin uploads): 403. A missing Origin is refused too;
@@ -44,9 +44,6 @@ export function page(title: string, text: string): string {
 	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} — Umiak</title><style>${ACCESS_CSS}</style><script>${APPEARANCE_BOOTSTRAP}</script></head><body><main class="umiak-access"><a href="/app" aria-label="Umiak">${LOCKUP_SVG}</a><h1>${title}</h1><p>${text}</p></main></body></html>`;
 }
 
-/** Payload's /admin and REST: served to operators only. */
-const OPERATOR_PATH = /^\/(admin|cms-api)(\/|$)/;
-
 /**
  * Auth endpoints of the `users` collection that only make sense with the
  * local strategy or Payload JWTs (both off): refresh-token would issue a JWT
@@ -54,14 +51,6 @@ const OPERATOR_PATH = /^\/(admin|cms-api)(\/|$)/;
  */
 const DISABLED_AUTH =
 	/^\/cms-api\/users\/(login|refresh-token|first-register|forgot-password|reset-password|unlock|verify\/[^/]+|[^/]+\/api-key\/reveal)\/?$/;
-
-/** Groups of X-Auth-Request-Groups, parsed like `parseAuthHeaders` (S8 §5.2). */
-export function headerGroups(h: Headers): string[] {
-	return (h.get("x-auth-request-groups") ?? "")
-		.split(",")
-		.map((g) => g.trim())
-		.filter((g) => g !== "" && !g.startsWith("role:"));
-}
 
 export function guard(
 	r: GuardRequest,
@@ -74,11 +63,9 @@ export function guard(
 	},
 ): GuardDenial | null {
 	if (PUBLIC_PATHS.has(r.pathname)) return null;
-	const owner = o.authMode === "owner";
 	// Only the private owner ingress may reach Next; it replaces this header
 	// with its socket peer. X-Forwarded-For never authenticates web requests.
 	if (
-		owner &&
 		!isTrustedIngressClient(
 			r.headers.get("x-umiak-client-ip") ?? "",
 			ownerCidrSet({
@@ -96,36 +83,11 @@ export function guard(
 			),
 		};
 	}
-	const email = r.headers.get("x-auth-request-email")?.trim() ?? "";
-	if (!owner && email === "") {
-		return {
-			status: 401,
-			reason: "not_signed_in",
-			html: page(
-				"Not signed in",
-				"This page is only served through the sign-in proxy. Open the dashboard address and sign in.",
-			),
-		};
-	}
 	if (DISABLED_AUTH.test(r.pathname)) {
 		return {
 			status: 403,
 			reason: "endpoint_disabled",
-			html: page("Forbidden", "Sign-in goes through the sign-in proxy only."),
-		};
-	}
-	if (
-		!owner &&
-		OPERATOR_PATH.test(r.pathname) &&
-		!headerGroups(r.headers).some((g) => o.operatorGroups.includes(g))
-	) {
-		return {
-			status: 403,
-			reason: "operators_only",
-			html: page(
-				"Operators only",
-				'The admin is for platform operators. Open <a href="/app">the dashboard</a>.',
-			),
+			html: page("Forbidden", "Sign in through the owner ingress."),
 		};
 	}
 	if (!SAFE_METHODS.has(r.method.toUpperCase())) {

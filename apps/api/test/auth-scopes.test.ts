@@ -23,7 +23,7 @@ const TEAM = randomUUID();
 const READER = generateApiKeySecret();
 const WRITER = generateApiKeySecret();
 
-function harness(listener: "public" | "proxied" = "public") {
+function harness(listener: "public" | "proxied" = "public", user = "member") {
 	const identity = testIdentityStore({
 		keys: [
 			{ secret: READER, teamId: TEAM, scopes: ["files:read"] },
@@ -34,7 +34,11 @@ function harness(listener: "public" | "proxied" = "public") {
 			{ sub: "member", teams: [{ teamId: TEAM, name: "t", role: "member" }] },
 		],
 	});
-	const h = createHarness({ listener, deps: { identity } });
+	const h = createHarness({
+		listener,
+		deps: { identity },
+		session: { user, email: `${user}@example.com`, groups: [] },
+	});
 	h.app.get("/v1/__test/write", requireScope("files:write"), (c) =>
 		c.body(null, 204),
 	);
@@ -127,9 +131,13 @@ describe("requireHuman and requireOwner", () => {
 	});
 
 	it("an owner passes", async () => {
-		const r = await harness("proxied").request("GET", "/v1/__test/owner", {
-			headers: session("owner"),
-		});
+		const r = await harness("proxied", "owner").request(
+			"GET",
+			"/v1/__test/owner",
+			{
+				headers: session("owner"),
+			},
+		);
 		expect(r.status).toBe(204);
 	});
 });

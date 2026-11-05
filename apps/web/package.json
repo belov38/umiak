@@ -3,17 +3,15 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
-	"description": "Dashboard /app and Payload admin /admin (Next.js 16 + Payload 3) behind oauth2-proxy",
+	"description": "Owner dashboard /app and Payload admin /admin",
 	"scripts": {
-		"dev": "node dev/dev.ts",
+		"dev": "next dev",
 		"build": "next build",
 		"start": "node .next/standalone/apps/web/server.js",
 		"check:image": "node check-image.ts",
 		"generate:importmap": "NEXT_PHASE=phase-production-build PAYLOAD_CONFIG_PATH=src/payload.config.ts payload generate:importmap",
 		"test": "vitest run",
-		"test:e2e": "node e2e/run.ts",
-		"typecheck": "tsc --noEmit -p .",
-		"typecheck:e2e": "tsc --noEmit -p e2e"
+		"typecheck": "tsc --noEmit -p ."
 	},
 	"dependencies": {
 		"@fontsource-variable/funnel-display": "5.3.0",

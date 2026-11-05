@@ -1,7 +1,7 @@
 "use client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // Browser data access of /app (S8 §9.1): @umiak/sdk on the dashboard's own
-// origin (`/api`, the oauth2-proxy cookie is the credential, no token) and
+// origin (`/api`, the owner ingress cookie is the credential, no token) and
 // TanStack Query for caching, retries and background refresh.
 import { Umiak } from "@umiak/sdk";
 import {

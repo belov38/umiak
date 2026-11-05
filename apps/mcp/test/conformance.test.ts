@@ -74,11 +74,11 @@ it("passes the conformance server scenarios except the baseline", async () => {
 		http: {
 			allowedOrigins: [origin],
 			authenticate: async () => ({
-				token: FAKE_TOKENS.oidc,
-				kind: "oidc",
+				token: FAKE_TOKENS.owner,
+				kind: "session",
 				scopes: [...FULL_SCOPES],
 				expiresAt: null,
-				subject: "oidc:conformance",
+				subject: "session:conformance",
 			}),
 		},
 	});

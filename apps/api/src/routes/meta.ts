@@ -18,7 +18,6 @@ import { ERROR_RESPONSES, jsonResponse, NO_AUTH } from "../openapi/registry.ts";
 export const ANONYMOUS_ROUTES: ReadonlySet<string> = new Set([
 	"/v1/meta",
 	"/v1/openapi.json",
-	"/v1/docs",
 ]);
 
 export const MetaSchema = z
@@ -71,7 +70,7 @@ const getMeta = createRoute({
 	summary: "Platform information",
 	description:
 		"Public facts about this deployment: API and dashboard URLs, the domain of published ports, " +
-		"the Keycloak issuer for `umiak login`, the SSH endpoint with its host keys, and CLI versions. " +
+		"owner authentication, the SSH endpoint with its host keys, and CLI versions. " +
 		"Needs no authentication; clients call it first to configure themselves.",
 	tags: ["meta"],
 	security: NO_AUTH,
@@ -87,7 +86,7 @@ const getOpenApi = createRoute({
 	operationId: "meta.openapi",
 	summary: "OpenAPI document",
 	description:
-		"This OpenAPI 3.1 document, with the server URL and Keycloak issuer of this deployment. " +
+		"This OpenAPI 3.1 document, with the server URL of this deployment. " +
 		"Needs no authentication. SDKs are generated from it.",
 	tags: ["meta"],
 	security: NO_AUTH,
@@ -96,25 +95,6 @@ const getOpenApi = createRoute({
 			z.record(z.string(), z.unknown()),
 			"OpenAPI 3.1 document",
 		),
-		...ERROR_RESPONSES,
-	},
-});
-
-const getDocs = createRoute({
-	method: "get",
-	path: "/v1/docs",
-	operationId: "meta.docs",
-	summary: "API reference page",
-	description:
-		"Interactive HTML reference (Scalar, pinned with SRI) rendered from `/v1/openapi.json`. Needs no " +
-		"authentication. Public listener only.",
-	tags: ["meta"],
-	security: NO_AUTH,
-	responses: {
-		200: {
-			description: "HTML page",
-			content: { "text/html": { schema: z.string() } },
-		},
 		...ERROR_RESPONSES,
 	},
 });
@@ -137,51 +117,6 @@ export function metaOf(deps: ApiDeps): Meta {
 	};
 }
 
-/**
- * The Scalar standalone bundle: an exact version with its SRI hash
- * (sha384 of dist/browser/standalone.js of @scalar/api-reference 1.76.3),
- * so a changed file on the CDN does not run. Bundling it would add the
- * package's whole dependency tree (Vue and ~30 packages) to the api.
- */
-const SCALAR_BUNDLE =
-	"https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.76.3/dist/browser/standalone.js";
-const SCALAR_BUNDLE_SRI =
-	"sha384-H/jJ+XQ0S+5wKmVCrODlHKRKyDzdSBog4sUPc+AQTZddtU1FyQsiCrA47EUte2Fd";
-
-/**
- * Only the pinned bundle runs (no inline script, no eval); it injects its
- * styles; the document and "try it" calls go to this origin.
- */
-const DOCS_CSP = [
-	"default-src 'none'",
-	`script-src ${SCALAR_BUNDLE}`,
-	"style-src 'unsafe-inline'",
-	"img-src 'self' data:",
-	"font-src 'self' data:",
-	"connect-src 'self'",
-	"base-uri 'none'",
-	"form-action 'none'",
-	"frame-ancestors 'none'",
-].join("; ");
-
-const DOCS_CONFIG = JSON.stringify({ withDefaultFonts: false });
-
-// Relative URL: works under /v1/docs and behind a path prefix. The first
-// script element only holds the configuration (type application/json).
-const DOCS_HTML = `<!doctype html>
-<html>
-  <head>
-    <title>umiak API</title>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-  </head>
-  <body>
-    <script id="api-reference" type="application/json" data-url="openapi.json" data-configuration="${DOCS_CONFIG.replaceAll('"', "&quot;")}"></script>
-    <script src="${SCALAR_BUNDLE}" integrity="${SCALAR_BUNDLE_SRI}" crossorigin="anonymous"></script>
-  </body>
-</html>
-`;
-
 export interface MetaRouteOptions {
 	/** Serve GET /v1/docs (the public listener only). */
 	docs: boolean;
@@ -190,7 +125,7 @@ export interface MetaRouteOptions {
 export function registerMetaRoutes(
 	app: ApiApp,
 	deps: ApiDeps,
-	o: MetaRouteOptions = { docs: true },
+	_o: MetaRouteOptions = { docs: true },
 ): void {
 	const meta = metaOf(deps);
 	app.openapi(getMeta, (c) => c.json(meta, 200));
@@ -202,9 +137,4 @@ export function registerMetaRoutes(
 		});
 		return c.json(doc, 200);
 	});
-
-	if (!o.docs || deps.settings.authMode === "owner") return;
-	app.openapi(getDocs, (c) =>
-		c.html(DOCS_HTML, 200, { "Content-Security-Policy": DOCS_CSP }),
-	);
 }

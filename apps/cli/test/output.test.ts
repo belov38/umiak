@@ -203,7 +203,7 @@ describe("umiak against the api", () => {
 		expect(r.code, r.stderr).toBe(0);
 		const me = JSON.parse(r.stdout);
 		expect(me.user).toBeNull();
-		expect(me.team.id).toBe(w.teamId);
+		expect(me).not.toHaveProperty("team");
 		expect(me.auth.kind).toBe("team_key");
 		expect(r.stdout.trimEnd().split("\n")).toHaveLength(1);
 	});
@@ -211,13 +211,11 @@ describe("umiak against the api", () => {
 	it("whoami in a terminal prints text; --json there prints JSON", async () => {
 		const t = await runCli(["whoami"], { env: keyEnv(), tty: true });
 		expect(t.code).toBe(0);
-		expect(t.stdout).toMatch(
-			/^team key in team .* \(team_[0-9a-z]{26}\); auth: team_key\n$/,
-		);
+		expect(t.stdout).toBe("API key; auth: API key\n");
 		const j = await runCli(["whoami", "--json"], { env: keyEnv(), tty: true });
-		expect(JSON.parse(j.stdout).team.id).toBe(w.teamId);
+		expect(JSON.parse(j.stdout)).not.toHaveProperty("team");
 		const h = await runCli(["--human", "whoami"], { env: keyEnv() });
-		expect(h.stdout).toMatch(/^team key in team /);
+		expect(h.stdout).toBe("API key; auth: API key\n");
 	});
 
 	it("an API error is the last stdout line with requestId; 401 exits 4", async () => {

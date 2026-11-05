@@ -108,7 +108,6 @@ export function emptyEnvironmentStore(): EnvironmentStore {
  * - identity: PgIdentityStore over `pool` if given, else `testIdentityStore`
  *   that knows `TEST_API_KEY` (all scopes, team `TEST_TEAM_ID`);
  * - identityEvents: without a notifier (never emits, ready);
- * - oidc: a verifier when the settings have UMIAK_OIDC_ISSUER;
  * - serviceTokens: none accepted;
  * - svc: `unconfiguredService()`, jobs: a RecordingJobSender,
  *   config: an empty StaticConfigReader,

@@ -33,7 +33,7 @@ export interface ServerOptions {
 	readOnly?: boolean;
 	/** null or absent: unknown, listed as a person (every tool). */
 	principal?: {
-		kind: "oidc" | "team_key" | "session";
+		kind: "team_key" | "session";
 		scopes: string[];
 	} | null;
 	/** Sandbox id or slug every call is pinned to. */

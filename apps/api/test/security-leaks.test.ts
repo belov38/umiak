@@ -1,6 +1,6 @@
 // Secret leak matrix (S7 §2 anti-goal 3, §8.3, global constraints): marker
 // values in env, secrets and secret files (raw and base64), API key
-// secrets, port tokens, bearer tokens (team keys and a Keycloak JWT) and
+// secrets, port tokens, bearer tokens (team keys and a owner session) and
 // port SSO codes go through create, fork, resume, PUT/PATCH /env,
 // environments, commands, api-keys, ports and the SSO exchange, with
 // Idempotency-Keys and real pg-boss jobs. Then:
@@ -310,7 +310,7 @@ describe.skipIf(skipPg())("secrets never leak", () => {
 			}),
 		);
 
-		// API keys: issued by the owner (session) and by a Keycloak user (JWT)
+		// API keys: issued by the owner (session) and by a paired owner
 		const issue = async (hh: Harness, headers: Record<string, string>) => {
 			const r = await call(hh, "POST", "/v1/api-keys", {
 				json: { name: `leak-${RUN}`, preset: "ci" },

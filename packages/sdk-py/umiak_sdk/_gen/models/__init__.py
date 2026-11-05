@@ -200,7 +200,6 @@ from .me_team_role_type_3_type_1 import MeTeamRoleType3Type1
 from .me_user_type_0 import MeUserType0
 from .meta import Meta
 from .meta_auth_mode import MetaAuthMode
-from .meta_oidc_type_0 import MetaOidcType0
 from .meta_openapi_response_200 import MetaOpenapiResponse200
 from .meta_preview_scheme import MetaPreviewScheme
 from .meta_ssh import MetaSsh
@@ -476,7 +475,6 @@ __all__ = (
     "MeAuthScopesItem",
     "Meta",
     "MetaAuthMode",
-    "MetaOidcType0",
     "MetaOpenapiResponse200",
     "MetaPreviewScheme",
     "MetaSsh",

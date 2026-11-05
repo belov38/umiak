@@ -43,7 +43,7 @@ async function setup(
 	});
 	const umiak = new Umiak({
 		baseUrl: api.url,
-		apiKey: o.token ?? FAKE_TOKENS.oidc,
+		apiKey: o.token ?? FAKE_TOKENS.owner,
 		env: {},
 	});
 	const stdin = new PassThrough();

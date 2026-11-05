@@ -33,7 +33,6 @@ export const NON_JSON_SUCCESS = [
 	"files.downloadArchive",
 	"files.downloadHead",
 	"files.uploadOffset",
-	"meta.docs",
 	"ports.delete",
 	"ptys.connect",
 	"ptys.resize",
@@ -46,11 +45,7 @@ export const NON_JSON_SUCCESS = [
  * be validated: HEAD answers (errors included) have no body, and the API
  * reference page is HTML without an error path.
  */
-export const NO_JSON_BODY = [
-	"files.downloadHead",
-	"files.uploadOffset",
-	"meta.docs",
-];
+export const NO_JSON_BODY = ["files.downloadHead", "files.uploadOffset"];
 
 const METHODS = ["get", "put", "post", "delete", "patch", "head", "options"];
 const JSON_TYPE = /^application\/((.+\+)?json|x-ndjson)$/i;

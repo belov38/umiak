@@ -1,6 +1,6 @@
 // WebSocket upgrades of a listener app (S7 §10.2). An upgrade request goes
 // through the app like any request: request id, logs, metrics, the
-// listener's authentication (Bearer; oauth2-proxy headers, Origin and
+// listener's authentication (Bearer; owner ingress headers, Origin and
 // `?team=` on proxied), scopes and validation. A route that accepts it
 // calls `acceptWebSocket(c, ...)`; anything else the app answers (401,
 // 403 origin_forbidden, 400, 429, ...) is written to the socket as a full

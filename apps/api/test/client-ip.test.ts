@@ -20,7 +20,7 @@ describe("TrustedProxies.clientOf", () => {
 		expect(p.clientOf("172.18.0.1", "6.6.6.6, 100.101.102.103")).toBe(
 			"100.101.102.103",
 		);
-		// Two trusted proxies (Serve to Docker, then oauth2-proxy).
+		// Two trusted proxies (Serve to Docker, then owner ingress).
 		expect(p.clientOf("172.18.0.5", "100.101.102.103, 172.18.0.1")).toBe(
 			"100.101.102.103",
 		);
@@ -71,6 +71,7 @@ describe("request log clientIp on a real socket", () => {
 		await new Promise<void>((r) => server.once("listening", () => r()));
 		try {
 			const port = (server.address() as AddressInfo).port;
+			h.deps.settings.ownerHosts.push(`127.0.0.1:${port}`);
 			const res = await fetch(`http://127.0.0.1:${port}/v1/meta`, { headers });
 			expect(res.status).toBe(200);
 		} finally {

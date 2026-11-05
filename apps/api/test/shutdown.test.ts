@@ -90,7 +90,7 @@ function keepAlive(port: number) {
 	return {
 		closed,
 		async request(path: string): Promise<string> {
-			sock.write(`GET ${path} HTTP/1.1\r\nHost: x\r\n\r\n`);
+			sock.write(`GET ${path} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n\r\n`);
 			for (;;) {
 				const res = take();
 				if (res !== null) return res;
@@ -130,10 +130,13 @@ describe.skipIf(skipPg())("api shutdown (SIGTERM)", () => {
 			UMIAK_API_METRICS_PORT: "0",
 		});
 		const deps = makeTestDeps(w.deps({ identityEvents: events, settings }));
-		return startApi(settings, deps, {
+		const api = await startApi(settings, deps, {
 			host: "127.0.0.1",
 			...(graceMs === undefined ? {} : { graceMs }),
 		});
+		for (const port of [api.ports.public, api.ports.proxied])
+			if (port !== null) api.deps.settings.ownerHosts.push(`127.0.0.1:${port}`);
+		return api;
 	}
 
 	function client(api: RunningApi) {

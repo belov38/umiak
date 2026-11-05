@@ -219,9 +219,6 @@ importers:
       hono:
         specifier: 4.13.14
         version: 4.13.14
-      jose:
-        specifier: 6.2.14
-        version: 6.2.14
       pg:
         specifier: 8.23.1
         version: 8.23.1

@@ -25,7 +25,7 @@ export interface SessionIdentity {
 	isOperator: boolean;
 }
 
-/** Identity claims from oauth2-proxy headers or Keycloak JWT claims. */
+/** Identity claims from owner ingress headers or owner session claims. */
 export interface SessionHeaders {
 	email: string;
 	/** IdP `sub`; resolveSession throws IdentityError("subject_required") without it. */

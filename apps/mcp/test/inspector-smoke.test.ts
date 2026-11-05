@@ -53,7 +53,7 @@ describe("inspector --cli against umiak mcp", () => {
 		// A hermetic home for the CLI: no profile, the file credential store.
 		const env = {
 			UMIAK_API_URL: api.url,
-			UMIAK_API_KEY: FAKE_TOKENS.oidc,
+			UMIAK_API_KEY: FAKE_TOKENS.owner,
 			HOME: dir,
 			XDG_CONFIG_HOME: join(dir, "config"),
 			XDG_STATE_HOME: join(dir, "state"),

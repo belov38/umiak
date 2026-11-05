@@ -72,9 +72,9 @@ describe("selectTools", () => {
 		).toEqual([]);
 	});
 
-	it("a person (oidc, session) or an unknown principal sees everything", () => {
+	it("a person (owner session) or an unknown principal sees everything", () => {
 		for (const principal of [
-			{ kind: "oidc" as const, scopes: [] },
+			{ kind: "session" as const, scopes: [] },
 			{ kind: "session" as const, scopes: [] },
 			null,
 		]) {

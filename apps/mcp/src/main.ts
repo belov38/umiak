@@ -98,7 +98,6 @@ export async function startMcp(
 		...(settings.ownerEnv ? { ownerEnv: settings.ownerEnv } : {}),
 		apiUrl: settings.apiUrl,
 		publicUrl: settings.publicUrl,
-		issuer: settings.issuer,
 		allowedHosts: settings.allowedHosts,
 		allowedOrigins: settings.allowedOrigins,
 		log: o.log,

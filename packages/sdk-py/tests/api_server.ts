@@ -230,6 +230,10 @@ async function main() {
 	}
 
 	const proxyPort = await listen(proxy);
+	deps.settings.ownerHosts.push(
+		`127.0.0.1:${proxyPort}`,
+		`127.0.0.1:${apiPort}`,
+	);
 
 	const coreCommandId = (id: string) => id.slice(4).toUpperCase();
 	const sandboxRow = async (slug: string) => {

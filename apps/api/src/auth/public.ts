@@ -1,7 +1,5 @@
-// Authentication of the public listener (S7 §7.1, §7.2, §7.10):
-// `Authorization: Bearer` with a team key (`umiak_`) or a Keycloak access
-// token. oauth2-proxy headers are removed before anything else, cookies are
-// never read.
+// Public API: scoped team API keys or the owner identity admitted by the private ingress.
+// Client-supplied identity headers are discarded before authentication.
 import { apiKeyHash, classifyBearer, isWellFormedApiKey } from "@umiak/auth";
 import type { Context, MiddlewareHandler } from "hono";
 import type { ApiDeps, ApiEnv } from "../deps.ts";
@@ -17,7 +15,7 @@ import {
 } from "./principal.ts";
 import { requestedTeam } from "./proxied.ts";
 
-/** Headers only oauth2-proxy may set; on the public host they are forged. */
+/** Headers only owner ingress may set; on the public host they are forged. */
 export function isProxyIdentityHeader(name: string): boolean {
 	const n = name.toLowerCase();
 	return (

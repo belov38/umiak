@@ -686,6 +686,7 @@ describe.skipIf(skipPg())("stream registry over HTTP and NOTIFY", () => {
 		server.on("connection", (s) => s.once("close", () => peerGone++));
 		await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 		const port = (server.address() as AddressInfo).port;
+		deps.settings.ownerHosts.push(`127.0.0.1:${port}`);
 		const detached = await h.request("POST", sb.commands, {
 			json: { mode: "detached", command: "sleep 3" },
 		});
@@ -711,7 +712,7 @@ describe.skipIf(skipPg())("stream registry over HTTP and NOTIFY", () => {
 				sock.write(
 					[
 						line,
-						"host: test",
+						`host: 127.0.0.1:${port}`,
 						`authorization: Bearer ${k.secret}`,
 						...rest,
 					].join("\r\n"),

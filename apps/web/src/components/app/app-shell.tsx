@@ -38,13 +38,8 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { NavItem } from "@/components/ui/nav-item";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@/components/ui/tooltip";
 import type { AppTeam } from "@/lib/app-session";
-import { signOutHref, switchTeamPath, teamPath } from "@/lib/team-path";
+import { switchTeamPath, teamPath } from "@/lib/team-path";
 import { cn } from "@/lib/utils";
 import { OwnerModeContext } from "./session-context";
 
@@ -58,7 +53,6 @@ const NAV = [
 export function AppShell({
 	team,
 	member,
-	logoutUrl,
 	ownerMode = false,
 	quickstart = false,
 	children,
@@ -66,7 +60,6 @@ export function AppShell({
 	team: AppTeam;
 	/** False when an operator looks at a team they are not in. */
 	member: boolean;
-	logoutUrl: string | null;
 	ownerMode?: boolean;
 	quickstart?: boolean;
 	children: React.ReactNode;
@@ -317,20 +310,6 @@ export function AppShell({
 							<DropdownMenuItem asChild>
 								<Link href="/app/account">Account</Link>
 							</DropdownMenuItem>
-							{!ownerMode && (
-								<Tooltip>
-									<TooltipTrigger asChild>
-										<DropdownMenuItem asChild>
-											{/* oauth2-proxy route: a full page load. */}
-											<a href={signOutHref(logoutUrl)}>Sign out</a>
-										</DropdownMenuItem>
-									</TooltipTrigger>
-									<TooltipContent side="left" className="max-w-64">
-										Signs you out of the single sign-on session too: the CLI
-										will ask for `umiak login` again.
-									</TooltipContent>
-								</Tooltip>
-							)}
 						</DropdownMenuContent>
 					</DropdownMenu>
 				)}

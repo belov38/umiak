@@ -26,12 +26,7 @@ export {
 	tbl,
 	uniqueViolation,
 } from "./identity/db.ts";
-export {
-	AUTH_HEADERS,
-	type HeaderSource,
-	isRoleEntry,
-	parseAuthHeaders,
-} from "./identity/headers.ts";
+export type { HeaderSource } from "./identity/headers.ts";
 export {
 	LAST_LOGIN_INTERVAL_MS,
 	type ResolveSessionOptions,

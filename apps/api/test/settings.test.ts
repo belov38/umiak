@@ -61,7 +61,7 @@ describe("loadSettings", () => {
 			sshLoginCaKeyFile: null,
 			gatewayTokenFile: null,
 			identityFile: null,
-			operatorGroups: [],
+			operatorGroups: ["umiak-local-operator"],
 			trustedProxyCidrs: [],
 			rate: { rps: 20, burst: 100, startsPerMinute: 30 },
 			maxStreams: 100,
@@ -71,7 +71,7 @@ describe("loadSettings", () => {
 		expect(s.cursorKey.length).toBeGreaterThanOrEqual(32);
 	});
 
-	it("parses csv lists, ports, booleans and the OIDC block", () => {
+	it("parses csv lists, ports, booleans and the owner settings", () => {
 		const s = loadSettings({
 			...TEST_ENV,
 			UMIAK_API_PUBLIC_PORT: "18080",
@@ -83,7 +83,11 @@ describe("loadSettings", () => {
 		});
 		expect(s.publicPort).toBe(18080);
 		expect(s.proxiedEnabled).toBe(false);
-		expect(s.operatorGroups).toEqual(["umiak-operators", "admins"]);
+		expect(s.operatorGroups).toEqual([
+			"umiak-operators",
+			"admins",
+			"umiak-local-operator",
+		]);
 		expect(s.trustedProxyCidrs).toEqual(["10.0.0.0/8", "fd00::/8"]);
 
 		expect(s.sshHost).toBe("ssh.other.test");

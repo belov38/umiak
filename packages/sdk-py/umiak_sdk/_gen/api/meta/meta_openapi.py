@@ -49,8 +49,8 @@ def sync_detailed(
 ) -> Response[Error | MetaOpenapiResponse200]:
     """OpenAPI document
 
-     This OpenAPI 3.1 document, with the server URL and Keycloak issuer of this deployment. Needs no
-    authentication. SDKs are generated from it.
+     This OpenAPI 3.1 document, with the server URL of this deployment. Needs no authentication. SDKs are
+    generated from it.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -75,8 +75,8 @@ def sync(
 ) -> Error | MetaOpenapiResponse200 | None:
     """OpenAPI document
 
-     This OpenAPI 3.1 document, with the server URL and Keycloak issuer of this deployment. Needs no
-    authentication. SDKs are generated from it.
+     This OpenAPI 3.1 document, with the server URL of this deployment. Needs no authentication. SDKs are
+    generated from it.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -97,8 +97,8 @@ async def asyncio_detailed(
 ) -> Response[Error | MetaOpenapiResponse200]:
     """OpenAPI document
 
-     This OpenAPI 3.1 document, with the server URL and Keycloak issuer of this deployment. Needs no
-    authentication. SDKs are generated from it.
+     This OpenAPI 3.1 document, with the server URL of this deployment. Needs no authentication. SDKs are
+    generated from it.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -121,8 +121,8 @@ async def asyncio(
 ) -> Error | MetaOpenapiResponse200 | None:
     """OpenAPI document
 
-     This OpenAPI 3.1 document, with the server URL and Keycloak issuer of this deployment. Needs no
-    authentication. SDKs are generated from it.
+     This OpenAPI 3.1 document, with the server URL of this deployment. Needs no authentication. SDKs are
+    generated from it.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

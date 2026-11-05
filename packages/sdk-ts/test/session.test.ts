@@ -1,5 +1,5 @@
 // Browser session mode (S8 §9.1): the dashboard calls the proxied listener
-// on its own origin; oauth2-proxy's cookie is the credential, so the SDK
+// on its own origin; owner ingress's cookie is the credential, so the SDK
 // sends no Authorization (the proxied listener refuses one) and needs no
 // credential chain.
 import { describe, expect, it } from "vitest";

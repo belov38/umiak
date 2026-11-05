@@ -23,7 +23,7 @@ export const Users: CollectionConfig = {
 	slug: "users",
 	auth: {
 		disableLocalStrategy: true,
-		// The oauth2-proxy headers, on every request (S8 §5.4).
+		// The owner ingress headers, on every request (S8 §5.4).
 		strategies: [ownerStrategy],
 	},
 	admin: {

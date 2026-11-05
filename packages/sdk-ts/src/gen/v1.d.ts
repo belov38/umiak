@@ -189,7 +189,7 @@ export interface paths {
         };
         /**
          * Platform information
-         * @description Public facts about this deployment: API and dashboard URLs, the domain of published ports, the Keycloak issuer for `umiak login`, the SSH endpoint with its host keys, and CLI versions. Needs no authentication; clients call it first to configure themselves.
+         * @description Public facts about this deployment: API and dashboard URLs, the domain of published ports, owner authentication, the SSH endpoint with its host keys, and CLI versions. Needs no authentication; clients call it first to configure themselves.
          */
         get: operations["meta.get"];
         put?: never;
@@ -209,7 +209,7 @@ export interface paths {
         };
         /**
          * OpenAPI document
-         * @description This OpenAPI 3.1 document, with the server URL and Keycloak issuer of this deployment. Needs no authentication. SDKs are generated from it.
+         * @description This OpenAPI 3.1 document, with the server URL of this deployment. Needs no authentication. SDKs are generated from it.
          */
         get: operations["meta.openapi"];
         put?: never;
@@ -303,7 +303,7 @@ export interface paths {
         put?: never;
         /**
          * Block a sandbox (operator)
-         * @description Blocks the sandbox: the gateway refuses all its ports and SSH, and for everyone but an operator only reads, stop and delete are allowed; anything else is 403 `forbidden` with details.reason `sandbox_blocked`. The reason and note are recorded. The same reason again changes nothing. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
+         * @description Blocks the sandbox: the gateway refuses all its ports and SSH, and for everyone but an operator only reads, stop and delete are allowed; anything else is 403 `forbidden` with details.reason `sandbox_blocked`. The reason and note are recorded. The same reason again changes nothing. Only a platform operator's browser session (the dashboard); API keys are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
          */
         post: operations["sandboxes.block"];
         delete?: never;
@@ -963,7 +963,7 @@ export interface paths {
         put?: never;
         /**
          * Block a hosted port (operator)
-         * @description Blocks the port: the gateway refuses it, and for everyone but an operator PUT, rotate-token and DELETE of the port are 403 `forbidden` (details.reason `port_blocked`), so the block survives an unpublish and a new publish. The same reason again changes nothing. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
+         * @description Blocks the port: the gateway refuses it, and for everyone but an operator PUT, rotate-token and DELETE of the port are 403 `forbidden` (details.reason `port_blocked`), so the block survives an unpublish and a new publish. The same reason again changes nothing. Only a platform operator's browser session (the dashboard); API keys are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
          */
         post: operations["ports.block"];
         delete?: never;
@@ -1003,7 +1003,7 @@ export interface paths {
         put?: never;
         /**
          * Unblock a hosted port (operator)
-         * @description Lifts the port's block at once; on a port that is not blocked nothing changes. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
+         * @description Lifts the port's block at once; on a port that is not blocked nothing changes. Only a platform operator's browser session (the dashboard); API keys are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
          */
         post: operations["ports.unblock"];
         delete?: never;
@@ -1183,7 +1183,7 @@ export interface paths {
         put?: never;
         /**
          * Unblock a sandbox (operator)
-         * @description Lifts the block at once; on a sandbox that is not blocked nothing changes. Only a platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
+         * @description Lifts the block at once; on a sandbox that is not blocked nothing changes. Only a platform operator's browser session (the dashboard); API keys are 403 `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
          */
         post: operations["sandboxes.unblock"];
         delete?: never;

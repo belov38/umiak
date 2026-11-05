@@ -1,5 +1,5 @@
 // GET /umiak-auth/authorize?label=&state= on the proxied listener (S7 §7.7,
-// S4 §8.4, S8 C7): the gateway sends a browser here, behind oauth2-proxy,
+// S4 §8.4, S8 C7): the gateway sends a browser here, behind owner ingress,
 // to open an `sso` port. A signed-in user allowed by the platform policy
 // gets a one-time code (32 random bytes, only its sha256 is stored, 60 s)
 // and a 302 to the callback of the port's host, built from the label, never

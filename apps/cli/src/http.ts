@@ -1,12 +1,12 @@
 // HTTP of the CLI outside the SDK transport: the CA-aware fetch every request
-// uses (api and Keycloak), and small JSON helpers for the anonymous calls
-// (`/v1/meta`, the OIDC endpoints).
+// uses (api and owner), and small JSON helpers for the anonymous calls
+// (`/v1/meta`, the owner pairing endpoints).
 //
 // `--cacert <file>` / UMIAK_CA_FILE: a PEM bundle of a private CA. The trusted
 // roots of the CLI's requests become Node's bundled roots
 // (`tls.rootCertificates`, Mozilla's list) plus that PEM: the OS trust store
 // is no longer consulted, so a corporate root installed only in the OS must
-// be in the PEM too. The bundled roots stay because Keycloak and the api may
+// be in the PEM too. The bundled roots stay because owner and the api may
 // sit behind different CAs. Bun takes it as `fetch(req, {tls: {ca}})`, and
 // the PTY WebSocket of `umiak shell` as `new WebSocket(url, {tls: {ca}})`.
 

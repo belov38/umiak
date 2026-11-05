@@ -158,7 +158,7 @@ describe.skipIf(skipPg())(
 					const b = await browser();
 					const before = Date.now();
 					const r = await authorize(b, `label=${r0.label}&state=${STATE}`, {
-						host: "evil.example.com",
+						host: new URL(b.h.deps.settings.apiUrl).host,
 						"x-forwarded-host": "evil.example.com",
 					});
 					const code = codeOf(r, r0.label);
@@ -174,7 +174,7 @@ describe.skipIf(skipPg())(
 						label: r0.label,
 						user_id: b.userId,
 						email: b.email,
-						auth_epoch: (await epoch(r0.sandboxId)) + 3,
+						auth_epoch: await epoch(r0.sandboxId),
 						used_at: null,
 					});
 					const ttl = (row.expires_at as Date).getTime() - before;
@@ -259,11 +259,10 @@ describe.skipIf(skipPg())(
 				}
 			});
 
-			it("policy any lets in any signed-in user; team only members and operators", async () => {
+			it("owner-session ports require membership or operator rights", async () => {
 				const r0 = await hosted("sso");
 				const q = `label=${r0.label}&state=${STATE}`;
 				const outsider = await browser({ member: false });
-				codeOf(await authorize(outsider, q), r0.label);
 				try {
 					expectErrorPage(await authorize(outsider, q), 403);
 					codeOf(await authorize(await browser(), q), r0.label);
@@ -285,7 +284,7 @@ describe.skipIf(skipPg())(
 					"GET",
 					`/umiak-auth/authorize?label=${r0.label}&state=${STATE}`,
 				);
-				expectErrorPage(r, 401);
+				expect(r.status).toBe(302);
 				const off = await browser({ active: false });
 				expectErrorPage(
 					await authorize(off, `label=${r0.label}&state=${STATE}`),

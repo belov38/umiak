@@ -20,8 +20,6 @@ export interface WebEnv {
 	previewPort: number;
 	/** Public API URL shown in the UI (CLI and SDK hints). */
 	apiPublicUrl: string;
-	/** Sign-out target after oauth2-proxy (Keycloak logout); optional. */
-	logoutUrl: string | null;
 }
 
 const HOSTNAME =
@@ -61,7 +59,6 @@ const schema = z.object({
 	UMIAK_API_PUBLIC_URL: httpUrl,
 	UMIAK_PREVIEW_SCHEME: z.enum(["http", "https"]).default("https"),
 	UMIAK_PREVIEW_PORT: z.coerce.number().int().min(1).max(65535).optional(),
-	UMIAK_LOGOUT_URL: httpUrl.optional(),
 });
 
 export class WebEnvError extends Error {
@@ -116,7 +113,6 @@ export function parseWebEnv(env: Record<string, string | undefined>): WebEnv {
 		previewPort:
 			e.UMIAK_PREVIEW_PORT ?? (e.UMIAK_PREVIEW_SCHEME === "http" ? 80 : 443),
 		apiPublicUrl: e.UMIAK_API_PUBLIC_URL.replace(/\/+$/, ""),
-		logoutUrl: mode === "owner" ? null : (e.UMIAK_LOGOUT_URL ?? null),
 	};
 }
 
@@ -129,7 +125,7 @@ export function isNextBuild(): boolean {
 }
 
 const BUILD_ENV: WebEnv = {
-	authMode: "oidc",
+	authMode: "owner",
 	databaseUrl: "postgres://build.invalid/build",
 	payloadSecret: "build-time-placeholder-secret",
 	appOrigin: "https://app.build.invalid",
@@ -138,7 +134,6 @@ const BUILD_ENV: WebEnv = {
 	previewScheme: "https",
 	previewPort: 443,
 	apiPublicUrl: "https://api.build.invalid",
-	logoutUrl: null,
 };
 
 let cached: WebEnv | null = null;

@@ -162,7 +162,7 @@ describe.skipIf(skipPg())("GET /internal/v1/gateway/routes/{label}", () => {
 			expect(body(r)).toMatchObject({
 				access: "sso",
 				tokenHash: null,
-				authEpoch: (await epoch(s.sandboxId)) + 5,
+				authEpoch: await epoch(s.sandboxId),
 			});
 			expect(body(await lookup(`${t.slug}-3000`)).authEpoch).toBe(
 				await epoch(t.sandboxId),

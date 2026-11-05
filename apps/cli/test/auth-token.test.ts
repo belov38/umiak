@@ -27,7 +27,7 @@ const MAIN = join(
 describe("umiak auth token", () => {
 	let w: CliWorld;
 	let home: CliHome;
-	let sub: string;
+	let _sub: string;
 	beforeAll(async () => {
 		w = await startWorld();
 	});
@@ -36,7 +36,7 @@ describe("umiak auth token", () => {
 	});
 	beforeEach(async () => {
 		home = cliHome();
-		sub = `kc-${crypto.randomUUID()}`;
+		_sub = `kc-${crypto.randomUUID()}`;
 		const r = await runCli(["login", "--no-browser", "--api-url", w.url], {
 			env: home.env,
 		});
@@ -106,7 +106,7 @@ describe("umiak auth token", () => {
 			env: home.env,
 		});
 		const me = await umiak.me();
-		expect(me.user?.email).toBe(`${sub}@example.com`);
-		expect(me.auth.kind).toBe("oidc");
+		expect(me.user?.email).toBe("local@umiak.invalid");
+		expect(me.auth.kind).toBe("session");
 	});
 });

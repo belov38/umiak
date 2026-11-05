@@ -1280,7 +1280,7 @@
     {
       "name": "desktop_url",
       "title": "Desktop link",
-      "description": "Live desktop link: owner browser sign-in in owner mode; single-use, 10 minutes in OIDC. Give it to the user. Agents act via computer_* tools.",
+      "description": "Live desktop link authenticated through the owner browser session. Give it to the user. Agents act via computer_* tools.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",

@@ -13,7 +13,6 @@ it("rejects unallowed socket peers despite a spoofed forwarded address", async (
 	app = createHttpApp({
 		apiUrl: "http://api",
 		publicUrl: "http://localhost/mcp",
-		issuer: null,
 		log: createLogger({ level: "silent" }),
 		ownerEnv: {
 			UMIAK_AUTH_MODE: "owner",
@@ -44,7 +43,6 @@ it("accepts a local request without an OAuth challenge", async () => {
 	app = createHttpApp({
 		apiUrl: "http://api",
 		publicUrl: "http://localhost/mcp",
-		issuer: null,
 		log: createLogger({ level: "silent" }),
 		ownerEnv: {
 			UMIAK_AUTH_MODE: "owner",
@@ -96,14 +94,12 @@ it("accepts a local request without an OAuth challenge", async () => {
 	expect(forwarded).toEqual(["127.0.0.1"]);
 });
 
-it.each(["owner", "oidc"] as const)(
-	"%s mode keeps a rejected team key unauthorized and advertises OAuth only in oidc",
+it.each(["owner"] as const)(
+	"%s mode keeps a rejected team key unauthorized and advertises OAuth never",
 	async (mode) => {
 		app = createHttpApp({
 			apiUrl: "http://api",
 			publicUrl: "http://localhost/mcp",
-			issuer:
-				mode === "owner" ? null : "https://keycloak.example.com/realms/umiak",
 			log: createLogger({ level: "silent" }),
 			ownerEnv: {
 				UMIAK_AUTH_MODE: mode,
@@ -137,7 +133,7 @@ it.each(["owner", "oidc"] as const)(
 			{ incoming: { socket: { remoteAddress: "127.0.0.1" } } },
 		);
 		expect(response.status).toBe(401);
-		expect(response.headers.has("www-authenticate")).toBe(mode === "oidc");
+		expect(response.headers.has("www-authenticate")).toBe(false);
 	},
 );
 
@@ -148,7 +144,6 @@ it.each(["", "Basic abc", "Bearer", "Bearer umiak_first, Bearer umiak_second"])(
 		app = createHttpApp({
 			apiUrl: "http://api",
 			publicUrl: "http://localhost/mcp",
-			issuer: null,
 			log: createLogger({ level: "silent" }),
 			ownerEnv: {
 				UMIAK_AUTH_MODE: "owner",
@@ -201,7 +196,6 @@ it("default local MCP transport preserves canonical Host through a real HTTP soc
 		app = createHttpApp({
 			apiUrl: `http://127.0.0.1:${address.port}`,
 			publicUrl: "http://localhost/mcp",
-			issuer: null,
 			log: createLogger({ level: "silent" }),
 			ownerEnv: {
 				UMIAK_AUTH_MODE: "owner",

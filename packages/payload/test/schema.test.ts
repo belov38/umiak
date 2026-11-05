@@ -39,7 +39,7 @@ describe("buildUmiakConfig", () => {
 		});
 		const users = c.collections.find((x) => x.slug === "users");
 		expect(users?.auth.disableLocalStrategy).toBe(true);
-		expect(users?.auth.strategies.map((s) => s.name)).toEqual(["oauth2-proxy"]);
+		expect(users?.auth.strategies.map((s) => s.name)).toEqual(["owner"]);
 		expect(users?.fields.some((f) => "name" in f && f.name === "hash")).toBe(
 			false,
 		);

@@ -1,4 +1,3 @@
-import { createPublicApp } from "@umiak/api";
 import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { Umiak } from "@umiak/sdk";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -38,12 +37,12 @@ it("SDK facade and computer tools use the real public desktop API with a fake gu
 		},
 	});
 	const h = w.harness({ deps: { config } });
-	const app = createPublicApp(h.deps);
+	const app = h.app;
 	const umiak = new Umiak({
-		baseUrl: "http://desktop-api.test",
+		baseUrl: "https://api.umiak.test",
 		apiKey: w.secret,
 		env: {},
-		fetch: async (request) => app.fetch(request as Request),
+		fetch: async (request) => app.request(request as Request),
 	});
 	const seeded = await w.seed({ state: "ready" });
 	const sb = await umiak.sandboxes.get(seeded.slug);
@@ -93,12 +92,12 @@ it("computer tools surface an operator block as a non-retryable error", async ()
 			return typeof value === "function" ? value.bind(t) : value;
 		},
 	});
-	const app = createPublicApp(w.harness({ deps: { config } }).deps);
+	const app = w.harness({ deps: { config } }).app;
 	const umiak = new Umiak({
-		baseUrl: "http://desktop-api.test",
+		baseUrl: "https://api.umiak.test",
 		apiKey: w.secret,
 		env: {},
-		fetch: async (request) => app.fetch(request as Request),
+		fetch: async (request) => app.request(request as Request),
 	});
 	const seeded = await w.seed({ state: "ready" });
 	await db.pool.query("UPDATE runtime.sandboxes SET blocked=true WHERE id=$1", [

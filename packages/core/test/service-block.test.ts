@@ -77,10 +77,10 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 	});
 
 	describe("block / unblock a sandbox", () => {
-		it("only an operator's browser session: keys, JWT and owners are forbidden, nothing changes", async () => {
+		it("only an operator's browser session: keys and non-operator owners are forbidden, nothing changes", async () => {
 			const env = await serviceEnv(t.pool);
 			const s = await seedSandbox(t.pool, env, { state: "ready" });
-			const forged: Principal = { ...operator(env.p.teamId), kind: "session" };
+			const forged: Principal = { ...operator(env.p.teamId), kind: "team_key" };
 			const key: Principal = { ...env.p, isOperator: true };
 			for (const p of [env.p, key, forged, owner(env.p.teamId)]) {
 				await expectForbidden(
@@ -606,7 +606,7 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 					"operator_required",
 				);
 			}
-			const forged: Principal = { ...operator(), kind: "session" };
+			const forged: Principal = { ...operator(), kind: "team_key" };
 			await expectForbidden(
 				a.svc.list(forged, { allTeams: true }),
 				"operator_required",

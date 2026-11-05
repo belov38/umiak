@@ -184,7 +184,7 @@ describe("auth and teams", () => {
 
 	it("answers 403 user_disabled, and token_expired once", async () => {
 		api.tokens.set("t_off", {
-			kind: "oidc",
+			kind: "session",
 			scopes: ["sandboxes:read"],
 			teamId: "team_fake",
 			disabled: true,
@@ -195,18 +195,18 @@ describe("auth and teams", () => {
 			code: "forbidden",
 			details: { reason: "user_disabled" },
 		});
-		api.script.expireTokenOnce = FAKE_TOKENS.oidc;
-		const first = await call("GET", "/v1/me", { token: FAKE_TOKENS.oidc });
+		api.script.expireTokenOnce = FAKE_TOKENS.owner;
+		const first = await call("GET", "/v1/me", { token: FAKE_TOKENS.owner });
 		expect(first.status).toBe(401);
 		expect(first.json.error.code).toBe("token_expired");
-		const second = await call("GET", "/v1/me", { token: FAKE_TOKENS.oidc });
+		const second = await call("GET", "/v1/me", { token: FAKE_TOKENS.owner });
 		expect(second.status).toBe(200);
 		expect(api.contractErrors).toEqual([]);
 	});
 
 	it("selects the team of a person by Umiak-Team", async () => {
 		api.tokens.set("t_two", {
-			kind: "oidc",
+			kind: "session",
 			scopes: ["sandboxes:read", "sandboxes:write"],
 			teamId: FAKE_TEAM,
 			teams: [OTHER_TEAM],
@@ -275,9 +275,9 @@ describe("auth and teams", () => {
 		expect(r.json.auth.scopes).toContain("sandboxes:read");
 		expect(r.json.auth.scopes).not.toContain("sandboxes:write");
 		expect(r.json.user).toBeNull();
-		const oidc = await call("GET", "/v1/me", { token: FAKE_TOKENS.oidc });
-		expect(oidc.json.auth.kind).toBe("oidc");
-		expect(oidc.json.user.email).toBe("user@example.com");
+		const owner = await call("GET", "/v1/me", { token: FAKE_TOKENS.owner });
+		expect(owner.json.auth.kind).toBe("session");
+		expect(owner.json.user.email).toBe("user@example.com");
 		expect(api.contractErrors).toEqual([]);
 	});
 

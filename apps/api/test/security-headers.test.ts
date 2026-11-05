@@ -1,7 +1,7 @@
 // Auth header handling over every operation of the public document (S7
 // §2 anti-goal 4, §7.1, §7.4, §7.10, §16 "Security"):
 // - public: no bearer is 401 everywhere but the anonymous operations, and
-//   oauth2-proxy headers (X-Auth-Request-*, X-Forwarded-User/Email), the
+//   owner ingress headers (X-Auth-Request-*, X-Forwarded-User/Email), the
 //   Tailscale-User-* headers of Tailscale Serve and
 //   cookies never authenticate nor change who the caller is;
 // - malformed or foreign bearers are 401, Umiak-Team of another team 403;
@@ -56,7 +56,7 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 		owner = await personOf(w, w.teamId, "owner", deps);
 		f = await buildFixture(w, w.teamId, w.harness({ deps }), owner);
 		anon = createHarness({ deps: w.deps(deps) });
-		// The identity of a platform operator, as oauth2-proxy would send it.
+		// The identity of a platform operator, as owner ingress would send it.
 		operator = {
 			...owner.headers,
 			"x-auth-request-groups": "umiak-operators",
@@ -83,29 +83,26 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 		if (r.text !== "") expect(errorOf(r).code, where).toBe("unauthorized");
 	}
 
-	it("public: no bearer is 401 on every authenticated operation, also with oauth2-proxy headers, cookies or a key in the query", async () => {
-		for (const [id, r] of authenticated) {
+	it("external peers cannot reach any operation with forged identity headers", async () => {
+		const external = createHarness({ deps: w.deps(deps) });
+		for (const [, r] of ROUTE_LIST) {
 			const req = r.request(f);
-			expect401(await send(anon, r.method, req), `${id} bare`);
-			const sep = req.path.includes("?") ? "&" : "?";
-			expect401(
-				await send(anon, r.method, {
-					...req,
-					path: `${req.path}${sep}access_token=${w.secret}&api_key=${w.secret}`,
-				}),
-				`${id} query`,
+			const res = await external.app.request(
+				req.path,
+				{
+					method: r.method,
+					headers: {
+						host: new URL(external.deps.settings.apiUrl).host,
+						...operator,
+					},
+				},
+				{ incoming: { socket: { remoteAddress: "203.0.113.1" } } },
 			);
-			expect401(
-				await send(anon, r.method, req, {
-					...operator,
-					cookie: "_oauth2_proxy=forged; __Host-session=forged",
-				}),
-				`${id} proxy headers`,
-			);
+			expect(res.status).toBe(403);
 		}
 	});
 
-	it("public: oauth2-proxy headers next to a team key change nothing", async () => {
+	it("public: owner ingress headers next to a team key change nothing", async () => {
 		const h = w.harness({ deps });
 		const plain = await h.request("GET", "/v1/me");
 		const forged = await h.request("GET", "/v1/me", { headers: operator });
@@ -205,12 +202,10 @@ describe.skipIf(skipPg())("auth headers on every operation", () => {
 		}
 	});
 
-	it("proxied: no X-Auth-Request-Email is 401 on every authenticated operation", async () => {
-		const { "x-auth-request-email": _, ...headers } = owner.headers;
-		for (const [id, r] of authenticated) {
-			const res = await send(owner.h, r.method, r.request(f), headers);
-			expect(res.status, id).toBe(401);
-		}
+	it("proxied: owner identity ignores forged login headers", async () => {
+		const res = await owner.h.request("GET", "/v1/me", { headers: operator });
+		expect(res.status, res.text).toBe(200);
+		expect((res.body as Any).user.id).toBe(encodeUuid("user", owner.userId));
 	});
 
 	it("proxied: a WebSocket upgrade with a foreign or no Origin is refused with 403 before the upgrade", async () => {

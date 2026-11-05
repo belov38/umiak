@@ -1,6 +1,6 @@
 // Client address for the request log (S7 §7.1): from `X-Forwarded-For` only
 // when the connection comes from UMIAK_API_TRUSTED_PROXY_CIDRS (ingress,
-// a TLS proxy on the host, via the Docker bridge, oauth2-proxy), else the
+// a TLS proxy on the host, via the Docker bridge, owner ingress), else the
 // address of the connection. Rate limits are per principal, not per address.
 import type { IncomingMessage } from "node:http";
 import type { TrustedProxies } from "@umiak/auth";

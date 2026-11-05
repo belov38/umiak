@@ -106,9 +106,12 @@ describe.skipIf(skipPg())("startApi with production dependencies", () => {
 	});
 
 	async function start(over: Record<string, string> = {}): Promise<RunningApi> {
-		return startApi(testSettings({ ...env, ...over }), undefined, {
+		const api = await startApi(testSettings({ ...env, ...over }), undefined, {
 			host: "127.0.0.1",
 		});
+		for (const port of [api.ports.public, api.ports.proxied])
+			if (port !== null) api.deps.settings.ownerHosts.push(`127.0.0.1:${port}`);
+		return api;
 	}
 
 	it("serves four ports: /readyz 200, /v1/meta 200 on public and proxied, internal needs a token; close frees the ports", async () => {
@@ -129,7 +132,7 @@ describe.skipIf(skipPg())("startApi with production dependencies", () => {
 				const meta = await fetch(url(p, "/v1/meta"));
 				expect(meta.status).toBe(200);
 				const body = (await meta.json()) as Record<string, unknown>;
-				expect(body).toMatchObject({ apiVersion: "v1", oidc: null });
+				expect(body).toMatchObject({ apiVersion: "v1" });
 				expect((body.ssh as { hostKeys: string[] }).hostKeys).toEqual([
 					hostKey.split(" ").slice(0, 2).join(" "),
 				]);

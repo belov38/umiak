@@ -70,7 +70,7 @@ export interface Route {
 	/** A team key only: a person gets 403 `api_key_required`. */
 	keyOnly?: true;
 	/**
-	 * A platform operator's browser session only (S8 C3): keys, Keycloak
+	 * A platform operator's browser session only (S8 C3): keys, other unsupported
 	 * tokens and other people get 403 `operator_required` before any lookup.
 	 */
 	operator?: true;
@@ -183,14 +183,6 @@ export const ROUTES: Record<string, Route> = {
 		anonymous: true,
 		resources: [],
 		request: () => ({ path: "/v1/openapi.json" }),
-	},
-	"meta.docs": {
-		method: "GET",
-		path: "/v1/docs",
-		scope: null,
-		anonymous: true,
-		resources: [],
-		request: () => ({ path: "/v1/docs" }),
 	},
 	"me.get": {
 		method: "GET",

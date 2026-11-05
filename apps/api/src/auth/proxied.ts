@@ -1,5 +1,5 @@
 // Authentication of the proxied listener (S7 §7.4, S8 §5.2, C4, C6): the
-// browser behind oauth2-proxy. Only oauth2-proxy reaches this port
+// browser behind owner ingress. Only owner ingress reaches this port
 // (NetworkPolicy), so its X-Auth-Request-* headers are trusted here.
 
 import type { Context, MiddlewareHandler } from "hono";

@@ -89,7 +89,7 @@ describe("the route table", () => {
 			};
 			const security = JSON.stringify(op.security ?? null);
 			if (r.anonymous) expect(security, id).toBe("[]");
-			else if (r.human) expect(security, id).toBe('[{"keycloak":[]}]');
+			else if (r.human) expect(security, id).toBe('[{"owner":[]}]');
 			else expect(security, id).toBe("null");
 		}
 	});

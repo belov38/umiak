@@ -1,9 +1,4 @@
-// The api of the CLI tests: apps/api's public app in process on a real HTTP
-// server, Postgres from @umiak/db/testing (PgIdentityStore: team keys, JIT users
-// from Keycloak JWTs), core's SandboxService over a test topology, and the
-// test OIDC server (device flow, refresh, revocation) as Keycloak. Built from
-// the exported pieces of @umiak/api/testing, like the SDK's test helper.
-
+// Real API over a test database, reached through an auto-approving test owner ingress.
 import { generateKeyPairSync } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { type ApiDeps, createApiServer, createPublicApp } from "@umiak/api";
@@ -81,9 +76,8 @@ export async function until<T>(
 }
 
 export interface WorldOptions {
-	/** Extra api settings (env names), e.g. UMIAK_OIDC_ISSUER behind a TLS front. */
+	/** Extra api settings (env names), e.g. custom SSH ports. */
 	settings?: Record<string, string>;
-	/** A started OIDC server to use instead of a new one. */
 	/** Logger of the api (captureLogs().log), for debugging. */
 	log?: ApiDeps["log"];
 }

@@ -431,6 +431,7 @@ describe.skipIf(skipPg() || skipReason !== "")(
 				const { server } = createApiServer(h.app);
 				await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 				base = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`;
+				h.deps.settings.ownerHosts.push(new URL(base).host);
 				closeServer = () =>
 					new Promise<void>((r) => {
 						server.closeAllConnections();

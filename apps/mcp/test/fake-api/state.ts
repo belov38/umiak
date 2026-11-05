@@ -38,16 +38,16 @@ export const READ_ONLY_SCOPES = [
 ];
 
 export interface FakePrincipal {
-	kind: "oidc" | "team_key";
+	kind: "session" | "team_key";
 	scopes: string[];
 	/**
 	 * The default team; in a request, the team it acts in (the fake replaces
 	 * it with the team Umiak-Team selected).
 	 */
 	teamId: string;
-	/** oidc: the person's other teams, selectable with Umiak-Team. */
+	/** session: the person's other teams, selectable with Umiak-Team. */
 	teams?: string[];
-	/** oidc: the person; team_key: the creator shown in /v1/me. */
+	/** session: the person; team_key: the creator shown in /v1/me. */
 	userEmail?: string;
 	keyId?: string;
 	expiresAt?: string;

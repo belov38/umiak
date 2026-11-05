@@ -12,7 +12,6 @@ from ..models.meta_tenancy import MetaTenancy
 from ..types import UNSET, Unset
 
 if TYPE_CHECKING:
-    from ..models.meta_oidc_type_0 import MetaOidcType0
     from ..models.meta_ssh import MetaSsh
 
 
@@ -29,7 +28,6 @@ class Meta:
         build (str): Build of the api Example: 1.4.0+3f2c1a9.
         latest_cli_version (None | str):  Example: 0.5.1.
         min_cli_version (None | str): Older CLIs warn and keep working Example: 0.4.0.
-        oidc (MetaOidcType0 | None): Keycloak for people (device flow of `umiak login`); null when only team keys work
         ssh (MetaSsh):
         umiak_domain (str): Domain of published ports: <previewScheme>://<slug>-<port>.<umiakDomain>[:previewPort]
             Example: umiak.example.com.
@@ -46,7 +44,6 @@ class Meta:
     build: str
     latest_cli_version: None | str
     min_cli_version: None | str
-    oidc: MetaOidcType0 | None
     ssh: MetaSsh
     umiak_domain: str
     auth_mode: MetaAuthMode | Unset = UNSET
@@ -56,8 +53,6 @@ class Meta:
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.meta_oidc_type_0 import MetaOidcType0  # noqa: PLC0415
-
         api_url = self.api_url
 
         api_version = self.api_version
@@ -71,12 +66,6 @@ class Meta:
 
         min_cli_version: None | str
         min_cli_version = self.min_cli_version
-
-        oidc: dict[str, Any] | None
-        if isinstance(self.oidc, MetaOidcType0):
-            oidc = self.oidc.to_dict()
-        else:
-            oidc = self.oidc
 
         ssh = self.ssh.to_dict()
 
@@ -106,7 +95,6 @@ class Meta:
                 "build": build,
                 "latestCliVersion": latest_cli_version,
                 "minCliVersion": min_cli_version,
-                "oidc": oidc,
                 "ssh": ssh,
                 "umiakDomain": umiak_domain,
             }
@@ -124,7 +112,6 @@ class Meta:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.meta_oidc_type_0 import MetaOidcType0  # noqa: PLC0415
         from ..models.meta_ssh import MetaSsh  # noqa: PLC0415
 
         d = dict(src_dict)
@@ -149,21 +136,6 @@ class Meta:
             return cast(None | str, data)
 
         min_cli_version = _parse_min_cli_version(d.pop("minCliVersion"))
-
-        def _parse_oidc(data: object) -> MetaOidcType0 | None:
-            if data is None:
-                return data
-            try:
-                if not isinstance(data, dict):
-                    raise TypeError()
-                oidc_type_0 = MetaOidcType0.from_dict(data)
-
-                return oidc_type_0
-            except (TypeError, ValueError, AttributeError, KeyError):
-                pass
-            return cast(MetaOidcType0 | None, data)
-
-        oidc = _parse_oidc(d.pop("oidc"))
 
         ssh = MetaSsh.from_dict(d.pop("ssh"))
 
@@ -199,7 +171,6 @@ class Meta:
             build=build,
             latest_cli_version=latest_cli_version,
             min_cli_version=min_cli_version,
-            oidc=oidc,
             ssh=ssh,
             umiak_domain=umiak_domain,
             auth_mode=auth_mode,

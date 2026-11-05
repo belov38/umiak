@@ -205,7 +205,7 @@ describe("store selection", () => {
 		expect(exitCodeOf(err)).toBe(2);
 	});
 
-	it("entry names are <profile>@<issuer> for oidc and <profile>@<apiUrl> for keys", () => {
+	it("entry names are <profile>@<issuer> for owners and <profile>@<apiUrl> for keys", () => {
 		expect(
 			credentialName("default", {
 				apiUrl: "https://api.x",

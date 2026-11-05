@@ -65,6 +65,9 @@ describe.skipIf(skipPg())("team API keys (S7 §7.2, §13)", () => {
 	): Promise<Session> {
 		const s = await w.dbSession({
 			role,
+			groups: (o.headers?.["x-auth-request-groups"] ?? "")
+				.split(",")
+				.filter(Boolean),
 			deps: { identityEvents: events, ...o.deps },
 		});
 		const headers = { ...s.headers, ...o.headers };
@@ -212,24 +215,28 @@ describe.skipIf(skipPg())("team API keys (S7 §7.2, §13)", () => {
 			expect(body(k).error.details.reason).toBe("user_required");
 		});
 
-		it("Keycloak JWT: createdVia cli with a umiak-cli/ User-Agent, else api", async () => {
+		it("owner session: createdVia cli with a umiak-cli/ User-Agent, else api", async () => {
 			const _settings = testSettings({
 				UMIAK_API_RATE_BURST: "100000",
 			});
-			const { h } = await session("owner");
+			const owner = await session("owner");
+			const h = owner.h;
 			const cli = await h.request("POST", "/v1/api-keys", {
-				headers: { "user-agent": "umiak-cli/0.1.0 (darwin; arm64)" },
+				headers: {
+					...owner.headers,
+					"user-agent": "umiak-cli/0.1.0 (darwin; arm64)",
+				},
 				json: { name: "cli", preset: "read-only" },
 			});
 			expect(cli.status, cli.text).toBe(201);
 			expect(body(cli).apiKey.createdVia).toBe("cli");
 			const api = await h.request("POST", "/v1/api-keys", {
-				headers: { "user-agent": "curl/8.0" },
+				headers: { ...owner.headers, "user-agent": "curl/8.0" },
 				json: { name: "api", preset: "read-only" },
 			});
-			expect(body(api).apiKey.createdVia).toBe("api");
+			expect(body(api).apiKey.createdVia).toBe("dashboard");
 			// Issued in the person's own (personal) team.
-			expect(body(api).apiKey.teamId).not.toBe(encodeUuid("team", w.teamId));
+			expect(body(api).apiKey.teamId).toBe(encodeUuid("team", w.teamId));
 		});
 	});
 

@@ -1,6 +1,6 @@
 // Payload auth strategy of the users collection (S8 §5.4): no passwords,
 // login, JWT or Payload cookie. Every request is authenticated by the
-// oauth2-proxy headers through resolveSession.
+// owner ingress headers through resolveSession.
 //
 // Payload only takes a user or null from a strategy, but web must tell a
 // missing login (401) from a refused one (403 pages "account disabled",
@@ -41,7 +41,7 @@ export type AuthDeniedReason =
 	| "identity_conflict";
 
 export type AuthOutcome =
-	/** No X-Auth-Request-Email: not behind oauth2-proxy (S8 §5.1). */
+	/** No X-Auth-Request-Email: not behind owner ingress (S8 §5.1). */
 	| { kind: "anonymous"; status: 401 }
 	/** subject_required -> 401; user_disabled, identity_conflict -> 403. */
 	| { kind: "denied"; status: 401 | 403; reason: AuthDeniedReason }
@@ -60,7 +60,7 @@ export function operatorGroupsOf(payload: Payload): string[] {
 }
 
 /**
- * Parses the oauth2-proxy headers and resolves the session. IdentityErrors
+ * Parses the owner ingress headers and resolves the session. IdentityErrors
  * of the login become `denied`; anything else (database down) is thrown.
  */
 export async function authenticateHeaders(

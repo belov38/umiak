@@ -1,7 +1,7 @@
 // The api process: production dependencies from the settings and the four
 // listeners (S7 §7.1).
 //   public   UMIAK_API_PUBLIC_PORT   (8080)  SDK, CLI, MCP, CI; WebSockets
-//   proxied  UMIAK_API_PROXIED_PORT  (8081)  browser via oauth2-proxy; WebSockets
+//   proxied  UMIAK_API_PROXIED_PORT  (8081)  browser via owner ingress; WebSockets
 //   internal UMIAK_API_INTERNAL_PORT (8082)  gateway, service tokens
 //   ops      UMIAK_API_METRICS_PORT  (9090)  /healthz, /readyz, /metrics
 // `close()` is the graceful stop of shutdown.ts (at most 10 s).
@@ -65,7 +65,7 @@ const BOSS_SCHEMA = "pgboss";
 
 /**
  * Idle keep-alive connections stay open longer than the idle timeout of
- * the proxies in front (ingress, oauth2-proxy), so a proxy never reuses a
+ * the proxies in front (ingress, owner ingress), so a proxy never reuses a
  * connection the server is closing.
  */
 const KEEP_ALIVE_TIMEOUT_MS = 65_000;

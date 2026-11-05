@@ -54,7 +54,7 @@ describe("both protocol eras", () => {
 	for (const era of ["modern", "legacy"] as const) {
 		it(`lists all tools and calls one (${era})`, async () => {
 			h = await startHttp();
-			const c = await h.connect(FAKE_TOKENS.oidc, { era });
+			const c = await h.connect(FAKE_TOKENS.owner, { era });
 			const { tools } = await c.client.listTools();
 			expect(names(tools)).toEqual(ALL_TOOLS.map((t) => t.name));
 			const r = await c.client.callTool({ name: "limits_get", arguments: {} });
@@ -104,7 +104,7 @@ describe("guards", () => {
 				headers: { host: "evil.example" },
 			},
 		);
-		expect(prm.status).toBe(421);
+		expect(prm.status).toBe(404);
 		// Health has no checks at all.
 		const health = await h.raw("GET", "/healthz", {
 			headers: { host: "evil.example" },
@@ -231,7 +231,7 @@ describe("guards", () => {
 describe("tool filters over HTTP", () => {
 	it("?toolsets=core&read_only=1 lists core read-only tools only", async () => {
 		h = await startHttp();
-		const c = await h.connect(FAKE_TOKENS.oidc, {
+		const c = await h.connect(FAKE_TOKENS.owner, {
 			query: "?toolsets=core&read_only=1",
 		});
 		const { tools } = await c.client.listTools();
@@ -317,9 +317,7 @@ describe("a 401 of the API during a call", () => {
 		expect(h.api.script.failNext).toBeUndefined();
 		const last = c.responses.at(-1);
 		expect(last?.status).toBe(401);
-		expect(last?.headers.get("www-authenticate")).toMatch(
-			/^Bearer resource_metadata="[^"]+", error="invalid_token"/,
-		);
+		expect(last?.headers.has("www-authenticate")).toBe(false);
 		// The cached check was dropped: the next request asks /v1/me again.
 		const before = h.journal(/^GET \/v1\/me$/).length;
 		await h.raw("POST", "/mcp", {
@@ -410,7 +408,7 @@ describe("concurrency and cancellation", () => {
 		expect(extra.texts[0]).toMatch(/^error: rate_limited$/m);
 		expect(extra.texts[0]).toMatch(/^retryable: true$/m);
 		// Another principal is not limited.
-		const other = await h.connect(FAKE_TOKENS.oidc);
+		const other = await h.connect(FAKE_TOKENS.owner);
 		const free = await other.client.callTool({
 			name: "limits_get",
 			arguments: {},
@@ -540,12 +538,9 @@ describe("health and metrics", () => {
 				'umiak_mcp_tool_calls_total{tool="limits_get",outcome="ok"} 1',
 			);
 			expect(text).toContain(
-				'umiak_mcp_auth_rejections_total{status="401",reason="no_bearer"} 1',
+				'umiak_mcp_auth_rejections_total{status="401",reason="unauthorized"} 2',
 			);
-			expect(text).toContain(
-				'umiak_mcp_auth_rejections_total{status="401",reason="unauthorized"} 1',
-			);
-			expect(text).toContain("umiak_mcp_me_cache_misses_total 2");
+			expect(text).toContain("umiak_mcp_me_cache_misses_total 4");
 			expect(text).toContain("umiak_mcp_tool_call_duration_seconds_bucket");
 			expect(text).toContain("umiak_mcp_tool_response_bytes_bucket");
 			expect(text).toContain("umiak_mcp_tool_calls_in_flight 0");

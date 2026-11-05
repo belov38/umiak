@@ -231,8 +231,8 @@ describe("limits_get and templates_list", () => {
 		]);
 	});
 
-	it("limits_get names the person for a Keycloak login", async () => {
-		const { call } = await start({ token: FAKE_TOKENS.oidc });
+	it("limits_get names the person for a owner pairing", async () => {
+		const { call } = await start({ token: FAKE_TOKENS.owner });
 		const r = await call("limits_get");
 		expect(r.json.identity).toBe("user@example.com");
 		expect(r.json.user).toMatchObject({ email: "user@example.com" });

@@ -6,7 +6,7 @@ import type { Scope } from "@umiak/auth";
 export { SCOPES, type Scope } from "@umiak/auth";
 
 export interface Principal {
-	/** browser session, Keycloak JWT (S7 §7.10) or team API key (S7 §7.2) */
+	/** browser session, owner session (S7 §7.10) or team API key (S7 §7.2) */
 	kind: "session" | "team_key";
 	/** Payload user id; null for team keys. */
 	userId: string | null;
@@ -22,7 +22,7 @@ export interface Principal {
 
 /**
  * Operator rights (S8 C3, C6): a browser session of a platform operator.
- * Keys and Keycloak tokens never carry them, whatever `isOperator` says.
+ * Keys and team keys never carry them, whatever `isOperator` says.
  */
 export function hasOperatorRights(p: Principal): boolean {
 	return p.kind === "session" && p.isOperator === true;

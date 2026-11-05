@@ -371,7 +371,6 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 				data: { publicPortsEnabled: true, idleTimeoutSeconds: 900 },
 			});
 		});
-
 	});
 
 	describe("umiak_ssh_revoke", () => {

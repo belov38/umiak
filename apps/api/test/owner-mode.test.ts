@@ -100,15 +100,18 @@ describe("owner API", () => {
 		).toBe(403);
 	});
 	it("requires the ingress allowlist to be configured", () => {
-		expect(() => testSettings({ UMIAK_AUTH_MODE: "owner" })).toThrow(
-			/UMIAK_LOCAL_ALLOWED_CIDRS/,
-		);
+		expect(() =>
+			testSettings({
+				UMIAK_AUTH_MODE: "owner",
+				UMIAK_LOCAL_ALLOWED_CIDRS: undefined,
+			}),
+		).toThrow(/UMIAK_LOCAL_ALLOWED_CIDRS/);
 		expect(() =>
 			testSettings({
 				UMIAK_AUTH_MODE: "none",
 				UMIAK_LOCAL_ALLOWED_CIDRS: "127.0.0.0/8",
 			}),
-		).toThrow(/UMIAK_AUTH_MODE must be oidc or owner/);
+		).toThrow(/UMIAK_AUTH_MODE must be owner/);
 	});
 	it("rejects arbitrary Host even on a same-origin GET without Origin", async () => {
 		const { request } = setup();
@@ -128,12 +131,11 @@ describe("owner API", () => {
 			expect((await request("/v1/meta", undefined, { host })).status).toBe(200);
 	});
 
-	it("advertises owner, single tenancy and suppresses OIDC", async () => {
-		const { request, settings } = setup();
+	it("advertises owner, single tenancy and has only owner fields", async () => {
+		const { request } = setup();
 		expect(await (await request("/v1/meta")).json()).toMatchObject({
 			authMode: "owner",
 			tenancy: "single",
-			oidc: null,
 		});
 	});
 	it("rejects browser cross-origin calls and form writes", async () => {

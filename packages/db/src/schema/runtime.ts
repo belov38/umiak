@@ -609,8 +609,6 @@ export const sandboxDesktops = runtime.table("sandbox_desktops", {
 		.notNull()
 		.default("token"),
 	authEpoch: integer("auth_epoch").notNull().default(1),
-	turnIssuedAt: tstz("turn_issued_at"),
-	turnAttemptedAt: tstz("turn_attempted_at"),
 	lastStopOperationId: uuid("last_stop_operation_id"),
 	updatedAt: tstz("updated_at").notNull().defaultNow(),
 	pendingDisconnect: boolean("pending_disconnect").notNull().default(false),

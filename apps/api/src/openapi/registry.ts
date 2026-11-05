@@ -93,7 +93,7 @@ export function extensibleEnum<const T extends readonly [string, ...string[]]>(
 
 /** Operations without authentication (`/v1/meta`). */
 export const NO_AUTH: { [name: string]: string[] }[] = [];
-/** Operations only for a person (SSH keys, issuing keys): Keycloak JWT. */
+/** Operations only for a person (SSH keys, issuing keys): owner session. */
 export const HUMAN_ONLY: { [name: string]: string[] }[] = [{ owner: [] }];
 /** Default for every operation, set at the document level. */
 export const DEFAULT_SECURITY: { [name: string]: string[] }[] = [

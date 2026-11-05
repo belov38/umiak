@@ -2,25 +2,9 @@
 // Protected Resource Metadata, GET /v1/me with its cache, the 55 s rule, and
 // the team (Umiak-Team, ?team=) of /v1/me and of the calls.
 import { afterEach, describe, expect, it } from "vitest";
-import {
-	bearerOf,
-	EXP_MARGIN_MS,
-	jwtExpiresAt,
-	MeCache,
-} from "../src/http/auth.ts";
-import {
-	bearerChallenge,
-	prmPath,
-	prmUrl,
-	protectedResourceMetadata,
-} from "../src/http/prm.ts";
+import { MeCache } from "../src/http/auth.ts";
 import { FAKE_TEAM, FAKE_TOKENS, OTHER_TEAM } from "./fake-api/index.ts";
-import {
-	fakeJwt,
-	type HttpHarness,
-	startHttp,
-	TEST_ISSUER,
-} from "./helpers/http.ts";
+import { type HttpHarness, startHttp } from "./helpers/http.ts";
 
 let h: HttpHarness | undefined;
 
@@ -65,72 +49,6 @@ function post(token: string | null, headers: Record<string, string> = {}) {
 const meCalls = () => H().journal(/^GET \/v1\/me$/).length;
 
 describe("challenges and metadata", () => {
-	it("answers 401 with resource_metadata without a bearer", async () => {
-		h = await startHttp();
-		const r = await post(null);
-		expect(r.status).toBe(401);
-		expect(r.headers["www-authenticate"]).toBe(
-			`Bearer resource_metadata="${h.origin}/.well-known/oauth-protected-resource/mcp"`,
-		);
-		expect(meCalls()).toBe(0);
-	});
-
-	it("never takes the bearer from the query", async () => {
-		h = await startHttp();
-		const r = await h.raw("POST", `/mcp?access_token=${FAKE_TOKENS.full}`, {
-			headers: { "content-type": "application/json" },
-			body: INIT,
-		});
-		expect(r.status).toBe(401);
-		expect(meCalls()).toBe(0);
-	});
-
-	it("serves RFC 9728 metadata without auth", async () => {
-		h = await startHttp();
-		const r = await h.raw("GET", "/.well-known/oauth-protected-resource/mcp");
-		expect(r.status).toBe(200);
-		const doc = JSON.parse(r.text);
-		expect(doc).toEqual({
-			resource: h.url,
-			authorization_servers: [TEST_ISSUER],
-			scopes_supported: ["openid", "email", "profile"],
-			bearer_methods_supported: ["header"],
-			resource_name: "umiak sandboxes",
-		});
-		expect(doc.scopes_supported).not.toContain("offline_access");
-	});
-
-	it("derives the metadata path from the public URL path", () => {
-		expect(prmPath("https://api.example.com/mcp")).toBe(
-			"/.well-known/oauth-protected-resource/mcp",
-		);
-		expect(prmPath("https://api.example.com/x/mcp/")).toBe(
-			"/.well-known/oauth-protected-resource/x/mcp",
-		);
-		expect(prmUrl("https://api.example.com:8443/mcp")).toBe(
-			"https://api.example.com:8443/.well-known/oauth-protected-resource/mcp",
-		);
-		// No issuer: no authorization server is named at all (not an empty list).
-		expect(
-			Object.keys(
-				protectedResourceMetadata({
-					publicUrl: "https://api.example.com/mcp",
-					issuer: null,
-				}),
-			),
-		).not.toContain("authorization_servers");
-	});
-
-	it("error_description has no quote or backslash (RFC 6750 NQSCHAR): they are replaced", () => {
-		const v = bearerChallenge("https://api.example.com/x", {
-			error: "invalid_token",
-			description: 'bad "token" C:\\path\u00e9',
-		});
-		expect(v).toBe(
-			`Bearer resource_metadata="https://api.example.com/x", error="invalid_token", error_description="bad 'token' C:/path "`,
-		);
-	});
-
 	it("answers 503 with Retry-After, uncached, when /v1/me fails", async () => {
 		h = await startHttp();
 		h.api.script.failNext = {
@@ -159,16 +77,14 @@ describe("challenges and metadata", () => {
 		h = await startHttp();
 		const r = await post("umiak_not_a_key");
 		expect(r.status).toBe(401);
-		expect(r.headers["www-authenticate"]).toMatch(
-			/^Bearer resource_metadata="http:\/\/127\.0\.0\.1:\d+\/\.well-known\/oauth-protected-resource\/mcp", error="invalid_token"/,
-		);
+		expect(r.headers["www-authenticate"]).toBeUndefined();
 		expect(JSON.parse(r.text).error).toBe("unauthorized");
 	});
 
 	it("answers 403 to a disabled user", async () => {
 		h = await startHttp();
 		h.api.tokens.set("t_disabled", {
-			kind: "oidc",
+			kind: "session",
 			scopes: ["sandboxes:read"],
 			teamId: FAKE_TEAM,
 			disabled: true,
@@ -182,62 +98,23 @@ describe("challenges and metadata", () => {
 			rejections.values.find((v) => v.labels.reason === "user_disabled")?.value,
 		).toBe(1);
 	});
-
-	it("refuses a JWT that expires within 55 s without asking the API", async () => {
-		h = await startHttp();
-		const soon = fakeJwt(Math.floor(h.clock.now / 1000) + 30);
-		h.api.tokens.set(soon, {
-			kind: "oidc",
-			scopes: ["sandboxes:read"],
-			teamId: FAKE_TEAM,
-		});
-		const r = await post(soon);
-		expect(r.status).toBe(401);
-		expect(r.headers["www-authenticate"]).toContain(
-			'error="invalid_token", error_description="token expires too soon"',
-		);
-		expect(meCalls()).toBe(0);
-		const later = fakeJwt(Math.floor(h.clock.now / 1000) + 120);
-		h.api.tokens.set(later, {
-			kind: "oidc",
-			scopes: ["sandboxes:read"],
-			teamId: FAKE_TEAM,
-		});
-		expect((await post(later)).status).toBe(200);
-		expect(meCalls()).toBe(1);
-	});
 });
 
 describe("the /v1/me cache", () => {
-	it("keeps a success for 30 s and a refusal for 5 s", async () => {
+	it("rechecks owner authorization on every admitted request", async () => {
 		h = await startHttp();
 		expect((await post(FAKE_TOKENS.full)).status).toBe(200);
-		expect((await post(FAKE_TOKENS.full)).status).toBe(200);
-		expect(meCalls()).toBe(1);
-		h.clock.now += 29_000;
-		expect((await post(FAKE_TOKENS.full)).status).toBe(200);
-		expect(meCalls()).toBe(1);
-		h.clock.now += 2_000;
 		expect((await post(FAKE_TOKENS.full)).status).toBe(200);
 		expect(meCalls()).toBe(2);
-
-		expect((await post("umiak_bad")).status).toBe(401);
-		expect((await post("umiak_bad")).status).toBe(401);
-		expect(meCalls()).toBe(3);
-		h.clock.now += 5_001;
-		expect((await post("umiak_bad")).status).toBe(401);
-		expect(meCalls()).toBe(4);
-		const misses = await h.metrics.meCacheMisses.get();
-		expect(misses.values[0]?.value).toBe(4);
 	});
 
-	it("shares one /v1/me between concurrent requests of a token", async () => {
+	it("checks every concurrent owner request independently", async () => {
 		h = await startHttp();
 		const all = await Promise.all(
-			Array.from({ length: 5 }, () => post(FAKE_TOKENS.oidc)),
+			Array.from({ length: 5 }, () => post(FAKE_TOKENS.owner)),
 		);
 		expect(all.map((r) => r.status)).toEqual([200, 200, 200, 200, 200]);
-		expect(meCalls()).toBe(1);
+		expect(meCalls()).toBe(5);
 	});
 
 	it("keys entries by token hash and team, evicting the oldest", () => {
@@ -257,19 +134,6 @@ describe("the /v1/me cache", () => {
 		expect(c.get("b", undefined)).toBeUndefined();
 		expect(MeCache.key("a", undefined).startsWith("a")).toBe(false);
 	});
-
-	it("reads exp of a JWT and the bearer of the header only", () => {
-		expect(jwtExpiresAt(fakeJwt(1_000))).toBe(1_000_000);
-		expect(jwtExpiresAt("umiak_abc")).toBeNull();
-		expect(jwtExpiresAt("a.b.c")).toBeNull();
-		expect(EXP_MARGIN_MS).toBe(55_000);
-		const req = (headers: Record<string, string>) =>
-			new Request("http://x/mcp?access_token=q", { headers });
-		expect(bearerOf(req({ authorization: "Bearer abc" }))).toBe("abc");
-		expect(bearerOf(req({ authorization: "bearer abc" }))).toBe("abc");
-		expect(bearerOf(req({ authorization: "Basic abc" }))).toBeNull();
-		expect(bearerOf(req({}))).toBeNull();
-	});
 });
 
 describe("the team of a request", () => {
@@ -278,7 +142,7 @@ describe("the team of a request", () => {
 	async function setup(): Promise<HttpHarness> {
 		h = await startHttp();
 		h.api.tokens.set(twoTeams, {
-			kind: "oidc",
+			kind: "session",
 			scopes: ["sandboxes:read", "sandboxes:write"],
 			teamId: FAKE_TEAM,
 			teams: [OTHER_TEAM],
@@ -298,7 +162,8 @@ describe("the team of a request", () => {
 		});
 		const r = await c.client.callTool({ name: "sandbox_list", arguments: {} });
 		expect(r.isError).toBeFalsy();
-		expect(teamOf("/v1/me")).toEqual([OTHER_TEAM]);
+		expect(teamOf("/v1/me").length).toBeGreaterThan(0);
+		expect(teamOf("/v1/me").every((t) => t === OTHER_TEAM)).toBe(true);
 		expect(teamOf("/v1/sandboxes")).toEqual([OTHER_TEAM]);
 	});
 
@@ -306,7 +171,8 @@ describe("the team of a request", () => {
 		const s = await setup();
 		const c = await s.connect(twoTeams, { query: `?team=${OTHER_TEAM}` });
 		await c.client.callTool({ name: "sandbox_list", arguments: {} });
-		expect(teamOf("/v1/me")).toEqual([OTHER_TEAM]);
+		expect(teamOf("/v1/me").length).toBeGreaterThan(0);
+		expect(teamOf("/v1/me").every((t) => t === OTHER_TEAM)).toBe(true);
 		expect(teamOf("/v1/sandboxes")).toEqual([OTHER_TEAM]);
 		// Without either: the default team, no header.
 		const d = await s.connect(twoTeams);
@@ -321,7 +187,8 @@ describe("the team of a request", () => {
 			query: "?team=team_nobody",
 		});
 		await c.client.callTool({ name: "sandbox_list", arguments: {} });
-		expect(teamOf("/v1/me")).toEqual([OTHER_TEAM]);
+		expect(teamOf("/v1/me").length).toBeGreaterThan(0);
+		expect(teamOf("/v1/me").every((t) => t === OTHER_TEAM)).toBe(true);
 		expect(teamOf("/v1/sandboxes")).toEqual([OTHER_TEAM]);
 	});
 

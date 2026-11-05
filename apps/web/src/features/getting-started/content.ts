@@ -1,7 +1,7 @@
 /** Commands are checked against docs/getting-started.md by the drift test. */
 export interface GuideDeployment {
 	tenancy?: "single" | "teams";
-	mode: "owner" | "oidc";
+	mode: "owner";
 	apiUrl: string;
 	appUrl: string;
 	previewDomain: string;
@@ -175,57 +175,42 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 					'[mcp_servers.umiak]\ncommand = "umiak"\nargs = ["mcp"]',
 				),
 				text(
-					`Remote MCP is available at ${mcp}. OIDC supports browser sign-in; owner-mode remote MCP uses the paired owner credential sent through the ingress. Prefer stdio for quickstart so credentials stay in the CLI profile. For HTTPS through your own proxy, remote clients must trust its certificate.`,
+					`Remote MCP is available at ${mcp}. Remote MCP uses the paired owner credential sent through the ingress. Prefer stdio for quickstart so credentials stay in the CLI profile. For HTTPS through your own proxy, remote clients must trust its certificate.`,
 				),
-				...(d.mode === "oidc"
-					? [
-							code(
-								"Claude Code · remote OAuth",
-								`claude mcp add --transport http --scope user --client-id umiak-mcp --callback-port 33418 umiak-remote ${quote(mcp)}\nclaude mcp login umiak-remote`,
-							),
-							code(
-								"Codex · remote OAuth",
-								`codex mcp add umiak-remote --url ${quote(mcp)} --oauth-client-id umiak-mcp\ncodex mcp login umiak-remote`,
-							),
-							code(
-								"Codex · OAuth callback setting",
-								'[mcp_servers.umiak-remote.oauth]\nclient_id = "umiak-mcp"\ncallback_port = 33418',
-							),
-						]
-					: [
-							code(
-								"Claude Code · remote HTTP",
-								d.mode === "owner"
-									? JSON.stringify(
-											{
-												mcpServers: {
-													"umiak-remote": {
-														type: "http",
-														url: mcp,
-														headers: {
-															// Claude Code expands this environment reference at runtime.
-															Authorization: "Bearer $" + "{UMIAK_OWNER_TOKEN}",
-														},
-													},
+				...[
+					code(
+						"Claude Code · remote HTTP",
+						d.mode === "owner"
+							? JSON.stringify(
+									{
+										mcpServers: {
+											"umiak-remote": {
+												type: "http",
+												url: mcp,
+												headers: {
+													// Claude Code expands this environment reference at runtime.
+													Authorization: "Bearer $" + "{UMIAK_OWNER_TOKEN}",
 												},
 											},
-											null,
-											2,
-										)
-									: `claude mcp add --transport http --scope user umiak-remote ${quote(mcp)}`,
-							),
-							code(
-								"Codex · remote HTTP configuration",
-								`[mcp_servers.umiak-remote]\nurl = ${JSON.stringify(mcp)}${d.mode === "owner" ? '\nbearer_token_env_var = "UMIAK_OWNER_TOKEN"' : ""}`,
-							),
-							...(d.mode === "owner"
-								? [
-										text(
-											"For Claude Code, save the remote JSON configuration in .mcp.json. Set UMIAK_OWNER_TOKEN in the client environment using your own paired CLI credential from its private profile; never commit a credential or paste it into this guide. Stdio avoids this manual credential transfer.",
-										),
-									]
-								: []),
-						]),
+										},
+									},
+									null,
+									2,
+								)
+							: `claude mcp add --transport http --scope user umiak-remote ${quote(mcp)}`,
+					),
+					code(
+						"Codex · remote HTTP configuration",
+						`[mcp_servers.umiak-remote]\nurl = ${JSON.stringify(mcp)}${d.mode === "owner" ? '\nbearer_token_env_var = "UMIAK_OWNER_TOKEN"' : ""}`,
+					),
+					...(d.mode === "owner"
+						? [
+								text(
+									"For Claude Code, save the remote JSON configuration in .mcp.json. Set UMIAK_OWNER_TOKEN in the client environment using your own paired CLI credential from its private profile; never commit a credential or paste it into this guide. Stdio avoids this manual credential transfer.",
+								),
+							]
+						: []),
+				],
 				text(
 					'Ask your agent: "Create a Linux sandbox, clone my repository into it and run the tests." umiak mcp --help explains read-only mode, toolsets and sandbox restrictions.',
 				),

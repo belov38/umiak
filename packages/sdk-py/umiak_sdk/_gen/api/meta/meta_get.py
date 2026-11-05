@@ -49,9 +49,9 @@ def sync_detailed(
 ) -> Response[Error | Meta]:
     """Platform information
 
-     Public facts about this deployment: API and dashboard URLs, the domain of published ports, the
-    Keycloak issuer for `umiak login`, the SSH endpoint with its host keys, and CLI versions. Needs no
-    authentication; clients call it first to configure themselves.
+     Public facts about this deployment: API and dashboard URLs, the domain of published ports, owner
+    authentication, the SSH endpoint with its host keys, and CLI versions. Needs no authentication;
+    clients call it first to configure themselves.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -76,9 +76,9 @@ def sync(
 ) -> Error | Meta | None:
     """Platform information
 
-     Public facts about this deployment: API and dashboard URLs, the domain of published ports, the
-    Keycloak issuer for `umiak login`, the SSH endpoint with its host keys, and CLI versions. Needs no
-    authentication; clients call it first to configure themselves.
+     Public facts about this deployment: API and dashboard URLs, the domain of published ports, owner
+    authentication, the SSH endpoint with its host keys, and CLI versions. Needs no authentication;
+    clients call it first to configure themselves.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -99,9 +99,9 @@ async def asyncio_detailed(
 ) -> Response[Error | Meta]:
     """Platform information
 
-     Public facts about this deployment: API and dashboard URLs, the domain of published ports, the
-    Keycloak issuer for `umiak login`, the SSH endpoint with its host keys, and CLI versions. Needs no
-    authentication; clients call it first to configure themselves.
+     Public facts about this deployment: API and dashboard URLs, the domain of published ports, owner
+    authentication, the SSH endpoint with its host keys, and CLI versions. Needs no authentication;
+    clients call it first to configure themselves.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -124,9 +124,9 @@ async def asyncio(
 ) -> Error | Meta | None:
     """Platform information
 
-     Public facts about this deployment: API and dashboard URLs, the domain of published ports, the
-    Keycloak issuer for `umiak login`, the SSH endpoint with its host keys, and CLI versions. Needs no
-    authentication; clients call it first to configure themselves.
+     Public facts about this deployment: API and dashboard URLs, the domain of published ports, owner
+    authentication, the SSH endpoint with its host keys, and CLI versions. Needs no authentication;
+    clients call it first to configure themselves.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

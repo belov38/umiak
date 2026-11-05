@@ -353,7 +353,7 @@ export function registerCommandRoutes(app: FakeApp, fake: Fake): void {
 				reason: null,
 				pid: 1000 + seq,
 				outputTruncated: null,
-				createdBy: p.kind === "oidc" ? "usr_fake" : null,
+				createdBy: p.kind === "session" ? "usr_fake" : null,
 				createdByKey: p.keyId ?? null,
 				createdAt: now,
 				startedAt: now,

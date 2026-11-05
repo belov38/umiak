@@ -25,7 +25,7 @@ export const EXIT_TEMPORARY = 75;
 export const USAGE = "usage";
 /** No credentials for the profile: `umiak login` or UMIAK_API_KEY. */
 export const NOT_LOGGED_IN = "not_logged_in";
-/** Keycloak refused the refresh token (`invalid_grant`): log in again. */
+/** Credentials are no longer usable: pair with the owner again. */
 export const LOGIN_REQUIRED = "login_required";
 /** The device code expired or the person denied the login. */
 export const LOGIN_FAILED = "login_failed";

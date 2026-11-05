@@ -605,12 +605,12 @@ describe.skipIf(skipPg())("collection rules", () => {
 				id: u.id,
 				data: {
 					active: false,
-					deactivatedReason: "idp_deleted",
+					deactivatedReason: "operator",
 					deactivatedAt: at,
 				},
 			});
 			const off = await read(u.id);
-			expect(off.deactivatedReason).toBe("idp_deleted");
+			expect(off.deactivatedReason).toBe("operator");
 			expect(off.deactivatedAt).toBe(at);
 			// Other updates of an inactive user leave them alone.
 			await payload.update({
@@ -618,7 +618,7 @@ describe.skipIf(skipPg())("collection rules", () => {
 				id: u.id,
 				data: { name: "x" },
 			});
-			expect((await read(u.id)).deactivatedReason).toBe("idp_deleted");
+			expect((await read(u.id)).deactivatedReason).toBe("operator");
 		});
 	});
 

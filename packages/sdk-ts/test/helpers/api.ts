@@ -72,6 +72,7 @@ export async function startTestApi(db: TestDatabase): Promise<TestApi> {
 	const { server, wss } = createApiServer(createPublicApp(deps));
 	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 	const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+	deps.settings.ownerHosts.push(new URL(url).host);
 
 	const requests: TestApi["requests"] = [];
 	const hooks: Hook[] = [];

@@ -64,6 +64,8 @@ export interface Harness {
 }
 
 export interface HarnessOptions {
+	/** Explicit authorization fixture. Owner transport itself is tested without this override. */
+	session?: import("@umiak/auth").SessionHeaders;
 	listener?: Listener;
 	deps?: Partial<ApiDeps>;
 	/**
@@ -86,10 +88,33 @@ function build(listener: Listener, deps: ApiDeps): ApiApp {
 	}
 }
 
+export const harnessDeps = new WeakMap<ApiApp, ApiDeps>();
+
 export function createHarness(o: HarnessOptions = {}): Harness {
 	const listener = o.listener ?? "public";
 	const deps = makeTestDeps(o.deps);
+	const session = o.session;
+	if (session) {
+		const resolve = deps.sessions.resolve.bind(deps.sessions);
+		deps.sessions.resolve = () => resolve(session);
+	}
 	const app = build(listener, deps);
+	harnessDeps.set(app, deps);
+	// app.request represents traffic already admitted by the owner ingress.
+	// Direct application requests and streaming helpers use the same transport.
+	const rawRequest = app.request.bind(app);
+	app.request = ((input, init, env) => {
+		const headers = new Headers(
+			init?.headers ?? (input instanceof Request ? input.headers : undefined),
+		);
+		if (!headers.has("host"))
+			headers.set("host", new URL(deps.settings.apiUrl).host);
+		return rawRequest(
+			input,
+			{ ...init, headers },
+			env ?? { incoming: { socket: { remoteAddress: "127.0.0.1" } } },
+		);
+	}) as typeof app.request;
 	const documented = listener === "public" || listener === "proxied";
 
 	async function request(

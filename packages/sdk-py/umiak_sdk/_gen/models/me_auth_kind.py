@@ -2,7 +2,6 @@ from enum import StrEnum
 
 
 class MeAuthKind(StrEnum):
-    OIDC = "oidc"
     SESSION = "session"
     TEAM_KEY = "team_key"
 

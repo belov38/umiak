@@ -7,8 +7,6 @@ import { createHash } from "node:crypto";
 import { Umiak, UmiakError } from "@umiak/sdk";
 import type { Metrics } from "../metrics.ts";
 
-/** A JWT with less than this left is refused: a call may take 50 s. */
-export const EXP_MARGIN_MS = 55_000;
 /** Longest life of a successful check in the cache. */
 export const ME_OK_TTL_MS = 30_000;
 /** Life of a refused check in the cache. */
@@ -23,7 +21,7 @@ export interface Principal {
 	token: string;
 	/** Team requested by Umiak-Team or `?team=`; absent: the default team. */
 	team?: string;
-	kind: "oidc" | "team_key" | "session";
+	kind: "team_key" | "session";
 	scopes: string[];
 	/** JWT `exp` in ms; null for team keys. */
 	expiresAt: number | null;
@@ -60,22 +58,6 @@ export function bearerOf(req: Request): string | null {
 
 export function tokenHash(token: string): string {
 	return createHash("sha256").update(token).digest("hex");
-}
-
-/** `exp` of a JWT in ms, read without checking the signature; null when it is not a JWT. */
-export function jwtExpiresAt(token: string): number | null {
-	if (token.startsWith("umiak_")) return null;
-	const parts = token.split(".");
-	if (parts.length !== 3 || parts[1] === undefined) return null;
-	try {
-		const payload: unknown = JSON.parse(
-			Buffer.from(parts[1], "base64url").toString("utf8"),
-		);
-		const exp = (payload as { exp?: unknown } | null)?.exp;
-		return typeof exp === "number" && Number.isFinite(exp) ? exp * 1000 : null;
-	} catch {
-		return null;
-	}
 }
 
 /** Results of GET /v1/me per (sha256(token), team), in memory only. */
@@ -138,7 +120,7 @@ export class MeCache {
 	}
 }
 
-const KINDS = new Set<string>(["oidc", "team_key", "session"]);
+const KINDS = new Set<string>(["team_key", "session"]);
 
 export interface AuthenticatorOptions {
 	apiUrl: string;
@@ -196,19 +178,14 @@ function rejectionOf(err: unknown): {
 
 /** Checks a bearer through GET /v1/me with the cache; concurrent misses share one call. */
 export function createAuthenticator(o: AuthenticatorOptions): Authenticate {
-	const now = o.now ?? Date.now;
 	const pending = new Map<string, Promise<Verdict>>();
 
 	async function ask(token: string, team: string | undefined) {
 		o.metrics?.meCacheMisses.inc();
-		const exp = jwtExpiresAt(token);
+		const exp = null;
 		const umiak = new Umiak({
 			baseUrl: o.apiUrl,
-			...(token === ""
-				? { session: true }
-				: token.startsWith("umiak_")
-					? { apiKey: token }
-					: { accessToken: token }),
+			...(token === "" ? { session: true } : { apiKey: token }),
 			...(team === undefined ? {} : { team }),
 			...(o.fetch === undefined ? {} : { fetch: o.fetch }),
 			userAgent: o.userAgent,
@@ -233,7 +210,7 @@ export function createAuthenticator(o: AuthenticatorOptions): Authenticate {
 					subject: `${kind}:${subject}`,
 				},
 			};
-			ttl = Math.min(ME_OK_TTL_MS, exp === null ? ME_OK_TTL_MS : exp - now());
+			ttl = ME_OK_TTL_MS;
 		} catch (err) {
 			const r = rejectionOf(err);
 			verdict = { rejection: r.rejection };
@@ -244,19 +221,6 @@ export function createAuthenticator(o: AuthenticatorOptions): Authenticate {
 	}
 
 	return async (token, team) => {
-		const exp = jwtExpiresAt(token);
-		if (exp !== null && exp - now() < EXP_MARGIN_MS) {
-			return {
-				status: 401,
-				reason: "expires_soon",
-				code: "unauthorized",
-				message: "token expires too soon",
-				challenge: {
-					error: "invalid_token",
-					description: "token expires too soon",
-				},
-			};
-		}
 		let verdict = o.cache.get(token, team);
 		if (verdict === undefined) {
 			const key = MeCache.key(token, team);

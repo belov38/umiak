@@ -1,6 +1,6 @@
 // Listener apps (S7 §7.1):
 //   public   :8080  SDK, CLI, MCP, CI          -> createPublicApp
-//   proxied  :8081  browser via oauth2-proxy   -> createProxiedApp
+//   proxied  :8081  browser via owner ingress   -> createProxiedApp
 //   internal :8082  gateway, service tokens    -> createInternalApp
 //   ops      :9090  /healthz, /readyz, /metrics -> createOpsApp
 // Public and proxied serve the same `/v1` resources (`mountV1`); they differ
@@ -110,7 +110,7 @@ export function mountV1(
 }
 
 export function createPublicApp(deps: ApiDeps): ApiApp {
-	// oauth2-proxy headers are forged on this host: removed before anything.
+	// owner ingress headers are forged on this host: removed before anything.
 	const app = listenerApp(deps, {}, [stripProxyHeaders()]);
 	app.use("*", ownerNetworkGuard(deps));
 	app.use("/v1/*", publicAuth(deps), rateLimit(deps));

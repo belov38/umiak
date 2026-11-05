@@ -21,12 +21,6 @@ describe("Getting started", () => {
 		expect(text).toContain("https://app.example.com/mcp");
 		expect(text).not.toContain("192.168.68.90");
 	});
-	it("uses build-from-source and mode-specific authentication outside quickstart", () => {
-		const text = JSON.stringify(guideSections({ ...deployment, mode: "oidc" }));
-		expect(text).toContain("pnpm --filter @umiak/cli build");
-		expect(text).not.toContain("install.sh");
-		expect(text).toContain("browser sign-in");
-	});
 	it("describes tailnet HTTPS access without LAN HTTP or the Compose sidecar", () => {
 		const text = JSON.stringify(guideSections(deployment));
 		expect(text).toContain("tailnet HTTPS address");
@@ -47,7 +41,7 @@ describe("Getting started", () => {
 			new URL("../../../docs/getting-started.md", import.meta.url),
 			"utf8",
 		);
-		for (const mode of ["owner", "oidc"] as const) {
+		for (const mode of ["owner"] as const) {
 			for (const section of guideSections({ ...deployment, mode })) {
 				for (const block of section.blocks) {
 					if (block.kind === "code")

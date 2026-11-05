@@ -68,8 +68,7 @@ async function fixture(
 			res.end(
 				JSON.stringify({
 					tenancy,
-					authMode: "oidc",
-					oidc: null,
+					authMode: "owner",
 					ssh: {
 						host: "ssh.example.test",
 						port: 2222,

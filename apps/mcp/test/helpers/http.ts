@@ -31,8 +31,6 @@ import {
 	TEST_CLIENT_INFO,
 } from "./connect.ts";
 
-export const TEST_ISSUER = "https://keycloak.example.com/realms/umiak";
-
 export interface ApiCall {
 	method: string;
 	path: string;
@@ -128,9 +126,12 @@ export async function startHttp(
 	const origin = `http://127.0.0.1:${port}`;
 	const url = `${origin}/mcp`;
 	const http = createHttpApp({
+		ownerEnv: {
+			UMIAK_AUTH_MODE: "owner",
+			UMIAK_LOCAL_ALLOWED_CIDRS: "127.0.0.0/8,::1/128",
+		},
 		apiUrl: api.url,
 		publicUrl: url,
-		issuer: TEST_ISSUER,
 		log,
 		metrics,
 		fetch: recordingFetch,

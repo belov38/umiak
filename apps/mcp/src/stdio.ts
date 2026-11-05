@@ -118,7 +118,7 @@ export class CancelTrackingTransport implements Transport {
 
 type Principal = NonNullable<ServerOptions["principal"]>;
 
-const PRINCIPAL_KINDS = new Set<string>(["oidc", "team_key", "session"]);
+const PRINCIPAL_KINDS = new Set<string>(["team_key", "session"]);
 
 /** GET /v1/me within PRINCIPAL_TIMEOUT_MS; null (list every tool) on any failure. */
 async function resolvePrincipal(

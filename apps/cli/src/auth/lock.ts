@@ -1,16 +1,4 @@
-// The config lock ($XDG_CONFIG_HOME/umiak/.lock, S7 §7.6): parallel `umiak`
-// processes (CLI, SDK through `umiak auth token`, MCP) refresh the Keycloak
-// token and write credentials one at a time.
-// - The lock is a file created with O_CREAT|O_EXCL holding a unique owner
-//   token; the holder removes it on release only while it still holds its
-//   own token.
-// - A holder that died leaves the file behind: a lock older than `staleMs`
-//   (30 s) is taken over. Holders keep their work far below that (the token
-//   refresh has a 20 s timeout, auth/token.ts).
-// - The stale file is first renamed aside and removed only if it is the same
-//   file (inode) that was found stale, so a lock created by another process
-//   between the check and the removal is put back, not deleted.
-
+// Cross-process lock for private CLI profile and credential store updates.
 import { randomUUID } from "node:crypto";
 import {
 	closeSync,

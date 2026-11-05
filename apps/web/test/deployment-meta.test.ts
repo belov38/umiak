@@ -14,7 +14,7 @@ describe("server dashboard metadata", () => {
 		const fetch = vi
 			.fn()
 			.mockResolvedValue(
-				new Response(JSON.stringify({ authMode: "oidc", tenancy: "single" })),
+				new Response(JSON.stringify({ authMode: "owner", tenancy: "single" })),
 			);
 		vi.stubGlobal("fetch", fetch);
 		expect(await getDeploymentMeta()).toEqual({ tenancy: "single" });
@@ -26,7 +26,7 @@ describe("server dashboard metadata", () => {
 	});
 	it("defaults old metadata and unavailability to teams", async () => {
 		for (const reply of [
-			new Response(JSON.stringify({ authMode: "oidc" })),
+			new Response(JSON.stringify({ authMode: "owner" })),
 			new Response("down", { status: 503 }),
 			new Response("invalid"),
 		]) {

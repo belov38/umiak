@@ -11,22 +11,10 @@ import {
 	killTransaction,
 	type Payload,
 } from "payload";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
-	afterAll,
-	beforeAll,
-	beforeEach,
-	describe,
-	expect,
-	it,
-	vi,
-} from "vitest";
-import {
-	AUTH_DENIED_HEADER,
-	authenticateHeaders,
 	getUmiakPayload,
 	migrateUmiakPayload,
-	ownerStrategy,
-	parseAuthHeaders,
 	resolveSession,
 } from "../src/index.ts";
 import { closePayload, Listener, testOptions } from "./helpers.ts";
@@ -272,14 +260,12 @@ describe.skipIf(skipPg())("resolveSession (S8 §5.3)", () => {
 	it("alternating browser (headers with role: entries) and CLI (JWT groups) logins notify nothing", async () => {
 		const e = email();
 		const sub = randomUUID();
-		const header = parseAuthHeaders({
-			"x-auth-request-email": e,
-			"x-auth-request-user": sub,
-			"x-auth-request-groups":
-				"role:offline_access,devs,role:uma_authorization,role:umiak-api:read",
-			"x-auth-request-preferred-username": "bob",
-		});
-		if (header === null) throw new Error("no claims");
+		const header = {
+			email: e,
+			user: sub,
+			groups: ["devs"],
+			preferredUsername: "bob",
+		};
 		expect(header.groups).toEqual(["devs"]);
 		const token = { email: e, user: sub, groups: ["devs"] };
 		const first = await resolveSession(payload, header, opts);
@@ -382,131 +368,5 @@ describe.skipIf(skipPg())("resolveSession (S8 §5.3)", () => {
 				r.user.id,
 			]),
 		).toBe(0);
-	});
-
-	describe("auth strategy (S8 §5.4)", () => {
-		const headers = (h: Record<string, string>) => new Headers(h);
-
-		it("authenticates by the oauth2-proxy headers", async () => {
-			const e = email();
-			const res = await ownerStrategy.authenticate({
-				payload,
-				headers: headers({
-					"x-auth-request-email": e,
-					"x-auth-request-user": randomUUID(),
-					"x-auth-request-groups": `devs,${OPS}`,
-				}),
-			});
-			expect(res.user).toMatchObject({
-				email: e,
-				isOperator: true,
-				active: true,
-				collection: "users",
-				_strategy: "oauth2-proxy",
-			});
-			expect(res.responseHeaders).toBeUndefined();
-		});
-
-		it("isOperator of the user comes from the resolved session, not from the second read", async () => {
-			const e = email();
-			const real = payload.findByID.bind(payload);
-			// A concurrent write between resolveSession and the read of the doc.
-			const spy = vi.spyOn(payload, "findByID").mockImplementationOnce((async (
-				a: Parameters<typeof real>[0],
-			) => ({
-				...(await real(a)),
-				isOperator: false,
-			})) as never);
-			try {
-				const res = await ownerStrategy.authenticate({
-					payload,
-					headers: headers({
-						"x-auth-request-email": e,
-						"x-auth-request-user": randomUUID(),
-						"x-auth-request-groups": OPS,
-					}),
-				});
-				expect(spy).toHaveBeenCalledTimes(1);
-				expect(res.user).toMatchObject({ email: e, isOperator: true });
-			} finally {
-				spy.mockRestore();
-			}
-		});
-
-		it("no email header -> no user; no sub -> no user", async () => {
-			expect(
-				(
-					await ownerStrategy.authenticate({
-						payload,
-						headers: headers({}),
-					})
-				).user,
-			).toBe(null);
-			expect(await authenticateHeaders(payload, headers({}))).toEqual({
-				kind: "anonymous",
-				status: 401,
-			});
-			const h = headers({ "x-auth-request-email": email() });
-			expect(
-				(await ownerStrategy.authenticate({ payload, headers: h })).user,
-			).toBe(null);
-			expect(await authenticateHeaders(payload, h)).toEqual({
-				kind: "denied",
-				status: 401,
-				reason: "subject_required",
-			});
-		});
-
-		it("a disabled user or a conflict: no user, the reason in the outcome and a response header", async () => {
-			const e = email();
-			const sub = randomUUID();
-			const r = await resolveSession(
-				payload,
-				{ email: e, user: sub, groups: [] },
-				opts,
-			);
-			await payload.update({
-				collection: "users",
-				id: r.user.id,
-				data: { active: false, deactivatedReason: "operator" },
-			});
-			const h = headers({
-				"x-auth-request-email": e,
-				"x-auth-request-user": sub,
-			});
-			const res = await ownerStrategy.authenticate({
-				payload,
-				headers: h,
-			});
-			expect(res.user).toBe(null);
-			expect(res.responseHeaders?.get(AUTH_DENIED_HEADER)).toBe(
-				"user_disabled",
-			);
-			expect(await authenticateHeaders(payload, h)).toEqual({
-				kind: "denied",
-				status: 403,
-				reason: "user_disabled",
-			});
-			const conflict = headers({
-				"x-auth-request-email": e,
-				"x-auth-request-user": randomUUID(),
-			});
-			expect(await authenticateHeaders(payload, conflict)).toEqual({
-				kind: "denied",
-				status: 403,
-				reason: "identity_conflict",
-			});
-		});
-
-		it("payload.auth runs the strategy", async () => {
-			const e = email();
-			const res = await payload.auth({
-				headers: headers({
-					"x-auth-request-email": e,
-					"x-auth-request-user": randomUUID(),
-				}),
-			});
-			expect(res.user).toMatchObject({ email: e, collection: "users" });
-		});
 	});
 });

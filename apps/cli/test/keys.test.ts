@@ -1,5 +1,5 @@
 // `umiak keys` (S7 §13, §14.2): team keys; create and rotate only with a
-// Keycloak login of an owner.
+// owner pairing of an owner.
 import {
 	afterAll,
 	afterEach,
@@ -41,7 +41,7 @@ describe("umiak keys", () => {
 		expect(c.stderr).toContain("umiak login");
 	});
 
-	it("an owner logged in with Keycloak creates, lists, rotates and revokes a key", async () => {
+	it("an owner logged in with owner creates, lists, rotates and revokes a key", async () => {
 		const _sub = `kc-${crypto.randomUUID()}`;
 		const login = await runCli(["login", "--no-browser", "--api-url", w.url], {
 			env: home.env,

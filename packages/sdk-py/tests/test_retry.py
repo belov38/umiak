@@ -386,7 +386,7 @@ class FakeUmiak:
         (self.dir / "out").write_text(
             json.dumps(
                 {
-                    "kind": "oidc",
+                    "kind": "owner",
                     "token": token,
                     "expiresAt": expires,
                     "apiUrl": api_url,

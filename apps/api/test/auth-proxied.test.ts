@@ -48,6 +48,7 @@ describe("owner proxied listener", () => {
 	});
 	it("rejects form submissions even from the dashboard Origin", async () => {
 		const h = createHarness({ listener: "proxied" });
+		h.app.post("/v1/__test/action", (c) => c.body(null, 204));
 		for (const type of [
 			"text/plain",
 			"application/x-www-form-urlencoded",

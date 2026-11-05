@@ -164,7 +164,7 @@ export async function selectPersonTeam(
 	throw teamForbidden("you are not a member of the team in Umiak-Team");
 }
 
-/** AuthContext of a person (browser session or Keycloak JWT). */
+/** AuthContext of a person (browser session or owner session). */
 export function personAuth(
 	kind: "session",
 	s: SessionIdentity,

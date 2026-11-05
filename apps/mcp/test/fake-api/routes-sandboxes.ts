@@ -199,7 +199,7 @@ async function spawnSandbox(
 		slug,
 		name: spec.name ?? null,
 		teamId: p.teamId,
-		createdBy: p.kind === "oidc" ? "usr_fake" : null,
+		createdBy: p.kind === "session" ? "usr_fake" : null,
 		createdByKey: p.keyId ?? null,
 		template: spec.template,
 		size: spec.size,
@@ -311,13 +311,13 @@ export function registerSandboxRoutes(app: FakeApp, fake: Fake): void {
 		const teamOf = (id: string) => ({
 			id,
 			name: `Team ${id}`,
-			role: p.kind === "oidc" ? "owner" : null,
+			role: p.kind === "session" ? "owner" : null,
 		});
 		const team = teamOf(p.teamId);
 		// A person's teams: the one of the request (selected by Umiak-Team) and the rest.
 		const own = fake.tokens.get(c.get("token"));
 		const teams =
-			p.kind === "oidc" && own !== undefined
+			p.kind === "session" && own !== undefined
 				? [own.teamId, ...(own.teams ?? [])].map(teamOf)
 				: [team];
 		const auth: Json = { kind: p.kind, scopes: p.scopes };
@@ -336,7 +336,7 @@ export function registerSandboxRoutes(app: FakeApp, fake: Fake): void {
 		}
 		return c.json({
 			user:
-				p.kind === "oidc"
+				p.kind === "session"
 					? {
 							id: "usr_fake",
 							email: p.userEmail ?? "user@example.com",

@@ -1,6 +1,6 @@
 // JIT of the user from IdP claims (S8 §5.3). One function for the Payload
 // auth strategy in web, PayloadIdentityStore.resolveSession in api (browser
-// sessions) and the Keycloak JWT of CLI, SDK and MCP: the identity is the
+// sessions) and the owner session of CLI, SDK and MCP: the identity is the
 // IdP `sub` everywhere.
 //
 // Everything runs in one Payload transaction: user rows are locked with

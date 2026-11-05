@@ -30,8 +30,6 @@ export interface Settings {
 	apiUrl: string;
 	/** UMIAK_MCP_PUBLIC_URL: the URL clients use, e.g. https://api.example.com/mcp. */
 	publicUrl: string;
-	/** UMIAK_OIDC_ISSUER without a trailing slash; null: no authorization server. */
-	issuer: string | null;
 	allowedOrigins: string[];
 	allowedHosts: string[];
 	logLevel: (typeof LOG_LEVELS)[number];
@@ -105,7 +103,6 @@ const schema = z.object({
 	UMIAK_API_URL: optionalUrl,
 	UMIAK_MCP_API_URL: url("the api's public listener, e.g. http://api:8080"),
 	UMIAK_MCP_PUBLIC_URL: url("e.g. https://api.example.com/mcp"),
-	UMIAK_OIDC_ISSUER: optionalUrl,
 	UMIAK_MCP_ALLOWED_ORIGINS: origins,
 	UMIAK_MCP_ALLOWED_HOSTS: csv,
 	UMIAK_LOG_LEVEL: z.preprocess(unsetEmpty, z.enum(LOG_LEVELS).default("info")),
@@ -115,8 +112,6 @@ const schema = z.object({
 export function loadSettings(
 	env: Record<string, string | undefined>,
 ): Settings {
-	const mode = parseAuthMode(env);
-	const cidrs = mode === "owner" ? ownerCidrSet(env) : undefined;
 	const r = schema.safeParse(env);
 	if (!r.success) {
 		const lines = r.error.issues.map(
@@ -124,6 +119,8 @@ export function loadSettings(
 		);
 		throw new SettingsError(`invalid environment:\n${lines.join("\n")}`);
 	}
+	const mode = parseAuthMode(env);
+	const cidrs = ownerCidrSet(env);
 	const e = r.data;
 	return {
 		...(mode === "owner" && cidrs !== undefined
@@ -141,10 +138,6 @@ export function loadSettings(
 		opsPort: e.UMIAK_MCP_OPS_PORT,
 		apiUrl: e.UMIAK_MCP_API_URL.replace(/\/+$/, ""),
 		publicUrl: e.UMIAK_MCP_PUBLIC_URL,
-		issuer:
-			mode === "owner"
-				? null
-				: (e.UMIAK_OIDC_ISSUER?.replace(/\/+$/, "") ?? null),
 		allowedOrigins: e.UMIAK_MCP_ALLOWED_ORIGINS,
 		allowedHosts: e.UMIAK_MCP_ALLOWED_HOSTS,
 		logLevel: e.UMIAK_LOG_LEVEL,

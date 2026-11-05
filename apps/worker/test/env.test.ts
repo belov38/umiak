@@ -97,7 +97,6 @@ describe("worker env", () => {
 			UMIAK_MIGRATE_ON_START: "false",
 			UMIAK_LOG_LEVEL: "debug",
 			UMIAK_DB_POOL_MAX: "50",
-			UMIAK_IDP_SYNC_INTERVAL: "60",
 		});
 		expect(env).toMatchObject({
 			gatewayServiceTokenFile: "/run/secrets/gw",

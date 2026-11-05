@@ -59,7 +59,11 @@ export interface ApiWorld {
 	 * the world's team (its default team), through `identity`; for writes
 	 * that reference the user (environments `updated_by`).
 	 */
-	dbSession(o: { role: "owner" | "member"; deps?: Partial<ApiDeps> }): Promise<{
+	dbSession(o: {
+		role: "owner" | "member";
+		deps?: Partial<ApiDeps>;
+		groups?: string[];
+	}): Promise<{
 		h: Harness;
 		headers: Record<string, string>;
 		userId: string;
@@ -162,7 +166,11 @@ export async function apiWorld(
 				[userId, teamId, o.role],
 			);
 			return {
-				h: createHarness({ listener: "proxied", deps: deps(o.deps) }),
+				h: createHarness({
+					listener: "proxied",
+					deps: deps(o.deps),
+					session: { user: sub, email, groups: o.groups ?? [] },
+				}),
 				headers: {
 					"x-auth-request-email": email,
 					"x-auth-request-user": sub,

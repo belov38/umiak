@@ -54,15 +54,14 @@ describe("openapi/v1.json", () => {
 
 	const doc = JSON.parse(COMMITTED) as Doc;
 
-	it("is OpenAPI 3.1 with the keycloak and teamKey schemes (S7 §15.1)", () => {
+	it("is OpenAPI 3.1 with the owner and teamKey schemes (S7 §15.1)", () => {
 		expect(doc.openapi).toBe("3.1.0");
-		expect(doc.security).toEqual([{ keycloak: [] }, { teamKey: [] }]);
-		expect(doc.components.securitySchemes.keycloak).toMatchObject({
-			type: "openIdConnect",
+		expect(doc.security).toEqual([{ owner: [] }, { teamKey: [] }]);
+		expect(doc.components.securitySchemes.owner).toMatchObject({
+			type: "http",
+			scheme: "bearer",
 		});
-		expect(
-			String(doc.components.securitySchemes.keycloak?.openIdConnectUrl),
-		).toMatch(/\/\.well-known\/openid-configuration$/);
+
 		expect(doc.components.securitySchemes.teamKey).toMatchObject({
 			type: "http",
 			scheme: "bearer",
@@ -101,13 +100,12 @@ describe("openapi/v1.json", () => {
 	});
 
 	it("meta, openapi.json and docs need no auth", () => {
-		for (const p of ["/v1/meta", "/v1/openapi.json", "/v1/docs"]) {
+		for (const p of ["/v1/meta", "/v1/openapi.json"]) {
 			expect(doc.paths[p]?.get?.security, p).toEqual([]);
 		}
 		expect(doc.paths["/v1/openapi.json"]?.get?.operationId).toBe(
 			"meta.openapi",
 		);
-		expect(doc.paths["/v1/docs"]?.get?.operationId).toBe("meta.docs");
 	});
 
 	it("operations with security: [] are exactly the routes the listeners leave anonymous", () => {
@@ -179,7 +177,6 @@ describe("openapi/v1.json", () => {
 			appUrl: "https://app.x.test",
 			apiUrl: "https://api.x.test",
 			umiakDomain: "x.test",
-			oidc: null,
 			ssh: { host: "ssh.x.test", port: 22, hostKeys: [] },
 			minCliVersion: null,
 			latestCliVersion: null,

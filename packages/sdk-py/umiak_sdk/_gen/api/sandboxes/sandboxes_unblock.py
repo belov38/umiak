@@ -77,8 +77,8 @@ def sync_detailed(
     """Unblock a sandbox (operator)
 
      Lifts the block at once; on a sandbox that is not blocked nothing changes. Only a platform
-    operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden`
-    (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
+    operator's browser session (the dashboard); API keys are 403 `forbidden` (details.reason
+    `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -113,8 +113,8 @@ def sync(
     """Unblock a sandbox (operator)
 
      Lifts the block at once; on a sandbox that is not blocked nothing changes. Only a platform
-    operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden`
-    (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
+    operator's browser session (the dashboard); API keys are 403 `forbidden` (details.reason
+    `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -144,8 +144,8 @@ async def asyncio_detailed(
     """Unblock a sandbox (operator)
 
      Lifts the block at once; on a sandbox that is not blocked nothing changes. Only a platform
-    operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden`
-    (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
+    operator's browser session (the dashboard); API keys are 403 `forbidden` (details.reason
+    `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -178,8 +178,8 @@ async def asyncio(
     """Unblock a sandbox (operator)
 
      Lifts the block at once; on a sandbox that is not blocked nothing changes. Only a platform
-    operator's browser session (the dashboard); API keys and Keycloak tokens are 403 `forbidden`
-    (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
+    operator's browser session (the dashboard); API keys are 403 `forbidden` (details.reason
+    `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.

@@ -1,5 +1,5 @@
 // `umiak keys list|create|rotate|rm` (S7 §7.2, §13): team API keys. create and
-// rotate need an owner logged in with Keycloak (`umiak login`): a team key
+// rotate need an owner logged in with owner (`umiak login`): a team key
 // cannot issue keys, so they stop before any request (`user_required`,
 // exit 4). The secret is printed only by create and rotate.
 
@@ -22,7 +22,7 @@ async function requirePerson(ctx: Context, what: string): Promise<void> {
 	if (ctx.resolved.profile?.auth === "owner") return;
 	throw new CliError({
 		code: "user_required",
-		message: `${what} needs an owner logged in with Keycloak (run: umiak login); a team key cannot issue keys`,
+		message: `${what} needs an owner logged in with owner (run: umiak login); a team key cannot issue keys`,
 		retryable: false,
 	});
 }
@@ -71,7 +71,7 @@ export function register(program: Command, run: Runner): void {
 
 	keys
 		.command("create")
-		.description("issue a team key (owner, Keycloak login)")
+		.description("issue a team key (owner, owner pairing)")
 		.argument("<name>", "name of the key")
 		.option("--preset <preset>", "read-only, ci or full")
 		.option(

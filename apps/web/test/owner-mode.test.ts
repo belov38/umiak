@@ -75,11 +75,14 @@ describe("owner web transport boundary", () => {
 			)?.reason,
 		).toBe("endpoint_disabled");
 	});
-	it("retains oidc as the default", () => {
+	it("requires ingress configuration by default", () => {
 		expect(
-			guard(request(), { appOrigin: options.appOrigin, operatorGroups: [] })
-				?.status,
-		).toBe(401);
+			guard(request(), {
+				appOrigin: options.appOrigin,
+				operatorGroups: [],
+				localAllowedCidrs: "192.168.1.0/24",
+			})?.status,
+		).toBe(403);
 	});
 	it("parses owner mode without a sign-out destination", () => {
 		const env = parseWebEnv({
@@ -94,6 +97,5 @@ describe("owner web transport boundary", () => {
 			UMIAK_LOGOUT_URL: "https://idp/logout",
 		});
 		expect(env.authMode).toBe("owner");
-		expect(env.logoutUrl).toBeNull();
 	});
 });

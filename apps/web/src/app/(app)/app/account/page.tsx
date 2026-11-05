@@ -3,8 +3,6 @@ import { redirect } from "next/navigation";
 import { AccountSettings } from "@/components/app/account-settings";
 import { DefaultTeamShell } from "@/components/app/default-team-shell";
 import { getDeploymentMeta } from "@/lib/deployment-meta";
-import { webEnv } from "@/lib/env";
-import { signOutHref } from "@/lib/team-path";
 
 export default async function AccountPage() {
 	if ((await getDeploymentMeta()).tenancy === "single")
@@ -12,11 +10,7 @@ export default async function AccountPage() {
 
 	return (
 		<DefaultTeamShell>
-			<AccountSettings
-				signOutHref={
-					webEnv().authMode === "owner" ? null : signOutHref(webEnv().logoutUrl)
-				}
-			/>
+			<AccountSettings signOutHref={null} />
 		</DefaultTeamShell>
 	);
 }

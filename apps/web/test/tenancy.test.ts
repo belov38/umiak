@@ -14,7 +14,9 @@ describe("explicit metadata tenancy", () => {
 			expect(metaTenancy(meta)).toBe("teams");
 	});
 	it("accepts only the explicit single field irrespective of auth mode", () => {
-		expect(metaTenancy({ tenancy: "single", authMode: "oidc" })).toBe("single");
+		expect(metaTenancy({ tenancy: "single", authMode: "owner" })).toBe(
+			"single",
+		);
 	});
 	it("does not teach team concepts in single-owner Getting started", () => {
 		for (const mode of ["owner"] as const) {
@@ -30,11 +32,11 @@ describe("explicit metadata tenancy", () => {
 			);
 		}
 	});
-	it("retains teams for OIDC Getting started", () => {
+	it("retains teams for an explicit teams presentation", () => {
 		expect(
 			JSON.stringify(
 				guideSections({
-					mode: "oidc",
+					mode: "owner",
 					tenancy: "teams",
 					apiUrl: "https://api.example.com",
 					appUrl: "https://app.example.com",
@@ -86,7 +88,6 @@ function markup(
 						personal: true,
 					},
 					member: true,
-					logoutUrl: null,
 					ownerMode: true,
 					quickstart,
 					// biome-ignore lint/correctness/noChildrenProp: Component props require children when using createElement in a .ts test.

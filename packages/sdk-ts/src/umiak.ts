@@ -99,7 +99,7 @@ export class Umiak {
 		delete(name: string, opts?: CallOptions): Promise<void>;
 	};
 	/**
-	 * Platform operators only (a dashboard session; keys and Keycloak tokens
+	 * Platform operators only (a dashboard session; keys and team keys
 	 * get 403 `operator_required`, S8 C3).
 	 */
 	readonly operator: {

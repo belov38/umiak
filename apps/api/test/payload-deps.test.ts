@@ -118,9 +118,16 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 		});
 
 		it("the identity file is loaded into Payload: its key answers /v1/me", async () => {
-			const r = await createPublicApp(deps).request("/v1/me", {
-				headers: { authorization: `Bearer ${secret}` },
-			});
+			const r = await createPublicApp(deps).request(
+				"/v1/me",
+				{
+					headers: {
+						host: new URL(deps.settings.apiUrl).host,
+						authorization: `Bearer ${secret}`,
+					},
+				},
+				{ incoming: { socket: { remoteAddress: "127.0.0.1" } } },
+			);
 			expect(r.status).toBe(200);
 			expect(await r.json()).toMatchObject({ team: { name: "payload-team" } });
 			const rows = await db.pool.query<{ name: string }>(
@@ -133,9 +140,16 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 		it("/v1/templates serves the Payload seed (linux and windows) and follows a change", async () => {
 			const app = createPublicApp(deps);
 			const get = async () => {
-				const r = await app.request("/v1/templates", {
-					headers: { authorization: `Bearer ${secret}` },
-				});
+				const r = await app.request(
+					"/v1/templates",
+					{
+						headers: {
+							host: new URL(deps.settings.apiUrl).host,
+							authorization: `Bearer ${secret}`,
+						},
+					},
+					{ incoming: { socket: { remoteAddress: "127.0.0.1" } } },
+				);
 				expect(r.status).toBe(200);
 				return ((await r.json()) as { data: { slug: string; name: string }[] })
 					.data;
@@ -169,17 +183,22 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 		});
 
 		it("a browser session is resolved by Payload (JIT user)", async () => {
-			const r = await createProxiedApp(deps).request("/v1/me", {
-				headers: {
-					"x-auth-request-email": "jit@example.com",
-					"x-auth-request-user": "sub-jit",
+			const r = await createProxiedApp(deps).request(
+				"/v1/me",
+				{
+					headers: {
+						host: new URL(deps.settings.apiUrl).host,
+						"x-auth-request-email": "jit@example.com",
+						"x-auth-request-user": "sub-jit",
+					},
 				},
-			});
+				{ incoming: { socket: { remoteAddress: "127.0.0.1" } } },
+			);
 			expect(r.status).toBe(200);
 			const rows = await db.pool.query<{ email: string }>(
-				"SELECT email FROM payload.users WHERE idp_subject = 'sub-jit'",
+				"SELECT email FROM payload.users WHERE idp_subject = 'umiak:local'",
 			);
-			expect(rows.rows).toEqual([{ email: "jit@example.com" }]);
+			expect(rows.rows).toEqual([{ email: "local@umiak.invalid" }]);
 		});
 
 		it("/readyz is 200", async () => {

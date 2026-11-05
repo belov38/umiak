@@ -41,7 +41,7 @@ export interface Settings {
 	proxiedPort: number;
 	internalPort: number;
 	metricsPort: number;
-	/** The proxied listener (oauth2-proxy) is started. */
+	/** The proxied listener (owner ingress) is started. */
 	proxiedEnabled: boolean;
 	databaseUrl: string;
 	/**

@@ -83,9 +83,8 @@ def sync_detailed(
      Blocks the sandbox: the gateway refuses all its ports and SSH, and for everyone but an operator only
     reads, stop and delete are allowed; anything else is 403 `forbidden` with details.reason
     `sandbox_blocked`. The reason and note are recorded. The same reason again changes nothing. Only a
-    platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403
-    `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team
-    needed.
+    platform operator's browser session (the dashboard); API keys are 403 `forbidden` (details.reason
+    `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -122,9 +121,8 @@ def sync(
      Blocks the sandbox: the gateway refuses all its ports and SSH, and for everyone but an operator only
     reads, stop and delete are allowed; anything else is 403 `forbidden` with details.reason
     `sandbox_blocked`. The reason and note are recorded. The same reason again changes nothing. Only a
-    platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403
-    `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team
-    needed.
+    platform operator's browser session (the dashboard); API keys are 403 `forbidden` (details.reason
+    `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -156,9 +154,8 @@ async def asyncio_detailed(
      Blocks the sandbox: the gateway refuses all its ports and SSH, and for everyone but an operator only
     reads, stop and delete are allowed; anything else is 403 `forbidden` with details.reason
     `sandbox_blocked`. The reason and note are recorded. The same reason again changes nothing. Only a
-    platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403
-    `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team
-    needed.
+    platform operator's browser session (the dashboard); API keys are 403 `forbidden` (details.reason
+    `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.
@@ -193,9 +190,8 @@ async def asyncio(
      Blocks the sandbox: the gateway refuses all its ports and SSH, and for everyone but an operator only
     reads, stop and delete are allowed; anything else is 403 `forbidden` with details.reason
     `sandbox_blocked`. The reason and note are recorded. The same reason again changes nothing. Only a
-    platform operator's browser session (the dashboard); API keys and Keycloak tokens are 403
-    `forbidden` (details.reason `operator_required`). The sandbox is found in any team, no Umiak-Team
-    needed.
+    platform operator's browser session (the dashboard); API keys are 403 `forbidden` (details.reason
+    `operator_required`). The sandbox is found in any team, no Umiak-Team needed.
 
     Args:
         sandbox (str): Sandbox id (`sb_...`) or slug Example: quiet-otter-lamp.

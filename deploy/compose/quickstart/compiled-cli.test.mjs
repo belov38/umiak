@@ -27,7 +27,7 @@ for (const httpsProxy of [false, true])
 		let child;
 		try {
 			t.mock.method(globalThis, "fetch", async () =>
-				Response.json({ oidc: null, tenancy: "single" }),
+				Response.json({ tenancy: "single" }),
 			);
 			const repo = new MemoryOwnerRepository();
 			const store = new OwnerStore(repo);

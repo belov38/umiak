@@ -5,6 +5,7 @@ import { guard, page } from "../src/lib/guard.ts";
 
 const ORIGIN = "https://app.umiak.example.com";
 const ENV = {
+	UMIAK_LOCAL_ALLOWED_CIDRS: "127.0.0.0/8",
 	DATABASE_URL: "postgres://u:p@127.0.0.1:5432/umiak",
 	PAYLOAD_SECRET: "0123456789abcdef0123",
 	UMIAK_APP_ORIGIN: ORIGIN,
@@ -14,7 +15,7 @@ const ENV = {
 	UMIAK_PREVIEW_PORT: "8085",
 	UMIAK_API_PUBLIC_URL: "https://api.umiak.example.com",
 };
-const SIGNED_IN = { "x-auth-request-email": "a@b.com" };
+const SIGNED_IN = { "x-umiak-client-ip": "127.0.0.1" };
 
 function req(
 	method: string,
@@ -28,16 +29,20 @@ describe("guard (S8 §5.1, §5.6)", () => {
 	const g = (method: string, path: string, h: Record<string, string> = {}) =>
 		guard(
 			{ method, pathname: path, headers: new Headers(h) },
-			{ appOrigin: ORIGIN, operatorGroups: ["umiak-operators"] },
+			{
+				appOrigin: ORIGIN,
+				operatorGroups: ["umiak-operators"],
+				localAllowedCidrs: "127.0.0.0/8",
+			},
 		);
 
 	it("no identity header: 401 on every path but /healthz", () => {
-		expect(g("GET", "/app")?.status).toBe(401);
-		expect(g("GET", "/")?.status).toBe(401);
-		expect(g("GET", "/admin")?.status).toBe(401);
-		expect(g("GET", "/cms-api/users")?.status).toBe(401);
+		expect(g("GET", "/app")?.status).toBe(403);
+		expect(g("GET", "/")?.status).toBe(403);
+		expect(g("GET", "/admin")?.status).toBe(403);
+		expect(g("GET", "/cms-api/users")?.status).toBe(403);
 		expect(g("GET", "/app", { "x-auth-request-email": "  " })?.status).toBe(
-			401,
+			403,
 		);
 		expect(g("GET", "/healthz")).toBe(null);
 	});
@@ -59,7 +64,7 @@ describe("guard (S8 §5.1, §5.6)", () => {
 	});
 
 	it("no identity wins over a bad origin (401 first)", () => {
-		expect(g("POST", "/app", { origin: "https://evil" })?.status).toBe(401);
+		expect(g("POST", "/app", { origin: "https://evil" })?.status).toBe(403);
 	});
 });
 
@@ -67,35 +72,13 @@ describe("guard: operator gate and disabled auth endpoints (S8 §5.4, §5.5)", (
 	const g = (method: string, path: string, h: Record<string, string> = {}) =>
 		guard(
 			{ method, pathname: path, headers: new Headers(h) },
-			{ appOrigin: ORIGIN, operatorGroups: ["umiak-operators"] },
+			{
+				appOrigin: ORIGIN,
+				operatorGroups: ["umiak-operators"],
+				localAllowedCidrs: "127.0.0.0/8",
+			},
 		);
 	const OP = { ...SIGNED_IN, "x-auth-request-groups": "dev, umiak-operators" };
-
-	it("/admin and /cms-api: 403 without an operator group, before Payload", () => {
-		for (const path of [
-			"/admin",
-			"/admin/",
-			"/admin/unauthorized",
-			"/admin/collections/api-keys",
-			"/cms-api/users",
-			"/cms-api/payload-preferences",
-			"/cms-api/payload-locked-documents",
-		]) {
-			const d = g("GET", path, {
-				...SIGNED_IN,
-				"x-auth-request-groups": "dev,role:umiak-operators",
-			});
-			expect(d?.status, path).toBe(403);
-			expect(d?.reason, path).toBe("operators_only");
-		}
-		expect(g("GET", "/admin", SIGNED_IN)?.reason).toBe("operators_only");
-		expect(
-			g("POST", "/cms-api/payload-preferences/x", {
-				...SIGNED_IN,
-				origin: ORIGIN,
-			})?.reason,
-		).toBe("operators_only");
-	});
 
 	it("operators pass; the gate does not touch /app or look-alike paths", () => {
 		expect(g("GET", "/admin/collections/users", OP)).toBe(null);
@@ -135,9 +118,9 @@ describe("proxy", () => {
 
 	it("without the header: 401 HTML with the security headers", async () => {
 		const res = proxy(req("GET", "/app"));
-		expect(res.status).toBe(401);
+		expect(res.status).toBe(403);
 		expect(res.headers.get("content-type")).toMatch(/^text\/html/);
-		expect(await res.text()).toContain("Not signed in");
+		expect(await res.text()).toContain("Forbidden");
 		expect(res.headers.get("content-security-policy")).toContain(
 			"frame-ancestors 'self'",
 		);
@@ -147,7 +130,7 @@ describe("proxy", () => {
 	});
 
 	it("the app root goes through the guard first: 401 without the header", () => {
-		expect(proxy(req("GET", "/")).status).toBe(401);
+		expect(proxy(req("GET", "/")).status).toBe(403);
 		expect(proxy(req("GET", "/", SIGNED_IN)).status).toBe(200);
 	});
 

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 /**
- * / → /app (temporary redirect). oauth2-proxy returns a login started at the
+ * / → /app (temporary redirect). owner ingress returns a login started at the
  * app root to /, and web has no page of its own there. proxy.ts runs first,
  * so an anonymous request still gets 401.
  */

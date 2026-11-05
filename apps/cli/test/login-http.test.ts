@@ -33,7 +33,6 @@ for (const [origin, warning] of [
 				return Response.json({
 					authMode: "owner",
 					tenancy: "single",
-					oidc: null,
 				});
 			if (path === "/owner/pair")
 				return Response.json({

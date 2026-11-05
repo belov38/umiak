@@ -42,12 +42,6 @@ import {
 	originAllowed,
 	readBodyLimited,
 } from "./limits.ts";
-import {
-	bearerChallenge,
-	prmPath,
-	prmUrl,
-	protectedResourceMetadata,
-} from "./prm.ts";
 
 export interface HttpOptions {
 	ownerEnv?: Record<string, string | undefined>;
@@ -55,8 +49,6 @@ export interface HttpOptions {
 	apiUrl: string;
 	/** UMIAK_MCP_PUBLIC_URL, e.g. https://api.example.com/mcp. */
 	publicUrl: string;
-	/** UMIAK_OIDC_ISSUER (PRM authorization_servers); null: none. */
-	issuer: string | null;
 	/** Extra Host values (UMIAK_MCP_ALLOWED_HOSTS). */
 	allowedHosts?: string[];
 	/** Origins a browser may call from (UMIAK_MCP_ALLOWED_ORIGINS); default none. */
@@ -201,8 +193,6 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 		: (o.fetch ?? fetch);
 	const apiFetch = apiCallLogger(apiTransport, log);
 	const mcpPath = new URL(o.publicUrl).pathname.replace(/(.)\/+$/, "$1");
-	const metadataUrl = prmUrl(o.publicUrl);
-	const metadata = protectedResourceMetadata(o);
 	const hosts = allowedHostsOf(o.publicUrl, o.allowedHosts);
 	const origins = allowedOriginsOf(o.allowedOrigins);
 	const limiter = new CallLimiter();
@@ -222,9 +212,6 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 		o.metrics?.authRejections.inc({ status: r.status, reason: r.reason });
 		log.info({ status: r.status, reason: r.reason }, "bearer refused");
 		const headers: Record<string, string> = {};
-		if (r.status === 401 && parseAuthMode(o.ownerEnv ?? {}) === "oidc") {
-			headers["WWW-Authenticate"] = bearerChallenge(metadataUrl, r.challenge);
-		}
 		if (r.status === 503) headers["Retry-After"] = "1";
 		return Response.json(
 			{ error: r.code, error_description: r.message },
@@ -248,20 +235,7 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 					"send one Authorization: Bearer <token> header or omit it in owner mode",
 			});
 		}
-		const token = bearer ?? (owner ? "" : null);
-		if (token === null) {
-			o.metrics?.authRejections.inc({ status: 401, reason: "no_bearer" });
-			return Response.json(
-				{
-					error: "unauthorized",
-					error_description: "send Authorization: Bearer <token>",
-				},
-				{
-					status: 401,
-					headers: { "WWW-Authenticate": bearerChallenge(metadataUrl) },
-				},
-			);
-		}
+		const token = bearer ?? "";
 		const localClient = clients.get(req);
 		const verify =
 			localClient === undefined
@@ -479,12 +453,6 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 			? c.json({ ready: false, reasons: ["shutting_down"] }, 503)
 			: c.json({ ready: true, reasons: [] }),
 	);
-	app.get(prmPath(o.publicUrl), (c) => {
-		if (!hostAllowed(c.req.header("host") ?? null, hosts)) {
-			return rpcError(421, "this Host is not served here");
-		}
-		return c.json(metadata);
-	});
 	app.all(mcpPath, serveMcp);
 
 	return {
