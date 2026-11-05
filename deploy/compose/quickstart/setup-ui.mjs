@@ -100,8 +100,18 @@ function setupInteractions() {
 	const showJob = (job) => {
 		if (!job) return;
 		disableBuilds(job.status === "running");
-		$("#build-log").textContent = job.log || "";
+		// Follow the end of the log unless the user scrolled up to read.
+		const log = $("#build-log");
+		const following =
+			!log.scrollHeight ||
+			log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+		log.textContent = job.log || "";
+		if (following) log.scrollTop = log.scrollHeight;
 		$("#build-details").hidden = !job.log;
+		if (job.status === "running" && !$("#build-details").dataset?.seen) {
+			$("#build-details").open = true;
+			if ($("#build-details").dataset) $("#build-details").dataset.seen = "1";
+		}
 		if (job.status === "running") $("#step-templates").open = true;
 		syncTest();
 		$("#build-error").textContent = job.error || "";
@@ -113,8 +123,12 @@ function setupInteractions() {
 					1000,
 			),
 		);
-		const activity =
-			(job.log || "").trim().split("\n").at(-1) || "Preparing the build";
+		const last = (job.log || "").trim().split("\n").at(-1) || "";
+		const activity = last
+			? last.length > 110
+				? `${last.slice(0, 110)}…`
+				: last
+			: "Preparing the build";
 		$("#build-progress").textContent =
 			job.status === "running"
 				? activity +
@@ -435,7 +449,7 @@ export function renderSetup(state) {
 	const hasTemplates =
 		(steps.templates?.data?.builds || []).length > 0 ||
 		nodes.some((n) => n.templates?.length);
-	const buildProgress = `<p id="build-progress" role="status" aria-live="polite"></p><p id="build-error" class="error" role="alert">${escapeHtml(state.buildJob?.error || "")}</p><details id="build-details"${state.buildJob?.log ? "" : " hidden"}><summary>Build details</summary><pre id="build-log">${escapeHtml(state.buildJob?.log || "")}</pre></details>`;
+	const buildProgress = `<p id="build-progress" role="status" aria-live="polite"></p><p id="build-error" class="error" role="alert">${escapeHtml(state.buildJob?.error || "")}</p><details id="build-details"${state.buildJob?.log ? "" : " hidden"}${state.buildJob?.status === "running" ? " open" : ""}><summary>Build log</summary><pre id="build-log" class="log" tabindex="0" aria-label="Build log, newest lines at the bottom">${escapeHtml(state.buildJob?.log || "")}</pre><p><a href="/quickstart/setup/build/log" target="_blank" rel="noopener">Open the full log in a new tab</a></p></details>`;
 	const continueLink =
 		'<p><a href="#step-smoke" id="continue-test">Continue to installation test</a></p>';
 	return page(

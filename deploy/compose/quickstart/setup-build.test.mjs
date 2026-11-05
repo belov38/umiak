@@ -345,3 +345,19 @@ test("completion resolves the current job artifact when an old ready manifest re
 		await rm(dir, { recursive: true, force: true });
 	}
 });
+
+test("full build log path accepts only job ids", () => {
+	const jobs = new TemplateBuildJobs({
+		store: {},
+		run: async () => {},
+		logDir: "/logs",
+	});
+	assert.equal(jobs.logPath("a".repeat(24)), `/logs/${"a".repeat(24)}.log`);
+	assert.equal(jobs.logPath("../etc/passwd"), null);
+	assert.equal(
+		new TemplateBuildJobs({ store: {}, run: async () => {} }).logPath(
+			"a".repeat(24),
+		),
+		null,
+	);
+});

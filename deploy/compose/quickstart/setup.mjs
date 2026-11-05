@@ -6,7 +6,7 @@ import { nodeService } from "./setup-nodes.mjs";
 // Owner-only setup orchestration. PVE adoption never writes to the host API.
 
 import { randomBytes, X509Certificate } from "node:crypto";
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { basename, dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -766,6 +766,7 @@ export function createSetupHandler({
 	const wizard = new SetupWizard({ store, steps });
 	const jobs = new TemplateBuildJobs({
 		store,
+		logDir: join(secretsDir, "template-build-logs"),
 		validate: async (slug, state, input) => {
 			state = await nodes.select(state, input.nodeId);
 			input.nodeId = state.steps.limits.data.nodeId;
@@ -1063,6 +1064,22 @@ export function createSetupHandler({
 		}
 		if (req.method === "GET" && path === "/quickstart/setup/state") {
 			json(res, 200, await store.read());
+			return true;
+		}
+		if (req.method === "GET" && path === "/quickstart/setup/build/log") {
+			const state = await store.read();
+			const file = jobs.logPath(state.buildJob?.id);
+			let text = state.buildJob?.log || "";
+			if (file)
+				try {
+					text = await readFile(file, "utf8");
+				} catch {}
+			res.writeHead(200, {
+				"content-type": "text/plain; charset=utf-8",
+				"cache-control": "no-store",
+				"x-content-type-options": "nosniff",
+			});
+			res.end(text || "No build output yet.\n");
 			return true;
 		}
 		if (req.method === "GET" && path === "/quickstart/setup/build") {

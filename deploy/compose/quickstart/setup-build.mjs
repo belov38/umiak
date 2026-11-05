@@ -2,7 +2,13 @@
 
 import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import {
+	appendFile,
+	mkdir,
+	readdir,
+	readFile,
+	writeFile,
+} from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -274,8 +280,11 @@ export class TemplateBuildJobs {
 		reserve = async () => {},
 		interrupt = async () => {},
 		finish = async () => {},
+		logDir,
 	}) {
 		this.store = store;
+		// Full job output on disk; the state keeps only the tail shown inline.
+		this.logDir = logDir;
 		this.run = run;
 		this.validate = validate;
 		this.register = register;
@@ -283,6 +292,10 @@ export class TemplateBuildJobs {
 		this.interrupt = interrupt;
 		this.finish = finish;
 		this.pending = Promise.resolve();
+	}
+	logPath(jobId) {
+		if (!this.logDir || !/^[a-f0-9]{24}$/.test(jobId || "")) return null;
+		return join(this.logDir, `${jobId}.log`);
 	}
 	async update(fn) {
 		const action = async () => {
@@ -333,6 +346,12 @@ export class TemplateBuildJobs {
 			try {
 				let progressWrites = Promise.resolve();
 				const onProgress = (chunk) => {
+					if (this.logDir)
+						progressWrites = progressWrites.then(() =>
+							mkdir(this.logDir, { recursive: true, mode: 0o700 })
+								.then(() => appendFile(this.logPath(job.id), chunk))
+								.catch(() => {}),
+						);
 					progressWrites = progressWrites.then(() =>
 						this.update((current) => {
 							if (current.buildJob?.id === job.id)
