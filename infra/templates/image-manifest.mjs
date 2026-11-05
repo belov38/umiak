@@ -168,6 +168,15 @@ export function verifyImageManifest(options) {
 	object(m.inventory, ["sha256", "sizeBytes"]);
 	hash(m.inventory.sha256);
 	size(m.inventory.sizeBytes, IMAGE_LIMITS.inventory);
+	check(
+		m.files.some(
+			(f) =>
+				f.path === "licenses/inventory.json" &&
+				f.sha256 === m.inventory.sha256 &&
+				f.sizeBytes === m.inventory.sizeBytes,
+		),
+		"Layer is missing its signed license inventory file",
+	);
 	object(m.verification, ["ok", "offlineReplay"]);
 	check(m.verification.ok === true && m.verification.offlineReplay === true);
 	return m;
@@ -213,7 +222,9 @@ export function validLayerPath(path) {
 	return (
 		typeof path === "string" &&
 		path.length <= 512 &&
-		/^(apt|inputs|build|licenses|recipes)\/[A-Za-z0-9_@+.,=/-]+$/.test(path) &&
+		/^(apt|inputs|build|licenses|recipes)\/[A-Za-z0-9_@+.,=~:/-]+$/.test(
+			path,
+		) &&
 		path.split("/").every((p) => p !== "" && p !== "." && p !== "..") &&
 		!/\.(?:qcow2?|raw|img|vmdk|vdi|iso)$/i.test(path)
 	);

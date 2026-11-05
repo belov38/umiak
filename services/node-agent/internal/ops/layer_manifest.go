@@ -22,7 +22,7 @@ const layerMaxMetadata = 1 << 20
 var layerDigestRE = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var layerVersionRE = regexp.MustCompile(`^\d{8}\.\d+(-edge\.\d{8}\.\d+)?$`)
 var layerSemverRE = regexp.MustCompile(`^\d+\.\d+\.\d+(-edge\.\d{8}\.\d+)?(\+[\w.-]+)?$`)
-var layerPathRE = regexp.MustCompile(`^(apt|inputs|build|licenses|recipes)/[A-Za-z0-9_@+.,=/-]+$`)
+var layerPathRE = regexp.MustCompile(`^(apt|inputs|build|licenses|recipes)/[A-Za-z0-9_@+.,=~:/-]+$`)
 var layerDiskRE = regexp.MustCompile(`(?i)\.(qcow2?|raw|img|vmdk|vdi|iso)$`)
 
 type layerBlob struct {
@@ -239,6 +239,15 @@ func verifyLayerManifest(data, sig []byte, keys []string, platform, agent, chann
 		total += f.SizeBytes
 	}
 	if total > a.SizeBytes || m.Inventory.SizeBytes <= 0 || m.Inventory.SizeBytes > 32<<20 || !layerDigestRE.MatchString(m.Inventory.SHA256) {
+		return fail()
+	}
+	inventoryFound := false
+	for _, f := range m.Files {
+		if f.Path == "licenses/inventory.json" && f.SHA256 == m.Inventory.SHA256 && f.SizeBytes == m.Inventory.SizeBytes {
+			inventoryFound = true
+		}
+	}
+	if !inventoryFound {
 		return fail()
 	}
 	return m, nil

@@ -3,6 +3,7 @@ import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { test } from "node:test";
 import {
 	imageObjectUrl,
+	validLayerPath,
 	verifyImageManifest,
 	verifyImagePointer,
 } from "./image-manifest.mjs";
@@ -114,4 +115,16 @@ test("rejects any rehosted base, modified disk contract or incomplete offline pr
 		change(m);
 		assert.throws(() => verified(m));
 	}
+});
+
+test("allows versioned unmodified deb paths and requires the signed license inventory file", () => {
+	assert.equal(
+		validLayerPath(
+			"apt/docker/pool/docker-ce_5:29.9.2~ubuntu.26.04~resolute_amd64.deb",
+		),
+		true,
+	);
+	const m = layerFixture();
+	m.files = m.files.filter((f) => f.path !== "licenses/inventory.json");
+	assert.throws(() => verified(m));
 });

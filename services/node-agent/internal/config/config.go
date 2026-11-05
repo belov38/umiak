@@ -15,11 +15,15 @@ const DefaultPath = "/etc/umiak-node.toml"
 
 // Config describes the node resources umiak-node may touch.
 type Config struct {
-	GuestSubnet string `toml:"guestSubnet" json:"guestSubnet"`
-	Node        string `toml:"node" json:"node"`
-	VG          string `toml:"vg" json:"vg"`
-	ThinPool    string `toml:"thinPool" json:"thinPool"`
-	Storage     string `toml:"storage" json:"storage"`
+	// Offline layer origin/trust are operator-owned settings, never request URLs or keys.
+	LayerBaseURL    string `toml:"layerBaseURL" json:"layerBaseURL"`
+	LayerKeysFile   string `toml:"layerKeysFile" json:"layerKeysFile"`
+	LayerCacheBytes int64  `toml:"layerCacheBytes" json:"layerCacheBytes"`
+	GuestSubnet     string `toml:"guestSubnet" json:"guestSubnet"`
+	Node            string `toml:"node" json:"node"`
+	VG              string `toml:"vg" json:"vg"`
+	ThinPool        string `toml:"thinPool" json:"thinPool"`
+	Storage         string `toml:"storage" json:"storage"`
 	// VMIDMin..VMIDMax: sandbox machines (pve: 500-589).
 	VMIDMin int `toml:"vmidMin" json:"vmidMin"`
 	VMIDMax int `toml:"vmidMax" json:"vmidMax"`

@@ -31,7 +31,15 @@ export function layerFixture() {
 			rawSha256: sha,
 			chunks: [{ sha256: sha, sizeBytes: 7 }],
 		},
-		files: [{ path: "build/recipe.sh", sizeBytes: 12, sha256: sha, mode: 420 }],
+		files: [
+			{ path: "build/recipe.sh", sizeBytes: 12, sha256: sha, mode: 420 },
+			{
+				path: "licenses/inventory.json",
+				sizeBytes: 12,
+				sha256: sha,
+				mode: 420,
+			},
+		],
 		inventory: { sha256: sha, sizeBytes: 12 },
 		verification: { ok: true, offlineReplay: true },
 	};
