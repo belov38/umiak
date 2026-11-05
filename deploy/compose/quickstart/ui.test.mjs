@@ -96,6 +96,6 @@ test("setup names missing local templates and unfinished reservations per node",
 		],
 	});
 	assert.match(html, /linux · 20261104\.1 · VM 600/);
-	assert.match(html, /pve2[\s\S]*Linux template needed/);
+	assert.match(html, /pve2[\s\S]*Template missing/);
 	assert.match(html, /Unfinished reservation: <code>prepare-held<\/code>/);
 });

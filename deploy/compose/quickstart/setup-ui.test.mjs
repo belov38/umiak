@@ -134,10 +134,10 @@ test("setup displays current gateway CA and leaf certificate expiry status", asy
 	assert.match(warning.textContent, /rebuilding agent packages and templates/);
 });
 
-test("setup offers three recipes and one Windows desktop with ISO URL inputs", () => {
+test("setup offers nonredundant recipes and one Windows desktop with ISO URL inputs", () => {
 	const html = renderSetup({ steps: {} }, "http://localhost");
 	const select = html.match(/<select id="build-slug">(.*?)<\/select>/)[1];
-	assert.equal((select.match(/<option /g) || []).length, 3);
+	assert.equal((select.match(/<option /g) || []).length, 2);
 	assert.match(select, /value="windows">Windows 11 \(with desktop\)/);
 	assert.doesNotMatch(select, /windows-desktop/);
 	assert.match(html, /id="build-iso-url"/);
@@ -190,7 +190,7 @@ test("first-run Linux action precedes optional controls and single node needs no
 	assert.match(html, /Build on: lab/);
 	assert.doesNotMatch(html, /<select id="build-node"/);
 	assert.ok(
-		html.indexOf('id="build-linux"') < html.indexOf("Other operating systems"),
+		html.indexOf('id="build-linux"') < html.indexOf("Build another template"),
 	);
 	assert.match(html, /id="windows-media" hidden/);
 	assert.doesNotMatch(
@@ -205,8 +205,16 @@ test("first-run Linux action precedes optional controls and single node needs no
 	assert.match(html, /<summary>Use an existing template<\/summary>/);
 });
 
-function setupBrowser(respond) {
-	const html = renderSetup({ steps: {} });
+function setupBrowser(
+	respond,
+	{
+		state = { steps: {} },
+		storage = new Map(),
+		nodes = "",
+		ready = false,
+	} = {},
+) {
+	const html = renderSetup(state);
 	const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].find(
 		(match) => match[1].includes("function setupInteractions"),
 	)[1];
@@ -224,10 +232,21 @@ function setupBrowser(respond) {
 			});
 		return elements.get(id);
 	};
+	element("#build-linux").dataset = {
+		nodes,
+		jobStatus: state.buildJob?.status,
+		jobNode: state.buildJob?.nodeId,
+	};
+	element("#build-linux").disabled = state.buildJob?.status === "running";
+	element("#smoke-node").dataset = { ready: String(ready), name: "pve" };
 	const timers = [];
 	let reloads = 0;
 	runInNewContext(script, {
 		document: { querySelector: element, querySelectorAll: () => [] },
+		sessionStorage: {
+			getItem: (key) => storage.get(key),
+			setItem: (key, value) => storage.set(key, value),
+		},
 		fetch: respond,
 		setTimeout: (callback) => {
 			timers.push(callback);
@@ -330,6 +349,129 @@ test("several nodes: one Linux action builds on every node that lacks it", () =>
 	// The node selector belongs to the optional single-template build only.
 	assert.ok(
 		html.indexOf('<select id="build-node"') >
-			html.indexOf("Other operating systems"),
+			html.indexOf("Build another template"),
 	);
+});
+
+const queueKey = "umiak-linux-build-queue";
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+test("queue retains per-node progress and resumes node 2 after registration reload", async () => {
+	const storage = new Map();
+	let finish = false;
+	const respond = async (_url, options) => ({
+		ok: true,
+		json: async () => {
+			const job = {
+				status: finish ? "ready" : "running",
+				startedAt: new Date().toISOString(),
+			};
+			return options ? job : { buildJob: job };
+		},
+	});
+	const first = setupBrowser(respond, {
+		storage,
+		nodes: "one,two",
+		ready: true,
+	});
+	await first.element("#build-linux").click();
+	assert.deepEqual(JSON.parse(storage.get(queueKey)).states, {
+		one: "Building",
+		two: "Waiting",
+	});
+	assert.equal(first.element("#step-templates").open, true);
+	assert.equal(first.element("#smoke-submit").disabled, true);
+	finish = true;
+	await first.timers.shift()();
+	assert.equal(first.reloads(), 1);
+	assert.equal(JSON.parse(storage.get(queueKey)).states.one, "Ready");
+	finish = false;
+	const second = setupBrowser(respond, { storage, ready: true });
+	await tick();
+	assert.match(
+		second.element("#queue-progress").textContent,
+		/Preparing node 2 of 2/,
+	);
+	assert.equal(JSON.parse(storage.get(queueKey)).states.two, "Building");
+	assert.equal(second.element("#smoke-submit").disabled, true);
+	finish = true;
+	await second.timers.shift()();
+	assert.deepEqual(JSON.parse(storage.get(queueKey)).states, {
+		one: "Ready",
+		two: "Ready",
+	});
+	assert.equal(JSON.parse(storage.get(queueKey)).active, false);
+});
+
+test("queue failure stops waiting nodes and keeps the error visible", async () => {
+	const storage = new Map();
+	const browser = setupBrowser(
+		async (_url, options) => ({
+			ok: true,
+			json: async () => {
+				const job = {
+					status: options ? "running" : "error",
+					error: "Build failed",
+					startedAt: new Date().toISOString(),
+				};
+				return options ? job : { buildJob: job };
+			},
+		}),
+		{ storage, nodes: "one,two", ready: true },
+	);
+	await browser.element("#build-linux").click();
+	const plan = JSON.parse(storage.get(queueKey));
+	assert.equal(plan.active, false);
+	assert.deepEqual(plan.states, { one: "Failed", two: "Waiting" });
+	assert.equal(browser.element("#build-error").textContent, "Build failed");
+	assert.equal(browser.element("#smoke-submit").disabled, false);
+});
+
+test("stopping the queue lets the current build finish without starting another node", async () => {
+	const storage = new Map();
+	let finish = false;
+	const respond = async (_url, options) => ({
+		ok: true,
+		json: async () => {
+			const job = {
+				status: finish ? "ready" : "running",
+				startedAt: new Date().toISOString(),
+			};
+			return options ? job : { buildJob: job };
+		},
+	});
+	const browser = setupBrowser(respond, {
+		storage,
+		nodes: "one,two",
+		ready: true,
+	});
+	await browser.element("#build-linux").click();
+	browser.element("#stop-queue").click();
+	assert.equal(browser.element("#smoke-submit").disabled, true);
+	finish = true;
+	await browser.timers.shift()();
+	const plan = JSON.parse(storage.get(queueKey));
+	assert.equal(plan.active, false);
+	assert.deepEqual(plan.states, { one: "Ready", two: "Waiting" });
+	const reloaded = setupBrowser(respond, { storage, ready: true });
+	assert.equal(reloaded.timers.length, 0);
+	assert.equal(reloaded.element("#smoke-submit").disabled, false);
+});
+
+test("installation test requires a Linux template on the selected node", () => {
+	const browser = setupBrowser(async () => {});
+	assert.equal(browser.element("#smoke-submit").disabled, true);
+	assert.match(
+		browser.element("#smoke-reason").textContent,
+		/Build a Linux template on pve first/,
+	);
+	browser.element("#smoke-node").dataset.ready = "true";
+	browser.element("#smoke-node").change();
+	assert.equal(browser.element("#smoke-submit").disabled, false);
+	const html = renderSetup({
+		sandboxNodes: [{ nodeId: "one", name: "pve", templates: [] }],
+	});
+	assert.match(html, /id="smoke-submit" disabled/);
+	assert.match(html, /Test on: pve/);
+	assert.match(html, /href="#step-templates"/);
+	assert.match(html, /id="build-details" hidden/);
 });
