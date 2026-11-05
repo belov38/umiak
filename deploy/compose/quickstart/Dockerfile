@@ -123,7 +123,7 @@ COPY infra/templates infra/templates
 COPY deploy/compose/quickstart/*.mjs deploy/compose/quickstart/
 COPY deploy/compose/quickstart/*.sh deploy/compose/quickstart/
 COPY deploy/compose/quickstart/THIRD_PARTY_NOTICES.md deploy/compose/quickstart/
-COPY deploy/compose/meta-proxy.mjs deploy/compose/canonical-fetch.mjs deploy/compose/
+COPY deploy/compose/meta-proxy.mjs deploy/compose/canonical-fetch.mjs deploy/compose/release-channel.mjs deploy/compose/
 COPY deploy/compose/quickstart/service-secrets.sh /service-secrets.sh
 COPY deploy/compose/quickstart/bootstrap.sh /bootstrap.sh
 COPY apps/web/src/app/globals.css apps/web/src/app/globals.css
@@ -140,6 +140,8 @@ COPY --from=node-agent-build /out/umiak-node-linux-amd64 /app/quickstart-assets/
 COPY --from=guest-build /out/umiak-agent-linux-amd64 /app/quickstart-assets/umiak-agent-linux-amd64
 COPY --from=guest-build /out/umiak-agent-windows-amd64.exe /app/quickstart-assets/umiak-agent-windows-amd64.exe
 COPY --from=guest-build /out/umiak-release /umiak-release
+ARG UMIAK_PLATFORM_VERSION=0.1.0
+ENV UMIAK_PLATFORM_VERSION=$UMIAK_PLATFORM_VERSION
 ARG UMIAK_SOURCE_COMMIT=
 ENV UMIAK_SOURCE_COMMIT=$UMIAK_SOURCE_COMMIT
 ENV NODE_ENV=production UMIAK_QUICKSTART_PORT=4180 UMIAK_QUICKSTART_ASSETS=/app/quickstart-assets

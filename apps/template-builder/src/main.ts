@@ -57,7 +57,8 @@ const USAGE = `usage:
   umiak-tpl retire <buildId> [--delete-vm] [--config <umiak.yaml>] [--force] [--force-poc]`;
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
-const TEMPLATES_DIR = join(REPO_ROOT, "infra/templates");
+const TEMPLATES_DIR =
+	process.env.UMIAK_RECIPE_DIR || join(REPO_ROOT, "infra/templates");
 const UBUNTU_KEY_FILE = join(TEMPLATES_DIR, "keys/ubuntu-cloud-images.asc");
 const UPDATE_KEYS_FILE =
 	process.env.UMIAK_UPDATE_KEYS_FILE ??

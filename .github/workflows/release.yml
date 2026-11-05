@@ -109,7 +109,9 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64
-          build-args: ${{ matrix.name == 'quickstart' && format('UMIAK_SOURCE_COMMIT={0}', github.sha) || '' }}
+          build-args: |
+            UMIAK_SOURCE_COMMIT=${{ github.sha }}
+            UMIAK_PLATFORM_VERSION=${{ inputs.version }}
           push: true
           tags: |
             ${{ env.REGISTRY }}/umiak-${{ matrix.name }}:${{ inputs.version }}

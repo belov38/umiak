@@ -301,3 +301,30 @@ umiak mcp --help
 ```text
 pct exec <ct> -- docker compose --project-directory /opt/umiak logs --tail=100 quickstart api worker gateway
 ```
+
+### Template recipe updates
+
+Templates can refresh independently of a platform release. In **Templates**,
+recipe checks default to every 24 hours and autonomous rollout is enabled.
+Recipes follow the platform's `stable` (default) or `edge` release channel.
+Pause auto-update to keep the current templates; disable checks to stop polling.
+Builds wait for idle sandbox nodes, verify before activation and copy through the
+same S21 replication path as Setup. Existing sandboxes keep their disks. Use
+**Check / Retry** after fixing a build or media error; rollback pauses rollout.
+
+Before publishing, provision an Ed25519 publisher key as the GitHub secret
+`RECIPE_SIGNING_KEY` (PEM private key), and its public key(s) as a JSON array of
+PEM strings in `/pve-secrets/recipe-publisher-keys.json`. Only public keys go into
+the installation. Never reuse/download a publisher private key in the control
+plane. For this private GitHub repository, provision a read-only releases token
+as `UMIAK_RECIPE_GITHUB_TOKEN` in the quickstart service environment. Missing keys
+or credentials surface an error and leave the baked-in recipes available.
+Use the manual **recipe-release** workflow; optionally refresh and commit pins.
+New Windows installations record ISO provenance for later unattended rebuilds;
+older installations need one verified **Rebuild now** to record local media.
+
+The platform updater integration reads `state.platform.channel`, falling back to
+`UMIAK_RELEASE_CHANNEL`. No recipe-specific channel setting exists. A future
+weekly publisher could dispatch this workflow with `refresh=true` and a unique
+version, or add a Sunday `schedule` trigger (`0 4 * * 0`) with explicit channel
+and version defaults. No schedule is enabled; owner approval is required first.

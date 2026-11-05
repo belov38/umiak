@@ -1,0 +1,75 @@
+name: recipe-release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Immutable recipe version YYYYMMDD.N
+        required: true
+        type: string
+      channel:
+        description: Release channel
+        type: choice
+        options: [stable, edge]
+        default: stable
+      refresh:
+        description: Refresh and commit pinned versions first
+        default: false
+        type: boolean
+      changelog:
+        description: Release notes
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: recipe-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@v5
+      - run: pnpm install --frozen-lockfile
+      - name: Guard immutable main release
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          test "$GITHUB_REF" = refs/heads/main
+          case "$CHANNEL" in
+            stable) printf '%s\n' "$VERSION" | grep -Eq '^[0-9]{8}\.[0-9]+$' ;;
+            edge) printf '%s\n' "$VERSION" | grep -Eq '^[0-9]{8}\.[0-9]+-edge\.[0-9]{8}\.[0-9]+$' ;;
+            *) exit 1 ;;
+          esac
+          if gh release view "recipes-$VERSION" >/dev/null 2>&1; then exit 1; fi
+      - name: Refresh pins
+        if: inputs.refresh
+        run: |
+          for os in linux linux-desktop windows; do pnpm --filter @umiak/template-builder umiak-tpl versions "$os" --update; done
+          git config user.name github-actions[bot]
+          git config user.email github-actions[bot]@users.noreply.github.com
+          git add infra/templates
+          if ! git diff --cached --quiet; then git commit -m 'chore: refresh template recipe pins'; git push origin HEAD:main; fi
+      - name: Pack and sign
+        env:
+          RECIPE_VERSION: ${{ inputs.version }}
+          RECIPE_CHANGELOG: ${{ inputs.changelog }}
+          RECIPE_SIGNING_KEY: ${{ secrets.RECIPE_SIGNING_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$RECIPE_SIGNING_KEY" > "$RUNNER_TEMP/recipe.key"
+          RECIPE_SIGNING_KEY_FILE="$RUNNER_TEMP/recipe.key" node infra/templates/release-recipes.mjs
+          rm "$RUNNER_TEMP/recipe.key"
+      - name: Publish independent channel release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          flags=""
+          if [ "$CHANNEL" = edge ]; then flags="--prerelease"; fi
+          gh release create "recipes-$VERSION" dist/recipes/recipes.tar dist/recipes/SHA256SUMS dist/recipes/SHA256SUMS.sig --target "$(git rev-parse HEAD)" --title "Recipes $VERSION" --notes-file dist/recipes/CHANGELOG.md --latest=false $flags

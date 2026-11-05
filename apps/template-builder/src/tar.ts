@@ -50,7 +50,10 @@ const MAGIC = Buffer.from("ustar\0");
 const VERSION = Buffer.from("00");
 
 /** Regular files of a ustar archive by cleaned name; directory entries are accepted and skipped. */
-export function readTar(buf: Buffer): Map<string, Buffer> {
+export function readTar(
+	buf: Buffer,
+	maxEntries = MAX_ENTRIES,
+): Map<string, Buffer> {
 	const files = new Map<string, Buffer>();
 	const dirs = new Set<string>();
 	let total = 0;
@@ -78,8 +81,8 @@ export function readTar(buf: Buffer): Map<string, Buffer> {
 		const rawName = cString(hdr, 0, 100);
 		const raw = prefix === "" ? rawName : `${prefix}/${rawName}`;
 		const next = pos + Math.ceil(size / BLOCK) * BLOCK;
-		if (++entries > MAX_ENTRIES)
-			throw new Error(`tar: more than ${MAX_ENTRIES} entries`);
+		if (++entries > maxEntries)
+			throw new Error(`tar: more than ${maxEntries} entries`);
 		const name = entryName(raw);
 		if (type === "5") {
 			if (size !== 0)

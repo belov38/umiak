@@ -25,3 +25,25 @@ exist. Retire deprecated builds after 24 hours only with no machine, snapshot or
 transfer references, using the existing fenced node-template retirement service.
 Dashboard exposes settings, available changelog, progress/history, retry and rollback.
 No scheduled GitHub workflow or live host access is part of implementation.
+
+## Release channels and integration contract
+
+Exactly `stable` (default) and `edge`, shared with the platform updater. The
+small shared module is `deploy/compose/release-channel.mjs`. Platform task owns
+`state.platform.channel` in the persisted setup store; it can provision
+`UMIAK_RELEASE_CHANNEL` as the environment fallback. Recipes never offer a
+separate channel selector. A channel change invalidates recipe selection until
+a bundle from the new channel passes verification. Stable releases use
+`recipes-YYYYMMDD.N`; edge uses `recipes-YYYYMMDD.N-edge.YYYYMMDD.N` and GitHub
+prerelease. Both use `--latest=false` to avoid replacing the platform installer's
+repository-wide latest release; recipe selection is latest within its prefix.
+
+Builder compatibility is API 1 plus a half-open platform version range and a
+minimum agent version. Platform edge builds compare their numeric capability
+version (the edge suffix does not change the builder API). Release images bake
+UMIAK_PLATFORM_VERSION; the packaged guest agent currently has version 0.1.0.
+
+Automatic retirement overrides S5's historical seven-day/two-version policy:
+S22 uses 24 hours and retains every referenced build. Retirement itself uses
+S21's fenced durable deletion path, including transfer references. Rollback
+pauses autonomous rollout and checks all configured template disks exist.

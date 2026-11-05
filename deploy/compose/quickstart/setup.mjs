@@ -1,5 +1,8 @@
 import { canonicalFetch } from "../canonical-fetch.mjs";
+import { platformReleaseChannel } from "../release-channel.mjs";
 import { gatewayCertificates } from "./certificates.mjs";
+import { rollbackRecipe } from "./recipe-rollback.mjs";
+import { recipeRollout } from "./recipe-rollout.mjs";
 import { cleanupBuild } from "./setup-build-cleanup.mjs";
 import { windowsDesktop } from "./setup-desktop.mjs";
 import { prepareWindowsMedia, validateWindowsMedia } from "./setup-iso.mjs";
@@ -786,6 +789,13 @@ export function createSetupHandler({
 		store,
 		logDir: join(secretsDir, "template-build-logs"),
 		validate: async (slug, state, input) => {
+			const channel = state.recipeChannel;
+			const available =
+				channel?.following === platformReleaseChannel(state) && !channel?.error
+					? channel?.available
+					: null;
+			input.recipeDirectory = available?.directory;
+			input.recipeVersion = available?.version;
 			state = await nodes.select(state, input.nodeId);
 			input.nodeId = state.steps.limits.data.nodeId;
 			if (input.mediaStorage && input.mediaStorage !== state.mediaStorage)
@@ -928,6 +938,9 @@ export function createSetupHandler({
 			);
 			return {
 				...manifest,
+				recipeVersion: input.recipeVersion,
+				iso: prepared.iso,
+				virtioIso: prepared.virtioIso,
 				mediaVerification: prepared.mediaVerification,
 				isoSha256: prepared.isoSha256,
 				virtioSha256: prepared.virtioSha256,
@@ -973,6 +986,17 @@ export function createSetupHandler({
 				});
 			}
 		},
+	});
+	const channel = recipeRollout({
+		jobs,
+		store,
+		nodes,
+		query,
+		pool,
+		pveOf,
+		connectionOf,
+		nodeCheck,
+		secretsDir,
 	});
 	const handler = async (req, res, context) => {
 		const path = new URL(req.url, context.origin).pathname;
@@ -1125,6 +1149,57 @@ export function createSetupHandler({
 			json(res, 200, await store.read());
 			return true;
 		}
+		if (path === "/quickstart/setup/recipes") {
+			try {
+				if (req.method === "POST") {
+					const input = await body(req);
+					if (input.rollback) {
+						const build = (
+							await query(
+								"SELECT * FROM runtime.template_builds WHERE id=$1 AND status='deprecated'",
+								[input.rollback],
+							)
+						).rows[0];
+						await rollbackRecipe({
+							build,
+							nodes,
+							state: await store.read(),
+							pveOf,
+							connectionOf,
+							nodeCheck,
+							secretsDir,
+						});
+						await channel.settings({ auto: false });
+					} else {
+						await channel.settings(input);
+						if (input.retry) {
+							await channel.update((c) => {
+								c.error = null;
+							});
+							void channel.tick(true);
+						}
+					}
+				} else if (req.method !== "GET") throw Error("Unsupported method");
+				const state = await store.read();
+				const builds = (
+					await query(
+						"SELECT id,template_slug,node_id,version,status,manifest->>'recipeVersion' AS recipe_version FROM runtime.template_builds WHERE status IN ('active','deprecated') ORDER BY created_at DESC",
+					)
+				).rows;
+				json(res, 200, {
+					channel: state.recipeChannel || {
+						enabled: true,
+						auto: true,
+						intervalHours: 24,
+					},
+					builds,
+				});
+			} catch (error) {
+				json(res, 400, { error: error.message });
+			}
+			return true;
+		}
+
 		if (req.method === "GET" && path === "/quickstart/setup/build/log") {
 			const state = await store.read();
 			const file = jobs.logPath(
@@ -1328,7 +1403,13 @@ export function createSetupHandler({
 		};
 		const timer = setInterval(sweep, 30000);
 		timer.unref();
-		handler.close = () => clearInterval(timer);
+		const recipeTimer = setInterval(() => void channel.tick(), 60000);
+		recipeTimer.unref();
+		void channel.tick();
+		handler.close = () => {
+			clearInterval(timer);
+			clearInterval(recipeTimer);
+		};
 		sweep();
 	};
 	handler.nodes = nodes;

@@ -50,6 +50,7 @@ export function buildInvocation(
 	);
 	const env = {
 		...process.env,
+		UMIAK_RECIPE_DIR: input.recipeDirectory || "",
 		UMIAK_PVE_URL: connection.apiUrl,
 		UMIAK_PVE_TOKEN_ID: connection.tokenId,
 		UMIAK_PVE_TOKEN_SECRET_FILE: join(secretsDir, "pve-token"),

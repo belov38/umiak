@@ -15,6 +15,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { ActionBar, PageHeader, Panel } from "@/components/ui/panel";
 import { useUmiak } from "@/lib/api";
 import { teamPath } from "@/lib/team-path";
+import { RecipeChannelPanel } from "./recipe-channel";
 
 type MediaRecord = {
 	templateSlug: string;
@@ -89,6 +90,7 @@ export function TemplateList({
 	return (
 		<section className="space-y-5">
 			<PageHeader title="Templates" />
+			{quickstart && session.isOperator && <RecipeChannelPanel />}
 			<p className="max-w-3xl text-sm text-muted-foreground">
 				A template is a base OS image used to create sandboxes. A{" "}
 				<Link href={teamPath(teamId, "snapshots")} className="underline">

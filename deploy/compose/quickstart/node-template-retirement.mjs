@@ -28,6 +28,7 @@ export async function retireNodeTemplate({
 	pve,
 	probeLocal,
 	taskUpid,
+	requireDeprecated = false,
 }) {
 	if (build.status === "retired") return { ok: true };
 	const prior = (
@@ -71,6 +72,8 @@ export async function retireNodeTemplate({
 			).rows[0];
 			if (current?.status === "retired") return false;
 			if (!current) throw Error("Unknown template build");
+			if (requireDeprecated && current.status !== "deprecated")
+				throw Error("Automatic retirement requires a deprecated build");
 			const open = (
 				await tx.client.query(
 					"SELECT id FROM runtime.node_build_jobs WHERE node_id=$1 AND status IN ('running','interrupted')",
