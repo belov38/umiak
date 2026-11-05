@@ -19,6 +19,7 @@ import {
 	buildInvocation,
 	runTemplateBuild,
 	TemplateBuildJobs,
+	visibleBuildJob,
 } from "./setup-build.mjs";
 import {
 	checkNode,
@@ -1166,7 +1167,10 @@ export function createSetupHandler({
 					}
 				}
 			}
-			html(res, renderSetup(state));
+			html(
+				res,
+				renderSetup({ ...state, buildJob: visibleBuildJob(state.buildJob) }),
+			);
 			return true;
 		}
 		if (req.method === "GET" && path === "/quickstart/setup/media/storages") {
@@ -1265,7 +1269,7 @@ export function createSetupHandler({
 		if (req.method === "GET" && path === "/quickstart/setup/build") {
 			const state = await store.read();
 			json(res, 200, {
-				buildJob: state.buildJob || null,
+				buildJob: visibleBuildJob(state.buildJob),
 				buildQueue: state.buildQueue || null,
 				builds: state.steps.templates?.data?.builds || [],
 			});

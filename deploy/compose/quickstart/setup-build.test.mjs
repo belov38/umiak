@@ -385,3 +385,13 @@ test("platform maintenance fences both queued and direct template builds", async
 		/Updating Umiak/,
 	);
 });
+
+test("setup hides a failed build of a template that is no longer offered", async () => {
+	const { visibleBuildJob } = await import("./setup-build.mjs");
+	assert.equal(visibleBuildJob({ slug: "debian", status: "error" }), null);
+	assert.equal(visibleBuildJob(null), null);
+	const linux = { slug: "linux", status: "error" };
+	assert.equal(visibleBuildJob(linux), linux);
+	const running = { slug: "debian", status: "running" };
+	assert.equal(visibleBuildJob(running), running);
+});

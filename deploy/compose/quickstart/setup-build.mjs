@@ -17,6 +17,17 @@ import { validateUploadedIso } from "./setup-iso.mjs";
 import { templateRange, validateTemplateRange } from "./setup-vmids.mjs";
 
 const exec = promisify(execFile);
+export const BUILDABLE_SLUGS = ["linux", "linux-desktop", "windows"];
+
+/** The last build job to show, hiding a failure of a template no longer offered (e.g. deferred Debian). */
+export function visibleBuildJob(job) {
+	if (!job) return null;
+	const slug = job.slug === "windows-desktop" ? "windows" : job.slug;
+	return job.status === "error" && slug && !BUILDABLE_SLUGS.includes(slug)
+		? null
+		: job;
+}
+
 export function buildInvocation(
 	slug,
 	state,
@@ -27,7 +38,7 @@ export function buildInvocation(
 	input = {},
 ) {
 	if (slug === "windows-desktop") slug = "windows";
-	if (!["linux", "linux-desktop", "windows"].includes(slug))
+	if (!BUILDABLE_SLUGS.includes(slug))
 		throw new Error("Unknown operating system");
 	const slot = input.templateVmid;
 	const range = templateRange(state);
