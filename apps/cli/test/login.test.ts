@@ -1,4 +1,4 @@
-// `umiak login` (device grant and --key-stdin), `umiak logout`, the credential
+// `umiak login` (owner pairing and --key-stdin), `umiak logout`, the credential
 // store files, and --cacert / UMIAK_CA_FILE through a self-signed TLS front.
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -18,11 +18,6 @@ import { runCli as runCliInProcess } from "../src/program.ts";
 import { type CliWorld, startWorld } from "./helpers/api.ts";
 import { type CliHome, cliHome, runCli } from "./helpers/run-cli.ts";
 import { startTlsFront, type TlsFront } from "./helpers/tls.ts";
-
-function _jwtClaims(token: string): Record<string, unknown> {
-	const part = token.split(".")[1] ?? "";
-	return JSON.parse(Buffer.from(part, "base64url").toString("utf8"));
-}
 
 const mode = (p: string) => statSync(p).mode & 0o777;
 
@@ -68,7 +63,7 @@ async function inProcess(
 
 describe("openBrowser command", () => {
 	it("Windows opens the link with rundll32 (no cmd parsing)", () => {
-		const url = "https://kc.x/device?user_code=AB&x=1";
+		const url = "https://umiak.example/auth/cli?code=AB&x=1";
 		expect(browserCommand("win32", url)).toEqual([
 			"rundll32",
 			["url.dll,FileProtocolHandler", url],
@@ -93,7 +88,6 @@ describe("umiak login", () => {
 	afterEach(() => home.rm());
 
 	it("--credential-store file keeps the tokens in credentials.json with mode 0600", async () => {
-		const _sub = `kc-${crypto.randomUUID()}`;
 		const env = { ...home.env, UMIAK_CREDENTIAL_STORE: undefined };
 		const r = await runCli(
 			[
@@ -156,7 +150,13 @@ describe("umiak login", () => {
 			team: null,
 		});
 		const who = await runCli(["whoami"], { env: home.env });
-		expect(JSON.parse(who.stdout).team.id).toBe(w.teamId);
+		expect(who.code, who.stderr).toBe(0);
+		const account = JSON.parse(who.stdout);
+		expect(account).toMatchObject({
+			user: null,
+			auth: { kind: "team_key" },
+		});
+		expect(account).not.toHaveProperty("team");
 	});
 
 	it("--key-stdin with an unknown key exits 4 and stores nothing", async () => {
