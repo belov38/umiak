@@ -93,6 +93,9 @@ function setupInteractions() {
 		);
 	};
 	const $ = (selector) => document.querySelector(selector);
+	for (const time of document.querySelectorAll("[data-local-time]"))
+		if (time.dateTime)
+			time.textContent = `at ${new Date(time.dateTime).toLocaleTimeString()}`;
 	let building = false;
 	let polling = false;
 	const value = (id) => $(id)?.value || "";
@@ -114,7 +117,7 @@ function setupInteractions() {
 	};
 	const showJob = (job) => {
 		if (!job) return;
-		disableBuilds(job.status === "running");
+		disableBuilds(job.status === "running" || !!plan?.active);
 		// Follow the end of the log unless the user scrolled up to read.
 		const log = $("#build-log");
 		const following =
@@ -128,7 +131,9 @@ function setupInteractions() {
 			if ($("#build-details").dataset) $("#build-details").dataset.seen = "1";
 		}
 		syncTest();
-		$("#build-error").textContent = briefError(job.error);
+		$("#build-error").textContent = job.error
+			? `Last build failed at ${new Date(job.finishedAt || job.startedAt).toLocaleTimeString()} on ${[...document.querySelectorAll("[data-queue-node]")].find((r) => r.dataset.queueNode === job.nodeId)?.dataset.name || job.nodeId}: ${briefError(job.error)}`
+			: "";
 		const elapsed = Math.max(
 			0,
 			Math.floor(
@@ -170,15 +175,20 @@ function setupInteractions() {
 			if (!response.ok)
 				throw new Error("Could not check build progress. Retrying…");
 			const result = await response.json();
+			plan = result.buildQueue;
 			showJob(result.buildJob);
-			if (["ready", "error"].includes(result.buildJob?.status))
-				finishNode(result.buildJob);
-			if (result.buildJob?.status === "ready") {
+			showQueue();
+			if (
+				result.buildJob?.status === "ready" &&
+				!plan?.active &&
+				($("#build-linux").dataset.jobStatus !== "ready" ||
+					$("#build-linux").dataset.jobId !== result.buildJob.id)
+			) {
 				// Registration has finished before the job becomes ready.
 				location.reload();
 				return;
 			}
-			if (result.buildJob?.status === "running") setTimeout(pollBuild, 2000);
+			setTimeout(pollBuild, 2000);
 		} catch (error) {
 			$("#build-error").textContent = error.message;
 			setTimeout(pollBuild, 3000);
@@ -186,29 +196,7 @@ function setupInteractions() {
 			polling = false;
 		}
 	};
-	// Keep the full requested queue across reloads, including completed nodes.
-	const QUEUE = "umiak-linux-build-queue";
 	let plan;
-	try {
-		const saved = sessionStorage.getItem(QUEUE);
-		if (saved) {
-			try {
-				plan = JSON.parse(saved);
-			} catch {
-				plan = {
-					nodes: saved.split(",").filter(Boolean),
-					states: {},
-					active: true,
-				};
-			}
-			if (!Array.isArray(plan?.nodes) || !plan.states) plan = null;
-		}
-	} catch {}
-	const saveQueue = () => {
-		try {
-			sessionStorage.setItem(QUEUE, JSON.stringify(plan));
-		} catch {}
-	};
 	const syncTest = () => {
 		const select = $("#smoke-node");
 		const option = select?.selectedOptions?.[0];
@@ -246,28 +234,15 @@ function setupInteractions() {
 		if (progress)
 			progress.textContent = plan.active
 				? `Preparing node ${plan.nodes.indexOf(current) + 1} of ${plan.nodes.length}: ${name || "waiting"}`
-				: "Build queue stopped or complete.";
+				: plan.message || "Build queue stopped or complete.";
 		if (plan.active) {
+			disableBuilds(true);
 			$("#step-templates").open = true;
 			if ($("#step-smoke")) $("#step-smoke").open = false;
 		}
 		if ($("#linux-ready")) $("#linux-ready").hidden = plan.active;
 		if ($("#stop-queue")) $("#stop-queue").hidden = !plan.active;
 		syncTest();
-	};
-	const finishNode = (job) => {
-		if (!plan) return;
-		const id = plan.nodes.find((id) => plan.states[id] === "Building");
-		if (id) plan.states[id] = job.status === "ready" ? "Ready" : "Failed";
-		if (job.status === "ready")
-			for (const node of plan.nodes) plan.states[node] = "Ready";
-		if (
-			job.status !== "ready" ||
-			plan.nodes.every((id) => plan.states[id] === "Ready")
-		)
-			plan.active = false;
-		saveQueue();
-		showQueue();
 	};
 	const build = async (slug, nodeId) => {
 		if (building) return;
@@ -286,34 +261,71 @@ function setupInteractions() {
 			await pollBuild();
 		} catch (error) {
 			$("#build-error").textContent = error.message;
-			finishNode({ status: "failed" });
 			disableBuilds(false);
 			syncTest();
 		}
 	};
-	const buildLinux = () => {
-		if (building) return;
-		const nodes = ($("#build-linux").dataset?.nodes || "")
-			.split(",")
-			.filter(Boolean);
-		plan = {
-			nodes,
-			states: Object.fromEntries(nodes.map((id) => [id, "Waiting"])),
-			active: nodes.length > 0,
-		};
-		const first = nodes[0];
-		if (first) plan.states[first] = "Building";
-		saveQueue();
-		showQueue();
-		return build("linux", first);
-	};
-	$("#stop-queue")?.addEventListener("click", () => {
-		if (plan) {
-			plan.active = false;
-			saveQueue();
+	const buildLinux = async () => {
+		if (building || plan?.active) return;
+		disableBuilds(true);
+		$("#build-error").textContent = "";
+		try {
+			plan = await post("build", {
+				slug: "linux",
+				nodes: ($("#build-linux").dataset.nodes || "")
+					.split(",")
+					.filter(Boolean),
+			});
 			showQueue();
+			await pollBuild();
+		} catch (error) {
+			$("#build-error").textContent = briefError(error.message);
+			disableBuilds(false);
+		}
+	};
+	$("#stop-queue")?.addEventListener("click", async () => {
+		try {
+			await post("build/stop", {});
+			await pollBuild();
+		} catch (error) {
+			$("#build-error").textContent = briefError(error.message);
 		}
 	});
+	for (const button of document.querySelectorAll("[data-recover-build]")) {
+		button.addEventListener("click", async () => {
+			const error = button.parentElement.querySelector("[data-recovery-error]");
+			button.disabled = true;
+			error.textContent = "";
+			try {
+				const input = {
+					nodeId: button.dataset.nodeId,
+					jobId: button.dataset.recoverBuild,
+				};
+				const info = await post("build/recover", { ...input, inspect: true });
+				const remains = [
+					...info.vms.map((v) => `VM ${v.vmid}`),
+					...info.disks.map((d) => d.name),
+				];
+				if (
+					remains.length &&
+					!confirm(
+						`Remove this build's Umiak resources: ${remains.join(", ")}? Other resources will be kept.`,
+					)
+				)
+					return;
+				await post("build/recover", {
+					...input,
+					confirmRemove: remains.length > 0,
+					retry: true,
+				});
+				location.reload();
+			} catch (e) {
+				error.textContent = briefError(e.message);
+			} finally {
+				button.disabled = false;
+			}
+		});
+	}
 	$("#smoke-node")?.addEventListener("change", syncTest);
 	const media = () => ({
 		iso: value("#build-iso"),
@@ -406,30 +418,8 @@ function setupInteractions() {
 		});
 	}
 	building = $("#build-linux").disabled;
-	const previousStatus = $("#build-linux").dataset?.jobStatus;
-	const previousNode = $("#build-linux").dataset?.jobNode;
-	if (
-		plan?.active &&
-		plan.states[previousNode] === "Building" &&
-		["ready", "error"].includes(previousStatus)
-	)
-		finishNode({ status: previousStatus });
-	showQueue();
-	// Resume the active job or the first waiting node after registration reloads.
-	if ($("#build-linux").disabled) void pollBuild();
-	else if (plan?.active) {
-		const next = plan.nodes.find((id) => plan.states[id] !== "Ready");
-		if (next) {
-			plan.states[next] = "Building";
-			saveQueue();
-			showQueue();
-			void build("linux", next);
-		} else {
-			plan.active = false;
-			saveQueue();
-			showQueue();
-		}
-	}
+	syncTest();
+	setTimeout(pollBuild, 0);
 }
 
 function briefBuildError(text) {
@@ -506,10 +496,22 @@ ${section(
 	`
 ${status("templates")}
 <p>A template is the reusable VM image your sandboxes start from. Build the Linux template to continue. Desktop and Windows templates can be added later.</p>
-<button type="button" id="build-linux" data-job-status="${escapeHtml(state.buildJob?.status || "")}" data-job-node="${escapeHtml(state.buildJob?.nodeId || "")}" data-nodes="${escapeHtml(needLinux.map((n) => n.nodeId).join(","))}"${running ? " disabled" : ""}>${needLinux.length > 1 ? `Build Linux template on all nodes (${escapeHtml(needLinux.map((n) => n.name).join(", "))})` : needLinux.length === 1 && nodes.length > 1 ? `Build Linux template on ${escapeHtml(needLinux[0].name)}` : "Build Linux template"}</button>
+<button type="button" id="build-linux" data-job-id="${escapeHtml(state.buildJob?.id || "")}" data-job-status="${escapeHtml(state.buildJob?.status || "")}" data-job-node="${escapeHtml(state.buildJob?.nodeId || "")}" data-nodes="${escapeHtml(needLinux.map((n) => n.nodeId).join(","))}"${running ? " disabled" : ""}>${needLinux.length > 1 ? `Build Linux template on all nodes (${escapeHtml(needLinux.map((n) => n.name).join(", "))})` : needLinux.length === 1 && nodes.length > 1 ? `Build Linux template on ${escapeHtml(needLinux[0].name)}` : "Build Linux template"}</button>
 <ul aria-label="Sandbox node template availability">${nodes.map((n) => `<li data-queue-node="${escapeHtml(n.nodeId)}" data-name="${escapeHtml(n.name)}">${escapeHtml(n.name)} · Node ${n.state === "active" || n.state === "ready" ? "online" : escapeHtml(n.state)} · Template ${(n.templates || []).some((t) => t.templateSlug === "linux") ? "ready" : "missing"} · <span data-node-build-state>${state.buildJob?.nodeId === n.nodeId && running ? "Building" : (n.templates || []).some((t) => t.templateSlug === "linux") ? "Ready" : "Waiting"}</span></li>`).join("")}</ul>
+${nodes
+	.filter((n) => n.buildJobId && !running)
+	.map((n) => {
+		const recovery = state.buildRecovery?.[n.nodeId] || {};
+		const resources = [
+			...(recovery.vms || []).map((v) => `VM ${v.vmid}`),
+			...(recovery.disks || []).map((d) => d.name),
+			...(recovery.unknown || []).map((v) => `Unknown VM ${v.vmid}`),
+		];
+		return `<section class="build-recovery"><p>The last build on ${escapeHtml(n.name)} ${state.buildJob?.nodeId === n.nodeId && !/interrupted by restart/i.test(state.buildJob?.error || "") ? "failed" : "was interrupted"} <time data-local-time datetime="${escapeHtml((state.buildJob?.nodeId === n.nodeId && state.buildJob?.finishedAt) || recovery.createdAt || "")}"></time>.</p><p>${escapeHtml(resources.length ? `Remaining: ${resources.join(", ")}` : recovery.error || "No leftover build VMs or disks found.")}</p><button type="button" data-recover-build="${escapeHtml(n.buildJobId)}" data-node-id="${escapeHtml(n.nodeId)}">Clean up and retry</button><p class="error" role="alert" data-recovery-error></p><a href="/quickstart/setup/build/log?jobId=${escapeHtml(n.buildJobId)}" target="_blank" rel="noopener">Open build log</a></section>`;
+	})
+	.join("")}
 <p id="queue-progress" role="status"></p><button type="button" id="stop-queue" class="outline" hidden>Stop queue after current build</button>
-<p>Allow about 10 minutes${needLinux.length > 1 ? " per node; nodes are built one after another. Keep this tab open" : ""}; download speed and hardware affect the time.</p>
+<p>Allow about 10 minutes${needLinux.length > 1 ? " per node; nodes are built one after another" : ""}; download speed and hardware affect the time.</p>
 ${buildProgress}
 ${nodes.some((n) => n.templates?.length || n.buildJobId) ? `<details><summary>Node details</summary>${nodes.map((n) => `<p>${escapeHtml(n.name)} · ${escapeHtml((n.templates || []).map((t) => `${t.templateSlug} · ${t.version} · VM ${t.pveVmid}`).join(", "))}${n.buildJobId ? ` · Unfinished reservation: <code>${escapeHtml(n.buildJobId)}</code>` : ""}</p>`).join("")}</details>` : ""}
 

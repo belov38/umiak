@@ -280,6 +280,7 @@ export class TemplateBuildJobs {
 		reserve = async () => {},
 		interrupt = async () => {},
 		finish = async () => {},
+		release = async () => {},
 		logDir,
 	}) {
 		this.store = store;
@@ -291,11 +292,23 @@ export class TemplateBuildJobs {
 		this.reserve = reserve;
 		this.interrupt = interrupt;
 		this.finish = finish;
+		this.release = release;
 		this.pending = Promise.resolve();
 	}
 	logPath(jobId) {
 		if (!this.logDir || !/^[a-f0-9]{24}$/.test(jobId || "")) return null;
 		return join(this.logDir, `${jobId}.log`);
+	}
+	async appendLog(jobId, text) {
+		const file = this.logPath(jobId);
+		if (file) {
+			await mkdir(this.logDir, { recursive: true, mode: 0o700 });
+			await appendFile(file, text, { mode: 0o600 });
+		}
+		await this.update((state) => {
+			if (state.buildJob?.id === jobId)
+				state.buildJob.log = ((state.buildJob.log || "") + text).slice(-24000);
+		});
 	}
 	async update(fn) {
 		const action = async () => {
@@ -308,18 +321,129 @@ export class TemplateBuildJobs {
 	}
 	async init() {
 		await this.update(async (state) => {
+			if (state.buildQueue?.active) {
+				state.buildQueue.active = false;
+				state.buildQueue.message =
+					"Queue stopped: Build interrupted by restart";
+				for (const id of state.buildQueue.nodes) {
+					if (["Building", "Copying"].includes(state.buildQueue.states[id]))
+						state.buildQueue.states[id] = "Stopped";
+					else if (state.buildQueue.states[id] === "Waiting")
+						state.buildQueue.states[id] = "Not started";
+				}
+			}
 			if (state.buildJob?.status === "running") {
 				await this.interrupt(state.buildJob, state);
 				state.buildJob = {
 					...state.buildJob,
 					status: "error",
+					finishedAt: new Date().toISOString(),
 					error:
 						"Build interrupted by restart. Check the build details and any unfinished template VM before retrying. Existing VMs have been kept.",
 				};
 			}
 		});
 	}
+	async startQueue(input, context = {}) {
+		const nodes = [...new Set(input.nodes || [])];
+		if (!nodes.length || nodes.some((id) => typeof id !== "string"))
+			throw Error("Select sandbox nodes");
+		const queue = {
+			id: randomBytes(12).toString("hex"),
+			nodes,
+			states: Object.fromEntries(nodes.map((id) => [id, "Waiting"])),
+			active: true,
+			names: input.names || {},
+		};
+		await this.update((state) => {
+			if (state.buildQueue?.active || state.buildJob?.status === "running")
+				throw Error("A template build is already running");
+			state.buildQueue = queue;
+			if (state.buildJob) state.buildJob.error = null;
+		});
+		this.queuePending = this.runQueue(queue, input, context);
+		return queue;
+	}
+	async stopQueue() {
+		await this.update((s) => {
+			if (!s.buildQueue) return;
+			s.buildQueue.active = false;
+			s.buildQueue.message = "Queue stopped after current build";
+			for (const id of s.buildQueue.nodes)
+				if (s.buildQueue.states[id] === "Waiting")
+					s.buildQueue.states[id] = "Not started";
+		});
+	}
+	async runQueue(queue, input, context) {
+		for (const nodeId of queue.nodes) {
+			let proceed = false;
+			await this.update((s) => {
+				if (s.buildQueue?.id !== queue.id || !s.buildQueue.active) return;
+				const ready =
+					s.buildQueue.states[nodeId] === "Ready" ||
+					s.steps?.templates?.data?.builds?.some(
+						(b) =>
+							b.nodeId === nodeId && b.templateSlug === (input.slug || "linux"),
+					);
+				if (ready) {
+					s.buildQueue.states[nodeId] = "Ready";
+					return;
+				}
+				s.buildQueue.states[nodeId] = "Building";
+				proceed = true;
+			});
+			if (!proceed) {
+				const s = await this.store.read();
+				if (s.buildQueue?.active && s.buildQueue.states[nodeId] === "Ready")
+					continue;
+				return;
+			}
+			let failure;
+			try {
+				await this.start(
+					input.slug || "linux",
+					{ ...input, nodeId },
+					{ ...context, queueId: queue.id },
+				);
+				await this.pending;
+				const state = await this.store.read();
+				if (state.buildJob.status !== "ready")
+					failure = state.buildJob.error || "Build failed";
+			} catch (error) {
+				failure = error.message;
+			}
+			await this.update((s) => {
+				if (s.buildQueue?.id !== queue.id) return;
+				s.buildQueue.states[nodeId] = failure ? "Failed" : "Ready";
+				if (failure) {
+					s.buildQueue.active = false;
+					const phase =
+						/(?:during|stage|at)[: ]+(verify|download|install|boot|configure)/i.exec(
+							failure,
+						)?.[1];
+					s.buildQueue.message = `Queue stopped: ${queue.names[nodeId] || nodeId} failed${phase ? ` during ${phase}` : ""}`;
+					s.buildQueue.error = failure;
+					for (const id of queue.nodes)
+						if (s.buildQueue.states[id] === "Waiting")
+							s.buildQueue.states[id] = "Not started";
+				} else if (
+					queue.nodes.every((id) => s.buildQueue.states[id] === "Ready")
+				) {
+					s.buildQueue.active = false;
+					s.buildQueue.message = "Build queue complete";
+				}
+			});
+			if (failure) return;
+		}
+		await this.update((s) => {
+			if (s.buildQueue?.id === queue.id && s.buildQueue.active) {
+				s.buildQueue.active = false;
+				s.buildQueue.message = "Build queue complete";
+			}
+		});
+	}
 	async start(slug, input = {}, context = {}) {
+		if (!context.queueId) this.queuePending = undefined;
 		if (slug === "windows-desktop") slug = "windows";
 		if (input.confirmRebuild === "windows-desktop")
 			input = { ...input, confirmRebuild: "windows" };
@@ -337,7 +461,11 @@ export class TemplateBuildJobs {
 			startedAt: new Date().toISOString(),
 		};
 		await this.update(async (current) => {
-			if (current.buildJob?.status === "running")
+			if (
+				(current.buildQueue?.active &&
+					current.buildQueue.id !== context.queueId) ||
+				current.buildJob?.status === "running"
+			)
 				throw new Error("A template build is already running");
 			await this.reserve(job, state, input);
 			current.buildJob = job;
@@ -399,9 +527,12 @@ export class TemplateBuildJobs {
 				let message = error.message;
 				try {
 					await this.interrupt(job, state);
+					if (!job.manifest && !(await this.store.read()).buildJob?.manifest)
+						await this.release(job, state);
 				} catch (reservationError) {
 					message = `${error.message}; reservation: ${reservationError.message}`;
 				}
+				await this.appendLog(job.id, `\n${message}\n`).catch(() => {});
 				await this.update((current) => {
 					current.buildJob = {
 						...current.buildJob,
@@ -415,6 +546,6 @@ export class TemplateBuildJobs {
 		return job;
 	}
 	settled() {
-		return this.pending;
+		return this.queuePending || this.pending;
 	}
 }

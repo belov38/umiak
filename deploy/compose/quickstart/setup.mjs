@@ -1,5 +1,6 @@
 import { canonicalFetch } from "../canonical-fetch.mjs";
 import { gatewayCertificates } from "./certificates.mjs";
+import { cleanupBuild } from "./setup-build-cleanup.mjs";
 import { windowsDesktop } from "./setup-desktop.mjs";
 import { prepareWindowsMedia, validateWindowsMedia } from "./setup-iso.mjs";
 import { nodeService } from "./setup-nodes.mjs";
@@ -765,6 +766,22 @@ export function createSetupHandler({
 		},
 	};
 	const wizard = new SetupWizard({ store, steps });
+	const recoverBuild = async (state, request) => {
+		const inventory = await nodes.list(state.steps.limits.data.providerId);
+		const node = inventory.find((n) => n.nodeId === request.nodeId);
+		if (!node || node.buildJobId !== request.jobId)
+			throw Error("Unknown unfinished node build");
+		return cleanupBuild({
+			service: nodes,
+			node,
+			request,
+			state,
+			limits: state.steps.limits.data,
+			api: () => pveOf(state),
+			probe: nodeCheck,
+			secretsDir,
+		});
+	};
 	const jobs = new TemplateBuildJobs({
 		store,
 		logDir: join(secretsDir, "template-build-logs"),
@@ -845,6 +862,8 @@ export function createSetupHandler({
 		},
 		reserve: (job) => nodes.reserve(job),
 		interrupt: (job, state) => nodes.interrupt(job, state),
+		release: (job, state) =>
+			recoverBuild(state, { nodeId: job.nodeId, jobId: job.id }),
 		finish: async (job, state) => {
 			const selected = await nodes.select(state, job.nodeId);
 			const vms = await (await pveOf(state)).get(
@@ -943,6 +962,12 @@ export function createSetupHandler({
 						await jobs.update((state) => {
 							if (state.buildJob?.id === context.job.id)
 								state.buildJob.replication = progress;
+							if (
+								state.buildQueue?.active &&
+								state.buildQueue.nodes.includes(progress.nodeId)
+							)
+								state.buildQueue.states[progress.nodeId] =
+									progress.phase === "ready" ? "Ready" : "Copying";
 						});
 					},
 				});
@@ -974,15 +999,8 @@ export function createSetupHandler({
 			}
 			return true;
 		}
-		if (path === "/app") {
-			const state = await store.read();
-			if (!state.complete) {
-				res.writeHead(303, { Location: "/setup" });
-				res.end();
-				return true;
-			}
-			return false;
-		}
+		if (path === "/app") return false;
+
 		if (req.method === "GET" && (path === "/app/help" || path === "/help")) {
 			res.writeHead(303, { Location: "/app/getting-started" });
 			res.end();
@@ -994,6 +1012,19 @@ export function createSetupHandler({
 				state.steps.limits?.data?.providerId,
 				state,
 			);
+			state.buildRecovery = {};
+			for (const node of state.sandboxNodes) {
+				if (!node.buildJobId || state.buildJob?.status === "running") continue;
+				try {
+					state.buildRecovery[node.nodeId] = await recoverBuild(state, {
+						nodeId: node.nodeId,
+						jobId: node.buildJobId,
+						inspect: true,
+					});
+				} catch (error) {
+					state.buildRecovery[node.nodeId] = { error: error.message };
+				}
+			}
 			state.detectedTemplates = [];
 			if (state.steps.connection?.status === "ready") {
 				for (const target of state.sandboxNodes) {
@@ -1096,7 +1127,10 @@ export function createSetupHandler({
 		}
 		if (req.method === "GET" && path === "/quickstart/setup/build/log") {
 			const state = await store.read();
-			const file = jobs.logPath(state.buildJob?.id);
+			const file = jobs.logPath(
+				new URL(req.url, context.origin).searchParams.get("jobId") ||
+					state.buildJob?.id,
+			);
 			let text = state.buildJob?.log || "";
 			if (file)
 				try {
@@ -1114,6 +1148,7 @@ export function createSetupHandler({
 			const state = await store.read();
 			json(res, 200, {
 				buildJob: state.buildJob || null,
+				buildQueue: state.buildQueue || null,
 				builds: state.steps.templates?.data?.builds || [],
 			});
 			return true;
@@ -1144,10 +1179,55 @@ export function createSetupHandler({
 			}
 			return true;
 		}
+		if (req.method === "POST" && path === "/quickstart/setup/build/recover") {
+			let input;
+			try {
+				input = await body(req);
+				const state = await store.read();
+				if (state.buildJob?.status === "running" || state.buildQueue?.active)
+					throw Error("Wait for the current build to finish");
+				const result = await recoverBuild(state, input);
+				if (input.retry && !input.inspect)
+					await jobs.start("linux", { nodeId: input.nodeId }, context);
+				json(res, 200, result);
+			} catch (error) {
+				await jobs
+					.appendLog(input?.jobId, `\nRecovery: ${error.message}\n`)
+					.catch(() => {});
+				json(res, 400, { error: error.message });
+			}
+			return true;
+		}
+		if (req.method === "POST" && path === "/quickstart/setup/build/stop") {
+			await jobs.stopQueue();
+			json(res, 200, { ok: true });
+			return true;
+		}
 		if (req.method === "POST" && path === "/quickstart/setup/build") {
 			try {
 				const input = await body(req);
-				json(res, 202, await jobs.start(input.slug || "linux", input, context));
+				if (input.nodes) {
+					const inventory = await nodes.list(
+						(await store.read()).steps.limits.data.providerId,
+					);
+					if (
+						!Array.isArray(input.nodes) ||
+						input.nodes.some(
+							(id) =>
+								!inventory.some((n) => n.nodeId === id && n.state === "active"),
+						)
+					)
+						throw Error("Unknown sandbox node");
+					input.names = Object.fromEntries(
+						inventory.map((n) => [n.nodeId, n.name]),
+					);
+					json(res, 202, await jobs.startQueue(input, context));
+				} else
+					json(
+						res,
+						202,
+						await jobs.start(input.slug || "linux", input, context),
+					);
 			} catch (error) {
 				json(res, 400, { error: error.message });
 			}

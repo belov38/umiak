@@ -273,7 +273,17 @@ test("build polls current activity and elapsed time, blocks duplicates and advan
 		};
 		return {
 			ok: true,
-			json: async () => (options?.method === "POST" ? job : { buildJob: job }),
+			json: async () =>
+				options?.method === "POST"
+					? { nodes: ["one"], states: { one: "Building" }, active: true }
+					: {
+							buildJob: job,
+							buildQueue: {
+								nodes: ["one"],
+								states: { one: finish ? "Ready" : "Building" },
+								active: !finish,
+							},
+						},
 		};
 	});
 	await browser.element("#build-linux").click();
@@ -353,96 +363,71 @@ test("several nodes: one Linux action builds on every node that lacks it", () =>
 	);
 });
 
-const queueKey = "umiak-linux-build-queue";
-test("one server build copies both nodes without scheduling a second build", async () => {
-	const storage = new Map();
-	let finish = false;
-	const respond = async (_url, options) => ({
+test("two browsers show the same durable queue without session storage", async () => {
+	const queue = {
+		nodes: ["one", "two"],
+		states: { one: "Failed", two: "Not started" },
+		active: false,
+		message: "Queue stopped: pve failed during verify",
+	};
+	const respond = async () => ({
 		ok: true,
-		json: async () => {
-			const job = {
-				status: finish ? "ready" : "running",
-				startedAt: new Date().toISOString(),
-			};
-			return options ? job : { buildJob: job };
-		},
-	});
-	const first = setupBrowser(respond, {
-		storage,
-		nodes: "one,two",
-		ready: true,
-	});
-	await first.element("#build-linux").click();
-	assert.deepEqual(JSON.parse(storage.get(queueKey)).states, {
-		one: "Building",
-		two: "Waiting",
-	});
-	assert.equal(first.element("#step-templates").open, true);
-	assert.equal(first.element("#smoke-submit").disabled, true);
-	finish = true;
-	await first.timers.shift()();
-	assert.equal(first.reloads(), 1);
-	assert.equal(JSON.parse(storage.get(queueKey)).states.one, "Ready");
-	assert.deepEqual(JSON.parse(storage.get(queueKey)).states, {
-		one: "Ready",
-		two: "Ready",
-	});
-	assert.equal(JSON.parse(storage.get(queueKey)).active, false);
-});
-
-test("queue failure stops waiting nodes and keeps the error visible", async () => {
-	const storage = new Map();
-	const browser = setupBrowser(
-		async (_url, options) => ({
-			ok: true,
-			json: async () => {
-				const job = {
-					status: options ? "running" : "error",
-					error: "Build failed",
-					startedAt: new Date().toISOString(),
-				};
-				return options ? job : { buildJob: job };
+		json: async () => ({
+			buildQueue: queue,
+			buildJob: {
+				nodeId: "one",
+				status: "error",
+				startedAt: "2026-11-05T00:47:00Z",
+				error: "verify failed",
 			},
 		}),
-		{ storage, nodes: "one,two", ready: true },
-	);
-	await browser.element("#build-linux").click();
-	const plan = JSON.parse(storage.get(queueKey));
-	assert.equal(plan.active, false);
-	assert.deepEqual(plan.states, { one: "Failed", two: "Waiting" });
-	assert.equal(browser.element("#build-error").textContent, "Build failed");
-	assert.equal(browser.element("#smoke-submit").disabled, false);
+	});
+	for (const storage of [
+		new Map(),
+		new Map([["umiak-linux-build-queue", "obsolete"]]),
+	]) {
+		const browser = setupBrowser(respond, { storage, ready: true });
+		await browser.timers.shift()();
+		assert.equal(browser.element("#queue-progress").textContent, queue.message);
+		assert.match(
+			browser.element("#build-error").textContent,
+			/Last build failed at .* on one: verify failed/,
+		);
+		assert.equal(browser.element("#smoke-submit").disabled, false);
+	}
 });
-
-test("hiding the queue does not cancel server-side template replication", async () => {
-	const storage = new Map();
-	let finish = false;
-	const respond = async (_url, options) => ({
-		ok: true,
-		json: async () => {
-			const job = {
-				status: finish ? "ready" : "running",
-				startedAt: new Date().toISOString(),
+test("stop queue posts to server and continues displaying the current build", async () => {
+	const requests = [];
+	const queue = {
+		nodes: ["one", "two"],
+		states: { one: "Building", two: "Waiting" },
+		active: true,
+	};
+	const browser = setupBrowser(
+		async (url, options) => {
+			requests.push(url);
+			if (options) {
+				queue.active = false;
+				queue.states.two = "Not started";
+			}
+			return {
+				ok: true,
+				json: async () => ({
+					buildQueue: queue,
+					buildJob: {
+						nodeId: "one",
+						status: "running",
+						startedAt: new Date().toISOString(),
+					},
+				}),
 			};
-			return options ? job : { buildJob: job };
 		},
-	});
-	const browser = setupBrowser(respond, {
-		storage,
-		nodes: "one,two",
-		ready: true,
-	});
-	await browser.element("#build-linux").click();
-	browser.element("#stop-queue").click();
-	assert.equal(browser.element("#smoke-submit").disabled, true);
-	finish = true;
+		{ ready: true },
+	);
 	await browser.timers.shift()();
-	const plan = JSON.parse(storage.get(queueKey));
-	assert.equal(plan.active, false);
-	assert.deepEqual(plan.states, { one: "Ready", two: "Ready" });
-	const reloaded = setupBrowser(respond, { storage, ready: true });
-	assert.equal(reloaded.timers.length, 0);
-	assert.equal(reloaded.element("#smoke-submit").disabled, false);
+	await browser.element("#stop-queue").click();
+	assert.ok(requests.includes("/quickstart/setup/build/stop"));
+	assert.equal(browser.element("#smoke-submit").disabled, true);
 });
 
 test("installation test requires a Linux template on the selected node", () => {
@@ -465,10 +450,15 @@ test("installation test requires a Linux template on the selected node", () => {
 });
 
 test("a failed build shows one line of error, not the whole tool output", () => {
-	const noise = Array.from({ length: 300 }, (_, i) => `Get:${i} https://example/pkg ${i}`).join("\n");
+	const noise = Array.from(
+		{ length: 300 },
+		(_, i) => `Get:${i} https://example/pkg ${i}`,
+	).join("\n");
 	const html = renderSetup({
 		steps: { limits: { status: "ready" }, network: { status: "ready" } },
-		sandboxNodes: [{ nodeId: "node_1", name: "pve", state: "active", templates: [] }],
+		sandboxNodes: [
+			{ nodeId: "node_1", name: "pve", state: "active", templates: [] },
+		],
 		buildJob: {
 			id: "a".repeat(24),
 			status: "error",
@@ -478,6 +468,9 @@ test("a failed build shows one line of error, not the whole tool output", () => 
 		},
 	});
 	const error = html.match(/<p id="build-error"[^>]*>([^<]*)<\/p>/)[1];
-	assert.match(error, /^Error: UMIAK_GUEST_SUBNET must be an IPv4 network See the build log/);
+	assert.match(
+		error,
+		/^Error: UMIAK_GUEST_SUBNET must be an IPv4 network See the build log/,
+	);
 	assert.ok(error.length < 400);
 });

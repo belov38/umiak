@@ -12,6 +12,7 @@ import {
 import pg from "../../../packages/db/node_modules/pg/lib/index.js";
 import { retireNodeTemplate } from "./node-template-retirement.mjs";
 import { PgSetupStore } from "./setup.mjs";
+import { cleanupBuild } from "./setup-build-cleanup.mjs";
 import { checkNode, pinnedPve } from "./setup-host.mjs";
 import { nodeService } from "./setup-nodes.mjs";
 import { replicateActiveTemplates } from "./template-replication.mjs";
@@ -242,91 +243,16 @@ export async function nodeCommand(
 	}
 
 	if (request.op === "cleanup-build") {
-		await service.transact(async (tx) => {
-			await lockNode(tx, node.nodeId);
-			const job = (
-				await tx.client.query(
-					"SELECT status,template_slug,retiring_build_id FROM runtime.node_build_jobs WHERE id=$1 AND node_id=$2",
-					[request.jobId, node.nodeId],
-				)
-			).rows[0];
-			if (job?.retiring_build_id)
-				throw Error(
-					"Template retirement has a durable intent; retry retire-template with its buildId instead of cleanup-build",
-				);
-			if (job?.status !== "interrupted" || job.template_slug === "node-prepare")
-				throw Error(
-					"Only an interrupted template build can be cleaned up; a running runner or node preparation must finish first",
-				);
-			const runner = (
-				await tx.client.query(
-					"SELECT pg_try_advisory_xact_lock(hashtextextended('template-runner:' || $1::text,0)) AS ok",
-					[request.jobId],
-				)
-			).rows[0];
-			if (!runner?.ok)
-				throw Error(
-					"Template builder process is still alive; stop it before cleanup",
-				);
-			const pve = await api();
-			const tasks = await pve.get(`/nodes/${node.name}/tasks`, {
-				source: "active",
-			});
-			if (tasks.some((t) => String(t.user || "").startsWith("umiak@pve")))
-				throw Error(
-					"Umiak PVE tasks are still running; wait for completion before cleanup",
-				);
-			const vms = await pve.get(`/nodes/${node.name}/qemu`);
-			const leases = (
-				await tx.client.query(
-					"SELECT vmid FROM runtime.vmid_leases WHERE build_job_id=$1",
-					[request.jobId],
-				)
-			).rows;
-			if (
-				vms.some(
-					(vm) =>
-						leases.some((l) => l.vmid === vm.vmid) ||
-						(((vm.vmid >= limits.vmidMin && vm.vmid <= limits.vmidMax) ||
-							(vm.vmid >= limits.templateVmidMin &&
-								vm.vmid <= limits.templateVmidMax)) &&
-							vm.status !== "stopped"),
-				)
-			)
-				throw Error(
-					"Inspect and remove build/verification VMs before releasing the reservation",
-				);
-			const local = await probe(
-				{
-					...state.steps.connection.data,
-					node: node.name,
-					sshHost: node.sshHost,
-				},
-				secretsDir,
-				{ op: "lv.list", args: {} },
-			);
-			if (
-				!Array.isArray(local.lvs) ||
-				local.lvs.some((lv) =>
-					leases.some((lease) =>
-						new RegExp(`^(?:base|vm)-${lease.vmid}-`).test(lv.name),
-					),
-				)
-			)
-				throw Error(
-					"Build local disks remain or cannot be verified; reservation retained",
-				);
-			await tx.client.query(
-				"DELETE FROM runtime.vmid_leases WHERE build_job_id=$1",
-				[request.jobId],
-			);
-			await finishNodeBuild(tx, {
-				nodeId: node.nodeId,
-				jobId: request.jobId,
-				status: "failed",
-			});
+		return cleanupBuild({
+			service,
+			node,
+			request,
+			state,
+			limits,
+			api,
+			probe,
+			secretsDir,
 		});
-		return { ok: true };
 	}
 
 	throw Error("Unknown node console operation");
