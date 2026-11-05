@@ -41,7 +41,7 @@ on 2026-11-04 through the coordinator, subject to the live restrictions below.
   sandboxes, snapshots or templates to make removal succeed.
 
 S19 originally excluded cross-node data transfer; S21 now provides verified
-template copies and journaled cold fork/resume/snapshot moves. Live migration,
+template copies via standard pvesm. Cold fork/resume/snapshot moves, live migration,
 shared storage drivers, multi-cluster installation, HA/automatic failover, public
 node selection, warm pools and a root shell from the control plane remain excluded.
 Authentication follows the current owner-only architecture.
@@ -90,12 +90,10 @@ through the existing admission savepoint and try the next candidate. If
 none succeeds, return existing retryable `out_of_capacity`.
 
 Fork and saved-snapshot create recheck eligibility under the same node lock.
-S21 supersedes S19 locality: resume/fork/saved-snapshot create prefer home, then
-reserve capacity on another eligible node in the same provider and cold-move
-stopped data before starting. A cordoned source can export; an unreachable
-source must return before copying can complete. Recover stays local. Machines
-and unfinished transfers block final removal. VMIDs remain cluster-unique
-through the provider allocator, including distinct template replica VMIDs.
+S21 retains local resume/fork/saved-snapshot create and recover. They wait on the
+node holding their disks when capacity is unavailable; cold moves are deferred.
+Machines and unfinished template copies block final removal. VMIDs remain
+cluster-unique, including distinct template replica VMIDs.
 Production template and verification VMs use that same PostgreSQL allocator,
 scoped to their durable node build job. Reconcile must protect both unfinished
 jobs and retained builder leases; local SQLite holds builder snapshot metadata
@@ -248,9 +246,7 @@ what was actually exercised. Coordinate live testing with S18 first.
 
 ## S21 successor
 
-S21 (`s21-portable-sandboxes.md`) now replaces the independent builds and
-local-only fork/resume/snapshot rules above with verified template replicas and
-journaled cold moves. Home is preferred; capacity/cordon fallback stays within
-one provider and preserves VMID/MAC/IP. Unreachable source data must become
-available before a move can complete. Recover remains local; live migration is
-excluded. Optional FIFO capacity waits replace immediate refusal when requested.
+S21 (`s21-portable-sandboxes.md`) replaces independent builds with build-once
+verified pvesm template replicas. Resume/fork/snapshot create remain local;
+optional FIFO waits replace immediate refusal when requested. Cold moves are
+deferred; live migration remains excluded.

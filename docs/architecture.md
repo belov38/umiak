@@ -120,7 +120,7 @@ Driver interface: `cloneFromTemplate`, `snapshot`, `cloneFromSnapshot`, `delete`
 - **Fork** = snapshot + a new machine from those LVs. Thin snapshots do not depend on the original, it can be deleted.
 - **Stop** = VM shutdown, LVs stay on the node. **Resume** = start of the same VM.
 - **Saved snapshot / user template** = a named snapshot from which new sandboxes are created.
-- **Portable storage (S21):** Build templates once and replicate verified base disks over restricted node-agent RPCs. Resume/fork/saved-snapshot create prefer home, then cold-move immutable stopped data to another eligible node in the same cluster. Matching bases use thin metadata deltas; otherwise sparse copies. A durable journal verifies the target before switching VM config/DB ownership and removing source. Optional per-team FIFO capacity waits reserve RAM only on admission. Live migration and archives remain future work.
+- **Templates and capacity waits (S21):** Build once and copy base disks via restricted node-agent volume.sendTo: standard pvesm raw+size export/import, zstd and pinned cluster SSH. Streaming SHA-256 and UUID-bound receipts precede publication. Resume/fork/saved-snapshot create stay on the node holding disks; optional per-team FIFO waits reserve RAM only on admission. Sandbox cold moves are deferred (future options: pvesm, rsync over a base snapshot, or a ZFS driver with zfs send -i).
 
 ## 6. Warm pool
 

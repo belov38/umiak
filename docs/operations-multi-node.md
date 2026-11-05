@@ -43,9 +43,10 @@ their local disks and template identity.
 Select a node for Smoke to create, execute in and delete a 2 GiB Linux sandbox
 there. This uses a private operator-only dashboard operation. Normal create
 continues to choose an eligible node automatically by free RAM; public API,
-CLI and SDK create have no node selector. Fork, resume and snapshot-based create prefer home; under capacity pressure or
-cordon S21 cold-moves data to another eligible node. Source disks survive until
-the verified target owns the data. An offline source must return before copying.
+CLI and SDK create have no node selector. Fork, resume and snapshot-based create stay on the node holding their disks.
+Capacity pressure or cordon waits there when requested; cross-node cold moves
+are deferred. Template copies use standard pvesm export/import with streaming
+SHA-256 and import receipts.
 Use `umiak start <id> --wait 100m` or `create/resume/fork --capacity-wait 100m
 --wait-ready` to queue for RAM. `umiak cancel-start <id>` cancels a queued request.
 
