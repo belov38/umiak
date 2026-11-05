@@ -91,4 +91,67 @@ unfinished transfers and running/interrupted build jobs. Both nodes active with
 8192 MiB caps. Failed build and historical transfers remain as audit records.
 Temporary test API key was revoked. Existing templates are Ready on both nodes.
 
-Merge remains pending the owner's disposition of the failed fresh-build acceptance.
+## Owner-approved exception and repeat steps
+
+The owner explicitly authorized merging with the fresh-build exception on
+2026-11-05. The owner independently verified worldwide Ubuntu snapshot
+degradation from six external probes (13–22 s for small files and HTTP 502).
+Those probes were supplied by the owner, not performed by this implementation.
+Fresh Linux build-from-image acceptance remains NOT PASSED; current pvesm copy,
+manifest/checksum identity, both-node smoke and capacity queue passed.
+
+Immediately before merge, independently rechecked: failed job terminal `failed`,
+zero running/interrupted build reservations, zero leases for failed job
+381dbc8954b9742e007d2645, VM 20002 absent from both node config directories,
+and no source LVs matching 20002 or its build identity. Both existing template
+VMs are stopped with template=1, and their DB builds are active/Ready. No test
+sandboxes, queue tickets or active sandbox operations remain. Product recovery
+inspection had already reported no unfinished build, so no additional Clean up
+was required; the builder's normal failure cleanup had removed its VM/disks.
+
+Repeat the waived check after Ubuntu snapshot recovers:
+
+1. Sign in to the owner's browser at the stand, open `/setup`, and verify no
+   active template build or copy. Do not deploy while it runs.
+2. In that authenticated browser console, request a *fresh*, all-node Linux
+   rebuild (omitting confirmRebuild would only reuse the current Ready source):
+
+```js
+await fetch('/quickstart/setup/build', {
+  method: 'POST',
+  headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({
+    slug: 'linux',
+    nodes: [
+      '01a1a98f-e973-7062-b078-617c52acb9d2', // pve
+      '01a1a997-4a71-7687-9dd4-74ac19a38efe', // pve2
+    ],
+    confirmRebuild: 'linux',
+  }),
+}).then(async r => ({status: r.status, body: await r.json()}));
+```
+
+3. Expect 202. Observe Building on pve, then Copying to pve2, then Ready on
+   both in Setup. Read `/quickstart/setup/state` for buildJob/buildQueue; record
+   source start/finish and template journal created_at/updated_at plus stream
+   elapsed/wire bytes. If it fails, use the product's Clean up action only after
+   inspecting its owned leftovers; do not manually delete unrelated guests.
+4. Compare active template_builds: same source build identity, version, manifest,
+   and every disk's sha256-pvesm-raw+size-v1 checksum; different cluster VMIDs.
+5. With an owner-authenticated CLI, sequentially run:
+
+```sh
+umiak --json create --template linux --name s21-recheck-a --wait-ready
+umiak exec <first-id> -- printf s21-recheck-ok
+umiak --json create --template linux --name s21-recheck-b --wait-ready
+umiak exec <second-id> -- printf s21-recheck-ok
+umiak rm <first-id> <second-id> --yes
+```
+
+Confirm the two sandboxes used different nodes (normal placement selects the
+node with more free RAM). If not, use Setup's node-specific installation Smoke
+on each node, which creates/executes/deletes through the product. Finally audit
+zero test sandboxes, active operations, queue tickets, unfinished copies and
+running/interrupted build jobs; leave both nodes active with 8192 MiB caps.
+Record the new successful fresh-build evidence without replacing this failed
+attempt or its approved exception.

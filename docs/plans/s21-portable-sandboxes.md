@@ -14,7 +14,8 @@ FIFO start queue; defer sandbox/snapshot cold moves.
 - [ ] Rebuild Linux once and copy to both nodes, compare checksums and timings.
 - [x] Create/exec/delete on both nodes; fill a node cap, queue/release/cancel
   through CLI and dashboard; delete all test sandboxes.
-- [ ] Record evidence, rebase origin/main and fast-forward push.
+- [x] Record evidence, rebase origin/main and fast-forward push (owner-approved
+  fresh-build exception; transport/queue/smoke passed).
 
 Future cold-move options: pvesm full copy, rsync over a base snapshot, or a ZFS
 storage driver with zfs send -i. Current acceptance is in
@@ -25,4 +26,5 @@ Acceptance: `../s21-simplification-acceptance.md`. Current pvesm copy passed in
 55.647 s with equal manifests/checksums, plus both-node CLI smoke and queue
 release/cancel/timeout. Fresh Linux build failed after 69m23s on upstream Ubuntu
 snapshot HTTP 500/502 and the 60-minute 00-base deadline; it was not published.
-No fresh-build success is claimed. Main merge awaits disposition of that gate.
+No fresh-build success is claimed. The owner approved merging with this explicit
+exception; exact re-run steps and cleanup evidence are in the acceptance report.
