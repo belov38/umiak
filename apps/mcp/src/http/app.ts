@@ -245,6 +245,8 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 						fetch: forwardClient(apiFetch as typeof fetch, localClient),
 						cache: new MeCache(),
 						userAgent,
+						...(o.metrics === undefined ? {} : { metrics: o.metrics }),
+						...(o.now === undefined ? {} : { now: o.now }),
 					});
 		const r = await verify(token, team);
 		return isRejection(r) ? refuse(r) : r;

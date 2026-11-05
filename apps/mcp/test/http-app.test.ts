@@ -540,6 +540,7 @@ describe("health and metrics", () => {
 			expect(text).toContain(
 				'umiak_mcp_auth_rejections_total{status="401",reason="unauthorized"} 2',
 			);
+			// Initialization, tool request and the two rejected requests all check credentials.
 			expect(text).toContain("umiak_mcp_me_cache_misses_total 4");
 			expect(text).toContain("umiak_mcp_tool_call_duration_seconds_bucket");
 			expect(text).toContain("umiak_mcp_tool_response_bytes_bucket");
