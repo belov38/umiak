@@ -1,4 +1,4 @@
-// Basic flow of @umiak/sdk against a real stack (infra/dev-cp/e2e.sh). Not a unit test:
+// Basic flow of @umiak/sdk against an owner homelab stack. Not a unit test:
 // it creates a sandbox on Proxmox. Credentials come from the SDK chain (UMIAK_API_KEY,
 // UMIAK_ACCESS_TOKEN, or `umiak auth token --json` of the CLI profile on PATH).
 //

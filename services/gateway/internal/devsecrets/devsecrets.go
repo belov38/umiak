@@ -62,7 +62,7 @@ const (
 	// the root wrapper drops privileges) reads it as the file owner, and the
 	// quickstart ingress (Node, uid/gid WorkerOwner, read-only mount) reads
 	// it through the group. So the file is owned by Owner.UID:WorkerOwner.GID
-	// with mode 0640. Dev stack / dev-cp (deploy/compose/gateway.yaml) - no
+	// with mode 0640. Standalone gateway test environments have no
 	// owner ingress, the gateway must NOT be pointed at the file; the feature
 	// stays disabled there.
 	FileIngressDesktopKey = "ingress-desktop-key"

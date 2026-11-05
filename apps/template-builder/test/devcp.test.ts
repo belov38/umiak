@@ -24,7 +24,7 @@ describe("devCpRegistrar", () => {
 			"-o",
 			"BatchMode=yes",
 			"umiak@192.168.68.90",
-			"cd umiak/deploy/compose && docker compose exec -T postgres psql -U umiak -d umiak -v ON_ERROR_STOP=1 -Atq",
+			"cd /opt/umiak && docker compose exec -T postgres psql -U umiak -d umiak -v ON_ERROR_STOP=1 -Atq",
 		]);
 		expect(calls[0]?.sql).toBe(
 			`INSERT INTO tunnel.tunnel_credentials (machine_id, bs_hash) VALUES ('${MID}', '\\x${HASH}');\n`,

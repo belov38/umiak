@@ -1,3 +1,4 @@
+import { harnessDeps } from "./helpers/harness.ts";
 // PTY over WebSocket (S7 §10): POST /ptys (Idempotency-Key, process.pty),
 // resize, and GET /ptys/{cmd}/connect with the subprotocol umiak.pty.v1 over
 // a real HTTP server (createApiServer) and the `ws` client: echo, input
@@ -71,6 +72,11 @@ async function serve(app: Harness["app"]): Promise<{
 }> {
 	const { server } = createApiServer(app);
 	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+	harnessDeps
+		.get(app)
+		?.settings.ownerHosts.push(
+			`127.0.0.1:${(server.address() as AddressInfo).port}`,
+		);
 	return {
 		base: `ws://127.0.0.1:${(server.address() as AddressInfo).port}`,
 		close: () =>
@@ -649,7 +655,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		});
 	});
 
-	it("before the upgrade: no subprotocol 400, wrong one 400, no bearer 401, no scope 403, plain GET 426 — all with the error envelope", async () => {
+	it("before the upgrade: no subprotocol 400, wrong one 400, invalid bearer 401, no scope 403, plain GET 426 — all with the error envelope", async () => {
 		const id = await pty({ command: "cat" });
 		const none = connect(connectPath(id), { protocols: [] });
 		const r1 = await none.refused;
@@ -660,7 +666,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 		const wrong = connect(connectPath(id), { protocols: ["umiak.pty.v0"] });
 		expect((await wrong.refused).status).toBe(400);
 
-		const anon = connect(connectPath(id), { bearer: null });
+		const anon = connect(connectPath(id), { bearer: "invalid" });
 		const r3 = await anon.refused;
 		expect(r3.status).toBe(401);
 		expect(r3.body.error.code).toBe("unauthorized");

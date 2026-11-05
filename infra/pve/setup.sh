@@ -984,7 +984,7 @@ step_cp_tailscale() {
 state() { pct exec "$ID" -- tailscale status --json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("BackendState", ""), d.get("AuthURL", ""))' || true; }
 read -r st url <<<"$(state)"
 if [ "$st" = Running ]; then
-	# infra/dev-cp/deploy.sh configures Tailscale Serve as umiak.
+	# The installer configures Tailscale Serve for the owner ingress.
 	pct exec "$ID" -- tailscale set --operator=umiak
 	echo "cp-tailscale: running, $(pct exec "$ID" -- tailscale ip -4) ($(pct exec "$ID" -- tailscale status --self --peers=false | awk '{print $2}')), operator umiak"
 	exit 0

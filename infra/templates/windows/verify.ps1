@@ -763,7 +763,7 @@ function Test-Facts {
 }
 
 # Desktop checks of the canonical Windows build (S10 sections 6.6, 7, 8).
-# API, screenshots and streamed media are checked by infra/dev-cp/e2e-desktop.sh.
+# API, screenshots and streamed media are checked through the owner desktop API.
 
 $DesktopRoot = Join-Path $env:ProgramData 'umiak-agent\desktop'
 $StreamerRoot = Join-Path $env:ProgramFiles 'umiak-desktop'
