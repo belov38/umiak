@@ -210,7 +210,10 @@ Do not add compatibility services. Target S24 metadata declares `minUpdater`
 with the actual bridge version and `dbCompatible: false`. The bridge rejects
 requirements above its running version before pull/fence/backup/application.
 Literal pre-bridge code ignores new metadata; operational rollout of the bridge
-is mandatory before publishing cutover (feasibility clarification sent to master). Do not claim direct source
+is mandatory before publishing cutover (confirmed by master).
+Test minUpdater refusal for bridge-aware runtimes and retain a historical
+pre-bridge regression documenting that the metadata gate is unsupported; no
+external enforcement or compatibility services are needed. Do not claim direct source
 upgrade support until the source executable-to-target bundle test passes for
 success AND full rollback. Container/image removal counts must disclose any
 temporary bridge artifacts.

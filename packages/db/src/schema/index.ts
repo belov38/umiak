@@ -1,3 +1,7 @@
+import { configurationTables } from "./configuration.ts";
+
+export * from "./configuration.ts";
+
 import {
 	agentEvents,
 	agentSyntheticEvents,
@@ -37,6 +41,7 @@ export * from "./tunnel.ts";
 
 /** Every table of schemas `runtime` and `tunnel`, for drizzle(..., { schema }). */
 export const schema = {
+	...configurationTables,
 	desktopTickets,
 	sandboxDesktops,
 	providers,

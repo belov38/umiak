@@ -49,7 +49,7 @@ Approved separate branch `s24-updater-bridge`, head
 295 installer tests and Biome passed. S24 must declare the actual published
 bridge version as minUpdater and dbCompatible false; no compatibility services.
 Literal pre-bridge code cannot interpret new minUpdater metadata; both supported
-installs must receive the bridge before cutover publication (clarification sent).
+installs must receive the bridge before cutover publication (confirmed by master).
 
 ## Remaining acceptance
 
@@ -61,3 +61,14 @@ installs must receive the bridge before cutover publication (clarification sent)
 - Actual bridge runtime -> target, forced failed health and full DB/state restore.
 - TS/Vitest/Biome/SDK/CLI/MCP/quickstart/installer/image/UI gates.
 - Owner performs live stand acceptance; no Proxmox/dev-stand access by implementer.
+
+## Migration layer (in progress)
+
+Synthetic source-schema fixture is derived from historical Payload SQL and owner
+schema changes, with no dependency on importing Payload in the test. It verifies
+row-for-row JSON equality across all nine tables, nullable revoked-key audit,
+operator edits and rerun idempotence. Additional tests cover fresh-only seeds,
+incomplete-source rejection, FK-failure rollback, and pending Debian deferral.
+`mise exec -- pnpm --filter @umiak/db test`: 91 passed (local Postgres Docker).
+`mise exec -- pnpm --filter @umiak/db typecheck`: passed.
+Runtime adapters/notifications and published-image upgrade acceptance remain pending.

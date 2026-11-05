@@ -10,6 +10,7 @@ import {
 // Drizzle SQL type -> information_schema.columns.udt_name.
 const UDT: Record<string, string> = {
 	uuid: "uuid",
+	numeric: "numeric",
 	text: "text",
 	smallint: "int2",
 	integer: "int4",
@@ -38,6 +39,16 @@ describe("drizzle schema", () => {
 		expect(names).toEqual(
 			[
 				"runtime.providers",
+				"runtime.users",
+				"runtime.teams",
+				"runtime.memberships",
+				"runtime.api_keys",
+				"runtime.ssh_keys",
+				"runtime.templates",
+				"runtime.sizes",
+				"runtime.pool_targets",
+				"runtime.platform_defaults",
+
 				"runtime.nodes",
 				"runtime.node_build_jobs",
 				"runtime.storages",
