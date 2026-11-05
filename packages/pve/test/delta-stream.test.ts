@@ -91,6 +91,26 @@ function harness(start = 0, corrupt = false, truncated = false) {
 	target.on("close", () => {
 		for (const timer of timers) clearTimeout(timer);
 	});
+	const finished = (stream: Duplex) =>
+		new Promise<void>((resolve) => {
+			let ended = false,
+				finished = false;
+			const check = () => {
+				if (ended && finished) resolve();
+			};
+			stream.on("end", () => {
+				ended = true;
+				check();
+			});
+			stream.on("finish", () => {
+				finished = true;
+				check();
+			});
+			stream.on("close", () => resolve());
+		});
+	const sourceClosed = finished(source),
+		targetClosed = finished(target);
+
 	const sourceNode: NodeOps = {
 		close() {},
 		async call<T>() {
@@ -102,7 +122,7 @@ function harness(start = 0, corrupt = false, truncated = false) {
 		},
 		async openTransfer() {
 			sourceOpens++;
-			return { stream: source, closed: Promise.resolve() };
+			return { stream: source, closed: sourceClosed };
 		},
 	};
 	const targetNode: NodeOps = {
@@ -113,7 +133,7 @@ function harness(start = 0, corrupt = false, truncated = false) {
 		},
 		async openTransfer() {
 			targetOpens++;
-			return { stream: target, closed: Promise.resolve() };
+			return { stream: target, closed: targetClosed };
 		},
 	};
 	return {

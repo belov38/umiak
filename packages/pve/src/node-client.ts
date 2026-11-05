@@ -292,10 +292,11 @@ export class SshNodeOps implements NodeOps {
 		const slot = await this.#acquire();
 		try {
 			const stream = await this.#exec(await this.#connect(slot));
-			const timer = setTimeout(
-				() => stream.destroy(),
-				this.#opts.callTimeoutMs ?? 120000,
-			);
+			const timer = setTimeout(() => {
+				stream.emit("error", new Error("delta stream inactivity timeout"));
+				stream.destroy();
+				stream.resume();
+			}, this.#opts.callTimeoutMs ?? 120000);
 			stream.on("readable", () => timer.refresh());
 			stream.on("error", () => {});
 			const closed = new Promise<void>((resolve) =>

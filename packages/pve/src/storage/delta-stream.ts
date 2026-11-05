@@ -14,6 +14,12 @@ class Reader {
 	constructor(stream: Duplex) {
 		this.iterator = stream[Symbol.asyncIterator]() as AsyncIterator<Buffer>;
 	}
+	async finish() {
+		if (this.buffer.length) throw Error("Trailing delta stream data");
+		const next = await this.iterator.next();
+		if (!next.done) throw Error("Trailing delta stream data");
+	}
+
 	async read(n: number) {
 		const out = Buffer.allocUnsafe(n);
 		let p = 0;
@@ -179,6 +185,8 @@ export async function streamDelta(
 				!proof.hash.equals(digest.hash)
 			)
 				throw Error("Delta final checksum mismatch");
+			source.stream.end();
+			await Promise.all([src.finish(), dst.finish()]);
 			await Promise.all(sessions.map((s) => s.closed));
 			progress.verifiedBytes = input.sizeBytes;
 			await input.onProgress?.({ ...progress });
@@ -191,7 +199,10 @@ export async function streamDelta(
 			input.signal?.removeEventListener("abort", abort);
 		}
 	} finally {
-		for (const s of sessions) s.stream.destroy();
+		for (const s of sessions) {
+			s.stream.destroy();
+			s.stream.resume();
+		}
 		await Promise.allSettled([inFlight, ...sessions.map((s) => s.closed)]);
 	}
 }
