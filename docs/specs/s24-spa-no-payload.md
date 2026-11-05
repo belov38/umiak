@@ -225,3 +225,9 @@ temporary bridge artifacts.
 2. Approved: setup/claim/recovery stays separate; S24b tracks SPA integration.
 3. Approved: separate generic updater bridge and minUpdater gate; owner releases
    and installs it before S24. No temporary compatibility services.
+
+Bridge prerequisite confirmed by owner: `0.4.0-edge.20261105.5` is released
+and installed on the sole supported CT590. S24 release must set
+`minUpdater: "0.4.0-edge.20261105.5"` and `dbCompatible: false`. The branch was
+rebased on main after bridge merge. Live upgrade/forced rollback is owner-run
+when requested; no implementer access to the stand.

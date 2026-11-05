@@ -140,3 +140,9 @@ release/promotion workflow, lockfile. Remove web runtime and packages/payload.
 - [ ] Complete acceptance doc with actual commands/results, commit and push.
 - [ ] Post head SHA, test gates, measurements and exact upgrade exercise in the
   master thread; owner performs live acceptance and merges.
+
+Bridge prerequisite confirmed by owner: `0.4.0-edge.20261105.5` is released
+and installed on the sole supported CT590. S24 release must set
+`minUpdater: "0.4.0-edge.20261105.5"` and `dbCompatible: false`. The branch was
+rebased on main after bridge merge. Live upgrade/forced rollback is owner-run
+when requested; no implementer access to the stand.
