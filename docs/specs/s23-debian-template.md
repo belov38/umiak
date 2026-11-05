@@ -26,3 +26,17 @@ build-once replication apply unchanged. Show Ubuntu 26.04 / Debian 13 in product
 selection. Unit tests cover recipe inheritance, pin validation, download trust,
 cache tampering, seed rendering and verify reports. No live stand use until the
 parent explicitly confirms availability.
+
+## Initial pins and validation
+
+- Cloud serial: `20261103-2651`, official Debian 13 genericcloud amd64 qcow2.
+- SHA256: `de9d63f5e5ec5927d7548bc05b6043b87457b8c1cb9bcb95365168e8d0293b4f`.
+- SHA512 and canonical source URL: `infra/templates/debian/versions.toml`.
+- Debian/security snapshot: `20261105T000000Z`.
+- Docker CE/CLI: `5:29.9.3-1~debian.13~trixie`; containerd `2.4.2-3`,
+  Compose `5.7.0-1`, buildx `0.38.1-1` (all Debian 13 trixie revisions).
+- Tool archives, Rust bootstrap, Chrome and npm agent pins initially equal Ubuntu's.
+
+The base image was downloaded and SHA512 verified locally to establish these
+pins. No live VM build or stand access is part of this implementation validation.
+Deferred build/verification commands are in `apps/template-builder/README.md`.

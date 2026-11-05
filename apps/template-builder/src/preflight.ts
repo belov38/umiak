@@ -49,6 +49,7 @@ export async function preflight(d: {
 	node: NodeOps;
 	cfg: { node: string; pool: string };
 	keyFile: string;
+	debian?: boolean;
 	buildMemoryMb?: number;
 	hasCommand?: (cmd: string) => boolean;
 	/** An iso-install recipe: its user ISO (file, pinned sha256 or "") and the console right. */
@@ -116,13 +117,24 @@ export async function preflight(d: {
 			};
 		}),
 		await check(`ISO tool ${ISO_TOOL}`, async () => ({ ok: has(ISO_TOOL) })),
-		await check("Ubuntu cloud image signing key", async () => {
-			await assertPinnedKey(
-				readFileSync(d.keyFile, "utf8"),
-				UBUNTU_CLOUD_IMAGE_KEY_FINGERPRINT,
-			);
-			return { ok: true, detail: d.keyFile };
-		}),
+		await check(
+			d.debian
+				? "Debian base trust: HTTPS TOFU pins"
+				: "Ubuntu cloud image signing key",
+			async () => {
+				if (d.debian)
+					return {
+						ok: true,
+						detail:
+							"SHA512 and SHA256 checked at download; no vendor checksum signature",
+					};
+				await assertPinnedKey(
+					readFileSync(d.keyFile, "utf8"),
+					UBUNTU_CLOUD_IMAGE_KEY_FINGERPRINT,
+				);
+				return { ok: true, detail: d.keyFile };
+			},
+		),
 		await check("umiak-node media.list", async () => {
 			const r = await d.node.call<{ iso: unknown[]; import: unknown[] }>(
 				"media.list",

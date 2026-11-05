@@ -517,6 +517,9 @@ async function main(argv: string[]): Promise<number> {
 					node: ctx.node,
 					cfg: ctx.cfg,
 					keyFile: UBUNTU_KEY_FILE,
+					debian:
+						recipe?.source.kind === "cloud-image" &&
+						recipe.source.distro === "debian",
 					...(recipe !== undefined
 						? { buildMemoryMb: recipe.buildVm.memoryMb }
 						: {}),

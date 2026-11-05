@@ -132,7 +132,11 @@ describe("recipe scripts: spec items", () => {
 
 	it("00-base installs the generic kernel and masks the spec 8.1 units", () => {
 		const base = code("steps/00-base.sh");
-		expect(base).toContain("linux-image-virtual");
+		expect(base).toContain('apt_install "$UMIAK_KERNEL_PACKAGE"');
+		expect(code("lib.sh")).toContain(
+			"UMIAK_KERNEL_PACKAGE=linux-image-virtual",
+		);
+		expect(code("lib.sh")).toContain("UMIAK_KERNEL_PACKAGE=linux-image-amd64");
 		expect(base).toContain("full-upgrade");
 		expect(bashArray(code("lib.sh"), "MASK_UNITS")).toEqual([
 			"apt-daily.timer",

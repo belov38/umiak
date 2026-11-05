@@ -58,7 +58,8 @@ export function verifyRecipeBundle({
 		compareVersion(agent, manifest.minAgent) < 0
 	)
 		throw Error("Recipe incompatible with this platform, agent or builder");
-	for (const slug of ["linux", "debian", "linux-desktop", "windows"])
+	// Older signed bundles predate Debian; keep their minimum recipe set valid.
+	for (const slug of ["linux", "linux-desktop", "windows"])
 		if (!files.has(`infra/templates/${slug}/template.yaml`))
 			throw Error("Incomplete recipe bundle");
 	return { manifest, files, digest };

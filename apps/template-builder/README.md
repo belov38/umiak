@@ -126,6 +126,7 @@ Do not rebuild occupied template slots; 594 is the dedicated Debian slot.
 ```sh
 # Optional pin refresh (downloads and hashes the base image; commit reviewed pins).
 mise exec -- node apps/template-builder/src/main.ts versions debian --update
+export UMIAK_TEMPLATE_VMID_RANGE=594-594 UMIAK_TEMPLATE_VMID=0
 mise exec -- node apps/template-builder/src/main.ts preflight debian
 pkg=$(infra/templates/agent-package.sh --os linux --tunnel-ca ~/.config/umiak/dev-ca/ca.pem --out /tmp/umiak-debian-agent)
 mise exec -- node apps/template-builder/src/main.ts build debian --agent-package "$pkg" --connect-url wss://tunnel.192-168-68-90.sslip.io/v1/connect --dev-cp-ssh umiak@192.168.68.90

@@ -1718,7 +1718,7 @@ export interface components {
              */
             slug?: string;
             /**
-             * @description Template slug (GET /v1/templates); `windows-desktop` is a compatibility alias for `windows`; ignored with `from`
+             * @description Template slug (GET /v1/templates): linux (Ubuntu 26.04, default), debian (Debian 13); `windows-desktop` is a compatibility alias for `windows`; ignored with `from`
              * @example linux
              */
             template?: string;

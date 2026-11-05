@@ -181,7 +181,7 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 		expect(tpl.docs).toHaveLength(1);
 		expect(tpl.docs[0]).toMatchObject({
 			slug: "linux",
-			name: "linux",
+			name: "Ubuntu 26.04",
 			os: "linux",
 			enabled: true,
 			defaultSize: "2gb",
@@ -189,6 +189,17 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 			loginUser: "user",
 			capabilities: ["exec", "files", "ssh"],
 		});
+		const debian = await payload.find({
+			collection: "templates",
+			where: { slug: { equals: "debian" } },
+		});
+		expect(debian.docs[0]).toMatchObject({
+			name: "Debian 13",
+			os: "linux",
+			defaultSize: "2gb",
+			capabilities: ["exec", "files", "ssh"],
+		});
+
 		const size = await payload.find({
 			collection: "sizes",
 			where: { slug: { equals: "2gb" } },
@@ -654,7 +665,7 @@ describe.skipIf(skipPg())(
 				(await payload.find({ collection: "templates" })).docs
 					.map((x) => x.slug)
 					.sort(),
-			).toEqual(["linux", "linux-desktop", "windows"]);
+			).toEqual(["debian", "linux", "linux-desktop", "windows"]);
 		});
 	},
 );

@@ -81,7 +81,7 @@ done
 # into the default menu entry; 10-system deletes the file.
 kernel=$(dpkg-query -W -f '${Depends}' "$UMIAK_KERNEL_PACKAGE" | grep -o "linux-image-[^ ,]*-$UMIAK_KERNEL_SUFFIX" | head -n1 || true)
 kernel=${kernel#linux-image-}
-[ -n "$kernel" ] && [ -f "/boot/vmlinuz-$kernel" ] || die "no generic kernel from linux-image-virtual"
+[ -n "$kernel" ] && [ -f "/boot/vmlinuz-$kernel" ] || die "no $UMIAK_KERNEL_SUFFIX kernel from $UMIAK_KERNEL_PACKAGE"
 log "next boot: $kernel"
 # The initrd-less PARTUUID boot of the image (spec 8.5) is not tried with the
 # generic kernel either.
