@@ -76,12 +76,7 @@ export class RecipeChannel {
 					c.checkedAt = new Date().toISOString();
 					c.checkedChannel = selectedChannel;
 				});
-				const keys = JSON.parse(
-					await readFile(
-						join(this.secretsDir, "recipe-publisher-keys.json"),
-						"utf8",
-					),
-				);
+				const keys = await publisherKeys(this.secretsDir);
 				if (!Array.isArray(keys) || keys.some((k) => typeof k !== "string"))
 					throw Error("Invalid publisher keys");
 				let release;
@@ -154,4 +149,21 @@ export class RecipeChannel {
 			this.busy = false;
 		}
 	}
+}
+
+// The official publisher key ships with the platform release (same trust root as
+// the images); an owner-provisioned list in the secrets dir overrides it.
+const BAKED_PUBLISHER_KEY = new URL(
+	"../../../infra/templates/keys/recipe-publisher.pub",
+	import.meta.url,
+);
+export async function publisherKeys(secretsDir) {
+	try {
+		return JSON.parse(
+			await readFile(join(secretsDir, "recipe-publisher-keys.json"), "utf8"),
+		);
+	} catch (error) {
+		if (error?.code !== "ENOENT") throw error;
+	}
+	return [await readFile(BAKED_PUBLISHER_KEY, "utf8")];
 }

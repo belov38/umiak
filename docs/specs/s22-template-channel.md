@@ -4,13 +4,13 @@ Recipes ship separately from platform images as immutable `recipes-<version>`
 GitHub releases. `recipes.tar` contains infra/templates and channel.json (version,
 builder API, minimum/maximum platform, minimum agent, changelog including pinned
 versions diff). SHA256SUMS is signed with an Ed25519 publisher key. Public keys
-are provisioned by the owner, never fetched from the channel. This follows the
+ship with the platform release (infra/templates/keys/recipe-publisher.pub, same trust root as the images) and are never fetched from the channel; an owner-provisioned recipe-publisher-keys.json overrides them. This follows the
 agent package trust model, with a distinct publisher authority.
 
 The owner-only quickstart control plane polls daily (interval configurable,
 checking and rollout independently disabled). Verify signature, archive checksum,
 strict archive paths/types and compatibility before caching recipes. Baked recipes
-remain the fallback. Missing publisher keys disables consumption with a visible
+remain the fallback. Invalid publisher keys disable consumption with a visible
 error; an installation's private agent key cannot authenticate upstream releases.
 
 Rollout defaults on. Reconcile enabled OS types serially on idle nodes through

@@ -256,3 +256,16 @@ test("retirement refuses machine, snapshot and transfer references before deleti
 	);
 	assert.equal(deleted, false);
 });
+
+test("the baked publisher key is a usable Ed25519 public key", async () => {
+	const { publisherKeys } = await import("./recipe-channel.mjs");
+	const { createPublicKey } = await import("node:crypto");
+	const { mkdtemp } = await import("node:fs/promises");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const keys = await publisherKeys(
+		await mkdtemp(join(tmpdir(), "umiak-keys-")),
+	);
+	assert.equal(keys.length, 1);
+	assert.equal(createPublicKey(keys[0]).asymmetricKeyType, "ed25519");
+});
