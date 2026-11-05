@@ -374,6 +374,12 @@ async function clearStaging(ctx: WorkerCtx, j: Journal) {
 			l.tags.includes(`umiak-transfer-${j.id}`) &&
 			l.name.startsWith(`umiak-snap-${j.id}-`),
 	);
+	const destination = portable(await ctx.infra.forNode(j.target_node_id));
+	if (destination.node.sendVolume)
+		for (const slot of ["scsi0", "efidisk0", "tpmstate0"])
+			await destination.node.call("volume.cleanupImport", {
+				name: `umiak-snap-${j.id}-${slot}`,
+			});
 }
 
 async function cleanupCommitted(ctx: WorkerCtx, j: Journal) {

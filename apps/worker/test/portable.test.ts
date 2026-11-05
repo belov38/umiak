@@ -102,6 +102,7 @@ function bridge(
 							uuid: randomUUID(),
 							data: Buffer.from(original),
 						});
+				if (op === "volume.cleanupImport") return { missing: true } as T;
 				if (op === "volume.sendTo") {
 					events.push("standardFull");
 					await opts.onWrite?.();

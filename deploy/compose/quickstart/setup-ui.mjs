@@ -167,7 +167,9 @@ function setupInteractions() {
 					"s"
 				: job.status === "ready"
 					? "Template build complete."
-					: "Build stopped. Check the error and build details.";
+					: r?.phase === "failed"
+						? `Template ready on the source. Copy to ${r.node} failed; clean up and retry.`
+						: "Build stopped. Check the error and build details.";
 	};
 	const pollBuild = async () => {
 		if (polling) return;
@@ -512,7 +514,7 @@ ${section(
 <style>#step-templates p,#step-templates li,#step-templates code{overflow-wrap:anywhere}</style>${status("templates")}
 <p>A template is the reusable VM image your sandboxes start from. Build the Linux template to continue. Desktop and Windows templates can be added later.</p>
 <button type="button" id="build-linux" data-job-id="${escapeHtml(state.buildJob?.id || "")}" data-job-status="${escapeHtml(state.buildJob?.status || "")}" data-job-node="${escapeHtml(state.buildJob?.nodeId || "")}" data-nodes="${escapeHtml(needLinux.map((n) => n.nodeId).join(","))}"${running ? " disabled" : ""}>${needLinux.length > 1 ? `Build Linux template on all nodes (${escapeHtml(needLinux.map((n) => n.name).join(", "))})` : needLinux.length === 1 && nodes.length > 1 ? `Build Linux template on ${escapeHtml(needLinux[0].name)}` : "Build Linux template"}</button>
-<ul aria-label="Sandbox node template availability">${nodes.map((n) => `<li data-queue-node="${escapeHtml(n.nodeId)}" data-name="${escapeHtml(n.name)}">${escapeHtml(n.name)} · Node ${n.state === "active" || n.state === "ready" ? "online" : escapeHtml(n.state)} · Template ${(n.templates || []).some((t) => t.templateSlug === "linux") ? "ready" : "missing"} · <span data-node-build-state>${state.buildJob?.nodeId === n.nodeId && running && !state.buildJob?.registered ? "Building" : (n.templates || []).some((t) => t.templateSlug === "linux") ? "Ready" : "Waiting"}</span></li>`).join("")}</ul>
+<ul aria-label="Sandbox node template availability">${nodes.map((n) => `<li data-queue-node="${escapeHtml(n.nodeId)}" data-name="${escapeHtml(n.name)}">${escapeHtml(n.name)} · Node ${n.state === "active" || n.state === "ready" ? "online" : escapeHtml(n.state)} · Template ${(n.templates || []).some((t) => t.templateSlug === "linux") ? "ready" : "missing"} · <span data-node-build-state>${escapeHtml(state.buildQueue?.states?.[n.nodeId] || (state.buildJob?.nodeId === n.nodeId && running && !state.buildJob?.registered ? "Building" : (n.templates || []).some((t) => t.templateSlug === "linux") ? "Ready" : "Waiting"))}</span></li>`).join("")}</ul>
 <div id="build-recoveries">${nodes
 		.filter((n) => n.buildJobId && !running)
 		.map((n) => {

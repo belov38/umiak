@@ -543,3 +543,70 @@ test("owner cancellation records intent and stops the queue without deleting res
 	assert.match(queries[0], /cancel_requested/);
 	assert.doesNotMatch(queries[0], /DELETE/);
 });
+
+test("an explicitly confirmed all-node rebuild builds once and copies despite existing templates", async () => {
+	const store = memory({
+		steps: {
+			templates: {
+				data: {
+					builds: [
+						{ nodeId: "a", templateSlug: "linux" },
+						{ nodeId: "b", templateSlug: "linux" },
+					],
+				},
+			},
+		},
+	});
+	const events = [];
+	const jobs = new TemplateBuildJobs({
+		store,
+		copyExisting: async () => {
+			throw Error("must rebuild the source");
+		},
+		run: async (_slug, _state, job) => {
+			events.push(job.nodeId);
+			return { pveVmid: 20002 };
+		},
+		replicate: async () =>
+			jobs.update((s) => {
+				s.buildQueue.states.b = "Ready";
+			}),
+	});
+	await jobs.startQueue({
+		nodes: ["a", "b"],
+		slug: "linux",
+		confirmRebuild: "linux",
+	});
+	await jobs.settled();
+	assert.deepEqual(events, ["a"]);
+	assert.deepEqual((await store.read()).buildQueue.states, {
+		a: "Ready",
+		b: "Ready",
+	});
+});
+
+test("untagged standard import disks require the node-agent's durable marker proof", async () => {
+	const id = "d".repeat(32);
+	for (const owned of [true, false]) {
+		const f = cleanupFixture({
+			vms: [{ vmid: 701, status: "stopped" }],
+			disks: [{ name: `vm-701-umiak-import-${id}-scsi0`, tags: [] }],
+			cfg: { name: `umiak-replica-${id}` },
+		});
+		const probe = f.options.probe;
+		f.options.probe = async (c, s, req) =>
+			req.op === "volume.cleanupImport" ? { owned } : probe(c, s, req);
+		const action = () =>
+			cleanupBuild({
+				...f.options,
+				request: { jobId: `copy-${id}`, confirmRemove: true },
+			});
+		if (owned) {
+			await action();
+			assert.ok(f.mutations.includes("delete"));
+		} else {
+			await assert.rejects(action(), /ownership cannot be verified/);
+			assert.deepEqual(f.mutations, []);
+		}
+	}
+});

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { replicateActiveTemplates } from "./template-replication.mjs";
+import {
+	recordReplicaChecksums,
+	replicateActiveTemplates,
+} from "./template-replication.mjs";
 
 test("a runner waiting for the copy lock rechecks publication before allocating another replica", async () => {
 	let locked = false;
@@ -44,4 +47,63 @@ test("a runner waiting for the copy lock rechecks publication before allocating 
 		{ phase: "ready", node: "pve2", nodeId: "target" },
 	]);
 	assert.ok(events.some((sql) => sql.includes("volume_transfers")));
+});
+
+test("checksum format upgrade changes only replicas with an equal verified legacy proof", async () => {
+	const old = {
+			scsi0: {
+				sha256: "a".repeat(64),
+				algorithm: "sha256-block-tree-v1",
+				sizeBytes: 512,
+			},
+		},
+		next = {
+			scsi0: {
+				sha256: "b".repeat(64),
+				algorithm: "sha256-pvesm-raw+size-v1",
+				sizeBytes: 512,
+			},
+		};
+	const queries = [];
+	await recordReplicaChecksums(
+		{ client: { query: async (...args) => queries.push(args) } },
+		{ id: "source", provider_id: "provider", checksums: old },
+		"root",
+		next,
+	);
+	assert.equal(queries.length, 2);
+	assert.match(queries[0][0], /checksums=\$4::jsonb/);
+	assert.deepEqual(queries[0][1], [
+		"provider",
+		"root",
+		JSON.stringify(next),
+		JSON.stringify(old),
+	]);
+});
+test("an immutable source with an existing raw checksum cannot change bytes", async () => {
+	const old = {
+			scsi0: {
+				sha256: "a".repeat(64),
+				algorithm: "sha256-pvesm-raw+size-v1",
+				sizeBytes: 512,
+			},
+		},
+		next = { scsi0: { ...old.scsi0, sha256: "b".repeat(64) } };
+	let wrote = false;
+	await assert.rejects(
+		recordReplicaChecksums(
+			{
+				client: {
+					query: async () => {
+						wrote = true;
+					},
+				},
+			},
+			{ id: "source", provider_id: "provider", checksums: old },
+			"root",
+			next,
+		),
+		/Immutable source/,
+	);
+	assert.equal(wrote, false);
 });

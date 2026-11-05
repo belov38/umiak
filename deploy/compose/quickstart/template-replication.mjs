@@ -15,6 +15,49 @@ import { checkNode } from "./setup-host.mjs";
 import { scopedNodeState } from "./setup-nodes.mjs";
 import { templateRange } from "./setup-vmids.mjs";
 
+// Older replicas may carry the canonical block-tree proof. Equality to that
+// immutable source proof permits an atomic transition to the raw+size identity.
+export async function recordReplicaChecksums(tx, source, root, checksums) {
+	const old = source.checksums;
+	if (old) {
+		if (
+			JSON.stringify(Object.keys(old).sort()) !==
+			JSON.stringify(Object.keys(checksums).sort())
+		)
+			throw Error("Immutable source template disk layout changed");
+		for (const slot of Object.keys(old)) {
+			const prior = old[slot],
+				next = checksums[slot];
+			if (
+				!["sha256-block-tree-v1", "sha256-pvesm-raw+size-v1"].includes(
+					prior.algorithm,
+				)
+			)
+				throw Error("Unsupported prior template checksum proof");
+			if (
+				prior.algorithm === "sha256-pvesm-raw+size-v1" &&
+				(prior.sha256 !== next.sha256 || prior.sizeBytes !== next.sizeBytes)
+			)
+				throw Error("Immutable source template checksum changed");
+		}
+	}
+
+	if (old)
+		await tx.client.query(
+			"UPDATE runtime.template_builds SET checksums=$3 WHERE provider_id=$1 AND (id=$2 OR source_build_id=$2) AND checksums=$4::jsonb AND status<>'retired'",
+			[
+				source.provider_id,
+				root,
+				JSON.stringify(checksums),
+				JSON.stringify(old),
+			],
+		);
+	await tx.client.query(
+		"UPDATE runtime.template_builds SET checksums=COALESCE(checksums,$2) WHERE id=$1",
+		[source.id, JSON.stringify(checksums)],
+	);
+}
+
 export async function replicateActiveTemplates({
 	pool,
 	state,
@@ -212,6 +255,10 @@ export async function replicateActiveTemplates({
 						});
 					}
 					if (journal.phase === "committed") {
+						for (const slot of Object.keys(journal.result.checksums))
+							await call(target).call("volume.cleanupImport", {
+								name: `umiak-snap-${journal.id}-${slot}`,
+							});
 						await call(target).call("lv.remove", {
 							names: Object.keys(journal.result.checksums).map(
 								(slot) => `umiak-snap-${journal.id}-${slot}`,
@@ -320,10 +367,7 @@ export async function replicateActiveTemplates({
 									],
 								)
 							).rows[0];
-						await tx.client.query(
-							"UPDATE runtime.template_builds SET checksums=COALESCE(checksums,$2) WHERE id=$1",
-							[source.id, JSON.stringify(checksums)],
-						);
+						await recordReplicaChecksums(tx, source, root, checksums);
 						await promoteNodeTemplate(tx, {
 							nodeId: target.nodeId,
 							buildId: build.id,
@@ -338,6 +382,10 @@ export async function replicateActiveTemplates({
 							[source.provider_id, journal.target_vmid, `copy-${journal.id}`],
 						);
 					});
+					for (const slot of Object.keys(checksums))
+						await call(target).call("volume.cleanupImport", {
+							name: `umiak-snap-${journal.id}-${slot}`,
+						});
 					await call(target).call("lv.remove", {
 						names: Object.keys(checksums).map(
 							(slot) => `umiak-snap-${journal.id}-${slot}`,
@@ -374,7 +422,7 @@ export async function replicateActiveTemplates({
 						nodeId: target.nodeId,
 					});
 					throw Error(
-						`${source.template_slug} is ready on ${origin.name}. Copy to ${target.name} failed: ${error.message}`,
+						`${source.template_slug === "linux" ? "Linux" : source.template_slug} is ready on ${origin.name}. Copy to ${target.name} failed: ${error.message}`,
 					);
 				} finally {
 					await conn

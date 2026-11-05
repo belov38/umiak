@@ -384,7 +384,10 @@ export class TemplateBuildJobs {
 	}
 	async runQueue(queue, input, context) {
 		try {
-			if (await this.copyExisting(input.slug || "linux", input, context)) {
+			if (
+				input.confirmRebuild !== (input.slug || "linux") &&
+				(await this.copyExisting(input.slug || "linux", input, context))
+			) {
 				await this.update((s) => {
 					s.buildQueue.active = false;
 					s.buildQueue.message = "Build queue complete";
@@ -409,10 +412,12 @@ export class TemplateBuildJobs {
 				if (s.buildQueue?.id !== queue.id || !s.buildQueue.active) return;
 				const ready =
 					s.buildQueue.states[nodeId] === "Ready" ||
-					s.steps?.templates?.data?.builds?.some(
-						(b) =>
-							b.nodeId === nodeId && b.templateSlug === (input.slug || "linux"),
-					);
+					(input.confirmRebuild !== (input.slug || "linux") &&
+						s.steps?.templates?.data?.builds?.some(
+							(b) =>
+								b.nodeId === nodeId &&
+								b.templateSlug === (input.slug || "linux"),
+						));
 				if (ready) {
 					s.buildQueue.states[nodeId] = "Ready";
 					return;
