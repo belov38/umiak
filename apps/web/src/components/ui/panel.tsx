@@ -38,21 +38,23 @@ export function PageHeader({
 		<header
 			data-slot="page-header"
 			className={cn(
-				"flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2",
+				"flex min-w-0 flex-col items-start gap-x-4 gap-y-2 sm:flex-row sm:flex-wrap sm:items-center",
 				className,
 			)}
 			{...props}
 		>
 			<h1
 				className={cn(
-					"min-w-0 max-sm:flex-1",
+					"min-w-0 shrink-0",
 					compact && "sandbox-detail-heading flex items-center gap-2",
 				)}
 			>
 				{title}
 			</h1>
 			{meta}
-			<div className="ml-auto flex flex-wrap items-center gap-2">{action}</div>
+			<div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+				{action}
+			</div>
 		</header>
 	);
 }
