@@ -82,8 +82,17 @@ export async function verifyAptIndex(o: {
 	keyFingerprint: string;
 	indexPath: string;
 	index: Buffer;
+	expectedSuite?: string;
 }): Promise<AptPackage[]> {
-	const key = await openpgp.readKey({ armoredKey: o.publicKey });
+	if (
+		(o.publicKey.match(/-----BEGIN PGP PUBLIC KEY BLOCK-----/g) ?? [])
+			.length !== 1
+	)
+		throw Error("Apt keyring must hold exactly one pinned authority");
+	const keys = await openpgp.readKeys({ armoredKeys: o.publicKey });
+	const key = keys[0];
+	if (keys.length !== 1 || !key)
+		throw Error("Apt keyring must hold exactly one pinned authority");
 	if (key.getFingerprint() !== o.keyFingerprint.toLowerCase())
 		throw Error("Apt archive key fingerprint mismatch");
 	const message = await openpgp.readCleartextMessage({
@@ -100,6 +109,12 @@ export async function verifyAptIndex(o: {
 		!o.indexPath.endsWith("/Packages")
 	)
 		throw Error("Invalid offline apt index path");
+	if (
+		o.expectedSuite !== undefined &&
+		release[0]?.get("suite") !== o.expectedSuite &&
+		release[0]?.get("codename") !== o.expectedSuite
+	)
+		throw Error("Apt Release suite mismatch");
 	const sums = release[0]?.get("sha256");
 	if (!sums) throw Error("Apt Release has no SHA-256 index binding");
 	let match = false;

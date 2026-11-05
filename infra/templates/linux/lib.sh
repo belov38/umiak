@@ -14,6 +14,11 @@ set -a
 . "$UMIAK_BUILD_DIR/env"
 set +a
 
+# The replay marker is created by the offline seed, outside captured build/env.
+if [ -f /etc/umiak-offline-replay ]; then UMIAK_LAYER_MODE=replay; fi
+UMIAK_CAPTURE_DIR=${UMIAK_CAPTURE_DIR:-/var/lib/umiak-layer-capture}
+UMIAK_LAYER_ROOT=${UMIAK_LAYER_ROOT:-/mnt/layer}
+
 export DEBIAN_FRONTEND=noninteractive
 export UCF_FORCE_CONFFOLD=1
 export NEEDRESTART_MODE=a
@@ -100,19 +105,35 @@ END { flush() }
 # fetch_verify <url> <sha256> <out>: downloads url to out unless out already
 # has the sha256; a mismatch fails the step.
 fetch_verify() {
-	local url=$1 sha=$2 out=$3
-	[[ $sha =~ ^[0-9a-f]{64}$ ]] || die "bad sha256 for $url: $sha"
-	if [ -f "$out" ] && echo "$sha  $out" | sha256sum -c --status; then
-		return 0
-	fi
-	log "download $url"
-	mkdir -p "$(dirname "$out")"
-	curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 -o "$out.part" "$url"
-	if ! echo "$sha  $out.part" | sha256sum -c --status; then
-		rm -f "$out.part"
-		die "sha256 mismatch for $url (want $sha)"
-	fi
-	mv "$out.part" "$out"
+ local url=$1 sha=$2 out=$3 cached
+ [[ $sha =~ ^[0-9a-f]{64}$ ]] || die "bad sha256 for $url: $sha"
+ mkdir -p "$(dirname "$out")"
+ if [ "${UMIAK_LAYER_MODE:-}" = replay ]; then
+  cached=$UMIAK_LAYER_ROOT/inputs/$sha
+  if ! [ -f "$cached" ] || ! echo "$sha  $cached" | sha256sum -c --status; then
+   die "missing/corrupt offline input: $sha ($url)"
+  fi
+  cp "$cached" "$out.part"
+ elif ! { [ -f "$out" ] && echo "$sha  $out" | sha256sum -c --status; }; then
+  log "download $url"
+  curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 --max-time 1800 -o "$out.part" "$url"
+ else
+  cp "$out" "$out.part"
+ fi
+ if ! echo "$sha  $out.part" | sha256sum -c --status; then
+  rm -f "$out.part"
+  die "sha256 mismatch for $url (want $sha)"
+ fi
+ mv "$out.part" "$out"
+ if [ "${UMIAK_LAYER_MODE:-}" = capture ]; then
+  mkdir -p "$UMIAK_CAPTURE_DIR/inputs"
+  cp "$out" "$UMIAK_CAPTURE_DIR/inputs/$sha"
+  python3 -I - "$UMIAK_CAPTURE_DIR/inputs.jsonl" "$url" "$sha" "$out" <<'PYINPUT'
+import json, os, sys
+with open(sys.argv[1], 'a') as f:
+    f.write(json.dumps(dict(url=sys.argv[2], sha256=sys.argv[3], sizeBytes=os.stat(sys.argv[4]).st_size)) + '\n')
+PYINPUT
+ fi
 }
 
 # toml_get <dotted.key>: a scalar from build/versions.toml; fails when absent.

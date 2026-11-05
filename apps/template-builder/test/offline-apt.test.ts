@@ -43,6 +43,9 @@ it("authenticates original Release -> Packages -> unmodified deb provenance offl
 		sizeBytes: deb.length,
 	});
 	await expect(
+		verifyAptIndex({ ...opts, publicKey: key.publicKey + key.publicKey }),
+	).rejects.toThrow(/exactly one/);
+	await expect(
 		verifyAptIndex({ ...opts, index: Buffer.from(`${packages}changed`) }),
 	).rejects.toThrow();
 	await expect(
