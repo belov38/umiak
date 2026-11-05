@@ -424,3 +424,24 @@ test("copy cleanup accepts exact replica name with lease, refuses foreign untagg
 			);
 	}
 });
+
+test("restart during copying never interrupts an already completed source reservation", async () => {
+	const store = memory({
+		steps: {},
+		buildJob: {
+			id: "source",
+			nodeId: "a",
+			status: "running",
+			registered: true,
+			manifest: { pveVmid: 20000 },
+		},
+	});
+	const jobs = new TemplateBuildJobs({
+		store,
+		interrupt: async () => {
+			throw Error("source reservation already succeeded");
+		},
+	});
+	await jobs.init();
+	assert.equal((await store.read()).buildJob.status, "error");
+});
