@@ -212,7 +212,7 @@ export const CreateSandboxRequest = z
 
 		template: z.string().optional().openapi({
 			description:
-				"Template slug (GET /v1/templates): linux (Ubuntu 26.04, default), debian (Debian 13); `windows-desktop` is a compatibility alias for `windows`; ignored with `from`",
+				"Template slug (GET /v1/templates); `windows-desktop` is a compatibility alias for `windows`; ignored with `from`",
 			example: "linux",
 		}),
 		size: z.string().optional().openapi({

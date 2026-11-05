@@ -27,7 +27,7 @@ export function buildInvocation(
 	input = {},
 ) {
 	if (slug === "windows-desktop") slug = "windows";
-	if (!["linux", "debian", "linux-desktop", "windows"].includes(slug))
+	if (!["linux", "linux-desktop", "windows"].includes(slug))
 		throw new Error("Unknown operating system");
 	const slot = input.templateVmid;
 	const range = templateRange(state);

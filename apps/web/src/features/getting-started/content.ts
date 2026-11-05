@@ -115,7 +115,7 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 			title: "Desktops",
 			blocks: [
 				text(
-					"Windows 11 (`windows`) includes the desktop; Linux offers Ubuntu 26.04 (`linux`, default), Debian 13 (`debian`), and Ubuntu desktop (`linux-desktop`). Use `linux-desktop` or `windows` for a graphical session. The old `windows-desktop` slug is accepted as an alias of `windows`. Desktop templates need more RAM than a headless Linux sandbox. The dashboard's Desktop tab has the same viewer. The embedded viewer needs a secure browser context for WebCodecs, which the tailnet HTTPS address provides.",
+					"Windows 11 (`windows`) includes the desktop; Linux offers `linux` and `linux-desktop`. Use `linux-desktop` or `windows` for a graphical session. The old `windows-desktop` slug is accepted as an alias of `windows`. Desktop templates need more RAM than a headless Linux sandbox. The dashboard's Desktop tab has the same viewer. The embedded viewer needs a secure browser context for WebCodecs, which the tailnet HTTPS address provides.",
 				),
 				code(
 					"Create a desktop",

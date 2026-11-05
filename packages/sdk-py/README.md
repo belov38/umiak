@@ -96,7 +96,7 @@ Postgres in docker or `UMIAK_TEST_DATABASE_URL`, a fault proxy);
 
 ## Windows desktops
 
-Windows 11 uses the single `windows` template and includes the desktop (4gb by default; 8gb optional). Linux offers Ubuntu 26.04 (`linux`, default), Debian 13 (`debian`), and Ubuntu desktop (`linux-desktop`). The legacy `windows-desktop` slug remains an input alias of `windows`; API responses return `windows`. Existing headless Windows sandboxes and saved snapshots retain their retired build until deleted.
+Windows 11 uses the single `windows` template and includes the desktop (4gb by default; 8gb optional). Linux offers `linux` and `linux-desktop`. The legacy `windows-desktop` slug remains an input alias of `windows`; API responses return `windows`. Existing headless Windows sandboxes and saved snapshots retain their retired build until deleted.
 
 ```python
 sb = umiak.sandboxes.create(template="windows", size="4gb", wait=True)

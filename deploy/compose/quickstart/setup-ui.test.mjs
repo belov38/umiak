@@ -137,8 +137,7 @@ test("setup displays current gateway CA and leaf certificate expiry status", asy
 test("setup offers nonredundant recipes and one Windows desktop with ISO URL inputs", () => {
 	const html = renderSetup({ steps: {} }, "http://localhost");
 	const select = html.match(/<select id="build-slug">(.*?)<\/select>/)[1];
-	assert.equal((select.match(/<option /g) || []).length, 3);
-	assert.match(select, /value="debian">Debian 13/);
+	assert.equal((select.match(/<option /g) || []).length, 2);
 	assert.match(select, /value="windows">Windows 11 \(with desktop\)/);
 	assert.doesNotMatch(select, /windows-desktop/);
 	assert.match(html, /id="build-iso-url"/);

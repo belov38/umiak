@@ -34,7 +34,7 @@ function bundle(overrides = {}) {
 				...overrides,
 			}),
 		);
-		for (const slug of ["linux", "debian", "linux-desktop", "windows"]) {
+		for (const slug of ["linux", "linux-desktop", "windows"]) {
 			mkdirSync(join(dir, "infra/templates", slug), { recursive: true });
 			writeFileSync(
 				join(dir, "infra/templates", slug, "template.yaml"),
