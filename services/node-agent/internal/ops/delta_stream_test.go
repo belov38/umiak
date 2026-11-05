@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -102,5 +103,31 @@ func TestDeltaStreamRefusesCorruptResumePrefixAndPublishedWrites(t *testing.T) {
 	}
 	if err := source.srv.DeltaStream(t.Context(), deltaRequest(name, "import", len(data), 0), bytes.NewReader(nil), &bytes.Buffer{}); err == nil {
 		t.Fatal("allowed template write")
+	}
+}
+
+func TestDeltaZeroFramesPreserveSparseHoles(t *testing.T) {
+	data := make([]byte, 512*1024)
+	source, name, _ := deltaHarness(t, data, false)
+	target, targetName, path := deltaHarness(t, data, true)
+	if e := os.Truncate(path, 0); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.Truncate(path, int64(len(data))); e != nil {
+		t.Fatal(e)
+	} //nolint:gosec // test fixture under t.TempDir
+	var wire, acks bytes.Buffer
+	if e := source.srv.DeltaStream(t.Context(), deltaRequest(name, "export", len(data), 0), bytes.NewReader(nil), &wire); e != nil {
+		t.Fatal(e)
+	}
+	if e := target.srv.DeltaStream(t.Context(), deltaRequest(targetName, "import", len(data), 0), &wire, &acks); e != nil {
+		t.Fatal(e)
+	}
+	info, e := os.Stat(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if info.Sys().(*syscall.Stat_t).Blocks != 0 {
+		t.Fatal("allocated an already-zero sparse hole")
 	}
 }

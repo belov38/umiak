@@ -181,5 +181,5 @@ func redactArgs(op string, raw json.RawMessage) string {
 
 func (s *Server) version(context.Context, json.RawMessage) (any, error) {
 	kernel, _ := fs.ReadFile(s.Host.FS, "proc/sys/kernel/osrelease")
-	return map[string]any{"version": s.Version, "config": s.Cfg, "kernel": strings.TrimSpace(string(kernel))}, nil
+	return map[string]any{"version": s.Version, "transferProtocols": []string{"pvesm-raw+size-zstd-v1", "delta-stream-v1"}, "config": s.Cfg, "kernel": strings.TrimSpace(string(kernel))}, nil
 }

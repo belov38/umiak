@@ -510,7 +510,8 @@ func (s *Server) ReceiveVolume(ctx context.Context, raw []byte, compressed io.Re
 // Ordinary volumes and a different LV generation can never match this proof.
 func (s *Server) volumeCleanupImport(ctx context.Context, raw json.RawMessage) (any, error) {
 	var a struct {
-		Name string `json:"name"`
+		Name    string `json:"name"`
+		Inspect bool   `json:"inspect,omitempty"`
 	}
 	if err := decodeArgs(raw, &a); err != nil {
 		return nil, err
@@ -559,6 +560,10 @@ func (s *Server) volumeCleanupImport(ctx context.Context, raw json.RawMessage) (
 			return nil, forbidden("import volume ownership/generation changed")
 		}
 	}
+	if a.Inspect {
+		return map[string]any{"owned": true}, nil
+	}
+
 	for _, lv := range all {
 		if lv.Name == a.Name || lv.Name == interim {
 			if err = s.LVM.Remove(ctx, lv.Name); err != nil {

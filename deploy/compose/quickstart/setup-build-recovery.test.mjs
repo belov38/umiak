@@ -505,3 +505,41 @@ test("cleanup can remove an owned replica converted to a template before registr
 	});
 	assert.deepEqual(f.mutations, ["delete"]);
 });
+
+test("owner cancellation records intent and stops the queue without deleting resources", async () => {
+	const { Readable } = await import("node:stream");
+	const { createSetupHandler } = await import("./setup.mjs");
+	const store = memory({
+		steps: {},
+		buildQueue: { active: true, nodes: ["a"], states: { a: "Copying" } },
+	});
+	const queries = [];
+	const handler = createSetupHandler({
+		store,
+		pool: {
+			query: async (sql) => {
+				queries.push(sql);
+				return { rowCount: 1, rows: [{ id: "copy" }] };
+			},
+		},
+	});
+	const req = Readable.from([JSON.stringify({ id: "a".repeat(32) })]);
+	req.method = "POST";
+	req.url = "/quickstart/setup/build/cancel-copy";
+	let status;
+	await handler(
+		req,
+		{
+			writeHead: (s) => {
+				status = s;
+			},
+			end() {},
+		},
+		{ owner: true, origin: "https://test.invalid" },
+	);
+	assert.equal(status, 202);
+	assert.equal((await store.read()).buildQueue.active, false);
+	assert.equal(queries.length, 1);
+	assert.match(queries[0], /cancel_requested/);
+	assert.doesNotMatch(queries[0], /DELETE/);
+});

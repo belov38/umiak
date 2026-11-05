@@ -207,8 +207,33 @@ export async function cleanupBuild({
 					`VM ${vm.vmid} ownership cannot be verified; reservation retained`,
 				);
 		}
+		const connection = {
+			...state.steps.connection.data,
+			node: node.name,
+			sshHost: node.sshHost,
+		};
 		for (const disk of disks) {
-			if (!disk.tags?.includes("umiak") || /^(?:base|vm)-590-/.test(disk.name))
+			const interim =
+				copyId &&
+				new RegExp(
+					`^vm-[0-9]+-umiak-import-${copyId}-(scsi0|efidisk0|tpmstate0)$`,
+				).exec(disk.name);
+			let markerOwned = false;
+			if (interim)
+				markerOwned =
+					(
+						await probe(connection, secretsDir, {
+							op: "volume.cleanupImport",
+							args: {
+								name: `umiak-snap-${copyId}-${interim[1]}`,
+								inspect: true,
+							},
+						})
+					).owned === true;
+			if (
+				(!disk.tags?.includes("umiak") && !markerOwned) ||
+				/^(?:base|vm)-590-/.test(disk.name)
+			)
 				throw Error(
 					`Disk ${disk.name} ownership cannot be verified; reservation retained`,
 				);
@@ -224,11 +249,6 @@ export async function cleanupBuild({
 				}),
 			);
 		}
-		const connection = {
-			...state.steps.connection.data,
-			node: node.name,
-			sshHost: node.sshHost,
-		};
 		if (copyId)
 			for (const slot of ["scsi0", "efidisk0", "tpmstate0"]) {
 				await probe(connection, secretsDir, {

@@ -50,6 +50,8 @@ export async function fullVolumeCopy(input: {
 	await input.onProgress?.({
 		verifiedBytes: r.sizeBytes,
 		transferredBytes: r.wireBytes ?? 0,
+		elapsedSeconds: r.elapsedSeconds,
+		wireBytes: r.wireBytes,
 		totalBytes: r.sizeBytes,
 	});
 	return r;

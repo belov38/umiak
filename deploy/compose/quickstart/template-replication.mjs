@@ -272,6 +272,10 @@ export async function replicateActiveTemplates({
 									"Template copy cancelled; clean up its owned resources before retrying",
 								);
 							progress[slot] = p.verifiedBytes;
+							if (p.elapsedSeconds !== undefined)
+								progress[`${slot}ElapsedSeconds`] = p.elapsedSeconds;
+							if (p.wireBytes !== undefined)
+								progress[`${slot}WireBytes`] = p.wireBytes;
 							await pool.query(
 								"UPDATE runtime.volume_transfers SET phase='copying',progress=$2,updated_at=now() WHERE id=$1",
 								[journal.id, JSON.stringify(progress)],

@@ -204,25 +204,36 @@ func (s *Server) DeltaStream(ctx context.Context, raw []byte, in io.Reader, out 
 					return badReq("delta frame checksum/prefix mismatch")
 				}
 				if !prefix {
-					n, err := f.WriteAt(b, int64(offset)) //nolint:gosec // validateDelta bounds offsets to at most 1 PiB
-					if err != nil {
-						return err
+					check := readback[:len(b)]
+					skipWrite := false
+					if flags&deltaZero != 0 {
+						if _, e = f.ReadAt(check, int64(offset)); e != nil { //nolint:gosec // validateDelta limits offsets to 1 PiB
+							return e
+						} //nolint:gosec // validateDelta limits offsets to 1 PiB
+						skipWrite = sha256.Sum256(check) == sum
 					}
-					if n != len(b) {
-						return io.ErrShortWrite
+					if !skipWrite {
+						n, err := f.WriteAt(b, int64(offset)) //nolint:gosec // validateDelta limits offsets to 1 PiB
+						if err != nil {
+							return err
+						}
+						if n != len(b) {
+							return io.ErrShortWrite
+						} //nolint:gosec // validateDelta limits offsets to 1 PiB
 					}
 					if e = f.Sync(); e != nil {
 						return e
 					}
-					check := readback[:len(b)]
-					if _, e = f.ReadAt(check, int64(offset)); e != nil { //nolint:gosec // validateDelta bounds offsets to at most 1 PiB
-						return e
-					}
-					proof := sha256.Sum256(check)
-					if proof != sum {
-						return badReq("delta readback checksum mismatch")
-					}
+					if !skipWrite {
+						if _, e = f.ReadAt(check, int64(offset)); e != nil { //nolint:gosec // validateDelta limits offsets to 1 PiB
+							return e
+						}
+						if sha256.Sum256(check) != sum {
+							return badReq("delta readback checksum mismatch")
+						}
+					} //nolint:gosec // validateDelta limits offsets to 1 PiB
 				}
+
 				deltaHash(h, b, offset)
 				if e = writeAll(out, deltaHeader(offset+length, uint32(length), deltaAck, sum[:])); e != nil {
 					return e
