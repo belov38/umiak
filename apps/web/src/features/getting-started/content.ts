@@ -26,9 +26,8 @@ const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 export function guideSections(d: GuideDeployment): GuideSection[] {
 	const singleOwner = d.tenancy === "single";
-	const previewScheme =
-		d.previewScheme ?? (d.mode === "owner" ? "http" : "https");
-	const previewPort = d.previewPort ?? (d.mode === "owner" ? 8085 : 443);
+	const previewScheme = d.previewScheme ?? "http";
+	const previewPort = d.previewPort ?? 8085;
 	const previewSuffix =
 		previewPort === (previewScheme === "http" ? 80 : 443)
 			? ""
@@ -54,41 +53,19 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 		{
 			id: "install",
 			title: "Install the CLI",
-			blocks:
-				d.mode === "owner"
-					? [
-							text(
-								"Download the installer from this deployment's tailnet HTTPS address.",
-							),
-							code(
-								"Install CLI",
-								`curl --fail ${quote(`${api}/install.sh`)} -o umiak-install.sh && sh ./umiak-install.sh`,
-							),
-							text(
-								"The installer runs login. Open the pairing link on the hostname where you claimed this deployment, and compare the short code shown in your terminal before approving. The CLI saves the deployment connection settings in its profile.",
-							),
-							code("Check CLI profile", "umiak whoami"),
-						]
-					: [
-							text(
-								"Build the CLI from the repository checkout. Choose the output for your OS and CPU (darwin/linux, arm64/x64), or umiak-windows-x64.exe on Windows. Copy it to a directory on PATH; a shell alias is insufficient for agent clients.",
-							),
-							code(
-								"Build the CLI",
-								"mise exec -- pnpm install\nmise exec -- pnpm --filter @umiak/cli build",
-							),
-							code(
-								"Install CLI (macOS arm64 example)",
-								'mkdir -p ~/.local/bin\ncp apps/cli/dist/umiak-darwin-arm64 ~/.local/bin/umiak\nexport PATH="$HOME/.local/bin:$PATH"',
-							),
-							code(
-								"Log in to this deployment",
-								`umiak login --api-url ${quote(api)}\numiak whoami`,
-							),
-							text(
-								`Login opens browser sign-in through this deployment's identity provider. For unattended clients, use a scoped ${singleOwner ? "" : "team "}API key from API keys.`,
-							),
-						],
+			blocks: [
+				text(
+					"Download the installer from this deployment's tailnet HTTPS address.",
+				),
+				code(
+					"Install CLI",
+					`curl --fail ${quote(`${api}/install.sh`)} -o umiak-install.sh && sh ./umiak-install.sh`,
+				),
+				text(
+					"The installer runs login. Open the pairing link on the hostname where you claimed this deployment, and compare the short code shown in your terminal before approving. The CLI saves the deployment connection settings in its profile.",
+				),
+				code("Check CLI profile", "umiak whoami"),
+			],
 		},
 		{
 			id: "first-sandbox",
@@ -180,36 +157,32 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 				...[
 					code(
 						"Claude Code · remote HTTP",
-						d.mode === "owner"
-							? JSON.stringify(
-									{
-										mcpServers: {
-											"umiak-remote": {
-												type: "http",
-												url: mcp,
-												headers: {
-													// Claude Code expands this environment reference at runtime.
-													Authorization: "Bearer $" + "{UMIAK_OWNER_TOKEN}",
-												},
-											},
+						JSON.stringify(
+							{
+								mcpServers: {
+									"umiak-remote": {
+										type: "http",
+										url: mcp,
+										headers: {
+											// Claude Code expands this environment reference at runtime.
+											Authorization: "Bearer $" + "{UMIAK_OWNER_TOKEN}",
 										},
 									},
-									null,
-									2,
-								)
-							: `claude mcp add --transport http --scope user umiak-remote ${quote(mcp)}`,
+								},
+							},
+							null,
+							2,
+						),
 					),
 					code(
 						"Codex · remote HTTP configuration",
-						`[mcp_servers.umiak-remote]\nurl = ${JSON.stringify(mcp)}${d.mode === "owner" ? '\nbearer_token_env_var = "UMIAK_OWNER_TOKEN"' : ""}`,
+						`[mcp_servers.umiak-remote]\nurl = ${JSON.stringify(mcp)}${'\nbearer_token_env_var = "UMIAK_OWNER_TOKEN"'}`,
 					),
-					...(d.mode === "owner"
-						? [
-								text(
-									"For Claude Code, save the remote JSON configuration in .mcp.json. Set UMIAK_OWNER_TOKEN in the client environment using your own paired CLI credential from its private profile; never commit a credential or paste it into this guide. Stdio avoids this manual credential transfer.",
-								),
-							]
-						: []),
+					...[
+						text(
+							"For Claude Code, save the remote JSON configuration in .mcp.json. Set UMIAK_OWNER_TOKEN in the client environment using your own paired CLI credential from its private profile; never commit a credential or paste it into this guide. Stdio avoids this manual credential transfer.",
+						),
+					],
 				],
 				text(
 					'Ask your agent: "Create a Linux sandbox, clone my repository into it and run the tests." umiak mcp --help explains read-only mode, toolsets and sandbox restrictions.',
@@ -261,26 +234,18 @@ export function guideSections(d: GuideDeployment): GuideSection[] {
 				text(
 					"Certificate error: check the certificate configured on your HTTPS proxy or guest gateway. Obtain any required CA through a trusted operator channel and compare its fingerprint. Do not bypass certificate verification for an installer.",
 				),
-				...(d.mode === "owner"
-					? [
-							text(
-								"New browser or device? Owner sessions live per browser and hostname. Get a ten-minute one-time code from Owner sessions → Sign in another browser in an existing session, or re-run the installer on the Proxmox node and choose Sign in a new browser. Enter it on the Sign in page. Existing browsers and CLIs stay signed in. CLI credentials cannot issue browser access. Recovery revokes all sessions; use it only as a last resort. An expired CLI pairing request needs a fresh login.",
-							),
-						]
-					: []),
+				...[
+					text(
+						"New browser or device? Owner sessions live per browser and hostname. Get a ten-minute one-time code from Owner sessions → Sign in another browser in an existing session, or re-run the installer on the Proxmox node and choose Sign in a new browser. Enter it on the Sign in page. Existing browsers and CLIs stay signed in. CLI credentials cannot issue browser access. Recovery revokes all sessions; use it only as a last resort. An expired CLI pairing request needs a fresh login.",
+					),
+				],
 				text(
-					d.mode === "owner"
-						? "Template unavailable: use Setup → Templates to register detected templates or its Build Linux template button. Operators can also use the documented apps/template-builder path in the repository. A successful build must be registered before creation."
-						: "Template unavailable: ask the operator to register a template build in Admin. Template builders live in apps/template-builder in the repository.",
+					"Template unavailable: use Setup → Templates to register detected templates or its Build Linux template button. Operators can also use the documented apps/template-builder path in the repository. A successful build must be registered before creation.",
 				),
 				code("Inspect CLI commands", "umiak --help\numiak mcp --help"),
 				code(
-					d.mode === "owner"
-						? "Inspect stack logs (on the Proxmox node)"
-						: "Inspect stack logs (Docker host)",
-					d.mode === "owner"
-						? "pct exec <ct> -- docker compose --project-directory /opt/umiak logs --tail=100 quickstart api worker gateway"
-						: "docker compose logs --tail=100 api worker gateway",
+					"Inspect stack logs (on the Proxmox node)",
+					"pct exec <ct> -- docker compose --project-directory /opt/umiak logs --tail=100 quickstart api worker gateway",
 				),
 			],
 		},

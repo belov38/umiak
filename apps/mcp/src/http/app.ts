@@ -180,8 +180,7 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 		}) as typeof fetch;
 	}
 	const log = o.log;
-	const canonicalApi =
-		o.ownerEnv?.UMIAK_AUTH_MODE === "owner" && o.ownerEnv.UMIAK_API_URL;
+	const canonicalApi = o.ownerEnv?.UMIAK_API_URL;
 	// Connect to fixed internal DNS while presenting the configured API authority.
 	// Never derive this Host from an incoming browser or MCP header.
 	const apiTransport = canonicalApi
@@ -225,8 +224,7 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 	): Promise<Principal | Response> {
 		if (o.authenticate !== undefined) return o.authenticate(req, team);
 		const bearer = bearerOf(req);
-		const owner = parseAuthMode(o.ownerEnv ?? {}) === "owner";
-		if (owner && req.headers.has("authorization") && bearer === null) {
+		if (req.headers.has("authorization") && bearer === null) {
 			return refuse({
 				status: 401,
 				reason: "malformed_authorization",
@@ -412,8 +410,9 @@ export function createHttpApp(o: HttpOptions): HttpApp {
 		return res;
 	}
 
+	parseAuthMode(o.ownerEnv ?? {});
 	const app = new Hono();
-	if (parseAuthMode(o.ownerEnv ?? {}) === "owner") {
+	{
 		let observed = 0;
 		const cidrs = ownerCidrSet(o.ownerEnv);
 		const trusted = new TrustedProxies(

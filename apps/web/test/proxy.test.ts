@@ -9,7 +9,6 @@ const ENV = {
 	DATABASE_URL: "postgres://u:p@127.0.0.1:5432/umiak",
 	PAYLOAD_SECRET: "0123456789abcdef0123",
 	UMIAK_APP_ORIGIN: ORIGIN,
-	UMIAK_OPERATOR_GROUPS: "umiak-operators",
 	UMIAK_PREVIEW_DOMAIN: "umiak.example.com",
 	UMIAK_PREVIEW_SCHEME: "http",
 	UMIAK_PREVIEW_PORT: "8085",

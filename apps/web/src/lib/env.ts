@@ -1,6 +1,11 @@
 // Environment of web (S8 §14.1). Parsed once; every problem is reported at
 // once, so a misconfigured deployment is fixed in one round.
-import { type AuthMode, ownerCidrSet, parseAuthMode } from "@umiak/auth";
+import {
+	type AuthMode,
+	OWNER_OPERATOR_GROUP,
+	ownerCidrSet,
+	parseAuthMode,
+} from "@umiak/auth";
 import { z } from "zod";
 
 export interface WebEnv {
@@ -50,7 +55,6 @@ const schema = z.object({
 			return false;
 		}
 	}, "must be an origin: scheme://host[:port] without a path or trailing slash"),
-	UMIAK_OPERATOR_GROUPS: z.string().trim().min(1, "required (comma-separated)"),
 	UMIAK_PREVIEW_DOMAIN: z
 		.string()
 		.trim()
@@ -89,25 +93,15 @@ export function parseWebEnv(env: Record<string, string | undefined>): WebEnv {
 	}
 	const e = r.data;
 	const mode = parseAuthMode(env);
-	const cidrs = mode === "owner" ? ownerCidrSet(env) : undefined;
+	const cidrs = ownerCidrSet(env);
 	return {
 		authMode: mode,
-		...(cidrs === undefined
-			? {}
-			: {
-					localAllowedCidrs: cidrs.allowed.join(","),
-					localDeniedCidrs: cidrs.denied.join(","),
-				}),
+		localAllowedCidrs: cidrs.allowed.join(","),
+		localDeniedCidrs: cidrs.denied.join(","),
 		databaseUrl: e.DATABASE_URL,
 		payloadSecret: e.PAYLOAD_SECRET,
 		appOrigin: e.UMIAK_APP_ORIGIN,
-		operatorGroups: [
-			...new Set(
-				e.UMIAK_OPERATOR_GROUPS.split(",")
-					.map((g) => g.trim())
-					.filter((g) => g !== ""),
-			),
-		],
+		operatorGroups: [OWNER_OPERATOR_GROUP],
 		umiakDomain: e.UMIAK_PREVIEW_DOMAIN,
 		previewScheme: e.UMIAK_PREVIEW_SCHEME,
 		previewPort:
@@ -129,7 +123,7 @@ const BUILD_ENV: WebEnv = {
 	databaseUrl: "postgres://build.invalid/build",
 	payloadSecret: "build-time-placeholder-secret",
 	appOrigin: "https://app.build.invalid",
-	operatorGroups: [],
+	operatorGroups: [OWNER_OPERATOR_GROUP],
 	umiakDomain: "umiak.build.invalid",
 	previewScheme: "https",
 	previewPort: 443,

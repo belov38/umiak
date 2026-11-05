@@ -25,7 +25,6 @@ describe.skipIf(skipPg())("owner Payload strategy", () => {
 			UMIAK_APP_ORIGIN: "https://app.umiak.test",
 			UMIAK_AUTH_MODE: "owner",
 			UMIAK_LOCAL_ALLOWED_CIDRS: "127.0.0.0/8",
-			UMIAK_OPERATOR_GROUPS: "umiak-local-operator",
 			UMIAK_PREVIEW_DOMAIN: "umiak.test",
 			UMIAK_API_PUBLIC_URL: "https://api.umiak.test",
 		});

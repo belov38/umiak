@@ -1,5 +1,5 @@
 "use client";
-// /app/account (S8 §9.9): profile (read-only, from the IdP), default team
+// /app/account (S8 §9.9): profile (the internal owner identity), default team
 // (server action), SSH keys (GET/POST/DELETE /v1/ssh-keys through the SDK)
 // and sign-out.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -78,7 +78,7 @@ export function AccountSettings({
 						<Button asChild variant="ghost">
 							<a
 								href={signOutHref}
-								title="Ends the single sign-on session too; the CLI will ask for umiak login again."
+								title="Ends this browser session; paired CLIs stay signed in."
 							>
 								Sign out
 							</a>
@@ -99,7 +99,7 @@ function Profile() {
 		<Section
 			plain
 			title="Profile"
-			description="From your identity provider; change it there."
+			description="Local owner identity for this deployment."
 		>
 			<dl className="grid max-w-xl grid-cols-[8rem_minmax(0,1fr)] gap-y-1 text-sm">
 				<dt className="text-muted-foreground">Name</dt>

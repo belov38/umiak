@@ -17,13 +17,12 @@ export function GettingStarted({
 	useEffect(() => {
 		const controller = new AbortController();
 		// Owner metadata uses the public request origin, including a trusted Serve origin.
-		const endpoint = deployment.mode === "owner" ? "/v1/meta" : "/api/v1/meta";
-		if (deployment.mode === "owner")
-			setCurrent({
-				...deployment,
-				apiUrl: window.location.origin,
-				appUrl: window.location.origin,
-			});
+		const endpoint = "/v1/meta";
+		setCurrent({
+			...deployment,
+			apiUrl: window.location.origin,
+			appUrl: window.location.origin,
+		});
 		fetch(endpoint, { signal: controller.signal })
 			.then(async (response) => {
 				if (!response.ok) return;

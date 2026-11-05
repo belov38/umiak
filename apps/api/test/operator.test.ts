@@ -83,7 +83,6 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 			settings: testSettings({
 				UMIAK_API_RATE_BURST: "100000",
 				UMIAK_API_RATE_STARTS_PER_MIN: "100000",
-				UMIAK_OPERATOR_GROUPS: OPERATORS,
 			}),
 		};
 		teamB = await newTeam(db.pool);

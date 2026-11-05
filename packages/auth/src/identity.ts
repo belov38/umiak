@@ -134,12 +134,12 @@ export type IdentityErrorCode =
 	| "not_found"
 	| "name_taken"
 	/**
-	 * The IdP identity clashes with another account (S8 §5.3): the email is
+	 * The session identity clashes with another account (S8 §5.3): the email is
 	 * bound to another `sub`, or a changed email belongs to another user.
 	 * The api answers 403; an operator resolves it.
 	 */
 	| "identity_conflict"
-	/** The IdP subject (`sub`, `X-Auth-Request-User`) is missing; the api answers 401. */
+	/** The internal session subject is missing; the api answers 401. */
 	| "subject_required";
 
 export class IdentityError extends Error {

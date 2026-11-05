@@ -444,7 +444,7 @@ apiKeys:
 			expect(await s.team(team)).toEqual({ id: team, name: "acme" });
 		});
 
-		it("keeps a revocation, a JIT binding and the IdP's email across re-seeding", async () => {
+		it("keeps a revocation, a JIT binding and the session's email across re-seeding", async () => {
 			const s = pgContractSubject(t.pool);
 			await seedIdentity(t.pool, yaml);
 			await s.revokeApiKey(roKey, {});
@@ -454,7 +454,7 @@ apiKeys:
 				user: sub,
 				groups: [],
 			});
-			// The email changes in the IdP after the first login.
+			// The email changes in the session after the first login.
 			const moved = `alice-moved-${team}@example.com`;
 			await s.resolveSession({ email: moved, user: sub, groups: [] });
 			await seedIdentity(t.pool, yaml);

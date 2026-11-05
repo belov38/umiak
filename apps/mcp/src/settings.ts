@@ -119,21 +119,17 @@ export function loadSettings(
 		);
 		throw new SettingsError(`invalid environment:\n${lines.join("\n")}`);
 	}
-	const mode = parseAuthMode(env);
+	parseAuthMode(env);
 	const cidrs = ownerCidrSet(env);
 	const e = r.data;
 	return {
-		...(mode === "owner" && cidrs !== undefined
-			? {
-					ownerEnv: {
-						UMIAK_AUTH_MODE: "owner",
-						UMIAK_API_URL: e.UMIAK_API_URL,
-						UMIAK_LOCAL_DENIED_CIDRS: cidrs.denied.join(","),
-						UMIAK_LOCAL_ALLOWED_CIDRS: cidrs.allowed.join(","),
-						UMIAK_API_TRUSTED_PROXY_CIDRS: env.UMIAK_API_TRUSTED_PROXY_CIDRS,
-					},
-				}
-			: {}),
+		ownerEnv: {
+			UMIAK_AUTH_MODE: "owner",
+			UMIAK_API_URL: e.UMIAK_API_URL,
+			UMIAK_LOCAL_DENIED_CIDRS: cidrs.denied.join(","),
+			UMIAK_LOCAL_ALLOWED_CIDRS: cidrs.allowed.join(","),
+			UMIAK_API_TRUSTED_PROXY_CIDRS: env.UMIAK_API_TRUSTED_PROXY_CIDRS,
+		},
 		port: e.UMIAK_MCP_PORT,
 		opsPort: e.UMIAK_MCP_OPS_PORT,
 		apiUrl: e.UMIAK_MCP_API_URL.replace(/\/+$/, ""),

@@ -24,7 +24,7 @@ import type { Scope } from "./scopes.ts";
 
 export interface PgIdentityStoreOptions {
 	pool: pg.Pool;
-	/** IdP groups that make a user an operator (UMIAK_OPERATOR_GROUPS). */
+	/** Trusted internal session groups that make a user an operator. */
 	operatorGroups: string[];
 }
 
@@ -241,7 +241,7 @@ export class PgIdentityStore implements IdentityStore {
 		return this.#session(c, userId);
 	}
 
-	// The email changed in the IdP: take it over unless another account owns
+	// The email changed in the session: take it over unless another account owns
 	// it. S8 merges a never-logged-in placeholder here; the stand-in does not.
 	async #changeEmail(
 		c: pg.PoolClient,

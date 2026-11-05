@@ -206,7 +206,6 @@ const schema = z.object({
 	UMIAK_API_SERVICE_TOKENS_FILE: required("path of the service tokens JSON"),
 	UMIAK_API_GATEWAY_TOKEN_FILE: optional,
 	UMIAK_IDENTITY_FILE: optional,
-	UMIAK_OPERATOR_GROUPS: csv(""),
 	UMIAK_APP_ORIGIN: optionalUrl,
 	UMIAK_API_URL: url("public URL of the API, https://api.<domain>"),
 	UMIAK_APP_URL: url("URL of the dashboard, https://app.<domain>"),
@@ -258,8 +257,7 @@ export function loadSettings(
 	env: Record<string, string | undefined>,
 ): Settings {
 	const mode = parseAuthMode(env);
-	const owner = mode === "owner";
-	const allowed = owner ? ownerAllowedCidrs(env) : [];
+	const allowed = ownerAllowedCidrs(env);
 	const r = schema.safeParse(env);
 	const lines = r.success
 		? []
@@ -271,7 +269,7 @@ export function loadSettings(
 	return {
 		authMode: mode,
 		localAllowedCidrs: allowed,
-		localDeniedCidrs: owner ? ownerDeniedCidrs(env) : [],
+		localDeniedCidrs: ownerDeniedCidrs(env),
 		ownerHosts: [
 			...new Set([
 				new URL(e.UMIAK_API_URL).host,
@@ -290,10 +288,7 @@ export function loadSettings(
 		serviceTokensFile: e.UMIAK_API_SERVICE_TOKENS_FILE,
 		gatewayTokenFile: e.UMIAK_API_GATEWAY_TOKEN_FILE ?? null,
 		identityFile: e.UMIAK_IDENTITY_FILE ?? null,
-		operatorGroups:
-			mode === "owner"
-				? [...e.UMIAK_OPERATOR_GROUPS, OWNER_OPERATOR_GROUP]
-				: e.UMIAK_OPERATOR_GROUPS,
+		operatorGroups: [OWNER_OPERATOR_GROUP],
 		appOrigin: new URL(e.UMIAK_APP_ORIGIN ?? e.UMIAK_APP_URL).origin,
 		apiUrl: e.UMIAK_API_URL.replace(/\/+$/, ""),
 		appUrl: e.UMIAK_APP_URL.replace(/\/+$/, ""),

@@ -152,7 +152,7 @@ apiKeys:
 		expect(await s.team(team)).toEqual({ id: team, name: "acme" });
 	});
 
-	it("keeps a revocation, a JIT binding and the IdP's email across re-seeding", async () => {
+	it("keeps a revocation, a JIT binding and the session's email across re-seeding", async () => {
 		const s = payloadContractSubject(payload);
 		await seedPayloadIdentity(payload, yaml);
 		await s.revokeApiKey(roKey, {});

@@ -53,7 +53,7 @@ const DENIED: ReadonlySet<string> = new Set<AuthDeniedReason>([
 	"identity_conflict",
 ]);
 
-/** UMIAK_OPERATOR_GROUPS of the config (config.custom.umiak). */
+/** Trusted operator groups of the config (config.custom.umiak). */
 export function operatorGroupsOf(payload: Payload): string[] {
 	const umiak = payload.config.custom?.umiak as UmiakCustomConfig | undefined;
 	return umiak?.operatorGroups ?? [];

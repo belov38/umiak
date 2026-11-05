@@ -118,7 +118,7 @@ export function identityErrorToHttp(e: unknown): unknown {
 				{ details: { reason: "identity_conflict" } },
 			);
 		case "subject_required":
-			return authRequired("the identity provider sent no subject (sub)");
+			return authRequired("the owner session has no subject");
 		default:
 			return e;
 	}

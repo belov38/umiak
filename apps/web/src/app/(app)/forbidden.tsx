@@ -12,7 +12,7 @@ const TEXT: Record<string, { title: string; text: string }> = {
 	},
 	identity_conflict: {
 		title: "Account conflict",
-		text: "This email belongs to another account, or your identity provider account has changed. Ask a platform operator.",
+		text: "This email belongs to another owner identity. Check the deployment identity in Admin.",
 	},
 	team: {
 		title: "No access to this team",

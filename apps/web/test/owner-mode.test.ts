@@ -89,7 +89,6 @@ describe("owner web transport boundary", () => {
 			DATABASE_URL: "postgres://local/db",
 			PAYLOAD_SECRET: "0123456789abcdef",
 			UMIAK_APP_ORIGIN: options.appOrigin,
-			UMIAK_OPERATOR_GROUPS: "operators",
 			UMIAK_PREVIEW_DOMAIN: "umiak.localhost",
 			UMIAK_API_PUBLIC_URL: "http://192.168.1.10:8080",
 			UMIAK_AUTH_MODE: "owner",

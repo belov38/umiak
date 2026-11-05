@@ -25,7 +25,6 @@ x-app-env: &app-env
   UMIAK_SSH_HOST: ${UMIAK_SSH_HOST:-}
   UMIAK_PREVIEW_SCHEME: http
   UMIAK_PREVIEW_PORT: ${UMIAK_PREVIEW_PORT:-8085}
-  UMIAK_OPERATOR_GROUPS: umiak-local-operator
   UMIAK_DATABASE_PASSWORD_FILE: /quickstart-db/password
   UMIAK_QUICKSTART_NETWORK_FILE: /network-config/quickstart-network.json
   UMIAK_SECRETS_DIR: /pve-secrets

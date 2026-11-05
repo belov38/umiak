@@ -17,7 +17,6 @@ import {
 export function ownerNetworkGuard(deps: ApiDeps): MiddlewareHandler<ApiEnv> {
 	let observed = 0;
 	return async (c, next) => {
-		if (deps.settings.authMode !== "owner") return next();
 		const peer = (
 			c.env as
 				| { incoming?: { socket?: { remoteAddress?: string } } }

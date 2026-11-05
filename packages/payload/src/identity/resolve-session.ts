@@ -28,7 +28,7 @@ import {
 } from "./db.ts";
 
 export interface ResolveSessionOptions {
-	/** Trusted internal session groups that make a user an operator (UMIAK_OPERATOR_GROUPS). */
+	/** Trusted internal session groups that make a user an operator. */
 	operatorGroups: readonly string[];
 	/**
 	 * Run in this request. With an open transaction the work joins it (the

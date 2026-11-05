@@ -592,7 +592,7 @@ describe.skipIf(skipPg())("collection rules", () => {
 			expect(on.deactivatedAt ?? null).toBe(null);
 		});
 
-		it("a given reason and time are kept (ctl-idp-sync)", async () => {
+		it("an explicit operator reason and deactivation time are kept", async () => {
 			const u = await user({ active: true });
 			const at = "2026-01-02T03:04:05.000Z";
 			await payload.update({

@@ -76,18 +76,13 @@ describe("loadSettings", () => {
 			...TEST_ENV,
 			UMIAK_API_PUBLIC_PORT: "18080",
 			UMIAK_API_PROXIED_ENABLED: "false",
-			UMIAK_OPERATOR_GROUPS: "umiak-operators, admins",
 			UMIAK_API_TRUSTED_PROXY_CIDRS: "10.0.0.0/8,fd00::/8",
 			UMIAK_SSH_HOST: "ssh.other.test",
 			UMIAK_SSH_PORT: "2222",
 		});
 		expect(s.publicPort).toBe(18080);
 		expect(s.proxiedEnabled).toBe(false);
-		expect(s.operatorGroups).toEqual([
-			"umiak-operators",
-			"admins",
-			"umiak-local-operator",
-		]);
+		expect(s.operatorGroups).toEqual(["umiak-local-operator"]);
 		expect(s.trustedProxyCidrs).toEqual(["10.0.0.0/8", "fd00::/8"]);
 
 		expect(s.sshHost).toBe("ssh.other.test");

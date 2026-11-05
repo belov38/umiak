@@ -7,7 +7,6 @@ const OK = {
 	DATABASE_URL: "postgres://web:pw@postgres:5432/umiak",
 	PAYLOAD_SECRET: "0123456789abcdef0123",
 	UMIAK_APP_ORIGIN: "https://app.umiak.example.com",
-	UMIAK_OPERATOR_GROUPS: " umiak-operators, admins ,,umiak-operators",
 	UMIAK_PREVIEW_DOMAIN: "UMIAK.example.com",
 	UMIAK_API_PUBLIC_URL: "https://api.umiak.example.com/",
 };
@@ -21,7 +20,7 @@ describe("parseWebEnv (S8 §14.1)", () => {
 			databaseUrl: OK.DATABASE_URL,
 			payloadSecret: OK.PAYLOAD_SECRET,
 			appOrigin: "https://app.umiak.example.com",
-			operatorGroups: ["umiak-operators", "admins"],
+			operatorGroups: ["umiak-local-operator"],
 			umiakDomain: "umiak.example.com",
 			previewScheme: "https",
 			previewPort: 443,
@@ -46,7 +45,6 @@ describe("parseWebEnv (S8 §14.1)", () => {
 			"DATABASE_URL",
 			"PAYLOAD_SECRET",
 			"UMIAK_APP_ORIGIN",
-			"UMIAK_OPERATOR_GROUPS",
 			"UMIAK_PREVIEW_DOMAIN",
 			"UMIAK_API_PUBLIC_URL",
 		]) {

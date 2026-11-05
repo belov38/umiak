@@ -21,7 +21,7 @@ export interface UmiakPayloadOptions {
 	databaseUrl: string;
 	/** PAYLOAD_SECRET. */
 	secret: string;
-	/** UMIAK_OPERATOR_GROUPS (S8 §5.5). */
+	/** Trusted internal operator groups. */
 	operatorGroups: string[];
 	/** UMIAK_APP_ORIGIN: the only origin of unsafe requests (S8 §5.6). */
 	appOrigin?: string;
@@ -83,6 +83,7 @@ function restrictInternalCollections(config: SanitizedConfig): SanitizedConfig {
 export async function buildUmiakConfig(
 	o: UmiakPayloadOptions,
 ): Promise<SanitizedConfig> {
+	parseAuthMode();
 	const umiak: UmiakCustomConfig = { operatorGroups: [...o.operatorGroups] };
 	const config = await buildConfig({
 		secret: o.secret,
@@ -106,10 +107,9 @@ export async function buildUmiakConfig(
 		// /api/* of app.<domain> belongs to the api service (S7 §5.1).
 		routes: { api: "/cms-api", admin: "/admin" },
 		csrf: o.appOrigin ? [o.appOrigin] : [],
-		cookiePrefix:
-			parseAuthMode() === "owner" && o.appOrigin?.startsWith("http:")
-				? "payload"
-				: "__Host-payload",
+		cookiePrefix: o.appOrigin?.startsWith("http:")
+			? "payload"
+			: "__Host-payload",
 		// avatar "default": no Gravatar request (an external origin, and it
 		// would hand every user's email hash to a third party).
 		admin: {
@@ -117,13 +117,9 @@ export async function buildUmiakConfig(
 			avatar: "default",
 			components: {
 				beforeNavLinks: ["/src/components/admin/brand#Logo"],
-				...(parseAuthMode() === "owner"
-					? {
-							logout: {
-								Button: "/src/components/admin/owner-logout#OwnerLogout",
-							},
-						}
-					: {}),
+				logout: {
+					Button: "/src/components/admin/owner-logout#OwnerLogout",
+				},
 				graphics: {
 					Logo: "/src/components/admin/brand#Logo",
 					Icon: "/src/components/admin/brand#Icon",

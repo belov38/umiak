@@ -88,7 +88,6 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 			const settings = testSettings({
 				DATABASE_URL: db.url,
 				PAYLOAD_SECRET,
-				UMIAK_OPERATOR_GROUPS: "umiak-operators",
 				...files(
 					[
 						"teams:",

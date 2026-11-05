@@ -6,7 +6,7 @@ import {
 	type TestDatabase,
 } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { captureLogs, testSettings } from "../src/testing/index.ts";
+import { captureLogs } from "../src/testing/index.ts";
 import type { Harness, HarnessResponse } from "./helpers/harness.ts";
 import { newTeam, personOf } from "./helpers/security.ts";
 import { type ApiWorld, apiWorld } from "./helpers/world.ts";
@@ -309,7 +309,6 @@ describe.skipIf(skipPg())("environments (S8 §10.2)", () => {
 			"member",
 			{
 				identity: new PgIdentityStore({ pool: db.pool, operatorGroups: [OPS] }),
-				settings: testSettings({ UMIAK_OPERATOR_GROUPS: OPS }),
 			},
 			[OPS],
 		);

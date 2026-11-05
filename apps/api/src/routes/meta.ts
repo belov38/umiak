@@ -102,8 +102,8 @@ const getOpenApi = createRoute({
 export function metaOf(deps: ApiDeps): Meta {
 	const s = deps.settings;
 	return {
-		...(s.authMode === "owner" ? { authMode: "owner" as const } : {}),
-		tenancy: s.authMode === "owner" ? "single" : "teams",
+		authMode: "owner",
+		tenancy: "single",
 		apiVersion: "v1",
 		build: s.build,
 		appUrl: s.appUrl,
