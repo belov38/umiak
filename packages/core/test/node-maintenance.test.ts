@@ -32,6 +32,23 @@ const reserve = (nodeId: string, jobId = randomUUID()) =>
 	);
 
 describe("node maintenance (S19)", () => {
+	it("restart after source completion preserves the successful reservation", async () => {
+		const a = await createTopology(db.pool);
+		const jobId = randomUUID();
+		await reserve(a.nodeId, jobId);
+		await withTx(db.pool, (tx) =>
+			finishNodeBuild(tx, { nodeId: a.nodeId, jobId, status: "succeeded" }),
+		);
+		await withTx(db.pool, (tx) => interruptNodeBuild(tx, a.nodeId, jobId));
+		expect(
+			(
+				await db.pool.query(
+					"SELECT status FROM runtime.node_build_jobs WHERE id=$1",
+					[jobId],
+				)
+			).rows[0].status,
+		).toBe("succeeded");
+	});
 	it("cannot use a Linux job reservation to promote another logical template", async () => {
 		const a = await createTopology(db.pool, {
 			build: { templateSlug: "windows", status: "building" },

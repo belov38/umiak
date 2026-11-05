@@ -58,7 +58,15 @@ export async function interruptNodeBuild(
 		"UPDATE runtime.node_build_jobs SET status='interrupted' WHERE id=$1 AND node_id=$2 AND status IN ('running','interrupted')",
 		[jobId, nodeId],
 	);
-	if (!r.rowCount) throw new Error("No matching unfinished build reservation");
+	if (!r.rowCount) {
+		// Registration may have completed just before the wizard state was persisted.
+		const done = await tx.client.query(
+			"SELECT 1 FROM runtime.node_build_jobs WHERE id=$1 AND node_id=$2 AND status='succeeded'",
+			[jobId, nodeId],
+		);
+		if (!done.rowCount)
+			throw new Error("No matching unfinished build reservation");
+	}
 }
 
 /** Trusted caller must verify all build/verification VMs stopped or removed first. */
