@@ -63,6 +63,9 @@ it("never returns index for missing assets, API paths, traversal, unknown pages 
 it("redirects owner admin links and never mounts static on public/internal listeners", async () => {
 	const redirect = await request("/admin/collections/templates");
 	expect(redirect.headers.get("location")).toBe("/app/settings/templates");
+	expect(
+		(await request("/admin/collections/api-keys")).headers.get("location"),
+	).toBe("/app/keys");
 	for (const app of [createPublicApp(deps), createInternalApp(deps)])
 		expect(
 			(

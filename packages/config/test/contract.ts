@@ -8,8 +8,8 @@ import type {
 	TemplateConfig,
 } from "../src/types.ts";
 
-// Contract of ConfigReader (S6 §5.11, S8 §7). Run against StaticConfigReader
-// here and against PayloadConfigReader in @umiak/payload. The fixture lists
+// Contract of StaticConfigReader (S6 §5.11). SQL reader integration lives in
+// packages/db/test/pg-config-reader.test.ts. The fixture lists
 // values in configuration order; `make` loads them into the reader under
 // test. Values differ from the defaults, so a reader that ignores a field
 // fails.

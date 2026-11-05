@@ -79,6 +79,9 @@ test("runtime contains assets and compiled libraries without dev tools or test s
   test -s /app/quickstart-assets/umiak-agent-windows-amd64.exe
   test -s /app/quickstart-assets/moonlight-web/LICENSE
   test -s /app/infra/templates/windows/template.yaml
+  test -s /app/apps/web/dist/index.html
+  test ! -e /app/packages/payload
+  test -z "$(find /app/node_modules/.pnpm -maxdepth 1 -name 'next@*' -print -o -name 'payload@*' -print -o -name '@payloadcms+*' -print -o -name 'graphql@*' -print -o -name 'server-only@*' -print)"
   test -s /app/packages/proto/dist/index.js
   test -s /app/packages/agent-client/dist/index.js
   ! command -v pnpm

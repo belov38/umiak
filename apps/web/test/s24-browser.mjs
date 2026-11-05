@@ -24,6 +24,7 @@ try {
 		},
 	]);
 	const page = await context.newPage();
+	page.setDefaultTimeout(10000);
 	const errors = [];
 	page.on("pageerror", (error) => errors.push(error.message));
 	const failed = [];
@@ -33,20 +34,23 @@ try {
 	});
 	await page.goto(`${base}/app/settings/templates`);
 	await page.getByRole("heading", { name: "Settings", exact: true }).waitFor();
-	await page.getByLabel("Description", { exact: true }).first().waitFor();
+	const linux = page
+		.locator('[data-slot="panel"]')
+		.filter({ has: page.locator('input[disabled][value="linux"]') });
+	await linux.getByLabel("Description", { exact: true }).waitFor();
 	assert.equal(
-		await page.getByLabel("Description", { exact: true }).first().inputValue(),
+		await linux.getByLabel("Description", { exact: true }).inputValue(),
 		"S24 operator edit",
 	);
-	await page
+	await linux
 		.getByLabel("Description", { exact: true })
-		.first()
 		.fill("S24 browser edit");
-	await page.getByRole("button", { name: "Save", exact: true }).first().click();
+	await linux.getByRole("button", { name: "Save", exact: true }).click();
 	await page.getByText("Settings saved", { exact: true }).waitFor();
+	console.log("Settings form saved");
 	await page.reload();
 	assert.equal(
-		await page.getByLabel("Description", { exact: true }).first().inputValue(),
+		await linux.getByLabel("Description", { exact: true }).inputValue(),
 		"S24 browser edit",
 	);
 	await page
@@ -60,6 +64,7 @@ try {
 	await page.getByLabel("Burst", { exact: true }).fill("77");
 	await page.getByRole("button", { name: "Save", exact: true }).click();
 	await page.getByText("Settings saved", { exact: true }).waitFor();
+	console.log("Settings form saved");
 	await page.reload();
 	assert.equal(
 		await page.getByLabel("Burst", { exact: true }).inputValue(),

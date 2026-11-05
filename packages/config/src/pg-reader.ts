@@ -180,7 +180,6 @@ export class PgConfigReader implements ConfigReader {
 		return (await this.#sizes()).map((s) => ({ ...s }));
 	}
 
-
 	async teamExists(teamId: string, client: pg.PoolClient): Promise<boolean> {
 		return (
 			(await client.query("SELECT 1 FROM runtime.teams WHERE id=$1", [teamId]))

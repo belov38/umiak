@@ -102,8 +102,9 @@ export function mountSpa(app: ApiApp, deps: ApiDeps) {
 		);
 		if (!match) return missing();
 		const section = match[1] ?? match[2];
+		if (section === "api-keys") return c.redirect("/app/keys", 302);
 		return c.redirect(
-			`/app/settings/${section === "teams" ? "workspaces" : section === "api-keys" || section === "ssh-keys" ? "account" : section}`,
+			`/app/settings/${section === "teams" ? "workspaces" : section === "ssh-keys" ? "account" : section}`,
 			302,
 		);
 	});
