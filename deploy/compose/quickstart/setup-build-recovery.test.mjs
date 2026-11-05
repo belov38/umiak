@@ -376,6 +376,7 @@ test("copy failure preserves ready source and finishes its reservation before co
 		interrupt: async () => events.push("interrupt"),
 		replicate: async () => {
 			events.push("copy");
+			assert.equal((await store.read()).buildQueue.states.a, "Ready");
 			await jobs.update((s) => {
 				s.buildJob.replication = { phase: "failed", node: "pve2", nodeId: "b" };
 			});

@@ -547,6 +547,8 @@ export class TemplateBuildJobs {
 				job.registered = true;
 				await this.update((s) => {
 					s.buildJob.registered = true;
+					if (s.buildQueue?.nodes.includes(job.nodeId))
+						s.buildQueue.states[job.nodeId] = "Ready";
 				});
 				await this.replicate(manifest, { ...context, job });
 				await this.update((current) => {
