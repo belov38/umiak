@@ -108,7 +108,11 @@ export function testIdentityStore(o: TestIdentityOptions = {}): IdentityStore {
 		async resolveSession(h: SessionHeaders) {
 			const sub = h.user?.trim() ?? "";
 			if (sub === "") throw new IdentityError("subject_required");
-			const s = sessions.get(sub);
+			const s =
+				sessions.get(sub) ??
+				(sub === "umiak:local" && sessions.size === 1
+					? sessions.values().next().value
+					: undefined);
 			if (s === undefined) return notImplemented(`resolveSession(${sub})`);
 			if (!s.active) throw new IdentityError("user_disabled");
 			const { active: _, ...identity } = s;

@@ -35,7 +35,6 @@ import {
 import { IdentityListener } from "./auth/identity-listener.ts";
 import { loadServiceTokens } from "./auth/internal.ts";
 import { KeyCache } from "./auth/key-cache.ts";
-import { OidcVerifier } from "./auth/oidc.ts";
 import { SessionResolver } from "./auth/principal.ts";
 import { RateLimits } from "./auth/rate-limit.ts";
 import { DEFAULT_COMMAND_TIMINGS } from "./commands/attach.ts";
@@ -229,7 +228,6 @@ export async function buildDeps(
 			identityEvents: events,
 			keyCache: new KeyCache(identity, events, { log }),
 			sessions: new SessionResolver(identity, events),
-			oidc: settings.oidc === null ? null : new OidcVerifier(settings.oidc),
 			serviceTokens,
 			rateLimits: new RateLimits(settings.rate),
 			svc: new SandboxServiceImpl({

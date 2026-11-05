@@ -5,7 +5,6 @@ import { z } from "@hono/zod-openapi";
 import type { ApiApp } from "../deps.ts";
 
 /** Placeholder values of the committed document; the served one is filled from settings. */
-export const DOC_ISSUER_PLACEHOLDER = "https://auth.example.com/realms/umiak";
 export const DOC_API_URL_PLACEHOLDER = "https://api.example.com";
 
 export const ErrorSchema = z
@@ -95,23 +94,18 @@ export function extensibleEnum<const T extends readonly [string, ...string[]]>(
 /** Operations without authentication (`/v1/meta`). */
 export const NO_AUTH: { [name: string]: string[] }[] = [];
 /** Operations only for a person (SSH keys, issuing keys): Keycloak JWT. */
-export const HUMAN_ONLY: { [name: string]: string[] }[] = [{ keycloak: [] }];
+export const HUMAN_ONLY: { [name: string]: string[] }[] = [{ owner: [] }];
 /** Default for every operation, set at the document level. */
 export const DEFAULT_SECURITY: { [name: string]: string[] }[] = [
-	{ keycloak: [] },
+	{ owner: [] },
 	{ teamKey: [] },
 ];
 
-/** Discovery URL of the `keycloak` scheme for an issuer. */
-export function openIdConnectUrl(issuer: string): string {
-	return `${issuer}/.well-known/openid-configuration`;
-}
-
 export function registerSecuritySchemes(app: ApiApp): void {
-	app.openAPIRegistry.registerComponent("securitySchemes", "keycloak", {
-		type: "openIdConnect",
-		openIdConnectUrl: openIdConnectUrl(DOC_ISSUER_PLACEHOLDER),
-		description: "Keycloak access token of a person (CLI, SDK, MCP)",
+	app.openAPIRegistry.registerComponent("securitySchemes", "owner", {
+		type: "http",
+		scheme: "bearer",
+		description: "Paired owner credential, verified by the owner ingress",
 	});
 	app.openAPIRegistry.registerComponent("securitySchemes", "teamKey", {
 		type: "http",

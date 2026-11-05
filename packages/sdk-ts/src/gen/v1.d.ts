@@ -88,26 +88,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/docs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * API reference page
-         * @description Interactive HTML reference (Scalar, pinned with SRI) rendered from `/v1/openapi.json`. Needs no authentication. Public listener only.
-         */
-        get: operations["meta.docs"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/environments": {
         parameters: {
             query?: never;
@@ -2110,7 +2090,7 @@ export interface components {
                  */
                 expiresAt?: string;
                 /** @enum {string} */
-                kind: "session" | "oidc" | "team_key" | (string & {});
+                kind: "session" | "team_key" | (string & {});
                 scopes: ("sandboxes:read" | "sandboxes:write" | "sandboxes:delete" | "commands:read" | "commands:exec" | "files:read" | "files:write" | "ports:write" | "ssh:connect" | "desktop" | "snapshots:read" | "snapshots:write" | "environments:read" | "environments:write" | "keys:admin")[];
             };
             /** @description Platform operator rights; only in a browser session */
@@ -2151,7 +2131,7 @@ export interface components {
              */
             appUrl: string;
             /** @enum {string} */
-            authMode?: "oidc" | "owner";
+            authMode?: "owner";
             /**
              * @description Build of the api
              * @example 1.4.0+3f2c1a9
@@ -2164,15 +2144,6 @@ export interface components {
              * @example 0.4.0
              */
             minCliVersion: string | null;
-            /** @description Keycloak for people (device flow of `umiak login`); null when only team keys work */
-            oidc: {
-                /** @example umiak-api */
-                audience: string;
-                /** @example umiak-cli */
-                clientId: string;
-                /** Format: uri */
-                issuer: string;
-            } | null;
             /** @description Public preview listener port; omit from URLs when it is the scheme default */
             previewPort?: number;
             /**
@@ -3048,35 +3019,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Error; `error.code` says what happened */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    "meta.docs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description HTML page */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
                 };
             };
             /** @description Error; `error.code` says what happened */

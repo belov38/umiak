@@ -8,11 +8,11 @@ import {
 } from "../src/owner-mode.ts";
 
 describe("owner mode configuration", () => {
-	it("defaults to oidc, accepts owner and rejects everything else", () => {
-		expect(parseAuthMode({})).toBe("oidc");
+	it("defaults to owner, accepts owner and rejects everything else", () => {
+		expect(parseAuthMode({})).toBe("owner");
 		expect(parseAuthMode({ UMIAK_AUTH_MODE: "owner" })).toBe("owner");
 		expect(() => parseAuthMode({ UMIAK_AUTH_MODE: "none" })).toThrow(
-			/UMIAK_AUTH_MODE must be oidc or owner/,
+			/UMIAK_AUTH_MODE must be owner/,
 		);
 		expect(() => parseAuthMode({ UMIAK_AUTH_MODE: "off" })).toThrow();
 	});

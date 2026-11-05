@@ -453,7 +453,7 @@ describe("mcpCredentials", () => {
 			calls.push(force);
 			await new Promise((r) => setTimeout(r, 20));
 			const token = tokens[Math.min(calls.length - 1, tokens.length - 1)];
-			return { kind: "oidc", token: token as string, expiresAt: null };
+			return { kind: "key", token: token as string, expiresAt: null };
 		};
 		return { calls, bearer };
 	}
@@ -546,7 +546,6 @@ describe("umiak mcp with a Keycloak login", () => {
 		const h = home();
 		const sub = `kc-${crypto.randomUUID()}`;
 		const claims = { sub, email: `${sub}@example.com` };
-		w.oidc.deviceFlow.autoApprove(claims);
 		const login = await runCli(["login", "--no-browser", "--api-url", w.url], {
 			env: h.env,
 		});

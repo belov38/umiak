@@ -2304,7 +2304,6 @@
 							"kind": {
 								"enum": [
 									"session",
-									"oidc",
 									"team_key"
 								],
 								"type": "string",
@@ -2441,7 +2440,6 @@
 					},
 					"authMode": {
 						"enum": [
-							"oidc",
 							"owner"
 						],
 						"type": "string"
@@ -2463,32 +2461,6 @@
 						"example": "0.4.0",
 						"type": [
 							"string",
-							"null"
-						]
-					},
-					"oidc": {
-						"description": "Keycloak for people (device flow of `umiak login`); null when only team keys work",
-						"properties": {
-							"audience": {
-								"example": "umiak-api",
-								"type": "string"
-							},
-							"clientId": {
-								"example": "umiak-cli",
-								"type": "string"
-							},
-							"issuer": {
-								"format": "uri",
-								"type": "string"
-							}
-						},
-						"required": [
-							"issuer",
-							"clientId",
-							"audience"
-						],
-						"type": [
-							"object",
 							"null"
 						]
 					},
@@ -2552,7 +2524,6 @@
 					"appUrl",
 					"apiUrl",
 					"umiakDomain",
-					"oidc",
 					"ssh",
 					"minCliVersion",
 					"latestCliVersion"
@@ -4324,10 +4295,10 @@
 			}
 		},
 		"securitySchemes": {
-			"keycloak": {
-				"description": "Keycloak access token of a person (CLI, SDK, MCP)",
-				"openIdConnectUrl": "https://auth.example.com/realms/umiak/.well-known/openid-configuration",
-				"type": "openIdConnect"
+			"owner": {
+				"description": "Paired owner credential, verified by the owner ingress",
+				"scheme": "bearer",
+				"type": "http"
 			},
 			"teamKey": {
 				"bearerFormat": "umiak_",
@@ -4433,7 +4404,7 @@
 				},
 				"security": [
 					{
-						"keycloak": []
+						"owner": []
 					}
 				],
 				"summary": "Issue a team API key",
@@ -4606,45 +4577,12 @@
 				},
 				"security": [
 					{
-						"keycloak": []
+						"owner": []
 					}
 				],
 				"summary": "Rotate a team API key",
 				"tags": [
 					"api-keys"
-				]
-			}
-		},
-		"/v1/docs": {
-			"get": {
-				"description": "Interactive HTML reference (Scalar, pinned with SRI) rendered from `/v1/openapi.json`. Needs no authentication. Public listener only.",
-				"operationId": "meta.docs",
-				"responses": {
-					"200": {
-						"content": {
-							"text/html": {
-								"schema": {
-									"type": "string"
-								}
-							}
-						},
-						"description": "HTML page"
-					},
-					"default": {
-						"content": {
-							"application/json": {
-								"schema": {
-									"$ref": "#/components/schemas/Error"
-								}
-							}
-						},
-						"description": "Error; `error.code` says what happened"
-					}
-				},
-				"security": [],
-				"summary": "API reference page",
-				"tags": [
-					"meta"
 				]
 			}
 		},
@@ -11655,7 +11593,7 @@
 				},
 				"security": [
 					{
-						"keycloak": []
+						"owner": []
 					}
 				],
 				"summary": "List my SSH keys",
@@ -11731,7 +11669,7 @@
 				},
 				"security": [
 					{
-						"keycloak": []
+						"owner": []
 					}
 				],
 				"summary": "Add an SSH key",
@@ -11794,7 +11732,7 @@
 				},
 				"security": [
 					{
-						"keycloak": []
+						"owner": []
 					}
 				],
 				"summary": "Remove an SSH key",
@@ -11838,7 +11776,7 @@
 	},
 	"security": [
 		{
-			"keycloak": []
+			"owner": []
 		},
 		{
 			"teamKey": []

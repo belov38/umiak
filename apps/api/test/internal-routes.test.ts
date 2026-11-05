@@ -157,7 +157,6 @@ describe.skipIf(skipPg())("GET /internal/v1/gateway/routes/{label}", () => {
 	it("sso: authEpoch = auth_epoch + ssoPolicyEpoch; token ports keep auth_epoch", async () => {
 		const s = await hosted("sso");
 		const t = await hosted("token");
-		defaults.set({ ssoPolicyEpoch: 5 });
 		try {
 			const r = await lookup(`${s.slug}-3000`);
 			expect(body(r)).toMatchObject({
@@ -169,7 +168,6 @@ describe.skipIf(skipPg())("GET /internal/v1/gateway/routes/{label}", () => {
 				await epoch(t.sandboxId),
 			);
 		} finally {
-			defaults.set({ ssoPolicyEpoch: 0 });
 		}
 	});
 

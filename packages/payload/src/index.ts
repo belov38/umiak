@@ -61,30 +61,12 @@ export {
 	type AuthOutcome,
 	authenticateHeaders,
 	authenticateRequest,
-	OAUTH2_PROXY_STRATEGY,
-	oauth2ProxyStrategy,
+	OWNER_STRATEGY,
 	operatorGroupsOf,
+	ownerStrategy,
 	type RequestAuth,
 	type UserDoc,
 } from "./identity/strategy.ts";
-export {
-	KeycloakAdminClient,
-	type KeycloakAdminClientOptions,
-	KeycloakError,
-	type KeycloakUser,
-	MAX_USER_PAGES,
-} from "./idp-sync/keycloak.ts";
-export {
-	type IdpDeactivatedReason,
-	type IdpSyncAbort,
-	type IdpSyncLog,
-	type IdpSyncResult,
-	KeycloakIdpSync,
-	type KeycloakIdpSyncOptions,
-	MASS_DEACTIVATION_MIN,
-	MASS_DEACTIVATION_SHARE,
-	type NoticeApiKey,
-} from "./idp-sync/sync.ts";
 export {
 	closeUmiakPayload,
 	getUmiakPayload,

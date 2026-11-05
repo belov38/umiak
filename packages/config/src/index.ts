@@ -8,7 +8,6 @@ export type {
 	ProviderTopology,
 	Quota,
 	SizeConfig,
-	SsoPortPolicy,
 	StorageTopology,
 	TemplateBuildTopology,
 	TemplateConfig,

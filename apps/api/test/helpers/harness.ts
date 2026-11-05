@@ -97,7 +97,10 @@ export function createHarness(o: HarnessOptions = {}): Harness {
 		path: string,
 		init: HarnessRequest = {},
 	): Promise<HarnessResponse> {
-		const headers = new Headers(init.headers);
+		const headers = new Headers({
+			host: new URL(deps.settings.apiUrl).host,
+			...init.headers,
+		});
 		if (o.bearer !== undefined && !headers.has("authorization")) {
 			headers.set("authorization", `Bearer ${o.bearer}`);
 		}
@@ -108,11 +111,15 @@ export function createHarness(o: HarnessOptions = {}): Harness {
 				headers.set("content-type", "application/json");
 			}
 		}
-		const res = await app.request(path, {
-			method,
-			headers,
-			...(body === undefined ? {} : { body }),
-		});
+		const res = await app.request(
+			path,
+			{
+				method,
+				headers,
+				...(body === undefined ? {} : { body }),
+			},
+			{ incoming: { socket: { remoteAddress: "127.0.0.1" } } },
+		);
 		const bytes =
 			method.toUpperCase() === "HEAD"
 				? new Uint8Array()

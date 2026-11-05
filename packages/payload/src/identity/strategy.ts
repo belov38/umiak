@@ -26,11 +26,10 @@ import {
 } from "@umiak/auth";
 import type { AuthStrategy, Payload } from "payload";
 import type { UmiakCustomConfig } from "../config.ts";
-import { type HeaderSource, parseAuthHeaders } from "./headers.ts";
+import type { HeaderSource } from "./headers.ts";
 import { resolveSession } from "./resolve-session.ts";
-import { sessionCacheKey, sessionCacheOf } from "./session-cache.ts";
 
-export const OAUTH2_PROXY_STRATEGY = "oauth2-proxy";
+export const OWNER_STRATEGY = "owner";
 
 /** Response header of a refused login: the IdentityError code. */
 export const AUTH_DENIED_HEADER = "x-umiak-auth-denied";
@@ -69,19 +68,17 @@ export async function authenticateHeaders(
 	headers: HeaderSource,
 	o: { operatorGroups?: readonly string[] } = {},
 ): Promise<AuthOutcome> {
-	const owner = parseAuthMode() === "owner";
-	if (owner && !ingressClientAllowed(headers))
+	parseAuthMode();
+	if (!ingressClientAllowed(headers))
 		return { kind: "denied", status: 403, reason: "client_network_forbidden" };
-	const claims = owner ? ownerSessionHeaders() : parseAuthHeaders(headers);
+	const claims = ownerSessionHeaders();
 	if (claims === null) return { kind: "anonymous", status: 401 };
 	try {
 		const session = await resolveSession(payload, claims, {
-			operatorGroups: owner
-				? [
-						...(o.operatorGroups ?? operatorGroupsOf(payload)),
-						OWNER_OPERATOR_GROUP,
-					]
-				: (o.operatorGroups ?? operatorGroupsOf(payload)),
+			operatorGroups: [
+				...(o.operatorGroups ?? operatorGroupsOf(payload)),
+				OWNER_OPERATOR_GROUP,
+			],
 		});
 		return { kind: "session", claims, session };
 	} catch (e) {
@@ -137,21 +134,11 @@ export async function authenticateRequest(
 	payload: Payload,
 	headers: HeaderSource,
 ): Promise<RequestAuth> {
-	// Recheck the network for every request before reading the session cache.
-	if (parseAuthMode() === "owner") return resolveRequest(payload, headers);
-	const cache = sessionCacheOf(payload);
-	if (cache === null) return resolveRequest(payload, headers);
-	const claims = parseAuthHeaders(headers);
-	if (claims === null) return { kind: "anonymous", status: 401 };
-	return (await cache.load(
-		sessionCacheKey(claims),
-		() => resolveRequest(payload, headers),
-		(v) => (v as RequestAuth).kind === "session",
-	)) as RequestAuth;
+	return resolveRequest(payload, headers);
 }
 
-export const oauth2ProxyStrategy: AuthStrategy = {
-	name: OAUTH2_PROXY_STRATEGY,
+export const ownerStrategy: AuthStrategy = {
+	name: OWNER_STRATEGY,
 	authenticate: async ({ headers, payload }) => {
 		const out = await authenticateRequest(payload, headers);
 		if (out.kind === "anonymous") return { user: null };
@@ -166,7 +153,7 @@ export const oauth2ProxyStrategy: AuthStrategy = {
 			user: {
 				...out.user,
 				collection: "users",
-				_strategy: OAUTH2_PROXY_STRATEGY,
+				_strategy: OWNER_STRATEGY,
 			},
 		};
 	},

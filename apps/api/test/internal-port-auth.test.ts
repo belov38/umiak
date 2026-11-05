@@ -154,7 +154,6 @@ describe.skipIf(skipPg())(
 		describe("/umiak-auth/authorize", () => {
 			it("redirects to the callback of the label's host, not the request's Host; stores only the hash", async () => {
 				const r0 = await hosted("sso");
-				defaults.set({ ssoPolicyEpoch: 3 });
 				try {
 					const b = await browser();
 					const before = Date.now();
@@ -187,7 +186,6 @@ describe.skipIf(skipPg())(
 					);
 					expect(raw.rowCount).toBe(0);
 				} finally {
-					defaults.set({ ssoPolicyEpoch: 0 });
 				}
 			});
 
@@ -266,7 +264,6 @@ describe.skipIf(skipPg())(
 				const q = `label=${r0.label}&state=${STATE}`;
 				const outsider = await browser({ member: false });
 				codeOf(await authorize(outsider, q), r0.label);
-				defaults.set({ ssoPortPolicy: "team" });
 				try {
 					expectErrorPage(await authorize(outsider, q), 403);
 					codeOf(await authorize(await browser(), q), r0.label);
@@ -278,7 +275,6 @@ describe.skipIf(skipPg())(
 						r0.label,
 					);
 				} finally {
-					defaults.set({ ssoPortPolicy: "any" });
 				}
 			});
 

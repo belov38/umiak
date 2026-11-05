@@ -25,7 +25,7 @@ import {
 	authenticateHeaders,
 	getUmiakPayload,
 	migrateUmiakPayload,
-	oauth2ProxyStrategy,
+	ownerStrategy,
 	parseAuthHeaders,
 	resolveSession,
 } from "../src/index.ts";
@@ -389,7 +389,7 @@ describe.skipIf(skipPg())("resolveSession (S8 §5.3)", () => {
 
 		it("authenticates by the oauth2-proxy headers", async () => {
 			const e = email();
-			const res = await oauth2ProxyStrategy.authenticate({
+			const res = await ownerStrategy.authenticate({
 				payload,
 				headers: headers({
 					"x-auth-request-email": e,
@@ -418,7 +418,7 @@ describe.skipIf(skipPg())("resolveSession (S8 §5.3)", () => {
 				isOperator: false,
 			})) as never);
 			try {
-				const res = await oauth2ProxyStrategy.authenticate({
+				const res = await ownerStrategy.authenticate({
 					payload,
 					headers: headers({
 						"x-auth-request-email": e,
@@ -436,7 +436,7 @@ describe.skipIf(skipPg())("resolveSession (S8 §5.3)", () => {
 		it("no email header -> no user; no sub -> no user", async () => {
 			expect(
 				(
-					await oauth2ProxyStrategy.authenticate({
+					await ownerStrategy.authenticate({
 						payload,
 						headers: headers({}),
 					})
@@ -448,7 +448,7 @@ describe.skipIf(skipPg())("resolveSession (S8 §5.3)", () => {
 			});
 			const h = headers({ "x-auth-request-email": email() });
 			expect(
-				(await oauth2ProxyStrategy.authenticate({ payload, headers: h })).user,
+				(await ownerStrategy.authenticate({ payload, headers: h })).user,
 			).toBe(null);
 			expect(await authenticateHeaders(payload, h)).toEqual({
 				kind: "denied",
@@ -474,7 +474,7 @@ describe.skipIf(skipPg())("resolveSession (S8 §5.3)", () => {
 				"x-auth-request-email": e,
 				"x-auth-request-user": sub,
 			});
-			const res = await oauth2ProxyStrategy.authenticate({
+			const res = await ownerStrategy.authenticate({
 				payload,
 				headers: h,
 			});

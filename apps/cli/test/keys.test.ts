@@ -16,7 +16,7 @@ describe("umiak keys", () => {
 	let w: CliWorld;
 	let home: CliHome;
 	beforeAll(async () => {
-		w = await startWorld({ oidc: { deviceInterval: 0 } });
+		w = await startWorld();
 	});
 	afterAll(async () => {
 		await w?.close();
@@ -42,8 +42,7 @@ describe("umiak keys", () => {
 	});
 
 	it("an owner logged in with Keycloak creates, lists, rotates and revokes a key", async () => {
-		const sub = `kc-${crypto.randomUUID()}`;
-		w.oidc.deviceFlow.autoApprove({ sub, email: `${sub}@example.com` });
+		const _sub = `kc-${crypto.randomUUID()}`;
 		const login = await runCli(["login", "--no-browser", "--api-url", w.url], {
 			env: home.env,
 		});

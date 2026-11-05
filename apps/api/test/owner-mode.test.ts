@@ -130,7 +130,6 @@ describe("owner API", () => {
 
 	it("advertises owner, single tenancy and suppresses OIDC", async () => {
 		const { request, settings } = setup();
-		expect(settings.oidc).toBeNull();
 		expect(await (await request("/v1/meta")).json()).toMatchObject({
 			authMode: "owner",
 			tenancy: "single",

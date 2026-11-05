@@ -65,7 +65,6 @@ describe("loadSettings", () => {
 			trustedProxyCidrs: [],
 			rate: { rps: 20, burst: 100, startsPerMinute: 30 },
 			maxStreams: 100,
-			oidc: null,
 			appOrigin: new URL(s.appUrl).origin,
 			logLevel: "info",
 		});
@@ -79,9 +78,6 @@ describe("loadSettings", () => {
 			UMIAK_API_PROXIED_ENABLED: "false",
 			UMIAK_OPERATOR_GROUPS: "umiak-operators, admins",
 			UMIAK_API_TRUSTED_PROXY_CIDRS: "10.0.0.0/8,fd00::/8",
-			UMIAK_OIDC_ISSUER: "http://localhost:8180/realms/umiak",
-			UMIAK_OIDC_JWKS_URL:
-				"http://keycloak:8080/realms/umiak/protocol/openid-connect/certs",
 			UMIAK_SSH_HOST: "ssh.other.test",
 			UMIAK_SSH_PORT: "2222",
 		});
@@ -89,15 +85,7 @@ describe("loadSettings", () => {
 		expect(s.proxiedEnabled).toBe(false);
 		expect(s.operatorGroups).toEqual(["umiak-operators", "admins"]);
 		expect(s.trustedProxyCidrs).toEqual(["10.0.0.0/8", "fd00::/8"]);
-		expect(s.oidc).toEqual({
-			issuer: "http://localhost:8180/realms/umiak",
-			discoveryUrl:
-				"http://localhost:8180/realms/umiak/.well-known/openid-configuration",
-			jwksUrl:
-				"http://keycloak:8080/realms/umiak/protocol/openid-connect/certs",
-			audience: "umiak-api",
-			allowedClients: ["umiak-cli", "umiak-mcp"],
-		});
+
 		expect(s.sshHost).toBe("ssh.other.test");
 		expect(s.sshPort).toBe(2222);
 	});
@@ -105,10 +93,8 @@ describe("loadSettings", () => {
 	it("empty strings count as unset", () => {
 		const s = loadSettings({
 			...TEST_ENV,
-			UMIAK_OIDC_ISSUER: "",
 			UMIAK_SSH_PORT: "",
 		});
-		expect(s.oidc).toBeNull();
 		expect(s.sshPort).toBe(22);
 	});
 

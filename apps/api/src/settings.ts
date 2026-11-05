@@ -31,16 +31,6 @@ export const LOG_LEVELS = [
 	"silent",
 ] as const;
 
-export interface OidcSettings {
-	issuer: string;
-	/** Discovery document; default `<issuer>/.well-known/openid-configuration`. */
-	discoveryUrl: string;
-	/** Overrides `jwks_uri` of the discovery document (compose: in-cluster Keycloak URL). */
-	jwksUrl: string | null;
-	audience: string;
-	allowedClients: string[];
-}
-
 export interface Settings {
 	authMode: AuthMode;
 	localAllowedCidrs: string[];
@@ -70,8 +60,6 @@ export interface Settings {
 	gatewayTokenFile: string | null;
 	identityFile: string | null;
 	operatorGroups: string[];
-	/** Null when UMIAK_OIDC_ISSUER is not set: Keycloak JWTs are not accepted. */
-	oidc: OidcSettings | null;
 	/** Origin the proxied listener accepts for unsafe methods and upgrades. */
 	appOrigin: string;
 	apiUrl: string;
@@ -219,14 +207,6 @@ const schema = z.object({
 	UMIAK_API_GATEWAY_TOKEN_FILE: optional,
 	UMIAK_IDENTITY_FILE: optional,
 	UMIAK_OPERATOR_GROUPS: csv(""),
-	UMIAK_OIDC_ISSUER: optionalUrl,
-	UMIAK_OIDC_DISCOVERY_URL: optionalUrl,
-	UMIAK_OIDC_JWKS_URL: optionalUrl,
-	UMIAK_OIDC_AUDIENCE: z.preprocess(
-		unsetEmpty,
-		z.string().default("umiak-api"),
-	),
-	UMIAK_OIDC_ALLOWED_CLIENTS: csv("umiak-cli,umiak-mcp"),
 	UMIAK_APP_ORIGIN: optionalUrl,
 	UMIAK_API_URL: url("public URL of the API, https://api.<domain>"),
 	UMIAK_APP_URL: url("URL of the dashboard, https://app.<domain>"),
@@ -284,21 +264,10 @@ export function loadSettings(
 	const lines = r.success
 		? []
 		: r.error.issues.map((i) => `  ${i.path.join(".")}: ${i.message}`);
-	if (r.success && r.data.UMIAK_OIDC_ISSUER === undefined) {
-		for (const k of [
-			"UMIAK_OIDC_DISCOVERY_URL",
-			"UMIAK_OIDC_JWKS_URL",
-		] as const) {
-			if (r.data[k] !== undefined) {
-				lines.push(`  ${k}: requires UMIAK_OIDC_ISSUER`);
-			}
-		}
-	}
 	if (!r.success || lines.length > 0) {
 		throw new SettingsError(`invalid environment:\n${lines.join("\n")}`);
 	}
 	const e = r.data;
-	const issuer = e.UMIAK_OIDC_ISSUER?.replace(/\/+$/, "");
 	return {
 		authMode: mode,
 		localAllowedCidrs: allowed,
@@ -325,18 +294,6 @@ export function loadSettings(
 			mode === "owner"
 				? [...e.UMIAK_OPERATOR_GROUPS, OWNER_OPERATOR_GROUP]
 				: e.UMIAK_OPERATOR_GROUPS,
-		oidc:
-			mode === "owner" || issuer === undefined
-				? null
-				: {
-						issuer,
-						discoveryUrl:
-							e.UMIAK_OIDC_DISCOVERY_URL ??
-							`${issuer}/.well-known/openid-configuration`,
-						jwksUrl: e.UMIAK_OIDC_JWKS_URL ?? null,
-						audience: e.UMIAK_OIDC_AUDIENCE,
-						allowedClients: e.UMIAK_OIDC_ALLOWED_CLIENTS,
-					},
 		appOrigin: new URL(e.UMIAK_APP_ORIGIN ?? e.UMIAK_APP_URL).origin,
 		apiUrl: e.UMIAK_API_URL.replace(/\/+$/, ""),
 		appUrl: e.UMIAK_APP_URL.replace(/\/+$/, ""),

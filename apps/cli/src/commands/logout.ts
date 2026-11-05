@@ -1,11 +1,5 @@
-// `umiak logout [--revoke]` (S7 §7.6): a Keycloak login revokes its refresh
-// token at Keycloak and is erased; a team key is only erased, and with
-// --revoke also revoked (DELETE /v1/api-keys/self: the key is the team's,
-// so it is not revoked by default). The profile stays in config.json.
-
 import { Umiak } from "@umiak/sdk";
 import type { Command } from "commander";
-import { revokeRefreshToken } from "../auth/device-grant.ts";
 import { withFileLock } from "../auth/lock.ts";
 import { credentialName, parseCredential } from "../auth/token.ts";
 import type { Context } from "../context.ts";
@@ -30,21 +24,7 @@ async function logout(ctx: Context, revokeKey: boolean): Promise<LogoutResult> {
 	const store = ctx.store(p);
 	const cred = parseCredential(await store.get(name));
 	let revoked = false;
-	if (cred?.kind === "oidc") {
-		try {
-			await revokeRefreshToken({
-				issuer: cred.issuer,
-				clientId: cred.clientId,
-				refreshToken: cred.refreshToken,
-				fetch: ctx.fetch,
-			});
-			revoked = true;
-		} catch (err) {
-			ctx.out.warn(
-				`could not revoke the refresh token at Keycloak: ${(err as Error).message}`,
-			);
-		}
-	} else if (cred?.kind === "key" && p.auth === "owner") {
+	if (cred?.kind === "key" && p.auth === "owner") {
 		const res = await ctx.fetch(
 			new Request(`${p.apiUrl}/owner/logout`, {
 				method: "POST",

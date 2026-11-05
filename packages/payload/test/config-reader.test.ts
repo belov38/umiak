@@ -38,19 +38,13 @@ async function setDefaults(
 	fx: ConfigFixture["defaults"],
 	defaultQuota: ConfigFixture["defaultQuota"],
 ): Promise<void> {
-	const { ssoPolicyEpoch, ...rest } = fx;
+	const rest = fx;
 	await payload.updateGlobal({
 		slug: "platform-defaults",
 		data: { ...rest, defaultQuota },
 		overrideAccess: true,
 	});
-	// The epoch belongs to a hook; the fixture needs a given value.
-	const adapter = payload.db as unknown as {
-		drizzle: { execute(q: unknown): Promise<unknown> };
-	};
-	await adapter.drizzle.execute(
-		sql`UPDATE ${tbl(payload, "platform_defaults")} SET sso_policy_epoch = ${ssoPolicyEpoch}`,
-	);
+
 }
 
 /**
@@ -304,8 +298,6 @@ describe.skipIf(skipPg())("PayloadConfigReader", () => {
 
 		it("reads defaults() without the cache (C7)", async () => {
 			const r = open({ ttlMs: 60_000 });
-			expect((await r.defaults()).ssoPortPolicy).toBe("team");
-			expect((await r.defaults()).ssoPolicyEpoch).toBe(4);
 			await payload.updateGlobal({
 				slug: "platform-defaults",
 				data: { publicPortsEnabled: true, publicDesktopEnabled: true },
@@ -313,20 +305,7 @@ describe.skipIf(skipPg())("PayloadConfigReader", () => {
 			});
 			expect((await r.defaults()).publicPortsEnabled).toBe(true);
 			expect((await r.defaults()).publicDesktopEnabled).toBe(true);
-			// ssoPortPolicy team -> any keeps the epoch, any -> team adds one.
-			await payload.updateGlobal({
-				slug: "platform-defaults",
-				data: { ssoPortPolicy: "any" },
-				overrideAccess: true,
-			});
-			await payload.updateGlobal({
-				slug: "platform-defaults",
-				data: { ssoPortPolicy: "team" },
-				overrideAccess: true,
-			});
-			const d = await r.defaults();
-			expect(d.ssoPortPolicy).toBe("team");
-			expect(d.ssoPolicyEpoch).toBe(5);
+
 		});
 
 		it("drops the cache when LISTEN is re-established", async () => {

@@ -24,12 +24,7 @@ import {
 import { PgBoss } from "pg-boss";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type ApiDeps, ServiceTokens } from "../src/index.ts";
-import {
-	captureLogs,
-	startTestOidcServer,
-	type TestOidcServer,
-	testSettings,
-} from "../src/testing/index.ts";
+import { captureLogs, testSettings } from "../src/testing/index.ts";
 import {
 	createHarness,
 	type Harness,
@@ -87,7 +82,6 @@ describe.skipIf(skipPg())("secrets never leak", () => {
 	let db: TestDatabase;
 	let boss: PgBoss;
 	let w: ApiWorld;
-	let oidc: TestOidcServer;
 	let deps: Partial<ApiDeps>;
 	let h: Harness;
 	let owner: Person;
@@ -137,14 +131,12 @@ describe.skipIf(skipPg())("secrets never leak", () => {
 		boss.on("error", () => {});
 		await boss.start();
 		await ensureQueues(boss);
-		oidc = await startTestOidcServer();
 		w = await apiWorld(db.pool);
 		const jobs = new PgBossJobSender(boss);
 		deps = {
 			settings: testSettings({
 				UMIAK_API_RATE_BURST: "100000",
 				UMIAK_API_RATE_STARTS_PER_MIN: "100000",
-				UMIAK_OIDC_ISSUER: oidc.issuer,
 			}),
 			log: logs.log,
 			jobs,
@@ -163,7 +155,6 @@ describe.skipIf(skipPg())("secrets never leak", () => {
 		markers.bearer.push(w.secret, GW);
 	});
 	afterAll(async () => {
-		await oidc?.close();
 		await w?.close();
 		await boss?.stop({ graceful: false });
 		await db?.drop();
@@ -334,15 +325,7 @@ describe.skipIf(skipPg())("secrets never leak", () => {
 			return ok(rot).secret as string;
 		};
 		const ownerKey = await issue(owner.h, owner.headers);
-		const jwt = await oidc.token({
-			sub: `sub-${RUN}`,
-			email: `jwt-${RUN}@example.com`,
-		});
-		markers.bearer.push(jwt);
-		const jh = createHarness({ deps: w.deps(deps), bearer: jwt });
-		// refused bearers are not logged either
-		const [head, payload, sig] = jwt.split(".") as [string, string, string];
-		const forged = `${head}.${payload}.${sig.slice(0, -4)}AAAA`;
+		const forged = "forged.header.signature";
 		const unknownKey = generateApiKeySecret();
 		markers.bearer.push(forged, unknownKey);
 		for (const bearer of [forged, unknownKey]) {
@@ -353,11 +336,8 @@ describe.skipIf(skipPg())("secrets never leak", () => {
 			);
 			expect(r.status).toBe(401);
 		}
-		ok(await call(jh, "GET", "/v1/me"));
-		const jwtKey = await issue(jh, {});
 		// The issued keys work (as bearers they are checked as issued values).
 		ok(await call(w.harness({ bearer: ownerKey, deps }), "GET", "/v1/me"));
-		ok(await call(w.harness({ bearer: jwtKey, deps }), "GET", "/v1/me"));
 		ok(await call(owner.h, "GET", "/v1/api-keys", { headers: owner.headers }));
 
 		// ports: issue and rotate a token, then list

@@ -372,34 +372,6 @@ describe.skipIf(skipPg())("NOTIFY from Payload hooks", () => {
 			});
 		});
 
-		it("ssoPortPolicy any -> team bumps ssoPolicyEpoch and sends umiak_routes '*'", async () => {
-			const before = await payload.findGlobal({ slug: "platform-defaults" });
-			expect(before.ssoPortPolicy).toBe("any");
-			const epoch = before.ssoPolicyEpoch as number;
-			await payload.updateGlobal({
-				slug: "platform-defaults",
-				data: { ssoPortPolicy: "team" },
-			});
-			let d = await payload.findGlobal({ slug: "platform-defaults" });
-			expect(d.ssoPolicyEpoch).toBe(epoch + 1);
-			expect(only(await listener.settle(), "umiak_routes")).toEqual(["*"]);
-			listener.clear();
-			// team -> any opens access: no new epoch is needed.
-			await payload.updateGlobal({
-				slug: "platform-defaults",
-				data: { ssoPortPolicy: "any" },
-			});
-			d = await payload.findGlobal({ slug: "platform-defaults" });
-			expect(d.ssoPolicyEpoch).toBe(epoch + 1);
-			expect(only(await listener.settle(), "umiak_routes")).toEqual(["*"]);
-			// The epoch is owned by the hook: a direct write is ignored.
-			await payload.updateGlobal({
-				slug: "platform-defaults",
-				data: { ssoPolicyEpoch: 0 },
-			});
-			d = await payload.findGlobal({ slug: "platform-defaults" });
-			expect(d.ssoPolicyEpoch).toBe(epoch + 1);
-		});
 	});
 
 	describe("umiak_ssh_revoke", () => {

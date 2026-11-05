@@ -1,19 +1,3 @@
-// `umiak login` (S7 §7.6):
-// - people: Keycloak device flow. `GET /v1/meta` gives `oidc {issuer,
-//   clientId}`; the code and the link are printed (and the browser opened,
-//   unless --no-browser or not in a terminal); then `GET /v1/me` with the
-//   new access token;
-// - automation: `--key-stdin` reads a team key from stdin (the only
-//   non-empty line; format and CRC checked offline, else exit 2 before any
-//   request) and checks it with `GET /v1/me`.
-// The credentials go to the credential store, the profile (apiUrl, team,
-// auth, issuer, store) to config.json, and the profile becomes current.
-// Re-login into a profile replaces its old entry: the old secret is deleted
-// when its entry name or its store differs from the new one, and an old
-// Keycloak refresh token is revoked (best effort).
-// Output: in JSON mode `{"event":"device_code",…}` (device flow) and last
-// `{"event":"logged_in","profile","apiUrl","me"}`.
-
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { isIP } from "node:net";
@@ -21,15 +5,9 @@ import { join } from "node:path";
 import { isWellFormedApiKey } from "@umiak/auth/api-key";
 import { Umiak } from "@umiak/sdk";
 import type { Command } from "commander";
-import { deviceLogin, revokeRefreshToken } from "../auth/device-grant.ts";
 import { withFileLock } from "../auth/lock.ts";
 import { ownerLogin } from "../auth/owner-login.ts";
-import {
-	credentialName,
-	OIDC_CLIENT_ID,
-	parseCredential,
-	type StoredCredential,
-} from "../auth/token.ts";
+import { credentialName, type StoredCredential } from "../auth/token.ts";
 import {
 	type Profile,
 	readConfig,
@@ -37,18 +15,17 @@ import {
 	writePrivateFile,
 } from "../config.ts";
 import type { Context } from "../context.ts";
-import { CliError, usageError } from "../exit-codes.ts";
-import { deadline, getJson } from "../http.ts";
+import { usageError } from "../exit-codes.ts";
+import { getJson } from "../http.ts";
 import { readAll } from "../io.ts";
 import type { Runner } from "../program.ts";
 import { presentAccount, tenancyCache, tenancyOf } from "../tenancy.ts";
 import { CLI_VERSION } from "./version.ts";
 import { humanMe, type Me } from "./whoami.ts";
 
-interface MetaOidc {
+interface LoginMeta {
 	tenancy?: "single" | "teams";
-	authMode?: "oidc" | "owner";
-	oidc: { issuer: string; clientId: string; audience: string } | null;
+	authMode?: "owner";
 }
 
 /** GET /v1/me with this bearer (and team), without the stored credentials. */
@@ -90,37 +67,6 @@ export function openBrowser(url: string): void {
 	} catch {
 		// No browser: the link is printed anyway.
 	}
-}
-
-async function deviceFlow(
-	ctx: Context,
-	apiUrl: string,
-	browser: boolean,
-	meta: MetaOidc,
-): Promise<{ cred: StoredCredential; issuer: string }> {
-	if (meta.oidc === null) {
-		throw new CliError({
-			code: "oidc_unavailable",
-			message: `${apiUrl} accepts only team keys; run: umiak login --key-stdin`,
-			retryable: false,
-		});
-	}
-	const issuer = meta.oidc.issuer.replace(/\/+$/, "");
-	const clientId = meta.oidc.clientId || OIDC_CLIENT_ID;
-	const t = await deviceLogin({
-		issuer,
-		clientId,
-		fetch: ctx.fetch,
-		onCode(c) {
-			const link = c.verificationUriComplete ?? c.verificationUri;
-			ctx.out.event("device_code", c);
-			ctx.out.info(
-				`To log in, open ${link}\nand confirm the code ${c.userCode} (valid ${Math.round(c.expiresIn / 60)} min).`,
-			);
-			if (browser && process.stderr.isTTY === true) openBrowser(link);
-		},
-	});
-	return { cred: { kind: "oidc", issuer, clientId, ...t }, issuer };
 }
 
 /**
@@ -192,17 +138,17 @@ async function login(
 	}
 	let cred: StoredCredential | undefined;
 	let profile: Profile;
-	let meta: MetaOidc;
+	let meta: LoginMeta;
 	if (opts.keyStdin === true) {
 		const key = keyFromStdin(await readAll(ctx.stdin));
-		meta = await getJson<MetaOidc>(ctx.fetch, `${apiUrl}/v1/meta`).catch(
-			() => ({ oidc: null }),
+		meta = await getJson<LoginMeta>(ctx.fetch, `${apiUrl}/v1/meta`).catch(
+			() => ({}),
 		);
 		cred = { kind: "key", token: key };
 		profile = { apiUrl, auth: "key" };
 	} else {
-		meta = await getJson<MetaOidc>(ctx.fetch, `${apiUrl}/v1/meta`);
-		if (meta.authMode === "owner") {
+		meta = await getJson<LoginMeta>(ctx.fetch, `${apiUrl}/v1/meta`);
+		{
 			const token = await ownerLogin({
 				apiUrl,
 				fetch: ctx.fetch,
@@ -217,19 +163,10 @@ async function login(
 			});
 			cred = { kind: "key", token };
 			profile = { apiUrl, auth: "owner" };
-		} else {
-			const f = await deviceFlow(ctx, apiUrl, opts.browser !== false, meta);
-			cred = f.cred;
-			profile = { apiUrl, auth: "oidc", issuer: f.issuer };
 		}
 	}
 	Object.assign(profile, tenancyCache(meta));
-	const token =
-		cred === undefined
-			? undefined
-			: cred.kind === "key"
-				? cred.token
-				: cred.accessToken;
+	const token = cred?.token;
 	const me = await meWith(ctx, apiUrl, token, r.team);
 	const ca = ctx.globals.cacert ?? ctx.env.UMIAK_CA_FILE;
 	if (ca !== undefined && ca !== "") {
@@ -249,10 +186,6 @@ async function login(
 	const store = ctx.store(profile);
 	const oldEntry = old === undefined ? undefined : credentialName(name, old);
 	const oldStore = old === undefined ? undefined : ctx.storeOf(old);
-	const oldCred =
-		oldEntry === undefined || oldStore === undefined
-			? null
-			: parseCredential(await oldStore.get(oldEntry).catch(() => null));
 	await withFileLock(ctx.paths.lock, async () => {
 		const entry = credentialName(name, profile);
 		if (cred !== undefined) {
@@ -276,25 +209,6 @@ async function login(
 		writeConfig(ctx.paths, config);
 	});
 	ctx.reload();
-	if (
-		oldCred?.kind === "oidc" &&
-		!(cred?.kind === "oidc" && cred.refreshToken === oldCred.refreshToken)
-	) {
-		const limit = deadline(10_000);
-		await revokeRefreshToken({
-			issuer: oldCred.issuer,
-			clientId: oldCred.clientId,
-			refreshToken: oldCred.refreshToken,
-			fetch: ctx.fetch,
-			signal: limit.signal,
-		})
-			.finally(() => limit.clear())
-			.catch((err: unknown) => {
-				ctx.out.warn(
-					`could not revoke the previous refresh token at Keycloak: ${(err as Error).message}`,
-				);
-			});
-	}
 	if (cred !== undefined && store.kind === "file") {
 		ctx.out.warn(
 			`credentials are stored in ${ctx.paths.credentials} (mode 0600), not in the OS keychain`,
@@ -312,7 +226,7 @@ export function register(program: Command, run: Runner): void {
 	program
 		.command("login")
 		.description(
-			"log in: Keycloak device flow for people, or a team key from stdin (--key-stdin)",
+			"log in: owner browser pairing, or a team key from stdin (--key-stdin)",
 		)
 		.option("--no-browser", "only print the login link, do not open a browser")
 		.option("--key-stdin", "read a team API key (umiak_…) from stdin")

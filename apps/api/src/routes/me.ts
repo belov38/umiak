@@ -43,7 +43,7 @@ export const MeSchema = z
 			description: "Platform operator rights; only in a browser session",
 		}),
 		auth: z.object({
-			kind: extensibleEnum(["session", "oidc", "team_key"]),
+			kind: extensibleEnum(["session", "team_key"]),
 			apiKeyId: z.string().optional().openapi({
 				description: "Team keys only",
 				example: "key_01jbx2v7d3m6c8q9w0e4r5t6y7",

@@ -78,72 +78,23 @@ const logLevel = z.preprocess(
 		.default("info"),
 );
 
-const optionalHttpUrl = z.preprocess(
-	unsetEmpty,
-	z
-		.string()
-		.refine(
-			(v) => {
-				try {
-					const u = new URL(v);
-					return u.protocol === "http:" || u.protocol === "https:";
-				} catch {
-					return false;
-				}
-			},
-			{ message: "must be an http:// or https:// URL" },
-		)
-		.optional(),
-);
-
-const workerSchema = z
-	.object({
-		UMIAK_AUTH_MODE: z.preprocess(
-			unsetEmpty,
-			z.enum(["oidc", "owner"]).default("oidc"),
-		),
-		DATABASE_URL: databaseUrl,
-		// Templates, sizes, quotas and defaults come from Payload (S8 plan
-		// decision 5); UMIAK_CONFIG_FILE is read only by `umiak-admin bootstrap`.
-		PAYLOAD_SECRET: required("secret of the Payload config, as web"),
-		UMIAK_DATA_KEYS_FILE: required("path of the data key ring JSON"),
-		UMIAK_SECRETS_DIR: required(
-			"directory with the PVE and umiak-node secrets",
-		),
-		UMIAK_GATEWAY_SERVICE_TOKEN_FILE: optional,
-		UMIAK_RECONCILE_DRY_RUN: bool(true),
-		UMIAK_HTTP_PORT: int(9090, 0, 65535),
-		UMIAK_MIGRATE_ON_START: bool(true),
-		UMIAK_LOG_LEVEL: logLevel,
-		UMIAK_DB_POOL_MAX: int(30, 2, 1000),
-		UMIAK_IDP_SYNC_INTERVAL: int(300, 10, 86_400),
-		// ctl-idp-sync (S8 §20.1, plan decision 9): on when the URL is set.
-		UMIAK_IDP_SYNC_KEYCLOAK_URL: optionalHttpUrl,
-		UMIAK_IDP_SYNC_REALM: z.preprocess(unsetEmpty, z.string().default("umiak")),
-		UMIAK_IDP_SYNC_CLIENT_ID: z.preprocess(
-			unsetEmpty,
-			z.string().default("umiak-worker"),
-		),
-		UMIAK_IDP_SYNC_CLIENT_SECRET_FILE: optional,
-		UMIAK_TURN_SECRET_FILE: optional,
-		UMIAK_TURN_URLS: optional,
-		UMIAK_PORT_DOMAIN: optional,
-		UMIAK_SSH_USER_CA_KEYS_FILE: optional,
-	})
-	.superRefine((e, ctx) => {
-		if (
-			e.UMIAK_AUTH_MODE !== "owner" &&
-			e.UMIAK_IDP_SYNC_KEYCLOAK_URL !== undefined &&
-			e.UMIAK_IDP_SYNC_CLIENT_SECRET_FILE === undefined
-		) {
-			ctx.addIssue({
-				code: "custom",
-				path: ["UMIAK_IDP_SYNC_CLIENT_SECRET_FILE"],
-				message:
-					"required with UMIAK_IDP_SYNC_KEYCLOAK_URL (client secret file)",
-			});
-		}
-	});
+const workerSchema = z.object({
+	UMIAK_AUTH_MODE: z.preprocess(unsetEmpty, z.enum(["owner"]).default("owner")),
+	DATABASE_URL: databaseUrl,
+	// Templates, sizes, quotas and defaults come from Payload (S8 plan
+	// decision 5); UMIAK_CONFIG_FILE is read only by `umiak-admin bootstrap`.
+	PAYLOAD_SECRET: required("secret of the Payload config, as web"),
+	UMIAK_DATA_KEYS_FILE: required("path of the data key ring JSON"),
+	UMIAK_SECRETS_DIR: required("directory with the PVE and umiak-node secrets"),
+	UMIAK_GATEWAY_SERVICE_TOKEN_FILE: optional,
+	UMIAK_RECONCILE_DRY_RUN: bool(true),
+	UMIAK_HTTP_PORT: int(9090, 0, 65535),
+	UMIAK_MIGRATE_ON_START: bool(true),
+	UMIAK_LOG_LEVEL: logLevel,
+	UMIAK_DB_POOL_MAX: int(30, 2, 1000),
+	UMIAK_PORT_DOMAIN: optional,
+	UMIAK_SSH_USER_CA_KEYS_FILE: optional,
+});
 
 const optionalHttpsUrl = z.preprocess(
 	unsetEmpty,
@@ -173,8 +124,6 @@ const adminSchema = z.object({
 });
 
 export interface WorkerEnv {
-	turnSecretFile: string | undefined;
-	turnUrls: string | undefined;
 	databaseUrl: string;
 	/** PAYLOAD_SECRET: the Payload instance of the config reader. */
 	payloadSecret: string;
@@ -186,25 +135,10 @@ export interface WorkerEnv {
 	migrateOnStart: boolean;
 	logLevel: (typeof LOG_LEVELS)[number];
 	dbPoolMax: number;
-	idpSyncIntervalMs: number;
-	/** Keycloak of ctl-idp-sync; undefined = the controller is off. */
-	idpSync: IdpSyncEnv | undefined;
 	/** Domain of the published ports (`<port>-<sandbox>.<domain>`), sent on every Claim. */
 	portDomain: string | undefined;
 	/** File with the SSH user CA public keys (one per line), sent on every Claim. */
 	sshUserCaKeysFile: string | undefined;
-}
-
-/** Keycloak Admin API access of ctl-idp-sync (S8 §20.1). */
-export interface IdpSyncEnv {
-	/** UMIAK_IDP_SYNC_KEYCLOAK_URL: internal Keycloak address, without `/realms`. */
-	keycloakUrl: string;
-	/** UMIAK_IDP_SYNC_REALM (default `umiak`). */
-	realm: string;
-	/** UMIAK_IDP_SYNC_CLIENT_ID (default `umiak-worker`). */
-	clientId: string;
-	/** UMIAK_IDP_SYNC_CLIENT_SECRET_FILE: file with the client secret. */
-	clientSecretFile: string;
 }
 
 /**
@@ -236,8 +170,6 @@ export function parseWorkerEnv(env: Env = process.env): WorkerEnv {
 	if (!r.success) fail(r.error);
 	const e = r.data;
 	return {
-		turnSecretFile: e.UMIAK_TURN_SECRET_FILE,
-		turnUrls: e.UMIAK_TURN_URLS,
 		databaseUrl: e.DATABASE_URL,
 		payloadSecret: e.PAYLOAD_SECRET,
 		dataKeysFile: e.UMIAK_DATA_KEYS_FILE,
@@ -248,18 +180,6 @@ export function parseWorkerEnv(env: Env = process.env): WorkerEnv {
 		migrateOnStart: e.UMIAK_MIGRATE_ON_START,
 		logLevel: e.UMIAK_LOG_LEVEL,
 		dbPoolMax: e.UMIAK_DB_POOL_MAX,
-		idpSyncIntervalMs: e.UMIAK_IDP_SYNC_INTERVAL * 1000,
-		idpSync:
-			e.UMIAK_AUTH_MODE === "owner" ||
-			e.UMIAK_IDP_SYNC_KEYCLOAK_URL === undefined ||
-			e.UMIAK_IDP_SYNC_CLIENT_SECRET_FILE === undefined
-				? undefined
-				: {
-						keycloakUrl: e.UMIAK_IDP_SYNC_KEYCLOAK_URL,
-						realm: e.UMIAK_IDP_SYNC_REALM,
-						clientId: e.UMIAK_IDP_SYNC_CLIENT_ID,
-						clientSecretFile: e.UMIAK_IDP_SYNC_CLIENT_SECRET_FILE,
-					},
 		portDomain: e.UMIAK_PORT_DOMAIN,
 		sshUserCaKeysFile: e.UMIAK_SSH_USER_CA_KEYS_FILE,
 	};

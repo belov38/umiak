@@ -8,7 +8,7 @@ import {
 	openCredentialStore,
 	parseStoreChoice,
 } from "./auth/store.ts";
-import { type Bearer, getBearer, REFRESH_MARGIN_MS } from "./auth/token.ts";
+import { type Bearer, getBearer } from "./auth/token.ts";
 import { CLI_VERSION } from "./commands/version.ts";
 import { type Env, type Paths, type Profile, pathsOf } from "./config.ts";
 import { CliError, NOT_LOGGED_IN } from "./exit-codes.ts";
@@ -164,12 +164,7 @@ export class Context {
 	 */
 	async bearer(force = false): Promise<Bearer> {
 		const b = this.#bearer;
-		if (
-			!force &&
-			b !== undefined &&
-			(b.expiresAt === null ||
-				Date.parse(b.expiresAt) - REFRESH_MARGIN_MS > Date.now())
-		) {
+		if (!force && b !== undefined) {
 			return b;
 		}
 		const r = this.resolved;
@@ -190,10 +185,7 @@ export class Context {
 			profileName: r.profileName,
 			profile: r.profile,
 			store: this.store(),
-			lockPath: this.paths.lock,
-			fetch: this.fetch,
 			env: this.env,
-			...(force ? { force, ...(b ? { rejected: b.token } : {}) } : {}),
 		});
 		return this.#bearer;
 	}

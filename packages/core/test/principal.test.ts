@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { idempotencyPrincipal, type Principal, SCOPES } from "../src/index.ts";
 
 const base: Principal = {
-	kind: "oidc",
+	kind: "session",
 	userId: "u1",
 	teamId: "t1",
 	role: "owner",

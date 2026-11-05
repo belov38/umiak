@@ -7,7 +7,6 @@ import type { Logger } from "pino";
 import { IdentityListener } from "../auth/identity-listener.ts";
 import { ServiceTokens } from "../auth/internal.ts";
 import { KeyCache } from "../auth/key-cache.ts";
-import { OidcVerifier } from "../auth/oidc.ts";
 import { SessionResolver } from "../auth/principal.ts";
 import { RateLimits } from "../auth/rate-limit.ts";
 import { DEFAULT_COMMAND_TIMINGS } from "../commands/attach.ts";
@@ -28,10 +27,11 @@ import {
 
 export * from "./fake-agent.ts";
 export * from "./identity.ts";
-export * from "./oidc-server.ts";
 
 /** A complete valid environment with test values (no files are read). */
 export const TEST_ENV: Readonly<Record<string, string>> = {
+	UMIAK_AUTH_MODE: "owner",
+	UMIAK_LOCAL_ALLOWED_CIDRS: "127.0.0.0/8,::1/128",
 	DATABASE_URL: "postgres://umiak:umiak@127.0.0.1:5432/umiak",
 	PAYLOAD_SECRET: "test-payload-secret-0123456789abcdef",
 	UMIAK_DATA_KEYS_FILE: "/nonexistent/data-keys.json",
@@ -126,6 +126,15 @@ export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 		over.identity ??
 		(pool === null
 			? testIdentityStore({
+					sessions: [
+						{
+							sub: "umiak:local",
+							isOperator: true,
+							teams: [
+								{ teamId: TEST_TEAM_ID, name: TEST_TEAM_NAME, role: "owner" },
+							],
+						},
+					],
 					keys: [
 						{
 							secret: TEST_API_KEY,
@@ -148,7 +157,6 @@ export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 		identityEvents,
 		keyCache: new KeyCache(identity, identityEvents),
 		sessions: new SessionResolver(identity, identityEvents),
-		oidc: settings.oidc === null ? null : new OidcVerifier(settings.oidc),
 		serviceTokens: new ServiceTokens({}),
 		rateLimits: new RateLimits(settings.rate),
 		svc: unconfiguredService(),

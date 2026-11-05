@@ -2,10 +2,7 @@ import type { GlobalConfig } from "payload";
 import { operatorOnly } from "../access.ts";
 import { quotaFields } from "../collections/teams.ts";
 import { platformDefaultsConfigAfterChange } from "../hooks/config.ts";
-import {
-	routesAfterChange,
-	ssoPolicyEpochBeforeChange,
-} from "../hooks/routes.ts";
+import { routesAfterChange } from "../hooks/routes.ts";
 
 // Platform defaults (S6 §5.11, S7, S8 §7). The values are seeded by the
 // initial migration. Retention defaults below preserve legacy behavior when
@@ -14,7 +11,6 @@ export const PlatformDefaults: GlobalConfig = {
 	slug: "platform-defaults",
 	access: { read: operatorOnly, update: operatorOnly },
 	hooks: {
-		beforeChange: [ssoPolicyEpochBeforeChange],
 		afterChange: [platformDefaultsConfigAfterChange, routesAfterChange],
 	},
 	fields: [
@@ -61,13 +57,6 @@ export const PlatformDefaults: GlobalConfig = {
 		{ name: "publicDesktopEnabled", type: "checkbox", defaultValue: false },
 		{ name: "publicPortsEnabled", type: "checkbox", defaultValue: true },
 		{
-			name: "ssoPortPolicy",
-			type: "select",
-			options: ["any", "team"],
-			required: true,
-			defaultValue: "any",
-		},
-		{
 			name: "rateLimits",
 			type: "group",
 			fields: [
@@ -92,14 +81,5 @@ export const PlatformDefaults: GlobalConfig = {
 			fields: quotaFields(),
 		},
 		{ name: "maxOwnedTeamsPerUser", type: "number", min: 0, defaultValue: 3 },
-		// Owned by the beforeChange hook: +1 when ssoPortPolicy goes from any
-		// to team (S8 §8); written values are ignored.
-		{
-			name: "ssoPolicyEpoch",
-			type: "number",
-			min: 0,
-			defaultValue: 0,
-			admin: { readOnly: true },
-		},
 	],
 };

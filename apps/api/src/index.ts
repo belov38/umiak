@@ -6,7 +6,6 @@ export * from "./app.ts";
 export * from "./auth/identity-listener.ts";
 export * from "./auth/internal.ts";
 export * from "./auth/key-cache.ts";
-export * from "./auth/oidc.ts";
 export * from "./auth/principal.ts";
 export * from "./auth/proxied.ts";
 export * from "./auth/public.ts";

@@ -9,6 +9,8 @@ import * as m20261101_010000_desktop_defaults from "./20261101_010000_desktop_de
 import * as m20261103_000000_windows_single from "./20261103_000000_windows_single.ts";
 import * as m20261104_000000_windows_name from "./20261104_000000_windows_name.ts";
 
+import * as ownerOnly from "./20261105_000000_owner_only.ts";
+
 export interface PayloadMigration {
 	name: string;
 	up: (args: MigrateUpArgs) => Promise<void>;
@@ -42,4 +44,5 @@ export const migrations: PayloadMigration[] = [
 		name: "20261103_000000_windows_single",
 	},
 	{ ...m20261104_000000_windows_name, name: "20261104_000000_windows_name" },
+	{ ...ownerOnly, name: "20261105_000000_owner_only" },
 ];

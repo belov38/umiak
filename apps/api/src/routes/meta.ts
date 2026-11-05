@@ -21,12 +21,9 @@ export const ANONYMOUS_ROUTES: ReadonlySet<string> = new Set([
 	"/v1/docs",
 ]);
 
-/** Public client of the CLI device flow; also used by the SDK and MCP. */
-export const OIDC_CLI_CLIENT_ID = "umiak-cli";
-
 export const MetaSchema = z
 	.object({
-		authMode: z.enum(["oidc", "owner"]).optional(),
+		authMode: z.enum(["owner"]).optional(),
 		tenancy: z.enum(["single", "teams"]).optional().openapi({
 			description:
 				"Presentation model for this deployment. Missing on older servers means teams; independent of credential kind.",
@@ -50,17 +47,6 @@ export const MetaSchema = z
 			description:
 				"Public preview listener port; omit from URLs when it is the scheme default",
 		}),
-		oidc: z
-			.object({
-				issuer: z.url(),
-				clientId: z.string().openapi({ example: OIDC_CLI_CLIENT_ID }),
-				audience: z.string().openapi({ example: "umiak-api" }),
-			})
-			.nullable()
-			.openapi({
-				description:
-					"Keycloak for people (device flow of `umiak login`); null when only team keys work",
-			}),
 		ssh: z.object({
 			host: z.string().openapi({ example: "ssh.example.com" }),
 			port: z.int().min(1).max(65535),
@@ -145,14 +131,6 @@ export function metaOf(deps: ApiDeps): Meta {
 		umiakDomain: s.umiakDomain,
 		previewScheme: s.previewScheme,
 		previewPort: s.previewPort,
-		oidc:
-			s.oidc === null
-				? null
-				: {
-						issuer: s.oidc.issuer,
-						clientId: OIDC_CLI_CLIENT_ID,
-						audience: s.oidc.audience,
-					},
 		ssh: { host: s.sshHost, port: s.sshPort, hostKeys: deps.hostKeys },
 		minCliVersion: s.minCliVersion,
 		latestCliVersion: s.latestCliVersion,
@@ -221,7 +199,6 @@ export function registerMetaRoutes(
 	app.openapi(getOpenApi, (c) => {
 		doc ??= buildOpenApiDocument(app, {
 			apiUrl: deps.settings.apiUrl,
-			issuer: deps.settings.oidc?.issuer ?? null,
 		});
 		return c.json(doc, 200);
 	});

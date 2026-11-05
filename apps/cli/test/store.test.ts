@@ -1,5 +1,3 @@
-// Credential stores, their selection and the config lock (unit, no api).
-import { execFile } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
@@ -14,8 +12,6 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FileStore } from "../src/auth/file-store.ts";
 import { KeychainStore, type SecretsBackend } from "../src/auth/keychain.ts";
@@ -25,7 +21,7 @@ import {
 	openCredentialStore,
 	parseStoreChoice,
 } from "../src/auth/store.ts";
-import { credentialName, getBearer } from "../src/auth/token.ts";
+import { credentialName } from "../src/auth/token.ts";
 import { exitCodeOf } from "../src/exit-codes.ts";
 
 let dir: string;
@@ -213,10 +209,9 @@ describe("store selection", () => {
 		expect(
 			credentialName("default", {
 				apiUrl: "https://api.x",
-				auth: "oidc",
-				issuer: "https://kc.x/realms/umiak",
+				auth: "owner",
 			}),
-		).toBe("default@https://kc.x/realms/umiak");
+		).toBe("default@https://api.x");
 		expect(credentialName("ci", { apiUrl: "https://api.x", auth: "key" })).toBe(
 			"ci@https://api.x",
 		);
@@ -305,72 +300,5 @@ describe("withFileLock", () => {
 			withFileLock(lock, async () => "never", { timeoutMs: 200, retryMs: 20 }),
 		).rejects.toMatchObject({ code: "lock_timeout", retryable: true });
 		expect(existsSync(lock)).toBe(true);
-	});
-});
-
-describe("getBearer refresh", () => {
-	it("keeps the refresh deadline alive through garbage collection", async () => {
-		const script = fileURLToPath(
-			new URL("./helpers/refresh-gc.ts", import.meta.url),
-		);
-		const { stdout } = await promisify(execFile)(process.execPath, [
-			"--expose-gc",
-			"--conditions=source",
-			script,
-			dir,
-		]);
-		expect(JSON.parse(stdout)).toEqual({
-			code: "network_error",
-			retryable: true,
-			lockReleased: true,
-			requestAborted: true,
-		});
-	});
-
-	it("a refresh that hangs is given up within its timeout and the lock is released", async () => {
-		const lock = join(dir, ".lock");
-		const file = new FileStore(join(dir, "credentials.json"));
-		const profile = {
-			apiUrl: "https://api.x",
-			auth: "oidc" as const,
-			issuer: "https://kc.x/realms/umiak",
-		};
-		await file.set(
-			credentialName("default", profile),
-			JSON.stringify({
-				kind: "oidc",
-				issuer: profile.issuer,
-				clientId: "umiak-cli",
-				accessToken: "old",
-				refreshToken: "r1",
-				expiresAt: new Date(Date.now() - 1000).toISOString(),
-			}),
-		);
-		// Never answers; only the request's signal ends it.
-		const hanging = (req: Request) =>
-			new Promise<Response>((_, reject) => {
-				req.signal.addEventListener("abort", () => reject(req.signal.reason));
-			});
-		const started = Date.now();
-		await expect(
-			getBearer({
-				profileName: "default",
-				profile,
-				store: file,
-				lockPath: lock,
-				fetch: hanging,
-				env: {},
-				refreshTimeoutMs: 200,
-			}),
-		).rejects.toMatchObject({ code: "network_error", retryable: true });
-		// The hanging request never ends by itself (room for a loaded machine).
-		expect(Date.now() - started).toBeLessThan(10_000);
-		expect(existsSync(lock)).toBe(false);
-	});
-
-	it("the refresh timeout is below the stale age of the lock", async () => {
-		const { LOCK_STALE_MS } = await import("../src/auth/lock.ts");
-		const { REFRESH_TIMEOUT_MS } = await import("../src/auth/token.ts");
-		expect(REFRESH_TIMEOUT_MS).toBeLessThan(LOCK_STALE_MS);
 	});
 });

@@ -3,7 +3,6 @@ import type { JobSender, KeyRing } from "@umiak/core";
 import type { Db } from "@umiak/db";
 import type pg from "pg";
 import { type DestinationStream, type Logger, pino } from "pino";
-import type { IdpSync } from "./controllers/idp-sync.ts";
 import type { AgentPort, GatewayPort, InfraRegistry } from "./ports.ts";
 
 /** Poll intervals and limits of the step engine. Tests pass milliseconds. */
@@ -88,7 +87,6 @@ export class RecordingMetrics implements Metrics {
 }
 
 export interface WorkerCtx {
-	turn?: import("./desktop.ts").TurnConfig;
 	pool: pg.Pool;
 	db: Db;
 	jobs: JobSender;
@@ -100,8 +98,6 @@ export interface WorkerCtx {
 	timing: Timing;
 	log: Logger;
 	metrics: Metrics;
-	/** S8 IdP sync; `ctl-idp-sync` is registered only when set (decision 15). */
-	idpSync?: IdpSync;
 	/**
 	 * `ctl-reconcile` only reports (S6 §11.2 `UMIAK_RECONCILE_DRY_RUN=1`).
 	 * Default true: the first runs of a PoC are dry (Task 13 reads the env).
@@ -128,7 +124,6 @@ export const REDACT_PATHS: string[] = [
 	"*.bs",
 	"*.token",
 	"*.serial",
-	"turn",
 	"*.iceServers",
 	"iceServers",
 	"credential",

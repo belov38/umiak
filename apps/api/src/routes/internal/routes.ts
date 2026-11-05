@@ -39,7 +39,7 @@ export interface GatewayRoute {
 export function toGatewayRoute(
 	label: string,
 	t: RouteTarget,
-	d: Pick<PlatformDefaults, "publicPortsEnabled" | "ssoPolicyEpoch">,
+	d: Pick<PlatformDefaults, "publicPortsEnabled">,
 ): GatewayRoute {
 	const publicDisabled = t.mode === "public" && !d.publicPortsEnabled;
 	return {
@@ -51,7 +51,7 @@ export function toGatewayRoute(
 		sandboxState: t.state,
 		access: t.mode,
 		tokenHash: t.tokenHash,
-		authEpoch: t.mode === "sso" ? t.authEpoch + d.ssoPolicyEpoch : t.authEpoch,
+		authEpoch: t.authEpoch,
 		blocked: t.blocked || publicDisabled,
 		blockReason: t.blocked
 			? t.blockReason

@@ -47,12 +47,8 @@ export interface PlatformDefaults {
 	/** Desktop sharing is disabled unless explicitly enabled. */
 	publicDesktopEnabled?: boolean | undefined;
 	/** Who may open `sso` ports (S7 §7.7, S8 C7); default `any`. */
-	ssoPortPolicy: SsoPortPolicy;
 	/** Added to `auth_epoch` of `sso` routes; bumped on a policy change (S8 C7). */
-	ssoPolicyEpoch: number;
 }
-
-export type SsoPortPolicy = "any" | "team";
 
 /** S6 §5.11. Implementations: StaticConfigReader (YAML), PayloadConfigReader (S8). */
 export interface ConfigReader {

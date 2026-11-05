@@ -8,7 +8,7 @@ export const OWNER_USER_SUB = "umiak:local";
 export const OWNER_USER_EMAIL = "local@umiak.invalid";
 export const OWNER_OPERATOR_GROUP = "umiak-local-operator";
 
-export type AuthMode = "oidc" | "owner";
+export type AuthMode = "owner";
 
 /** Networks of the trusted ingress; `denied` wins over `allowed`. */
 export interface CidrSet {
@@ -17,9 +17,8 @@ export interface CidrSet {
 }
 
 export function parseAuthMode(env: Environment = process.env): AuthMode {
-	const mode = env.UMIAK_AUTH_MODE || "oidc";
-	if (mode !== "oidc" && mode !== "owner")
-		throw new Error("UMIAK_AUTH_MODE must be oidc or owner");
+	const mode = env.UMIAK_AUTH_MODE || "owner";
+	if (mode !== "owner") throw new Error("UMIAK_AUTH_MODE must be owner");
 	return mode;
 }
 

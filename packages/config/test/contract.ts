@@ -85,8 +85,6 @@ export function makeConfigFixture(): ConfigFixture {
 			defaultTemplate: "linux",
 			publicPortsEnabled: false,
 			publicDesktopEnabled: true,
-			ssoPortPolicy: "team",
-			ssoPolicyEpoch: 4,
 		},
 		defaultQuota: {
 			maxActiveSandboxes: 2,

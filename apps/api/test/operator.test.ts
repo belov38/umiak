@@ -12,12 +12,7 @@ import {
 } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type ApiDeps, ServiceTokens } from "../src/index.ts";
-import {
-	issueApiKey,
-	startTestOidcServer,
-	type TestOidcServer,
-	testSettings,
-} from "../src/testing/index.ts";
+import { issueApiKey, testSettings } from "../src/testing/index.ts";
 import type { Harness, HarnessResponse } from "./helpers/harness.ts";
 import {
 	type Any,
@@ -60,7 +55,6 @@ function caller(h: Harness, headers: Record<string, string> = {}): Caller {
 describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 	let db: TestDatabase;
 	let w: ApiWorld;
-	let oidc: TestOidcServer;
 	let deps: Partial<ApiDeps>;
 	/** Deps of people resolved with the operator group configured. */
 	let opDeps: Partial<ApiDeps>;
@@ -79,7 +73,6 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 			topology: { node: { ramCapMb: 10_000_000 } },
 			quota: { maxSavedSnapshots: 1000 },
 		});
-		oidc = await startTestOidcServer();
 		deps = { sshCa: testSshCa() };
 		opDeps = {
 			...deps,
@@ -90,7 +83,6 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 			settings: testSettings({
 				UMIAK_API_RATE_BURST: "100000",
 				UMIAK_API_RATE_STARTS_PER_MIN: "100000",
-				UMIAK_OIDC_ISSUER: oidc.issuer,
 				UMIAK_OPERATOR_GROUPS: OPERATORS,
 			}),
 		};
@@ -116,7 +108,6 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 		});
 	});
 	afterAll(async () => {
-		await oidc?.close();
 		await w?.close();
 		await db?.drop();
 	});
@@ -131,16 +122,6 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 			code: "forbidden",
 			details: { reason },
 		});
-	}
-
-	/** An operator's Keycloak token on the public listener: never operator rights (C6). */
-	async function operatorJwt(): Promise<Caller> {
-		const token = await oidc.token({
-			sub: randomUUID(),
-			email: `op-${randomUUID()}@example.com`,
-			groups: [OPERATORS],
-		});
-		return caller(w.harness({ bearer: token, deps: opDeps }));
 	}
 
 	describe("who may call", () => {
@@ -158,13 +139,8 @@ describe.skipIf(skipPg())("operator blocks (S8 C3)", () => {
 				["POST", `${sb}/ports/${f.port}/block`, { json: { reason: "abuse" } }],
 				["POST", `${sb}/ports/${f.port}/unblock`],
 			];
-			const jwt = await operatorJwt();
-			const me = await jwt("GET", "/v1/me");
-			expect(me.status, me.text).toBe(200);
-			expect((me.body as Any).isOperator).toBe(false);
 			for (const [who, call] of [
 				["team key", key],
-				["operator JWT", jwt],
 				["owner session", owner],
 			] as const) {
 				for (const [m, p, init] of calls) {

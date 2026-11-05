@@ -8,11 +8,8 @@ import { ApiError, validationError } from "../http/errors.ts";
 import { ownerAuthenticate } from "./owner.ts";
 import {
 	type AuthContext,
-	authRequired,
 	decodeTeamRef,
 	needsAuth,
-	personAuth,
-	selectPersonTeam,
 	TEAM_HEADER,
 } from "./principal.ts";
 
@@ -24,25 +21,6 @@ const FORM_TYPES = [
 	"multipart/form-data",
 	"text/plain",
 ];
-
-/**
- * `X-Auth-Request-Groups`: comma-separated and/or repeated (Node joins
- * repeats with ", "). `role:<name>` entries (realm and client roles that
- * oauth2-proxy's keycloak-oidc provider adds) are dropped, as in
- * parseAuthHeaders of @umiak/payload: the CLI JWT has only `groups`, and both
- * logins must store the same users.groups.
- */
-export function parseGroups(v: string | undefined): string[] {
-	if (v === undefined) return [];
-	return [
-		...new Set(
-			v
-				.split(",")
-				.map((g) => g.trim())
-				.filter((g) => g !== "" && !g.startsWith("role:")),
-		),
-	];
-}
 
 function isUpgrade(c: Context<ApiEnv>): boolean {
 	return c.req.header("upgrade")?.toLowerCase() === "websocket";
@@ -129,26 +107,5 @@ async function authenticate(
 	deps: ApiDeps,
 	c: Context<ApiEnv>,
 ): Promise<AuthContext> {
-	if (deps.settings.authMode === "owner")
-		return ownerAuthenticate(deps, c, requestedTeam(c));
-	const email = c.req.header("x-auth-request-email")?.trim() ?? "";
-	if (email === "") {
-		throw authRequired("no browser session (X-Auth-Request-Email is missing)");
-	}
-	const requested = requestedTeam(c);
-	const user = c.req.header("x-auth-request-user");
-	const preferredUsername = c.req.header("x-auth-request-preferred-username");
-	const s = await deps.sessions.resolve({
-		email,
-		groups: parseGroups(c.req.header("x-auth-request-groups")),
-		...(user === undefined ? {} : { user }),
-		...(preferredUsername ? { preferredUsername } : {}),
-	});
-	const team = await selectPersonTeam(
-		deps.identity,
-		s,
-		requested,
-		s.isOperator,
-	);
-	return personAuth("session", s, team, null);
+	return ownerAuthenticate(deps, c, requestedTeam(c));
 }

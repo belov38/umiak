@@ -246,8 +246,6 @@ export class PayloadConfigReader implements ConfigReader {
 					: "linux",
 			publicPortsEnabled: g.publicPortsEnabled !== false,
 			publicDesktopEnabled: g.publicDesktopEnabled === true,
-			ssoPortPolicy: g.ssoPortPolicy === "team" ? "team" : "any",
-			ssoPolicyEpoch: num(g.ssoPolicyEpoch) ?? 0,
 		};
 	}
 

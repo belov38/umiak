@@ -77,7 +77,6 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 			recoverMinIntervalSeconds: 600,
 			defaultTemplate: "linux",
 			publicPortsEnabled: true,
-			ssoPortPolicy: "any",
 			rateLimits: { requestsPerSecond: 20, burst: 100, startsPerMinute: 30 },
 			defaultQuota: {
 				maxActiveSandboxes: 10000,
@@ -90,7 +89,6 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 				maxSavedSnapshots: 10,
 			},
 			maxOwnedTeamsPerUser: 3,
-			ssoPolicyEpoch: 0,
 		});
 	});
 

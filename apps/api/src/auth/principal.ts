@@ -166,7 +166,7 @@ export async function selectPersonTeam(
 
 /** AuthContext of a person (browser session or Keycloak JWT). */
 export function personAuth(
-	kind: "session" | "oidc",
+	kind: "session",
 	s: SessionIdentity,
 	team: AuthTeam,
 	tokenExpiresAt: Date | null,

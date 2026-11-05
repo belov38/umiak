@@ -3,7 +3,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { startTestOidcServer, type TestOidcServer } from "@umiak/api/testing";
 import {
 	afterAll,
 	afterEach,
@@ -13,15 +12,14 @@ import {
 	expect,
 	it,
 } from "vitest";
-import { deviceLogin } from "../src/auth/device-grant.ts";
 import type { SecretsBackend } from "../src/auth/keychain.ts";
 import { browserCommand } from "../src/commands/login.ts";
 import { runCli as runCliInProcess } from "../src/program.ts";
-import { type CliWorld, startWorld, until } from "./helpers/api.ts";
+import { type CliWorld, startWorld } from "./helpers/api.ts";
 import { type CliHome, cliHome, runCli } from "./helpers/run-cli.ts";
 import { startTlsFront, type TlsFront } from "./helpers/tls.ts";
 
-function jwtClaims(token: string): Record<string, unknown> {
+function _jwtClaims(token: string): Record<string, unknown> {
 	const part = token.split(".")[1] ?? "";
 	return JSON.parse(Buffer.from(part, "base64url").toString("utf8"));
 }
@@ -80,141 +78,22 @@ describe("openBrowser command", () => {
 	});
 });
 
-describe("deviceLogin (unit, scripted Keycloak)", () => {
-	it("polls at the interval, adds 5 s on slow_down, and returns the tokens", async () => {
-		const answers: [number, Record<string, unknown>][] = [
-			[
-				200,
-				{
-					device_code: "dc",
-					user_code: "ABCD-EFGH",
-					verification_uri: "https://kc/device",
-					expires_in: 600,
-					interval: 5,
-				},
-			],
-			[400, { error: "authorization_pending" }],
-			[400, { error: "slow_down" }],
-			[400, { error: "authorization_pending" }],
-			[200, { access_token: "at", refresh_token: "rt", expires_in: 300 }],
-		];
-		const forms: Record<string, string>[] = [];
-		const sleeps: number[] = [];
-		const t = await deviceLogin({
-			issuer: "https://kc/realms/umiak/",
-			clientId: "umiak-cli",
-			fetch: async (req) => {
-				forms.push({
-					url: req.url,
-					...Object.fromEntries(new URLSearchParams(await req.text())),
-				});
-				const [status, body] = answers.shift() as [
-					number,
-					Record<string, unknown>,
-				];
-				return Response.json(body, { status });
-			},
-			onCode: () => {},
-			sleep: async (ms) => void sleeps.push(ms),
-		});
-		expect(t).toMatchObject({ accessToken: "at", refreshToken: "rt" });
-		expect(sleeps).toEqual([5000, 5000, 10_000, 10_000]);
-		expect(forms[0]).toEqual({
-			url: "https://kc/realms/umiak/protocol/openid-connect/auth/device",
-			client_id: "umiak-cli",
-			scope: "openid",
-		});
-		expect(forms[1]).toEqual({
-			url: "https://kc/realms/umiak/protocol/openid-connect/token",
-			grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-			device_code: "dc",
-			client_id: "umiak-cli",
-		});
-	});
-});
-
 describe("umiak login", () => {
 	let w: CliWorld;
 	let home: CliHome;
 	beforeAll(async () => {
-		w = await startWorld({ oidc: { deviceInterval: 0 } });
+		w = await startWorld();
 	});
 	afterAll(async () => {
 		await w?.close();
 	});
 	beforeEach(() => {
 		home = cliHome();
-		w.oidc.deviceFlow.autoApprove(null);
 	});
 	afterEach(() => home.rm());
 
-	it("device grant: login, then auth token gives a token of the same person", async () => {
-		const sub = `kc-${crypto.randomUUID()}`;
-		const email = `${sub}@example.com`;
-		w.oidc.deviceFlow.autoApprove({ sub, email });
-		const before = w.oidc.stats.deviceAuthorization;
-
-		const r = await runCli(["login", "--no-browser", "--api-url", w.url], {
-			env: home.env,
-		});
-		expect(r.code, r.stderr).toBe(0);
-		const lines = r.lines();
-		expect(lines.map((l) => l.event)).toEqual(["device_code", "logged_in"]);
-		expect(lines[0]).toMatchObject({
-			userCode: expect.stringMatching(/^[A-Z]{4}-[A-Z]{4}$/),
-			verificationUri: `${w.oidc.issuer}/device`,
-		});
-		expect(lines[1]).toMatchObject({
-			profile: "default",
-			apiUrl: w.url,
-			me: { user: { email }, auth: { kind: "oidc" } },
-		});
-		expect(r.stderr).toContain("confirm the code");
-		expect(r.stderr).toContain("credentials are stored in");
-		expect(w.oidc.stats.deviceAuthorization).toBe(before + 1);
-
-		const config = JSON.parse(
-			readFileSync(join(home.configDir, "config.json"), "utf8"),
-		);
-		expect(config).toEqual({
-			current: "default",
-			profiles: {
-				default: {
-					apiUrl: w.url,
-					auth: "oidc",
-					issuer: w.oidc.issuer,
-					credentialStore: "file",
-					tenancy: "teams",
-					tenancyCheckedAt: expect.any(Number),
-				},
-			},
-		});
-		const configText = readFileSync(
-			join(home.configDir, "config.json"),
-			"utf8",
-		);
-		expect(configText).not.toMatch(/eyJ/);
-		expect(mode(join(home.configDir, "config.json"))).toBe(0o600);
-
-		const t = await runCli(["auth", "token", "--json"], { env: home.env });
-		expect(t.code, t.stderr).toBe(0);
-		const tok = JSON.parse(t.stdout);
-		expect(tok).toMatchObject({ kind: "oidc", apiUrl: w.url, team: null });
-		expect(Date.parse(tok.expiresAt)).toBeGreaterThan(Date.now() + 200_000);
-		expect(jwtClaims(tok.token)).toMatchObject({
-			sub,
-			email,
-			azp: "umiak-cli",
-		});
-
-		const who = await runCli(["whoami"], { env: home.env });
-		expect(who.code, who.stderr).toBe(0);
-		expect(JSON.parse(who.stdout).user.email).toBe(email);
-	});
-
 	it("--credential-store file keeps the tokens in credentials.json with mode 0600", async () => {
-		const sub = `kc-${crypto.randomUUID()}`;
-		w.oidc.deviceFlow.autoApprove({ sub, email: `${sub}@example.com` });
+		const _sub = `kc-${crypto.randomUUID()}`;
 		const env = { ...home.env, UMIAK_CREDENTIAL_STORE: undefined };
 		const r = await runCli(
 			[
@@ -233,15 +112,10 @@ describe("umiak login", () => {
 		const file = join(home.configDir, "credentials.json");
 		expect(mode(file)).toBe(0o600);
 		const all = JSON.parse(readFileSync(file, "utf8"));
-		const entry = all[`work@${w.oidc.issuer}`];
+		const entry = all[`work@${w.url}`];
 		expect(entry).toBeTypeOf("string");
 		const cred = JSON.parse(entry);
-		expect(cred).toMatchObject({
-			kind: "oidc",
-			issuer: w.oidc.issuer,
-			clientId: "umiak-cli",
-		});
-		expect(cred.refreshToken).toBeTypeOf("string");
+		expect(cred).toMatchObject({ kind: "key", token: expect.any(String) });
 		const config = JSON.parse(
 			readFileSync(join(home.configDir, "config.json"), "utf8"),
 		);
@@ -250,70 +124,7 @@ describe("umiak login", () => {
 		// The profile remembers its store: no flag or env needed later.
 		const t = await runCli(["auth", "token"], { env });
 		expect(t.code, t.stderr).toBe(0);
-		expect(t.stdout.trim()).toBe(cred.accessToken);
-	});
-
-	it("waits through authorization_pending until the person confirms", async () => {
-		const oidc = await startTestOidcServer({ deviceInterval: 1 });
-		const w2 = await startWorld({ oidcServer: oidc });
-		try {
-			const sub = `kc-${crypto.randomUUID()}`;
-			const run = runCli(["login", "--no-browser", "--api-url", w2.url], {
-				env: home.env,
-			});
-			const code = await until(async () => oidc.deviceFlow.pending()[0]);
-			// The CLI has polled at least once and got authorization_pending.
-			await until(async () => (oidc.stats.token >= 1 ? true : undefined));
-			oidc.deviceFlow.approve(code, {
-				sub,
-				email: `${sub}@example.com`,
-			});
-			const r = await run;
-			expect(r.code, r.stderr).toBe(0);
-			expect(r.last()).toMatchObject({
-				event: "logged_in",
-				me: { user: { email: `${sub}@example.com` } },
-			});
-			expect(oidc.stats.token).toBeGreaterThanOrEqual(2);
-		} finally {
-			await w2.close();
-			await oidc.close();
-		}
-	});
-
-	it("an expired device code exits 4 and stores nothing", async () => {
-		const oidc = await startTestOidcServer({
-			deviceInterval: 1,
-			deviceExpiresIn: 1,
-		});
-		const w2 = await startWorld({ oidcServer: oidc });
-		try {
-			const r = await runCli(["login", "--no-browser", "--api-url", w2.url], {
-				env: home.env,
-			});
-			expect(r.code).toBe(4);
-			expect(r.last()).toMatchObject({ event: "error", code: "login_failed" });
-			expect(r.last().message).toMatch(/expired/);
-			expect(() => readFileSync(join(home.configDir, "config.json"))).toThrow();
-		} finally {
-			await w2.close();
-			await oidc.close();
-		}
-	});
-
-	it("a login denied in the browser exits 4 and stores nothing", async () => {
-		const run = runCli(["login", "--no-browser", "--api-url", w.url], {
-			env: home.env,
-		});
-		const code = await until(async () => w.oidc.deviceFlow.pending()[0]);
-		w.oidc.deviceFlow.deny(code);
-		const r = await run;
-		expect(r.code).toBe(4);
-		expect(r.last()).toMatchObject({
-			code: "login_failed",
-			message: expect.stringMatching(/denied/),
-		});
-		expect(() => readFileSync(join(home.configDir, "config.json"))).toThrow();
+		expect(t.stdout.trim()).toBe(cred.token);
 	});
 
 	it("--key-stdin checks the key with /v1/me and stores it", async () => {
@@ -427,56 +238,6 @@ describe("umiak login", () => {
 		expect(bad.last()).toMatchObject({ code: "team_forbidden" });
 	});
 
-	it("logout of a Keycloak login revokes the refresh token and erases it", async () => {
-		const sub = `kc-${crypto.randomUUID()}`;
-		w.oidc.deviceFlow.autoApprove({ sub, email: `${sub}@example.com` });
-		expect(
-			(
-				await runCli(["login", "--no-browser", "--api-url", w.url], {
-					env: home.env,
-				})
-			).code,
-		).toBe(0);
-		const revokes = w.oidc.stats.revoke;
-		const r = await runCli(["logout"], { env: home.env });
-		expect(r.code, r.stderr).toBe(0);
-		expect(JSON.parse(r.stdout)).toEqual({
-			profile: "default",
-			loggedOut: true,
-			revoked: true,
-		});
-		expect(w.oidc.stats.revoke).toBe(revokes + 1);
-		expect(
-			JSON.parse(
-				readFileSync(join(home.configDir, "credentials.json"), "utf8"),
-			),
-		).toEqual({});
-		const t = await runCli(["auth", "token"], { env: home.env });
-		expect(t.code).toBe(4);
-		const again = await runCli(["logout"], { env: home.env });
-		expect(JSON.parse(again.stdout)).toMatchObject({ loggedOut: false });
-	});
-
-	it("re-login into the same profile revokes the old refresh token", async () => {
-		const sub = `kc-${crypto.randomUUID()}`;
-		w.oidc.deviceFlow.autoApprove({ sub, email: `${sub}@example.com` });
-		const login = () =>
-			runCli(["login", "--no-browser", "--api-url", w.url], { env: home.env });
-		expect((await login()).code).toBe(0);
-		const cred = () =>
-			JSON.parse(
-				JSON.parse(
-					readFileSync(join(home.configDir, "credentials.json"), "utf8"),
-				)[`default@${w.oidc.issuer}`],
-			);
-		const first = cred().refreshToken;
-		const revokes = w.oidc.stats.revoke;
-		const r = await login();
-		expect(r.code, r.stderr).toBe(0);
-		expect(w.oidc.stats.revoke).toBe(revokes + 1);
-		expect(cred().refreshToken).not.toBe(first);
-	});
-
 	it("re-login with another store deletes the secret from the old store", async () => {
 		const secrets = fakeSecrets();
 		const env = { ...home.env, UMIAK_CREDENTIAL_STORE: undefined };
@@ -559,27 +320,15 @@ describe("umiak login", () => {
 
 describe("--cacert / UMIAK_CA_FILE (self-signed TLS front for api and Keycloak)", () => {
 	let tls: TlsFront;
-	let oidc: TestOidcServer;
 	let w: CliWorld;
 	let home: CliHome;
 	beforeAll(async () => {
 		tls = await startTlsFront();
-		oidc = await startTestOidcServer({
-			deviceInterval: 0,
-			issuer: `${tls.url}/realms/umiak`,
-		});
-		w = await startWorld({
-			oidcServer: oidc,
-			settings: {
-				UMIAK_OIDC_JWKS_URL: `${oidc.base}/realms/umiak/protocol/openid-connect/certs`,
-			},
-		});
-		tls.route("/realms/", oidc.base);
+		w = await startWorld();
 		tls.route("/v1/", w.url);
 	});
 	afterAll(async () => {
 		await w?.close();
-		await oidc?.close();
 		await tls?.close();
 	});
 	beforeEach(() => {
@@ -598,45 +347,6 @@ describe("--cacert / UMIAK_CA_FILE (self-signed TLS front for api and Keycloak)"
 			retryable: true,
 		});
 		expect(r.last().message).toMatch(/certificate/i);
-	});
-
-	it("--cacert: device login through HTTPS api and Keycloak; UMIAK_CA_FILE for later commands", async () => {
-		const sub = `kc-${crypto.randomUUID()}`;
-		oidc.deviceFlow.autoApprove({ sub, email: `${sub}@example.com` });
-		const r = await runCli(
-			["login", "--no-browser", "--api-url", tls.url, "--cacert", tls.caFile],
-			{
-				env: home.env,
-			},
-		);
-		expect(r.code, r.stderr).toBe(0);
-		expect(r.last()).toMatchObject({
-			event: "logged_in",
-			me: { user: { email: `${sub}@example.com` } },
-		});
-		expect(oidc.stats.deviceAuthorization).toBeGreaterThanOrEqual(1);
-
-		const who = await runCli(["whoami"], {
-			env: { ...home.env, UMIAK_CA_FILE: tls.caFile },
-		});
-		expect(who.code, who.stderr).toBe(0);
-		expect(JSON.parse(who.stdout).user.email).toBe(`${sub}@example.com`);
-
-		// A refresh goes to Keycloak through the same CA.
-		const file = join(home.configDir, "credentials.json");
-		const all = JSON.parse(readFileSync(file, "utf8"));
-		const name = `default@${oidc.issuer}`;
-		const cred = JSON.parse(all[name]);
-		cred.expiresAt = new Date(Date.now() - 1000).toISOString();
-		all[name] = JSON.stringify(cred);
-		const { writeFileSync } = await import("node:fs");
-		writeFileSync(file, JSON.stringify(all), { mode: 0o600 });
-		const refreshes = oidc.stats.refresh;
-		const t = await runCli(["auth", "token", "--json"], {
-			env: { ...home.env, UMIAK_CA_FILE: tls.caFile },
-		});
-		expect(t.code, t.stderr).toBe(0);
-		expect(oidc.stats.refresh).toBe(refreshes + 1);
 	});
 
 	it("an unreadable --cacert is a usage error", async () => {

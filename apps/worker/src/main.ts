@@ -21,11 +21,7 @@ import { PveInfraRegistry } from "./adapters/pve-infra.ts";
 import { parseWorkerEnv, type WorkerEnv } from "./env.ts";
 import { errText, processLogger } from "./log.ts";
 import { PromMetrics } from "./metrics.ts";
-import {
-	createWorkerIdpSync,
-	openWorkerPayload,
-	type WorkerPayload,
-} from "./payload.ts";
+import { openWorkerPayload, type WorkerPayload } from "./payload.ts";
 import type { AgentPort, GatewayPort } from "./ports.ts";
 import { createWorker, STOP_TIMEOUT_MS, type Worker } from "./worker.ts";
 
@@ -91,14 +87,6 @@ async function main(): Promise<void> {
 			log,
 		});
 		const p = payload;
-		const idpSync = createWorkerIdpSync({
-			env: env.idpSync,
-			payload: p.payload,
-			log,
-		});
-		if (idpSync === undefined) {
-			log.info("UMIAK_IDP_SYNC_KEYCLOAK_URL is not set: ctl-idp-sync is off");
-		}
 		let gateway: GatewayPort;
 		let agent: AgentPort;
 		if (env.gatewayServiceTokenFile !== undefined) {
@@ -127,22 +115,7 @@ async function main(): Promise<void> {
 			gateway = new UnconfiguredGatewayPort();
 			agent = new UnavailableAgentPort();
 		}
-		if (!(env.turnSecretFile && env.turnUrls))
-			log.info(
-				"desktop runs without TURN: WebRTC is unavailable, streaming uses WebSocket via the gateway",
-			);
 		worker = createWorker({
-			...(env.turnSecretFile && env.turnUrls
-				? {
-						turn: {
-							secret: readFileSync(env.turnSecretFile, "utf8").trim(),
-							urls: env.turnUrls
-								.split(",")
-								.map((s) => s.trim())
-								.filter(Boolean),
-						},
-					}
-				: {}),
 			pool,
 			config: p.config,
 			keys,
@@ -154,8 +127,6 @@ async function main(): Promise<void> {
 			reconcileDryRun: env.reconcileDryRun,
 			migrateOnStart: env.migrateOnStart,
 			httpPort: env.httpPort,
-			idpSyncIntervalMs: env.idpSyncIntervalMs,
-			...(idpSync === undefined ? {} : { idpSync }),
 			payloadReady: () => p.ready(),
 		});
 		await worker.start();

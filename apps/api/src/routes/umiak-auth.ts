@@ -112,7 +112,7 @@ async function authorize(c: Context<ApiEnv>, deps: ApiDeps): Promise<Response> {
 		throw page(403, "forbidden", "This port is blocked by the platform.");
 	}
 	const a = authOf(c);
-	if (desktop || d.ssoPortPolicy === "team") {
+	{
 		const inTeam = a.teams.some((m) => m.teamId === t.teamId);
 		if (!inTeam && !a.principal.isOperator) {
 			throw page(

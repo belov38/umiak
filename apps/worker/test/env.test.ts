@@ -9,18 +9,6 @@ const BASE = {
 };
 
 describe("worker env", () => {
-	it("owner disables IDP sync even with leftover Keycloak configuration", () => {
-		expect(
-			parseWorkerEnv({
-				...BASE,
-				UMIAK_AUTH_MODE: "owner",
-				UMIAK_IDP_SYNC_KEYCLOAK_URL: "http://keycloak:8080",
-			}).idpSync,
-		).toBeUndefined();
-		expect(() =>
-			parseWorkerEnv({ ...BASE, UMIAK_AUTH_MODE: "invalid" }),
-		).toThrow();
-	});
 	it("missing DATABASE_URL is a clear error", () => {
 		const { DATABASE_URL: _, ...rest } = BASE;
 		expect(() => parseWorkerEnv(rest)).toThrow(EnvError);
@@ -78,7 +66,6 @@ describe("worker env", () => {
 			migrateOnStart: true,
 			logLevel: "info",
 			dbPoolMax: 30,
-			idpSyncIntervalMs: 300_000,
 			portDomain: undefined,
 			sshUserCaKeysFile: undefined,
 		});
@@ -119,7 +106,6 @@ describe("worker env", () => {
 			migrateOnStart: false,
 			logLevel: "debug",
 			dbPoolMax: 50,
-			idpSyncIntervalMs: 60_000,
 		});
 	});
 

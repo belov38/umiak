@@ -153,14 +153,14 @@ describe("requireOwnerUnlessKey", () => {
 		expect(await run({ kind: "team_key", userId: null, role: null })).toBe(
 			"passed",
 		);
-		expect(await run({ kind: "oidc", userId: "u", role: "owner" })).toBe(
+		expect(await run({ kind: "session", userId: "u", role: "owner" })).toBe(
 			"passed",
 		);
 		for (const p of [
 			{ kind: "session", userId: "u", role: "member" },
 			// Not a key, whatever userId says.
 			{ kind: "session", userId: null, role: "member" },
-			{ kind: "oidc", userId: null, role: null },
+			{ kind: "session", userId: null, role: null },
 		]) {
 			expect(await run(p)).toMatchObject({
 				status: 403,

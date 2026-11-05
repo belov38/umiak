@@ -2,17 +2,10 @@
 // the public app. The committed `openapi/v1.json` uses placeholder URLs; the
 // document served at `/v1/openapi.json` carries the deployment's.
 import type { ApiApp } from "../deps.ts";
-import {
-	DEFAULT_SECURITY,
-	DOC_API_URL_PLACEHOLDER,
-	DOC_ISSUER_PLACEHOLDER,
-	openIdConnectUrl,
-} from "./registry.ts";
+import { DEFAULT_SECURITY, DOC_API_URL_PLACEHOLDER } from "./registry.ts";
 
 export interface DocumentUrls {
 	apiUrl: string;
-	/** Keycloak issuer; null keeps the placeholder. */
-	issuer: string | null;
 }
 
 export type OpenApiDocument = Record<string, unknown>;
@@ -28,7 +21,6 @@ export function buildOpenApiDocument(
 	app: ApiApp,
 	urls: DocumentUrls = {
 		apiUrl: DOC_API_URL_PLACEHOLDER,
-		issuer: DOC_ISSUER_PLACEHOLDER,
 	},
 ): OpenApiDocument {
 	const doc = app.getOpenAPI31Document({
@@ -37,14 +29,6 @@ export function buildOpenApiDocument(
 		servers: [{ url: urls.apiUrl }],
 		security: DEFAULT_SECURITY,
 	}) as unknown as OpenApiDocument;
-	const schemes = (
-		doc.components as {
-			securitySchemes?: { keycloak?: { openIdConnectUrl?: string } };
-		}
-	)?.securitySchemes;
-	if (urls.issuer !== null && schemes?.keycloak) {
-		schemes.keycloak.openIdConnectUrl = openIdConnectUrl(urls.issuer);
-	}
 	return doc;
 }
 

@@ -21,8 +21,6 @@ import { IdentityListener } from "../src/index.ts";
 import {
 	captureLogs,
 	issueApiKey,
-	startTestOidcServer,
-	type TestOidcServer,
 	testSettings,
 } from "../src/testing/index.ts";
 import { eventually } from "./helpers/auth.ts";
@@ -40,7 +38,6 @@ describe.skipIf(skipPg())("team API keys (S7 §7.2, §13)", () => {
 	let db: TestDatabase;
 	let w: ApiWorld;
 	let events: IdentityListener;
-	let oidc: TestOidcServer;
 
 	beforeAll(async () => {
 		db = await createTestDatabase({ max: 20 });
@@ -48,10 +45,8 @@ describe.skipIf(skipPg())("team API keys (S7 §7.2, §13)", () => {
 		events = IdentityListener.connect(db.url, { reconnectDelayMs: 50 });
 		events.start();
 		await events.whenReady();
-		oidc = await startTestOidcServer();
 	});
 	afterAll(async () => {
-		await oidc?.close();
 		await events?.close();
 		await w?.close();
 		await db?.drop();
@@ -218,15 +213,10 @@ describe.skipIf(skipPg())("team API keys (S7 §7.2, §13)", () => {
 		});
 
 		it("Keycloak JWT: createdVia cli with a umiak-cli/ User-Agent, else api", async () => {
-			const settings = testSettings({
-				UMIAK_OIDC_ISSUER: oidc.issuer,
+			const _settings = testSettings({
 				UMIAK_API_RATE_BURST: "100000",
 			});
-			const token = await oidc.token({
-				sub: randomUUID(),
-				email: `u-${randomUUID()}@example.com`,
-			});
-			const h = w.harness({ bearer: token, deps: { settings } });
+			const { h } = await session("owner");
 			const cli = await h.request("POST", "/v1/api-keys", {
 				headers: { "user-agent": "umiak-cli/0.1.0 (darwin; arm64)" },
 				json: { name: "cli", preset: "read-only" },

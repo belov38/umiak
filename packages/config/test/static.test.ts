@@ -63,8 +63,6 @@ describe("StaticConfigReader.fromFile(poc.yaml)", () => {
 			recoverMinIntervalSeconds: 600,
 			defaultTemplate: "linux",
 			publicPortsEnabled: true,
-			ssoPortPolicy: "any",
-			ssoPolicyEpoch: 0,
 		});
 	});
 
@@ -176,8 +174,6 @@ describe("StaticConfigReader.fromObject", () => {
 		expect(t?.capabilities).toEqual(["exec", "files", "ssh"]);
 		const d = await r.defaults();
 		expect(d.publicPortsEnabled).toBe(true);
-		expect(d.ssoPortPolicy).toBe("any");
-		expect(d.ssoPolicyEpoch).toBe(0);
 	});
 
 	it("reads explicit S7 template and platform fields", async () => {
@@ -194,8 +190,6 @@ describe("StaticConfigReader.fromObject", () => {
 			],
 			defaults: {
 				publicPortsEnabled: false,
-				ssoPortPolicy: "team",
-				ssoPolicyEpoch: 3,
 			},
 		});
 		expect(await r.template("linux")).toMatchObject({
@@ -205,16 +199,9 @@ describe("StaticConfigReader.fromObject", () => {
 		});
 		expect(await r.defaults()).toMatchObject({
 			publicPortsEnabled: false,
-			ssoPortPolicy: "team",
-			ssoPolicyEpoch: 3,
 			maxTtlSeconds: 604800,
 		});
-		expect(() =>
-			StaticConfigReader.fromObject({
-				...b,
-				defaults: { ssoPortPolicy: "everyone" },
-			}),
-		).toThrow(/defaults\.ssoPortPolicy/);
+
 		// Capabilities are a closed set (S7 §13): a typo fails the config.
 		expect(() =>
 			StaticConfigReader.fromObject({

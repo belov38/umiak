@@ -10,11 +10,11 @@ import {
 	usersRevokeAfterChange,
 	usersRevokeAfterDelete,
 } from "../hooks/ssh-revoke.ts";
-import { oauth2ProxyStrategy } from "../identity/strategy.ts";
+import { ownerStrategy } from "../identity/strategy.ts";
 
-// Only resolveSession writes them, from the IdP claims (Local API,
+// Only resolveSession writes them, from the owner session (Local API,
 // overrideAccess): through /admin and /cms-api the values are dropped.
-const fromIdp = { create: () => false, update: () => false };
+const fromSession = { create: () => false, update: () => false };
 
 const lowercase = ({ value }: { value?: unknown }) =>
 	typeof value === "string" ? value.trim().toLowerCase() : value;
@@ -24,7 +24,7 @@ export const Users: CollectionConfig = {
 	auth: {
 		disableLocalStrategy: true,
 		// The oauth2-proxy headers, on every request (S8 §5.4).
-		strategies: [oauth2ProxyStrategy],
+		strategies: [ownerStrategy],
 	},
 	admin: {
 		useAsTitle: "email",
@@ -59,32 +59,32 @@ export const Users: CollectionConfig = {
 			unique: true,
 			admin: {
 				description:
-					"`sub` of the IdP; empty for stubs. Clear it to let a new IdP account take over this user.",
+					"Stable internal session subject; empty for manually created stubs.",
 			},
 		},
 		{ name: "preferredUsername", type: "text" },
 		{
 			name: "groups",
 			type: "json",
-			access: fromIdp,
+			access: fromSession,
 			admin: {
 				...jsonFieldAdmin,
 				readOnly: true,
-				description: "Last groups from the IdP.",
+				description: "Groups of the internal owner session.",
 			},
 		},
 		{
 			name: "isOperator",
 			type: "checkbox",
 			defaultValue: false,
-			access: fromIdp,
+			access: fromSession,
 			admin: { readOnly: true },
 		},
 		{ name: "active", type: "checkbox", defaultValue: true },
 		{
 			name: "deactivatedReason",
 			type: "select",
-			options: ["operator", "idp_disabled", "idp_deleted"],
+			options: ["operator"],
 		},
 		{ name: "deactivatedAt", type: "date" },
 		{ name: "defaultTeam", type: "relationship", relationTo: "teams" },

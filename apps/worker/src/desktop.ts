@@ -1,35 +1,8 @@
-import { createHmac } from "node:crypto";
-import { stepRequestId } from "@umiak/core";
 import type { WorkerCtx } from "./context.ts";
-import { AgentUnavailable, type DesktopConfiguration } from "./ports.ts";
+import { AgentUnavailable } from "./ports.ts";
 import type { StepFence } from "./steps.ts";
 import { waitUntil } from "./wait.ts";
 
-/** Only worker and coturn hold this key. Never log this configuration. */
-export interface TurnConfig {
-	secret: string;
-	urls: string[];
-}
-export function issueTurnCredentials(
-	config: TurnConfig,
-	sandboxId: string,
-	now = new Date(),
-): DesktopConfiguration["iceServers"][number] {
-	if (
-		config.secret.length < 32 ||
-		config.urls.length === 0 ||
-		config.urls.some((url) => !/^turns?:[^\s]+$/.test(url))
-	)
-		throw new Error("TURN secret and URLs are not configured correctly");
-	const username = `${Math.floor(now.getTime() / 1000) + 86400}:${sandboxId}`;
-	return {
-		urls: [...config.urls],
-		username,
-		credential: createHmac("sha1", config.secret)
-			.update(username)
-			.digest("base64"),
-	};
-}
 /** Called after claim and after secrets delivery on every new boot. */
 export async function configureDesktop(
 	ctx: WorkerCtx,
@@ -60,56 +33,15 @@ export async function configureDesktop(
 		{
 			authEpoch,
 			// Without TURN the desktop runs on the WebSocket transport only.
-			iceServers: ctx.turn ? [issueTurnCredentials(ctx.turn, sandboxId)] : [],
+			iceServers: [],
 		},
 		requestId,
 	);
 	await ctx.pool.query(
-		"UPDATE runtime.sandbox_desktops SET turn_issued_at=now(),updated_at=now() WHERE sandbox_id=$1 AND auth_epoch=$2",
+		"UPDATE runtime.sandbox_desktops SET updated_at=now() WHERE sandbox_id=$1 AND auth_epoch=$2",
 		[sandboxId, authEpoch],
 	);
 }
-/** Desktops renewed per controller run; the rest wait for the next run. */
-export const DESKTOP_TURN_BATCH = 100;
-/**
- * Every ten minutes refresh credentials older than twelve hours: never attempted
- * first, then the longest since the last attempt, then the oldest credentials.
- * An unreachable guest is logged and skipped: it stays due but goes behind the
- * others, so a full batch of dead guests cannot starve the rest.
- */
-export async function refreshDesktopTurn(
-	ctx: WorkerCtx,
-	batch = DESKTOP_TURN_BATCH,
-): Promise<number> {
-	if (!ctx.turn) return 0;
-	const due = await ctx.pool.query<{ id: string; machine_id: string }>(
-		`SELECT s.id,s.machine_id FROM runtime.sandboxes s JOIN runtime.sandbox_desktops d ON d.sandbox_id=s.id WHERE s.state='ready' AND s.machine_id IS NOT NULL AND (d.turn_issued_at IS NULL OR d.turn_issued_at<now()-interval '12 hours') ORDER BY d.turn_attempted_at ASC NULLS FIRST, d.turn_issued_at ASC NULLS FIRST, s.id LIMIT $1`,
-		[batch],
-	);
-	await ctx.pool.query(
-		"UPDATE runtime.sandbox_desktops SET turn_attempted_at=now() WHERE sandbox_id=ANY($1::uuid[])",
-		[due.rows.map((s) => s.id)],
-	);
-	let count = 0;
-	for (const s of due.rows) {
-		try {
-			await configureDesktop(
-				ctx,
-				s.id,
-				s.machine_id,
-				stepRequestId(s.id, `desktop-turn:${Math.floor(Date.now() / 600000)}`),
-			);
-			count++;
-		} catch (err) {
-			ctx.log.warn(
-				{ sandboxId: s.id, err: (err as Error).message },
-				"desktop TURN renewal failed; retrying on the next run",
-			);
-		}
-	}
-	return count;
-}
-
 /** A configured desktop must become usable on this same boot before finish. */
 export async function waitForDesktopReady(
 	ctx: WorkerCtx,

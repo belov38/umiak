@@ -8,13 +8,10 @@ import type { ApiDeps, ApiEnv } from "../deps.ts";
 import { ownerAuthenticate } from "./owner.ts";
 import {
 	type AuthContext,
-	authRequired,
 	decodeTeamRef,
 	invalidToken,
 	keyAuth,
 	needsAuth,
-	personAuth,
-	selectPersonTeam,
 	TEAM_HEADER,
 	teamForbidden,
 } from "./principal.ts";
@@ -72,13 +69,7 @@ async function authenticate(
 	c: Context<ApiEnv>,
 ): Promise<AuthContext> {
 	const token = bearerOf(c);
-	if (token === null && deps.settings.authMode === "owner")
-		return ownerAuthenticate(deps, c, requestedTeam(c));
-	if (token === null) {
-		throw authRequired(
-			"authentication required: send `Authorization: Bearer <token>` with a team API key or a Keycloak access token (`umiak login`)",
-		);
-	}
+	if (token === null) return ownerAuthenticate(deps, c, requestedTeam(c));
 	// Decoded after the credential passed: a stranger always gets a 401.
 	const teamHeader = c.req.header(TEAM_HEADER);
 	const requested = () =>
@@ -88,12 +79,8 @@ async function authenticate(
 	switch (classifyBearer(token)) {
 		case "team_key":
 			return keyAuthenticate(deps, token, requested);
-		case "jwt":
-			return jwtAuthenticate(deps, token, requested);
 		default:
-			throw invalidToken(
-				"the bearer is neither a team API key nor an access token",
-			);
+			throw invalidToken("the bearer is not a team API key");
 	}
 }
 
@@ -123,29 +110,4 @@ async function keyAuthenticate(
 	}
 	deps.keyCache.touch(hit.key);
 	return keyAuth(hit.key, hit.teamName);
-}
-
-async function jwtAuthenticate(
-	deps: ApiDeps,
-	token: string,
-	requested: () => string | null,
-): Promise<AuthContext> {
-	if (deps.oidc === null) {
-		throw invalidToken(
-			"this deployment does not accept Keycloak tokens; use a team API key",
-		);
-	}
-	const claims = await deps.oidc.verify(token);
-	const s = await deps.sessions.resolve({
-		email: claims.email,
-		user: claims.sub,
-		groups: claims.groups,
-		...(claims.preferredUsername === undefined
-			? {}
-			: { preferredUsername: claims.preferredUsername }),
-		...(claims.name === undefined ? {} : { name: claims.name }),
-	});
-	// No operator bypass for tokens (C6).
-	const team = await selectPersonTeam(deps.identity, s, requested(), false);
-	return personAuth("oidc", s, team, claims.expiresAt);
 }

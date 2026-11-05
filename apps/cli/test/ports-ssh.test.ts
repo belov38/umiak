@@ -55,7 +55,7 @@ describe("ports and ssh", () => {
 	let env: Record<string, string>;
 	let sb: { id: string; slug: string };
 	beforeAll(async () => {
-		w = await startWorld({ oidc: { deviceInterval: 0 } });
+		w = await startWorld();
 		sb = await w.readySandbox();
 	});
 	afterAll(async () => {
@@ -344,8 +344,7 @@ describe("ports and ssh", () => {
 	});
 
 	it("ssh-keys add (default ~/.ssh/id_ed25519.pub), list and rm need a person", async () => {
-		const sub = `kc-${crypto.randomUUID()}`;
-		w.oidc.deviceFlow.autoApprove({ sub, email: `${sub}@example.com` });
+		const _sub = `kc-${crypto.randomUUID()}`;
 		const login = await runCli(["login", "--no-browser", "--api-url", w.url], {
 			env: home.env,
 		});

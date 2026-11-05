@@ -18,8 +18,8 @@ type Scope = NonNullable<
 >[number];
 
 async function requirePerson(ctx: Context, what: string): Promise<void> {
-	const kind = (await ctx.bearer()).kind;
-	if (kind === "oidc") return;
+	await ctx.bearer();
+	if (ctx.resolved.profile?.auth === "owner") return;
 	throw new CliError({
 		code: "user_required",
 		message: `${what} needs an owner logged in with Keycloak (run: umiak login); a team key cannot issue keys`,

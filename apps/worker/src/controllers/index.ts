@@ -1,10 +1,8 @@
 import type { QueueName } from "@umiak/core";
 import type { WorkerCtx } from "../context.ts";
-import { refreshDesktopTurn } from "../desktop.ts";
 import { runAutostop } from "./autostop.ts";
 import { runCleanup } from "./cleanup.ts";
 import { runHealth } from "./health.ts";
-import { IDP_SYNC_INTERVAL_MS, runIdpSync } from "./idp-sync.ts";
 import { runReconcile } from "./reconcile.ts";
 
 // Periodic controllers (S6 §15.1). Each is an `exclusive` pg-boss queue whose
@@ -23,12 +21,6 @@ export interface ControllerSpec {
 }
 
 export const CONTROLLERS: readonly ControllerSpec[] = [
-	{
-		queue: "ctl-desktop-turn",
-		intervalMs: 600_000,
-		enabled: (ctx) => ctx.turn !== undefined,
-		run: refreshDesktopTurn,
-	},
 	{ queue: "ctl-health", intervalMs: 10_000, run: runHealth },
 	{ queue: "ctl-autostop", intervalMs: 15_000, run: runAutostop },
 	{ queue: "ctl-cleanup", intervalMs: 600_000, run: runCleanup },
@@ -36,15 +28,6 @@ export const CONTROLLERS: readonly ControllerSpec[] = [
 		queue: "ctl-reconcile",
 		intervalMs: 60_000,
 		run: (ctx) => runReconcile(ctx, { dryRun: ctx.reconcileDryRun ?? true }),
-	},
-	{
-		queue: "ctl-idp-sync",
-		intervalMs: IDP_SYNC_INTERVAL_MS,
-		enabled: (ctx) => ctx.idpSync !== undefined,
-		run: async (ctx) => {
-			if (ctx.idpSync === undefined) return;
-			await runIdpSync(ctx, ctx.idpSync);
-		},
 	},
 ];
 
@@ -56,5 +39,4 @@ export function activeControllers(ctx: WorkerCtx): ControllerSpec[] {
 export * from "./autostop.ts";
 export * from "./cleanup.ts";
 export * from "./health.ts";
-export * from "./idp-sync.ts";
 export * from "./reconcile.ts";

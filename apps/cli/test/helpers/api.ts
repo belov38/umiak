@@ -11,14 +11,13 @@ import {
 	FakeAgent,
 	issueApiKey,
 	makeTestDeps,
-	startTestOidcServer,
-	type TestOidcServer,
-	type TestOidcServerOptions,
 	testSettings,
 } from "@umiak/api/testing";
 import {
 	encodeUuid,
 	loadSshCa,
+	OWNER_OPERATOR_GROUP,
+	ownerSessionHeaders,
 	PgEnvironmentStore,
 	type SshCa,
 } from "@umiak/auth";
@@ -30,7 +29,6 @@ import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 export interface CliWorld {
 	/** URL of the api (http://127.0.0.1:<port>). */
 	url: string;
-	oidc: TestOidcServer;
 	db: TestDatabase;
 	env: ServiceEnv;
 	deps: ApiDeps;
@@ -83,11 +81,9 @@ export async function until<T>(
 }
 
 export interface WorldOptions {
-	oidc?: TestOidcServerOptions;
 	/** Extra api settings (env names), e.g. UMIAK_OIDC_ISSUER behind a TLS front. */
 	settings?: Record<string, string>;
 	/** A started OIDC server to use instead of a new one. */
-	oidcServer?: TestOidcServer;
 	/** Logger of the api (captureLogs().log), for debugging. */
 	log?: ApiDeps["log"];
 }
@@ -95,7 +91,6 @@ export interface WorldOptions {
 export async function startWorld(o: WorldOptions = {}): Promise<CliWorld> {
 	const db = await createTestDatabase({ max: 20 });
 	const pool = db.pool;
-	const oidc = o.oidcServer ?? (await startTestOidcServer(o.oidc));
 	// A node big enough for every sandbox of a suite (the default is 4 × 2 GB).
 	const env = await serviceEnv(pool, {
 		topology: { node: { ramCapMb: 1_048_576 } },
@@ -118,7 +113,6 @@ export async function startWorld(o: WorldOptions = {}): Promise<CliWorld> {
 		settings: testSettings({
 			UMIAK_API_RATE_BURST: "100000",
 			UMIAK_API_RATE_STARTS_PER_MIN: "100000",
-			UMIAK_OIDC_ISSUER: oidc.issuer,
 			UMIAK_SSH_HOST: ssh.host,
 			UMIAK_SSH_PORT: String(ssh.port),
 			...o.settings,
@@ -136,7 +130,57 @@ export async function startWorld(o: WorldOptions = {}): Promise<CliWorld> {
 		...(o.log === undefined ? {} : { log: o.log }),
 	});
 	const { secret } = await issueApiKey(deps.identity, { teamId: team });
-	const { server } = createApiServer(createPublicApp(deps));
+	const ownerToken = `umiak_owner_${crypto.randomUUID()}`;
+	const owner = await deps.identity.resolveSession(ownerSessionHeaders());
+	await pool.query(
+		"INSERT INTO identity.memberships(user_id,team_id,role) VALUES($1,$2,'owner') ON CONFLICT DO NOTHING",
+		[owner.user.id, team],
+	);
+	await pool.query("UPDATE identity.users SET default_team_id=$2 WHERE id=$1", [
+		owner.user.id,
+		team,
+	]);
+	deps.settings.operatorGroups.push(OWNER_OPERATOR_GROUP);
+	const app = createPublicApp(deps);
+	// Test ingress: pairing auto-approves; production pairing is covered by quickstart.
+	let revoked = false;
+	const { server } = createApiServer({
+		fetch(request, env) {
+			const path = new URL(request.url).pathname;
+			if (path === "/owner/pair") {
+				revoked = false;
+				return Response.json({
+					id: "pair",
+					secret: "private",
+					interval: 0,
+					expiresIn: 600,
+				});
+			}
+			if (path === "/owner/pair/poll")
+				return Response.json({ token: ownerToken });
+			if (path === "/owner/logout") {
+				revoked = true;
+				return Response.json({ ok: true });
+			}
+			if (request.headers.get("authorization") === `Bearer ${ownerToken}`) {
+				if (revoked)
+					return Response.json(
+						{
+							error: {
+								code: "unauthorized",
+								message: "Owner credential revoked",
+								retryable: false,
+								details: {},
+								requestId: "req_test",
+							},
+						},
+						{ status: 401 },
+					);
+				request.headers.delete("authorization");
+			}
+			return app.fetch(request, env);
+		},
+	});
 	const requests: string[] = [];
 	server.on("request", (req) => {
 		requests.push(`${req.method} ${req.url}`);
@@ -146,6 +190,7 @@ export async function startWorld(o: WorldOptions = {}): Promise<CliWorld> {
 	});
 	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 	const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+	deps.settings.ownerHosts.push(new URL(url).host);
 	const finish = async (
 		slug: string,
 		sandbox: string,
@@ -207,7 +252,6 @@ export async function startWorld(o: WorldOptions = {}): Promise<CliWorld> {
 		finish(slug, "ready", "running", "succeeded");
 	return {
 		url,
-		oidc,
 		db,
 		env,
 		deps,
@@ -254,7 +298,6 @@ export async function startWorld(o: WorldOptions = {}): Promise<CliWorld> {
 			});
 			deps.streams.close();
 			await agent.close();
-			if (o.oidcServer === undefined) await oidc.close();
 			await db.drop();
 		},
 	};

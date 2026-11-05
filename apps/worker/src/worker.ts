@@ -26,7 +26,6 @@ import {
 	type Timing,
 	type WorkerCtx,
 } from "./context.ts";
-import type { IdpSync } from "./controllers/idp-sync.ts";
 import { activeControllers, type ControllerSpec } from "./controllers/index.ts";
 import {
 	closeServer,
@@ -40,7 +39,6 @@ import { PromMetrics } from "./metrics.ts";
 import type { AgentPort, GatewayPort, InfraRegistry } from "./ports.ts";
 
 export interface WorkerOptions {
-	turn?: import("./desktop.ts").TurnConfig;
 	/** Shared pool: pg-boss, Drizzle and the handlers (S6 §15.2). Owned by the caller. */
 	pool: pg.Pool;
 	config: ConfigReader;
@@ -49,10 +47,6 @@ export interface WorkerOptions {
 	infra: InfraRegistry & { close?(): Promise<void> };
 	agent: AgentPort;
 	gateway: GatewayPort;
-	/** S8 IdP sync; `ctl-idp-sync` runs only when set (decision 15). */
-	idpSync?: IdpSync;
-	/** `UMIAK_IDP_SYNC_INTERVAL`; default the controller's 300 s. */
-	idpSyncIntervalMs?: number;
 	log?: Logger;
 	metrics?: PromMetrics;
 	timing?: Timing;
@@ -125,7 +119,6 @@ export class Worker {
 		this.metrics = o.metrics ?? new PromMetrics({ log: this.#log });
 		this.boss = createBoss(o.bossDb ?? poolDb(o.pool), this.#log, o.boss);
 		this.ctx = {
-			...(o.turn ? { turn: o.turn } : {}),
 			pool: o.pool,
 			db: dbOf(o.pool),
 			jobs: new PgBossJobSender(this.boss),
@@ -138,7 +131,6 @@ export class Worker {
 			log: this.#log,
 			metrics: this.metrics,
 			reconcileDryRun: o.reconcileDryRun ?? true,
-			...(o.idpSync !== undefined ? { idpSync: o.idpSync } : {}),
 		};
 	}
 
@@ -192,12 +184,7 @@ export class Worker {
 				? { pollingIntervalSeconds: o.pollingIntervalSeconds }
 				: {}),
 		});
-		const controllers = (o.controllers ?? activeControllers(this.ctx)).map(
-			(c) =>
-				c.queue === "ctl-idp-sync" && o.idpSyncIntervalMs !== undefined
-					? { ...c, intervalMs: o.idpSyncIntervalMs }
-					: c,
-		);
+		const controllers = o.controllers ?? activeControllers(this.ctx);
 		await registerControllers(this.boss, this.ctx, controllers, {
 			...(o.pollingIntervalSeconds !== undefined
 				? { pollingIntervalSeconds: o.pollingIntervalSeconds }

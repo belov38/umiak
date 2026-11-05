@@ -7,7 +7,7 @@ export { SCOPES, type Scope } from "@umiak/auth";
 
 export interface Principal {
 	/** browser session, Keycloak JWT (S7 §7.10) or team API key (S7 §7.2) */
-	kind: "session" | "oidc" | "team_key";
+	kind: "session" | "team_key";
 	/** Payload user id; null for team keys. */
 	userId: string | null;
 	teamId: string;

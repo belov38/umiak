@@ -11,7 +11,6 @@ import type { AgentApi } from "./agent/types.ts";
 import type { IdentityListener } from "./auth/identity-listener.ts";
 import type { ServiceTokens } from "./auth/internal.ts";
 import type { KeyCache } from "./auth/key-cache.ts";
-import type { OidcVerifier } from "./auth/oidc.ts";
 import type { AuthContext, SessionResolver } from "./auth/principal.ts";
 import type { RateLimits } from "./auth/rate-limit.ts";
 import type { CommandTimings } from "./commands/attach.ts";
@@ -39,8 +38,6 @@ export interface ApiDeps {
 	keyCache: KeyCache;
 	/** Cached resolveSession for browser sessions and Keycloak tokens. */
 	sessions: SessionResolver;
-	/** Keycloak access tokens; null without UMIAK_OIDC_ISSUER. */
-	oidc: OidcVerifier | null;
 	/** Accepted service tokens of the internal listener. */
 	serviceTokens: ServiceTokens;
 	rateLimits: RateLimits;

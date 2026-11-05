@@ -14,7 +14,7 @@ import { CliError } from "./exit-codes.ts";
 
 export type Env = Record<string, string | undefined>;
 
-export type AuthKind = "oidc" | "key" | "owner";
+export type AuthKind = "key" | "owner";
 export type StoreKind = "keychain" | "file";
 
 export interface Profile {
@@ -27,8 +27,6 @@ export interface Profile {
 	/** Team chosen at login (`--team` / UMIAK_TEAM); else the default team of the user. */
 	team?: string;
 	auth: AuthKind;
-	/** Keycloak issuer of an `oidc` profile. */
-	issuer?: string;
 	/** Where `umiak login` stored the credentials. */
 	credentialStore?: StoreKind;
 }
