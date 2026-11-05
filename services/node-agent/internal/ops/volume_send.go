@@ -55,6 +55,42 @@ type importRecord struct {
 	Receipt VolumeReceipt     `json:"receipt"`
 }
 
+// Bind the PVE storage alias to the same VG/thin pool whose LV ownership was checked.
+func (s *Server) validateTransferStorage() error {
+	raw, err := fs.ReadFile(s.Host.FS, "etc/pve/storage.cfg")
+	if err != nil {
+		return err
+	}
+	selected := false
+	kind := ""
+	values := map[string]string{}
+	count := 0
+	for _, line := range strings.Split(string(raw), "\n") {
+		clean := strings.TrimSpace(line)
+		if clean == "" || strings.HasPrefix(clean, "#") {
+			continue
+		}
+		if line[0] != ' ' && line[0] != '\t' {
+			parts := strings.Fields(clean)
+			selected = len(parts) == 2 && parts[1] == s.Cfg.Storage
+			if selected {
+				count++
+				kind = strings.TrimSuffix(parts[0], ":")
+			}
+			continue
+		}
+		if selected {
+			parts := strings.Fields(clean)
+			if len(parts) >= 2 {
+				values[parts[0]] = parts[1]
+			}
+		}
+	}
+	if count != 1 || kind != "lvmthin" || values["vgname"] != s.Cfg.VG || values["thinpool"] != s.Cfg.ThinPool {
+		return forbidden("PVE storage does not match the configured Umiak VG/thin pool")
+	}
+	return nil
+}
 func (s *Server) clusterIP(name string) (string, error) {
 	if !nodeNameRe.MatchString(name) {
 		return "", badReq("invalid cluster node")
@@ -93,6 +129,9 @@ func (s *Server) validateReceive(a VolumeReceiveArgs) (string, string, error) {
 		return "", "", badReq("source and destination are the same node")
 	}
 	if _, err := s.clusterIP(a.SourceNode); err != nil {
+		return "", "", err
+	}
+	if err := s.validateTransferStorage(); err != nil {
 		return "", "", err
 	}
 	return m[1], m[2], nil
@@ -194,6 +233,9 @@ func (s *Server) volumeSendTo(ctx context.Context, raw json.RawMessage) (any, er
 	m := snapLVRe.FindStringSubmatch(a.TargetName)
 	if m == nil || !transferIDRe.MatchString(m[1]) || !regexp.MustCompile(`^[a-z0-9]{1,16}$`).MatchString(m[2]) {
 		return nil, badReq("invalid staging destination")
+	}
+	if err = s.validateTransferStorage(); err != nil {
+		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

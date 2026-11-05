@@ -11,7 +11,7 @@ import (
 )
 
 func TestVolumeSendRejectsForeignAndUntrustedDestinations(t *testing.T) {
-	h := newHarness(fstest.MapFS{"etc/pve/.members": {Data: []byte(`{"nodelist":{"pve":{"online":1,"ip":"192.168.1.1"},"pve2":{"online":1,"ip":"192.168.1.2"},"offline":{"online":0,"ip":"192.168.1.3"}}}`)}})
+	h := newHarness(fstest.MapFS{"etc/pve/storage.cfg": {Data: []byte("lvmthin: local-lvm\n\tvgname pve\n\tthinpool data\n")}, "etc/pve/.members": {Data: []byte(`{"nodelist":{"pve":{"online":1,"ip":"192.168.1.1"},"pve2":{"online":1,"ip":"192.168.1.2"},"offline":{"online":0,"ip":"192.168.1.3"}}}`)}})
 	h.lvm.lvs[1].UUID = "source-uuid"
 	h.lvm.lvs[1].Attr = "Vri---tz-k"
 	for _, a := range []map[string]any{
@@ -42,7 +42,7 @@ func TestVolumeReceiveRejectsForeignNamesBeforeStartingCommands(t *testing.T) {
 func TestVerifiedImportReceiptIsBoundToSourceAndLVGeneration(t *testing.T) {
 	id := strings.Repeat("a", 32)
 	name := "umiak-snap-" + id + "-scsi0"
-	h := newHarness(fstest.MapFS{"etc/pve/.members": {Data: []byte(`{"nodelist":{"pve2":{"online":1,"ip":"192.168.1.2"}}}`)}})
+	h := newHarness(fstest.MapFS{"etc/pve/storage.cfg": {Data: []byte("lvmthin: local-lvm\n\tvgname pve\n\tthinpool data\n")}, "etc/pve/.members": {Data: []byte(`{"nodelist":{"pve2":{"online":1,"ip":"192.168.1.2"}}}`)}})
 	h.srv.Cfg.StateDir = t.TempDir()
 	a := VolumeReceiveArgs{TargetName: name, TargetVmid: 598, SourceNode: "pve2", SourceUUID: "source-uuid", SizeBytes: 512, Probe: true}
 	r := VolumeReceipt{Name: name, SourceUUID: a.SourceUUID, UUID: "target-uuid", SHA256: strings.Repeat("b", 64), SizeBytes: 512, Verified: true}
@@ -84,5 +84,14 @@ func TestSnapshotExportsFreezeTheirSource(t *testing.T) {
 	}
 	if err := h.srv.freezeTransferSource(t.Context(), lvm.LV{Name: "base-599-disk-0", Attr: "Vwi-a-tz--"}); err == nil {
 		t.Fatal("writable template accepted as immutable")
+	}
+}
+
+func TestFullCopyRejectsStorageAliasesToOtherPools(t *testing.T) {
+	for _, config := range []string{"dir: local-lvm\n\tpath /foreign\n", "lvmthin: local-lvm\n\tvgname foreign\n\tthinpool data\n", "lvmthin: local-lvm\n\tvgname pve\n\tthinpool foreign\n"} {
+		h := newHarness(fstest.MapFS{"etc/pve/storage.cfg": {Data: []byte(config)}})
+		if err := h.srv.validateTransferStorage(); err == nil {
+			t.Fatal("accepted", config)
+		}
 	}
 }
