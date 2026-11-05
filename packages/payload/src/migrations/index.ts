@@ -11,6 +11,9 @@ import * as m20261104_000000_windows_name from "./20261104_000000_windows_name.t
 import * as m20261105_000000_owner_only from "./20261105_000000_owner_only.ts";
 import * as m20261105_011533_retire_directory_notices from "./20261105_011533_retire_directory_notices.ts";
 
+import * as m20261105_020000_debian_template from "./20261105_020000_debian_template.ts";
+import * as m20261106_000000_drop_debian_template from "./20261106_000000_drop_debian_template.ts";
+
 export interface PayloadMigration {
 	name: string;
 	up: (args: MigrateUpArgs) => Promise<void>;
@@ -57,5 +60,15 @@ export const migrations: PayloadMigration[] = [
 		up: m20261105_011533_retire_directory_notices.up,
 		down: m20261105_011533_retire_directory_notices.down,
 		name: "20261105_011533_retire_directory_notices",
+	},
+	{
+		up: m20261105_020000_debian_template.up,
+		down: m20261105_020000_debian_template.down,
+		name: "20261105_020000_debian_template",
+	},
+	{
+		up: m20261106_000000_drop_debian_template.up,
+		down: m20261106_000000_drop_debian_template.down,
+		name: "20261106_000000_drop_debian_template",
 	},
 ];

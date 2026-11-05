@@ -181,7 +181,7 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 		expect(tpl.docs).toHaveLength(1);
 		expect(tpl.docs[0]).toMatchObject({
 			slug: "linux",
-			name: "linux",
+			name: "Ubuntu 26.04",
 			os: "linux",
 			enabled: true,
 			defaultSize: "2gb",

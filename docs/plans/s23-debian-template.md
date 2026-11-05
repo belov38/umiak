@@ -1,5 +1,7 @@
 # S23 implementation plan
 
+> **Status: deferred (2026-11-06).** Implementation reverted from main; Ubuntu stays the only Linux template. Kept as the design record for a later revival.
+
 1. Commit spec and this plan.
 2. Add Debian pins and inherited recipe. Generalize recipe schema, image cache,
    downloads and versions updater; enforce cloud.debian.org HTTPS without redirects,

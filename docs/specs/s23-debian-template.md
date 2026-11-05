@@ -1,5 +1,7 @@
 # S23: Debian 13 sandbox template
 
+> **Status: deferred (2026-11-06).** Implementation reverted from main; Ubuntu stays the only Linux template. Kept as the design record for a later revival.
+
 Add `debian` (trixie, amd64 genericcloud) alongside `linux` (Ubuntu 26.04,
 unchanged default). Reuse the Linux recipe steps, seed, files and verification;
 select apt sources, kernel, Java and Ubuntu-specific behavior by distro.
