@@ -95,6 +95,24 @@ def backup(identity, release):
         resume()
 
 
+def extract_state(archive, staging):
+    """Extract our private state archive with its exact owners and modes.
+
+    The data filter blocks unsafe paths and links but discards ownership and
+    directory modes (directories come out 0700). Restore both from the archive
+    without following symlinks; `cp -a` then carries them into the volumes, so
+    a service running as another user can still traverse its secret directory.
+    """
+    archive.extractall(staging, filter="data")
+    members = archive.getmembers()
+    for member in members:
+        os.chown(staging / member.name, member.uid, member.gid, follow_symlinks=False)
+    # Deepest first: tightening a parent never blocks fixing its children.
+    for member in sorted(members, key=lambda m: m.name.count("/"), reverse=True):
+        if member.isdir() or member.isreg():
+            os.chmod(staging / member.name, member.mode & 0o7777)
+
+
 def restore(identity, restore_data):
     target = BASE / identity
     metadata = json.loads((target / "metadata.json").read_text())
@@ -114,12 +132,7 @@ def restore(identity, restore_data):
             staging = target / "restore"
             if staging.exists():
                 shutil.rmtree(staging)
-            archive.extractall(staging, filter="data")
-            # The data filter intentionally discards ownership. Restore the
-            # original numeric IDs from our private archive without following
-            # symlinks; cp -a below carries them into the Docker volumes.
-            for member in archive.getmembers():
-                os.chown(staging / member.name, member.uid, member.gid, follow_symlinks=False)
+            extract_state(archive, staging)
             for name, path in paths.items():
                 for child in path.iterdir():
                     if child.is_dir() and not child.is_symlink():

@@ -111,3 +111,35 @@ def test_restore_stops_target_services_before_restoring_source_config(fake_backu
     assert (backup.CONFIG / "compose.yaml").read_text() == "old images"
     assert any("dropdb" in c for c in fake_backup)
     assert any("pg_restore" in c for c in fake_backup)
+
+
+def test_restore_extraction_keeps_directory_and_file_modes(tmp_path):
+    import os
+    import stat
+    import tarfile
+
+    source = tmp_path / "source" / "gateway-secrets"
+    (source / "logs").mkdir(parents=True)
+    source.chmod(0o755)
+    (source / "logs").chmod(0o711)
+    (source / "api-token").write_text("secret")
+    (source / "api-token").chmod(0o600)
+    (source / "ca.pem").write_text("public")
+    (source / "ca.pem").chmod(0o664)
+    with tarfile.open(tmp_path / "state.tar", "w") as archive:
+        archive.add(source, arcname="gateway-secrets")
+    staging = tmp_path / "restore"
+    # The host updater runs with a strict umask; the data filter creates
+    # directories through it, which is what left them 0700 on a real rollback.
+    previous = os.umask(0o077)
+    try:
+        with tarfile.open(tmp_path / "state.tar") as archive:
+            backup.extract_state(archive, staging)
+    finally:
+        os.umask(previous)
+    mode = lambda p: stat.S_IMODE(os.lstat(staging / p).st_mode)
+    # Regression: the data filter alone left every directory 0700.
+    assert mode("gateway-secrets") == 0o755
+    assert mode("gateway-secrets/logs") == 0o711
+    assert mode("gateway-secrets/api-token") == 0o600
+    assert mode("gateway-secrets/ca.pem") == 0o664
