@@ -1,8 +1,5 @@
-// Bearer check of the remote MCP server (S11 6.3, 11.5): the bearer is
-// asked to the api itself (GET /v1/me with this bearer and team), and the
-// answer is cached in the pod by sha256(token) and team. A JWT is decoded
-// without verifying it, only for the cache lifetime and the 55 s rule:
-// the api decides whether it is valid.
+// Verify opaque credentials through the private API; never decode client token claims.
+// The owner ingress enforces browser and paired-credential authentication.
 import { createHash } from "node:crypto";
 import { Umiak, UmiakError } from "@umiak/sdk";
 import type { Metrics } from "../metrics.ts";
@@ -23,7 +20,7 @@ export interface Principal {
 	team?: string;
 	kind: "team_key" | "session";
 	scopes: string[];
-	/** JWT `exp` in ms; null for team keys. */
+	/** Credential expiry in ms; null for ingress-managed sessions and opaque keys. */
 	expiresAt: number | null;
 	/** The person or key behind the bearer (the concurrency limit counts by it). */
 	subject: string;

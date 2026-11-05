@@ -28,7 +28,7 @@ export interface TestKeySpec {
 }
 
 export interface TestSessionSpec {
-	/** IdP subject (X-Auth-Request-User or JWT `sub`). */
+	/** Stable internal session subject. */
 	sub: string;
 	email?: string;
 	teams: TeamMembership[];

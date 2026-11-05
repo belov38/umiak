@@ -11,9 +11,9 @@ describe("classifyBearer", () => {
 		expect(classifyBearer(`umiaks_${"a".repeat(49)}`)).toBe("reserved");
 	});
 
-	it("three non-empty base64url parts are a jwt", () => {
+	it("signed-token-shaped bearers are unsupported", () => {
 		expect(classifyBearer("eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln-_x")).toBe(
-			"jwt",
+			"invalid",
 		);
 	});
 
