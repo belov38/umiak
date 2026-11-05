@@ -80,6 +80,7 @@ export function toSandboxResource(
 ): SandboxResource {
 	const x = ctx.extras;
 	const op = s.activeOperation;
+	const phase = op?.progress.phase;
 	return {
 		id: encodeUuid("sandbox", s.id),
 		slug: s.slug,
@@ -93,7 +94,10 @@ export function toSandboxResource(
 		size: s.sizeSlug,
 		vcpu: s.vcpu,
 		memoryMb: s.memoryMb,
-		state: s.state,
+		state:
+			op && isPublicOperation(op) && (phase === "moving" || phase === "queued")
+				? phase
+				: s.state,
 		health: s.health,
 		healthReason: s.healthReason,
 		degradedSince: isoOrNull(s.degradedSince),

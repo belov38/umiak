@@ -11,6 +11,7 @@ import { REPROVISION_OP } from "../ops/reprovision.ts";
 import { RESUME_OP } from "../ops/resume.ts";
 import { SAVE_SNAPSHOT_OP } from "../ops/save-snapshot.ts";
 import { STOP_OP } from "../ops/stop.ts";
+import { ensureMachineMove, withPortableLock } from "../portable.ts";
 import { isPermanent } from "../ports.ts";
 import {
 	DeadlineExceeded,
@@ -84,6 +85,22 @@ export async function handleSandboxOp(
 	ctx: WorkerCtx,
 	data: SandboxOpData,
 ): Promise<SandboxOpResult> {
+	const row = (
+		await ctx.pool.query<{ machine_id: string | null; portable: boolean }>(
+			`SELECT s.machine_id,EXISTS(SELECT 1 FROM runtime.move_reservations r WHERE r.machine_id=s.machine_id) OR EXISTS(SELECT 1 FROM runtime.volume_transfers v WHERE v.kind='machine' AND v.source_id=s.machine_id AND v.phase NOT IN ('done','cancelled')) AS portable FROM runtime.operations o JOIN runtime.sandboxes s ON s.id=o.sandbox_id WHERE o.id=$1`,
+			[data.operationId],
+		)
+	).rows[0];
+	if (row?.portable && row.machine_id)
+		return withPortableLock(ctx, `machine:${row.machine_id}`, () =>
+			handleSandboxOpLocked(ctx, data),
+		);
+	return handleSandboxOpLocked(ctx, data);
+}
+async function handleSandboxOpLocked(
+	ctx: WorkerCtx,
+	data: SandboxOpData,
+): Promise<SandboxOpResult> {
 	const fenced = await Fenced.begin(ctx, data.operationId);
 	if (fenced === null) return "skipped";
 	const h = handlerOf(fenced.op.kind);
@@ -95,6 +112,7 @@ export async function handleSandboxOp(
 		for (;;) {
 			try {
 				if (fenced.deadlinePassed()) throw new DeadlineExceeded(fenced.id);
+				await ensureMachineMove(ctx, fenced);
 				await h.run(ctx, fenced);
 				return "succeeded";
 			} catch (e) {
@@ -144,6 +162,7 @@ async function compensate(
 	h: SandboxOpHandler,
 	error: OperationError,
 ): Promise<SandboxOpResult> {
+	await ensureMachineMove(ctx, fenced, true);
 	await h.compensate(ctx, fenced, error);
 	ctx.metrics.inc("umiak_operation_failed_total", {
 		kind: fenced.op.kind,

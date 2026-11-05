@@ -6,6 +6,8 @@ class SandboxState(StrEnum):
     DELETED = "deleted"
     DELETING = "deleting"
     ERROR = "error"
+    MOVING = "moving"
+    QUEUED = "queued"
     READY = "ready"
     STARTING = "starting"
     STOPPED = "stopped"

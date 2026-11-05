@@ -15,6 +15,7 @@ import {
 	snapshotRef,
 } from "./db.ts";
 import { errFields } from "./log.ts";
+import { ensureSnapshotLocal, withPortableLock } from "./portable.ts";
 import type { CreatedVm, InfraSnapshotRef, NodeInfra } from "./ports.ts";
 import { DeadlineExceeded, FencedOut, type StepFence } from "./steps.ts";
 import { waitUntil } from "./wait.ts";
@@ -186,6 +187,28 @@ const PREPARED: readonly MachineState[] = [
 ];
 
 export async function prepareMachine(
+	ctx: WorkerCtx,
+	fence: StepFence,
+	machineId: string,
+	source: PrepSource,
+): Promise<void> {
+	if (source.kind === "snapshot")
+		return withPortableLock(ctx, `snapshot:${source.snapshotId}`, async () => {
+			const m = await loadMachine(ctx.pool, machineId);
+			if (!m) throw new Error("machine missing");
+			if (m.state === "allocating" || m.state === "provisioning")
+				await ensureSnapshotLocal(
+					ctx,
+					fence,
+					source.snapshotId,
+					m.node_id,
+					m.storage_id,
+				);
+			return prepareMachineLocked(ctx, fence, machineId, source);
+		});
+	return prepareMachineLocked(ctx, fence, machineId, source);
+}
+async function prepareMachineLocked(
 	ctx: WorkerCtx,
 	fence: StepFence,
 	machineId: string,

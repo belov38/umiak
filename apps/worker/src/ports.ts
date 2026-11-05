@@ -1,5 +1,5 @@
 import type { SecretFile } from "@umiak/core";
-import type { DiskSlot, QuiesceHook } from "@umiak/pve";
+import type { DiskSlot, NodeOps, PveClient, QuiesceHook } from "@umiak/pve";
 
 // Infrastructure ports of the worker. Handlers reach Proxmox, the guest agent
 // and the gateway only through these interfaces; tests use the fakes in
@@ -102,6 +102,7 @@ export interface StartOpts extends PowerOpts {
  * gone does nothing.
  */
 export interface NodeInfra {
+	portable?(): { node: NodeOps; api: PveClient; name: string; storage: string };
 	readonly vmidRange: { min: number; max: number };
 	readonly templateVmids: number[];
 	create(p: {

@@ -213,6 +213,8 @@ from .operation_force_stop_type_0_restart_error_type_0 import (
     OperationForceStopType0RestartErrorType0,
 )
 from .operation_kind import OperationKind
+from .operation_progress import OperationProgress
+from .operation_progress_phase import OperationProgressPhase
 from .operation_state import OperationState
 from .port_token import PortToken
 from .repository_input import RepositoryInput
@@ -261,6 +263,7 @@ from .snapshot_consistency_type_3_type_1 import SnapshotConsistencyType3Type1
 from .snapshot_create import SnapshotCreate
 from .snapshot_error_type_0 import SnapshotErrorType0
 from .snapshot_list import SnapshotList
+from .snapshot_progress import SnapshotProgress
 from .snapshot_state import SnapshotState
 from .ssh_access import SshAccess
 from .ssh_certificate import SshCertificate
@@ -489,6 +492,8 @@ __all__ = (
     "OperationForceStopType0",
     "OperationForceStopType0RestartErrorType0",
     "OperationKind",
+    "OperationProgress",
+    "OperationProgressPhase",
     "OperationState",
     "PortToken",
     "RepositoryInput",
@@ -537,6 +542,7 @@ __all__ = (
     "SnapshotCreate",
     "SnapshotErrorType0",
     "SnapshotList",
+    "SnapshotProgress",
     "SnapshotState",
     "SshAccess",
     "SshCertificate",

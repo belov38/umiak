@@ -1,5 +1,5 @@
 import type { Tx } from "@umiak/db";
-import { RESERVED_SQL } from "./capacity.ts";
+import { MOVE_RESERVED_SQL, RESERVED_SQL } from "./capacity.ts";
 import { NODE_NOT_BUILDING_SQL } from "./node-maintenance.ts";
 
 /**
@@ -11,6 +11,7 @@ export const STORAGE_BELOW_THRESHOLDS_SQL = `(COALESCE((st.usage ->> 'dataPercen
 
 export interface PlaceInput {
 	templateSlug: string;
+	providerId?: string;
 	needMb: number;
 	/** Count other pairs' warm machines as available (admission with eviction). */
 	evict?: boolean;
@@ -82,13 +83,13 @@ export async function place(
 		 JOIN runtime.storages st ON st.id = tb.storage_id AND st.node_id = n.id AND st.provider_id = n.provider_id
 		 CROSS JOIN LATERAL (
 		   SELECT
-		     COALESCE(SUM(m.memory_mb) FILTER (WHERE ${RESERVED_SQL}), 0) AS reserved_mb,
+		     COALESCE(SUM(m.memory_mb) FILTER (WHERE ${RESERVED_SQL}), 0) + ${MOVE_RESERVED_SQL} AS reserved_mb,
 		     COALESCE(SUM(m.memory_mb) FILTER (
 		       WHERE m.state = 'warm' AND m.pool_key IS DISTINCT FROM $4), 0) AS evictable_mb
 		   FROM runtime.machines m
 		   WHERE m.node_id = n.id AND m.state <> 'deleted'
 		 ) ram
-		 WHERE n.state = 'active' AND n.retired_at IS NULL AND ${NODE_NOT_BUILDING_SQL}
+		 WHERE ($5::uuid IS NULL OR n.provider_id=$5) AND n.state = 'active' AND n.retired_at IS NULL AND ${NODE_NOT_BUILDING_SQL}
 		   AND ${STORAGE_BELOW_THRESHOLDS_SQL}
 		   AND n.ram_cap_mb - ram.reserved_mb
 		       + CASE WHEN $3::boolean THEN ram.evictable_mb ELSE 0 END >= $2
@@ -98,6 +99,7 @@ export async function place(
 			input.needMb,
 			input.evict ?? false,
 			input.pairKey ?? null,
+			input.providerId ?? null,
 		],
 	);
 	return r.rows.map((row) => ({

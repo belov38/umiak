@@ -444,7 +444,14 @@ function OperationBar({ sandbox: s }: { sandbox: SandboxData }) {
 			<LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
 			<span className="font-medium">{op.kind.replace("_", " ")}</span>
 			<span className="text-muted-foreground">
-				{op.state}
+				{op.progress?.phase === "moving"
+					? `Moving to ${op.progress.targetNode || "another node"}…`
+					: op.progress?.phase === "queued"
+						? "Waiting for capacity…"
+						: op.state}
+				{op.progress?.totalBytes
+					? ` · ${Math.floor((op.progress.verifiedBytes || 0) / 1048576)} / ${Math.ceil(op.progress.totalBytes / 1048576)} MiB`
+					: ""}
 				{op.step ? ` · ${op.step}` : ""}
 			</span>
 			<div className="ml-2 h-1 flex-1 overflow-hidden bg-muted">

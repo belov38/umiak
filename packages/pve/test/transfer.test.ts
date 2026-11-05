@@ -233,3 +233,39 @@ it("observes cancellation during a payload read before mutating staging", async 
 	).rejects.toThrow();
 	expect(dst.writes).toEqual([]);
 });
+
+it("uses thin metadata to read only changed base-relative blocks", async () => {
+	const disk = node(Buffer.from([1, 2, 3, 4, 5, 6]));
+	const target = node(Buffer.from([1, 2, 3, 4, 0, 0]));
+	const reads: number[] = [];
+	const source: NodeOps = {
+		close() {},
+		async call<T>(op: string, args?: object): Promise<T> {
+			if (op === "lv.transferMap") {
+				expect((args as { base: string }).base).toBe("base-600-disk-0");
+				return {
+					sizeBytes: 6,
+					next: 0,
+					ranges: [{ offset: 4, length: 2 }],
+				} as T;
+			}
+			if (op === "lv.transferRead")
+				reads.push((args as { offset: number }).offset);
+			if (op === "lv.transferDigest")
+				throw Error("unbounded digest must never be called");
+			return disk.ops.call<T>(op, args);
+		},
+	};
+	await relayVolume({
+		source,
+		target: target.ops,
+		sourceName: "snapshot",
+		targetName: "staging",
+		sizeBytes: 6,
+		blockBytes: 2,
+		sourceBase: "base-600-disk-0",
+		baseChecksum: "a".repeat(64),
+	});
+	expect(target.writes).toEqual([4]);
+	expect(reads.every((offset) => offset === 4)).toBe(true);
+});

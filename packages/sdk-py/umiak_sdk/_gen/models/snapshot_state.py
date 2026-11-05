@@ -5,6 +5,7 @@ class SnapshotState(StrEnum):
     CREATING = "creating"
     DELETING = "deleting"
     FAILED = "failed"
+    MOVING = "moving"
     READY = "ready"
 
     def __str__(self) -> str:

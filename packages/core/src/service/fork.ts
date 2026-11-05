@@ -5,13 +5,11 @@ import {
 	idempotencyKeyReused,
 	notFound,
 	operationInProgress,
-	outOfCapacity,
 	type ValidationIssue,
 	validation,
 } from "../errors.ts";
 import { claimIdempotencyKey } from "../idempotency.ts";
 import { uuidv7 } from "../ids.ts";
-import { nodeUnplaceable } from "../placement.ts";
 import { idempotencyPrincipal, type Principal } from "../principal.ts";
 import type { Operation, Sandbox } from "../rows.ts";
 import {
@@ -39,10 +37,7 @@ import {
 	resolveDurations,
 	resolveTemplate,
 } from "./create-input.ts";
-import {
-	admitOnNode,
-	OUT_OF_CAPACITY_RETRY_SECONDS,
-} from "./create-placement.ts";
+import { admitPortable } from "./create-placement.ts";
 import { insertSandboxRow } from "./sandbox-row.ts";
 import {
 	checkSecretPatch,
@@ -252,25 +247,18 @@ export async function forkSandbox(
 		// As create (§8.4): the fork's new disks go to the source's storage,
 		// which must be below its thresholds on an active node (a draining
 		// node takes no new machines, forks included).
-		const unplaceable = await nodeUnplaceable(
-			tx,
-			src.node_id,
-			srcMachine.storageId,
-		);
-		if (unplaceable !== null) {
-			throw outOfCapacity(
-				OUT_OF_CAPACITY_RETRY_SECONDS,
-				undefined,
-				unplaceable,
-			);
-		}
-		await admitOnNode(
+		const destination = await admitPortable(
 			tx,
 			deps,
-			src.node_id,
-			size.memoryMb,
+			{
+				nodeId: src.node_id,
+				storageId: srcMachine.storageId,
+				providerId: src.provider_id,
+				templateBuildId: src.template_build_id,
+				templateSlug: src.template_slug,
+			},
 			`${src.template_slug}/${size.slug}`,
-			srcMachine.storageId,
+			size.memoryMb,
 		);
 
 		const labels: Record<string, string> = input.labels ?? src.labels ?? {};
@@ -290,7 +278,7 @@ export async function forkSandbox(
 			originSnapshotId: null,
 			forkedFromSandboxId: src.id,
 			providerId: src.provider_id,
-			nodeId: src.node_id,
+			nodeId: destination.nodeId,
 			machineId,
 			ttlSeconds,
 			idleTimeoutSeconds,
@@ -305,8 +293,8 @@ export async function forkSandbox(
 			[
 				machineId,
 				src.provider_id,
-				src.node_id,
-				srcMachine.storageId,
+				destination.nodeId,
+				destination.storageId,
 				src.template_build_id,
 				size.slug,
 				size.vcpu,

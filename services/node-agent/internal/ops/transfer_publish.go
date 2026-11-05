@@ -22,7 +22,8 @@ func (s *Server) lvTransferPublish(ctx context.Context, raw json.RawMessage) (an
 	}
 	m := snapLVRe.FindStringSubmatch(a.Name)
 	t := vmDiskRe.FindStringSubmatch(a.Target)
-	if m == nil || !transferIDRe.MatchString(m[1]) || t == nil {
+	snapshotTarget := snapLVRe.FindStringSubmatch(a.Target)
+	if m == nil || !transferIDRe.MatchString(m[1]) || (t == nil && snapshotTarget == nil) {
 		return nil, forbidden("invalid publication names")
 	}
 	lv, err := s.transferTarget(ctx, a.Name)
@@ -33,29 +34,34 @@ func (s *Server) lvTransferPublish(ctx context.Context, raw json.RawMessage) (an
 	if !ours(lv) || !slices.Contains(lv.Tags, proof) {
 		return nil, forbidden("not transfer staging")
 	}
-	vmid := atoiMatch(t, 1)
-	tags := []string{"umiak", "umiak-vm-" + t[1], proof}
-	if s.Cfg.IsTemplateSlot(vmid) {
-		conf, err := fs.ReadFile(s.Host.FS, fmt.Sprintf("etc/pve/qemu-server/%d.conf", vmid))
-		if err != nil {
-			return nil, err
-		}
-		marked := false
-		for line := range strings.Lines(string(conf)) {
-			if strings.HasPrefix(strings.TrimSpace(line), "[") {
-				break
+	var tags []string
+	if snapshotTarget != nil {
+		tags = []string{"umiak", "umiak-snap-" + snapshotTarget[1], proof}
+	} else {
+		vmid := atoiMatch(t, 1)
+		tags = []string{"umiak", "umiak-vm-" + t[1], proof}
+		if s.Cfg.IsTemplateSlot(vmid) {
+			conf, err := fs.ReadFile(s.Host.FS, fmt.Sprintf("etc/pve/qemu-server/%d.conf", vmid))
+			if err != nil {
+				return nil, err
 			}
-			k, v, _ := strings.Cut(line, ":")
-			if strings.TrimSpace(k) == "tags" && slices.Contains(strings.FieldsFunc(strings.TrimSpace(v), func(r rune) bool { return r == ';' || r == ',' || r == ' ' }), "umiak-tpl") {
-				marked = true
+			marked := false
+			for line := range strings.Lines(string(conf)) {
+				if strings.HasPrefix(strings.TrimSpace(line), "[") {
+					break
+				}
+				k, v, _ := strings.Cut(line, ":")
+				if strings.TrimSpace(k) == "tags" && slices.Contains(strings.FieldsFunc(strings.TrimSpace(v), func(r rune) bool { return r == ';' || r == ',' || r == ' ' }), "umiak-tpl") {
+					marked = true
+				}
 			}
+			if !marked {
+				return nil, forbidden("template config lacks ownership tag")
+			}
+			tags = []string{"umiak-tpl", proof}
+		} else if !s.Cfg.InRange(vmid) {
+			return nil, forbidden("target outside configured ranges")
 		}
-		if !marked {
-			return nil, forbidden("template config lacks ownership tag")
-		}
-		tags = []string{"umiak-tpl", proof}
-	} else if !s.Cfg.InRange(vmid) {
-		return nil, forbidden("target outside configured ranges")
 	}
 	all, err := s.LVM.List(ctx)
 	if err != nil {

@@ -33,7 +33,11 @@ export const RESERVED_SQL = `(m.state IN (${sqlList(RESERVED_MACHINE_STATES)})
     WHERE s.machine_id = m.id
       AND (o.kind IN ('resume', 'recover')
         OR (o.kind IN ('fork', 'save_snapshot') AND o.request->>'forceStop' = 'true'))
-      AND o.state IN ('pending', 'running'))))`;
+      AND o.state IN ('pending', 'running')
+ AND NOT EXISTS (SELECT 1 FROM runtime.move_reservations mr WHERE mr.machine_id=m.id AND mr.operation_id=o.id))))`;
+
+/** Outstanding target reservations while the home machine still belongs to its source node. */
+export const MOVE_RESERVED_SQL = `COALESCE((SELECT SUM(mr.memory_mb) FROM runtime.move_reservations mr JOIN runtime.operations mo ON mo.id=mr.operation_id WHERE mr.node_id=n.id AND mo.state IN ('pending','running')),0)`;
 
 /**
  * S6 §8.1 `powered`: RAM of VMs that may be running right now. Machines in a
@@ -60,13 +64,13 @@ async function ramOf(
 		powered_mb: number;
 	}>(
 		`SELECT n.ram_cap_mb AS cap_mb,
-		   COALESCE(SUM(m.memory_mb) FILTER (WHERE ${RESERVED_SQL}), 0)::int AS reserved_mb,
+		   COALESCE(SUM(m.memory_mb) FILTER (WHERE ${RESERVED_SQL}), 0)::int + ${MOVE_RESERVED_SQL}::int AS reserved_mb,
 		   COALESCE(SUM(m.memory_mb) FILTER (WHERE ${POWERED_SQL}), 0)::int AS powered_mb
 		 FROM runtime.nodes n
 		 LEFT JOIN runtime.machines m
 		   ON m.node_id = n.id AND m.state <> 'deleted' AND m.id IS DISTINCT FROM $2::uuid
 		 WHERE n.id = $1
-		 GROUP BY n.ram_cap_mb`,
+		 GROUP BY n.id, n.ram_cap_mb`,
 		[nodeId, excludeMachineId],
 	);
 	const row = r.rows[0];

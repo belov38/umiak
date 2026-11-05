@@ -4,6 +4,7 @@ from enum import StrEnum
 class OperationState(StrEnum):
     FAILED = "failed"
     PENDING = "pending"
+    QUEUED = "queued"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     SUPERSEDED = "superseded"

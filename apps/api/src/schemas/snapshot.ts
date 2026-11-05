@@ -43,7 +43,20 @@ export const SnapshotSchema = z
 			description: "The name; while creating, the name it will get",
 			example: "web-stack",
 		}),
-		state: extensibleEnum(["creating", "ready", "failed", "deleting"]),
+		state: extensibleEnum([
+			"creating",
+			"ready",
+			"failed",
+			"deleting",
+			"moving",
+		]),
+		progress: z
+			.object({
+				targetNode: z.string(),
+				verifiedBytes: z.number().nonnegative(),
+				totalBytes: z.number().nonnegative(),
+			})
+			.optional(),
 		sourceSandboxId: z.string().nullable().openapi({
 			description: "The sandbox it was taken from (`sb_...`)",
 		}),

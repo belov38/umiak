@@ -17,7 +17,7 @@ only after their relevant gate passes. Implement inline without delegates.
 - [x] 2. Add replica/journal migrations and DB types, build-once replication in
   `deploy/compose/quickstart/setup-build.mjs`, per-node progress, installer node
   activation copies templates. Preserve per-node previous build on failure.
-- [ ] 3. Extend placement/admission and worker resume/fork/snapshot steps with
+- [x] 3. Extend placement/admission and worker resume/fork/snapshot steps with
   durable cold-move fencing/config switch/cleanup. Test every crash boundary,
   unavailable source, same VMID/MAC, multi-disk and snapshot delete races.
 - [ ] 4. Add durable FIFO capacity tickets, cancellation and wakeup/reconcile.
@@ -103,3 +103,24 @@ safe block comparison. Relay no longer invokes whole-disk digest RPC; legacy
 lv.transferDigest refuses disks above 8 MiB. Checksums explicitly identify their
 sha256-block-tree-v1 algorithm. Full-copy verification includes target allocations
 to catch unexpected target data. Published template bases are verified again.
+
+
+Phase 3: home-first admission now selects a same-provider destination for resume,
+automatic unexpected-stop resume, fork and saved-snapshot create. Move reservations
+hold target RAM without double-counting the stopped source. The worker copies
+immutable multi-disk snapshots, applies thin_delta against matching verified local
+bases (full sparse fallback otherwise), and journals verification/config switch/
+commit/cleanup. PVE::QemuConfig lock + move_config_to_node preserve VMID, SMBIOS,
+MAC/IP and cluster firewall; a migrate lock blocks target boot before DB commit.
+A durable switching intent is finished before a superseding delete can discard
+staging. Saved snapshot movement and clone/delete serialize on a snapshot lock.
+Cleanup selects immutable LV UUIDs, so delayed replay cannot delete a reused name.
+Reconciliation protects transfer LVs and retries committed/abandoned cleanup.
+API/dashboard expose moving state, destination and verified-byte progress;
+TypeScript/Python generated models updated. Tests cover successful move, corrupt
+readback, a crash after config relocation, delete during copy, fork and saved
+snapshot create on another node, plus native guards and UUID reuse protection.
+
+Legacy sandbox cloud-init disks or additional unmanaged disks are refused by the
+config-switch helper, preserving the source. Fresh S5 templates do not use those
+legacy disks. No live acceptance has been run.

@@ -13,6 +13,7 @@ import (
 
 // LV is one logical volume of the configured VG.
 type LV struct {
+	UUID            string   `json:"uuid"`
 	ThinID          string   `json:"thinId,omitempty"`
 	Name            string   `json:"name"`
 	SizeBytes       uint64   `json:"sizeBytes"`
@@ -75,7 +76,7 @@ func parseFloat(s string) float64 {
 // List returns every LV of the VG.
 func (e *Exec) List(ctx context.Context) ([]LV, error) {
 	out, err := e.Run(ctx, "lvs", "--reportformat", "json", "--units", "b", "--nosuffix",
-		"-o", "lv_name,lv_size,lv_attr,lv_tags,origin,data_percent,metadata_percent,pool_lv,thin_id", e.VG)
+		"-o", "lv_name,lv_uuid,lv_size,lv_attr,lv_tags,origin,data_percent,metadata_percent,pool_lv,thin_id", e.VG)
 	if err != nil {
 		return nil, err
 	}
@@ -94,6 +95,7 @@ func (e *Exec) List(ctx context.Context) ([]LV, error) {
 			lvs = append(lvs, LV{
 				Name:            m["lv_name"],
 				ThinID:          strings.TrimSpace(m["thin_id"]),
+				UUID:            strings.TrimSpace(m["lv_uuid"]),
 				SizeBytes:       size,
 				Attr:            m["lv_attr"],
 				Tags:            tags,

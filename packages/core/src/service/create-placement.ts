@@ -153,24 +153,13 @@ export async function admitOnSnapshotNode(
 	pairKey: string,
 	needMb: number,
 ): Promise<Placement> {
-	const unplaceable = await nodeUnplaceable(tx, snap.nodeId, snap.storageId);
-	if (unplaceable !== null)
-		throw outOfCapacity(OUT_OF_CAPACITY_RETRY_SECONDS, undefined, unplaceable);
-	const res = await admit(tx, {
-		nodeId: snap.nodeId,
-		storageId: snap.storageId,
-		needMb,
-		pairKey,
-		evict: true,
-		jobs: deps.jobs,
-	});
-	if (!res.ok) throw outOfCapacity(OUT_OF_CAPACITY_RETRY_SECONDS);
+	const destination = await admitPortable(tx, deps, snap, pairKey, needMb);
 	return {
 		fromPool: false,
 		machineId: uuidv7(),
-		nodeId: snap.nodeId,
+		nodeId: destination.nodeId,
 		providerId: snap.providerId,
-		storageId: snap.storageId,
+		storageId: destination.storageId,
 		templateBuildId: snap.templateBuildId,
 		originSnapshotId: snap.id,
 	};
@@ -197,4 +186,61 @@ export async function admitOnNode(
 		jobs: deps.jobs,
 	});
 	if (!res.ok) throw outOfCapacity(OUT_OF_CAPACITY_RETRY_SECONDS);
+}
+
+/** Home-first admission, then a destination in the same provider. No disks move in this transaction. */
+export async function admitPortable(
+	tx: Tx,
+	deps: Pick<SandboxServiceDeps, "jobs">,
+	source: {
+		nodeId: string;
+		storageId: string;
+		providerId: string;
+		templateBuildId: string;
+		templateSlug: string;
+	},
+	pairKey: string,
+	needMb: number,
+): Promise<{
+	nodeId: string;
+	storageId: string;
+	templateBuildId: string;
+	providerId: string;
+}> {
+	const homeReason = await nodeUnplaceable(tx, source.nodeId, source.storageId);
+	if (homeReason === null) {
+		const home = await admit(tx, {
+			nodeId: source.nodeId,
+			storageId: source.storageId,
+			needMb,
+			pairKey,
+			evict: true,
+			jobs: deps.jobs,
+		});
+		if (home.ok) return source;
+	}
+	const candidates = await place(tx, {
+		templateSlug: source.templateSlug,
+		providerId: source.providerId,
+		needMb,
+		pairKey,
+		evict: true,
+	});
+	for (const c of candidates) {
+		if (c.nodeId === source.nodeId) continue;
+		const admission = await admit(tx, {
+			nodeId: c.nodeId,
+			storageId: c.storageId,
+			needMb,
+			pairKey,
+			evict: true,
+			jobs: deps.jobs,
+		});
+		if (admission.ok) return { ...c, templateBuildId: source.templateBuildId };
+	}
+	throw outOfCapacity(
+		OUT_OF_CAPACITY_RETRY_SECONDS,
+		undefined,
+		homeReason ?? undefined,
+	);
 }

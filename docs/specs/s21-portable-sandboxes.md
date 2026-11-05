@@ -1,6 +1,6 @@
 # S21: Portable templates, cold moves and capacity waits
 
-Status: phases 1–2 implemented; cold moves and capacity waits in progress. Supersedes S19 locality only when the S21
+Status: template replication and cold moves implemented; capacity waits in progress. Supersedes S19 locality only when the S21
 transfer and admission paths are enabled; existing paths remain local until then.
 
 ## Decisions
@@ -45,8 +45,9 @@ verified byte offset, expected checksums and phases: preparing, copying,
 verified, switching, committed, cleaning, done (or failed). Resume from the last
 verified offset after a crash. Fence source lifecycle and destination admission
 throughout. Never delete source before verified destination and durable ownership
-switch. Cleanup retries independently. Cancellation before commit removes staging
-only; after commit complete cleanup. Coordinate PVE VM-config relocation under
+switch. Cleanup retries independently. Cancellation before switching intent removes staging only. Once switching
+intent is durable, complete the verified config/DB switch before applying a
+superseding delete; after commit complete cleanup. Coordinate PVE VM-config relocation under
 the cluster VM lock, preserve VMID/MAC/IP/firewall, and never allow two runnable
 configs. Missing/unreachable source means wait/fail safely: cold move cannot
 recover inaccessible local data. Cordoned but reachable sources can export.

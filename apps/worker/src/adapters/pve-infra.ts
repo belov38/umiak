@@ -261,6 +261,14 @@ export interface PveNodeInfraOptions {
 
 /** NodeInfra over S1 `Machines` for one node. */
 export class PveNodeInfra implements NodeInfra {
+	portable() {
+		return {
+			node: this.#c.node,
+			api: this.#c.api,
+			name: this.#t.nodeName,
+			storage: this.#t.storageName,
+		};
+	}
 	readonly vmidRange: { min: number; max: number };
 	readonly #db: pg.Pool;
 	readonly #t: NodeTopology;

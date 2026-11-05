@@ -20,6 +20,7 @@ import {
 	sandboxToError,
 	transitionSandbox,
 } from "../ops/common.ts";
+import { reconcilePortableCleanup } from "../portable.ts";
 import type { InfraLv, InfraVm, NodeInfra } from "../ports.ts";
 
 // Controller `reconcile` (S6 §11.2, §11.3; every 60 s). Compares Proxmox
@@ -158,6 +159,7 @@ export async function runReconcile(
 	ctx: WorkerCtx,
 	o: ReconcileOptions,
 ): Promise<ReconcileAction[]> {
+	if (!o.dryRun) await reconcilePortableCleanup(ctx);
 	const jobs = o.jobs ?? pgBossLiveJobs(ctx.pool);
 	const p = await ctx.pool.query<ProviderRow>(
 		`SELECT id, vmid_min, vmid_max FROM runtime.providers
@@ -420,6 +422,20 @@ async function lvOrphanReason(
 	range: { min: number; max: number },
 ): Promise<string | null> {
 	if (!lv.tags.includes(UMIAK_TAG)) return null;
+	if (lv.tags.some((t) => t.startsWith("umiak-transfer-"))) return null;
+	const transfer = lv.tags
+		.find((t) => /^umiak-snap-[a-f0-9]{32}$/.test(t))
+		?.slice("umiak-snap-".length);
+	if (
+		transfer &&
+		(
+			await q.query(
+				"SELECT 1 FROM runtime.volume_transfers WHERE id=$1 AND phase NOT IN ('done','cancelled')",
+				[transfer],
+			)
+		).rowCount
+	)
+		return null;
 	const c = classifyLv(lv);
 	if (c === null) return null;
 	if (c.kind === "vm") {

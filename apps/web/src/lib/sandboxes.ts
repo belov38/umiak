@@ -11,6 +11,8 @@ export const POLL_RETRY_BUDGET_MS = 2_000;
 /** States shown with a spinner and the step of the active operation. */
 export const TRANSITIONAL_STATES: ReadonlySet<string> = new Set([
 	"creating",
+	"moving",
+	"queued",
 	"starting",
 	"stopping",
 	"deleting",

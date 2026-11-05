@@ -48,7 +48,13 @@ export function waitForStates(current: string): string[] {
 
 /** `waitFor` of the next long-poll, or null when a long-poll cannot wait. */
 export function liveWaitFor(current: string | undefined): string | null {
-	if (current === undefined || WAIT_END_STATES.has(current)) return null;
+	if (
+		current === undefined ||
+		WAIT_END_STATES.has(current) ||
+		current === "moving" ||
+		current === "queued"
+	)
+		return null;
 	return waitForStates(current).join(",");
 }
 

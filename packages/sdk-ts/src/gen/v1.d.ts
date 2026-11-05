@@ -2245,6 +2245,19 @@ export interface components {
             id: string;
             /** @enum {string} */
             kind: "create" | "fork" | "stop" | "resume" | "recover" | "delete" | "save_snapshot" | (string & {});
+            /** @description Portable data transfer or capacity queue progress; no credentials or request bodies */
+            progress?: {
+                /** @enum {string} */
+                phase: "moving" | "queued";
+                /**
+                 * Format: date-time
+                 * @description ISO 8601 UTC with milliseconds
+                 */
+                queuedUntil?: string | null;
+                targetNode?: string;
+                totalBytes?: number;
+                verifiedBytes?: number;
+            };
             /** @example sb_01jbx4q3m7f8r2t6v9w0y1z2a3 */
             sandboxId: string;
             /**
@@ -2256,7 +2269,7 @@ export interface components {
              * @description pending and running are active; succeeded, failed and superseded are final
              * @enum {string}
              */
-            state: "pending" | "running" | "succeeded" | "failed" | "superseded" | (string & {});
+            state: "pending" | "running" | "succeeded" | "failed" | "superseded" | "queued" | (string & {});
             /** @description Last completed step, for debugging; values may change */
             step: string | null;
         };
@@ -2479,7 +2492,7 @@ export interface components {
          * @description `ready` means usable; creating, stopping, stopped, starting, error, deleting, deleted
          * @enum {string}
          */
-        SandboxState: "creating" | "ready" | "stopping" | "stopped" | "starting" | "error" | "deleting" | "deleted" | (string & {});
+        SandboxState: "creating" | "ready" | "stopping" | "stopped" | "starting" | "error" | "deleting" | "deleted" | "moving" | "queued" | (string & {});
         /** @description A secret file on tmpfs in the guest: up to 32 files, 8 MiB in total */
         SecretFileInput: {
             /** @description File content, base64 (up to 1 MiB decoded) */
@@ -2550,6 +2563,11 @@ export interface components {
              * @example web-stack
              */
             name: string;
+            progress?: {
+                targetNode: string;
+                totalBytes: number;
+                verifiedBytes: number;
+            };
             /**
              * Format: date-time
              * @description ISO 8601 UTC with milliseconds
@@ -2560,7 +2578,7 @@ export interface components {
             /** @description The sandbox it was taken from (`sb_...`) */
             sourceSandboxId: string | null;
             /** @enum {string} */
-            state: "creating" | "ready" | "failed" | "deleting" | (string & {});
+            state: "creating" | "ready" | "failed" | "deleting" | "moving" | (string & {});
             template: string | null;
             templateVersion: string | null;
         };

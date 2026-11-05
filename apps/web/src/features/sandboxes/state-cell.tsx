@@ -54,11 +54,17 @@ export function StateCell({ sandbox }: { sandbox: SandboxData }) {
 			<div className="flex flex-col gap-0.5" data-testid="sandbox-state">
 				<span className="inline-flex items-center gap-1">
 					<LoaderCircleIcon className="size-3.5 animate-spin text-muted-foreground" />
-					{sandbox.state}
+					{sandbox.state === "moving"
+						? `Moving to ${op?.progress?.targetNode || "another node"}…`
+						: sandbox.state === "queued"
+							? "Waiting for capacity…"
+							: sandbox.state}
 				</span>
 				{op && (
 					<span className="text-xs text-muted-foreground">
-						{op.kind}
+						{op.progress?.totalBytes
+							? `${Math.floor((op.progress.verifiedBytes || 0) / 1048576)} / ${Math.ceil(op.progress.totalBytes / 1048576)} MiB`
+							: op.kind}
 						{op.step ? `: ${op.step}` : ""}
 					</span>
 				)}

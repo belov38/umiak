@@ -80,7 +80,7 @@ export async function retireNodeTemplate({
 			if (open && open.id !== job.id)
 				throw Error("Node has another unfinished build/preparation");
 			const refs = await tx.client.query(
-				"SELECT 1 FROM runtime.machines WHERE template_build_id=$1 AND state<>'deleted' UNION ALL SELECT 1 FROM runtime.snapshots WHERE template_build_id=$1 AND state<>'deleted' UNION ALL SELECT 1 FROM runtime.volume_transfers WHERE (source_id=$1 OR source_node_id=$2) AND phase<>'done' LIMIT 1",
+				"SELECT 1 FROM runtime.machines WHERE template_build_id=$1 AND node_id=$2 AND state<>'deleted' UNION ALL SELECT 1 FROM runtime.snapshots WHERE template_build_id=$1 AND node_id=$2 AND state<>'deleted' UNION ALL SELECT 1 FROM runtime.volume_transfers WHERE (source_id=$1 OR source_node_id=$2) AND phase<>'done' LIMIT 1",
 				[build.id, node.nodeId],
 			);
 			if (refs.rowCount)

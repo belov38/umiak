@@ -42,7 +42,30 @@ export function toOperationResource(op: Operation): OperationResource {
 		id: encodeUuid("operation", op.id),
 		sandboxId: encodeUuid("sandbox", op.sandboxId),
 		kind: op.kind as (typeof PUBLIC_OPERATION_KINDS)[number],
-		state: op.state,
+		state:
+			op.progress.phase === "queued" &&
+			["pending", "running"].includes(op.state)
+				? "queued"
+				: op.state,
+		...(["moving", "queued"].includes(String(op.progress.phase))
+			? {
+					progress: {
+						phase: op.progress.phase as "moving" | "queued",
+						...(typeof op.progress.targetNode === "string"
+							? { targetNode: op.progress.targetNode }
+							: {}),
+						...(typeof op.progress.verifiedBytes === "number"
+							? { verifiedBytes: op.progress.verifiedBytes }
+							: {}),
+						...(typeof op.progress.totalBytes === "number"
+							? { totalBytes: op.progress.totalBytes }
+							: {}),
+						...(typeof op.progress.queuedUntil === "string"
+							? { queuedUntil: op.progress.queuedUntil }
+							: {}),
+					},
+				}
+			: {}),
 		step: op.step,
 		error:
 			op.errorCode === null

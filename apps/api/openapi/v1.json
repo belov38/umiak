@@ -2686,6 +2686,41 @@
 						"type": "string",
 						"x-extensible-enum": true
 					},
+					"progress": {
+						"description": "Portable data transfer or capacity queue progress; no credentials or request bodies",
+						"properties": {
+							"phase": {
+								"enum": [
+									"moving",
+									"queued"
+								],
+								"type": "string"
+							},
+							"queuedUntil": {
+								"description": "ISO 8601 UTC with milliseconds",
+								"format": "date-time",
+								"type": [
+									"string",
+									"null"
+								]
+							},
+							"targetNode": {
+								"type": "string"
+							},
+							"totalBytes": {
+								"minimum": 0,
+								"type": "number"
+							},
+							"verifiedBytes": {
+								"minimum": 0,
+								"type": "number"
+							}
+						},
+						"required": [
+							"phase"
+						],
+						"type": "object"
+					},
 					"sandboxId": {
 						"example": "sb_01jbx4q3m7f8r2t6v9w0y1z2a3",
 						"type": "string"
@@ -2705,7 +2740,8 @@
 							"running",
 							"succeeded",
 							"failed",
-							"superseded"
+							"superseded",
+							"queued"
 						],
 						"type": "string",
 						"x-extensible-enum": true
@@ -3437,7 +3473,9 @@
 					"starting",
 					"error",
 					"deleting",
-					"deleted"
+					"deleted",
+					"moving",
+					"queued"
 				],
 				"type": "string",
 				"x-extensible-enum": true
@@ -3590,6 +3628,27 @@
 						"example": "web-stack",
 						"type": "string"
 					},
+					"progress": {
+						"properties": {
+							"targetNode": {
+								"type": "string"
+							},
+							"totalBytes": {
+								"minimum": 0,
+								"type": "number"
+							},
+							"verifiedBytes": {
+								"minimum": 0,
+								"type": "number"
+							}
+						},
+						"required": [
+							"targetNode",
+							"verifiedBytes",
+							"totalBytes"
+						],
+						"type": "object"
+					},
 					"readyAt": {
 						"description": "ISO 8601 UTC with milliseconds",
 						"format": "date-time",
@@ -3617,7 +3676,8 @@
 							"creating",
 							"ready",
 							"failed",
-							"deleting"
+							"deleting",
+							"moving"
 						],
 						"type": "string",
 						"x-extensible-enum": true

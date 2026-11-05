@@ -20,13 +20,14 @@ import {
 } from "./common.ts";
 import { OperationSchema } from "./operation.ts";
 
-export const SandboxStateSchema = extensibleEnum(SANDBOX_STATES).openapi(
-	"SandboxState",
-	{
-		description:
-			"`ready` means usable; creating, stopping, stopped, starting, error, deleting, deleted",
-	},
-);
+export const SandboxStateSchema = extensibleEnum([
+	...SANDBOX_STATES,
+	"moving",
+	"queued",
+] as const).openapi("SandboxState", {
+	description:
+		"`ready` means usable; creating, stopping, stopped, starting, error, deleting, deleted",
+});
 
 const REASONS = BLOCK_REASONS as readonly ["operator", "abuse"];
 

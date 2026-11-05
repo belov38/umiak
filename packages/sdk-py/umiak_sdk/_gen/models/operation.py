@@ -9,10 +9,12 @@ from attrs import field as _attrs_field
 
 from ..models.operation_kind import OperationKind
 from ..models.operation_state import OperationState
+from ..types import UNSET, Unset
 
 if TYPE_CHECKING:
     from ..models.operation_error_type_0 import OperationErrorType0
     from ..models.operation_force_stop_type_0 import OperationForceStopType0
+    from ..models.operation_progress import OperationProgress
 
 
 T = TypeVar("T", bound="Operation")
@@ -34,6 +36,8 @@ class Operation:
         started_at (datetime.datetime | None): ISO 8601 UTC with milliseconds
         state (OperationState): pending and running are active; succeeded, failed and superseded are final
         step (None | str): Last completed step, for debugging; values may change
+        progress (OperationProgress | Unset): Portable data transfer or capacity queue progress; no credentials or
+            request bodies
     """
 
     created_at: datetime.datetime
@@ -46,6 +50,7 @@ class Operation:
     started_at: datetime.datetime | None
     state: OperationState
     step: None | str
+    progress: OperationProgress | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -89,6 +94,10 @@ class Operation:
         step: None | str
         step = self.step
 
+        progress: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.progress, Unset):
+            progress = self.progress.to_dict()
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
@@ -105,6 +114,8 @@ class Operation:
                 "step": step,
             }
         )
+        if progress is not UNSET:
+            field_dict["progress"] = progress
 
         return field_dict
 
@@ -112,6 +123,7 @@ class Operation:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.operation_error_type_0 import OperationErrorType0  # noqa: PLC0415
         from ..models.operation_force_stop_type_0 import OperationForceStopType0  # noqa: PLC0415
+        from ..models.operation_progress import OperationProgress  # noqa: PLC0415
 
         d = dict(src_dict)
         created_at = datetime.datetime.fromisoformat(d.pop("createdAt"))
@@ -191,6 +203,13 @@ class Operation:
 
         step = _parse_step(d.pop("step"))
 
+        _progress = d.pop("progress", UNSET)
+        progress: OperationProgress | Unset
+        if isinstance(_progress, Unset):
+            progress = UNSET
+        else:
+            progress = OperationProgress.from_dict(_progress)
+
         operation = cls(
             created_at=created_at,
             error=error,
@@ -202,6 +221,7 @@ class Operation:
             started_at=started_at,
             state=state,
             step=step,
+            progress=progress,
         )
 
         operation.additional_properties = d

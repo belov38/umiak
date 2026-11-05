@@ -20,10 +20,24 @@ export const OperationSchema = z
 		id: z.string().openapi({ example: "op_01jbx2v7d3m6c8q9w0e4r5t6y7" }),
 		sandboxId: z.string().openapi({ example: "sb_01jbx4q3m7f8r2t6v9w0y1z2a3" }),
 		kind: extensibleEnum(PUBLIC_OPERATION_KINDS),
-		state: extensibleEnum(OPERATION_STATES).openapi({
+		state: extensibleEnum([...OPERATION_STATES, "queued"] as const).openapi({
 			description:
 				"pending and running are active; succeeded, failed and superseded are final",
 		}),
+
+		progress: z
+			.object({
+				phase: z.enum(["moving", "queued"]),
+				targetNode: z.string().optional(),
+				verifiedBytes: z.number().nonnegative().optional(),
+				totalBytes: z.number().nonnegative().optional(),
+				queuedUntil: NullableTimestamp.optional(),
+			})
+			.optional()
+			.openapi({
+				description:
+					"Portable data transfer or capacity queue progress; no credentials or request bodies",
+			}),
 		step: z.string().nullable().openapi({
 			description: "Last completed step, for debugging; values may change",
 		}),

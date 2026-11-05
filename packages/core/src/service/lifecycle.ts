@@ -1,6 +1,6 @@
 import { type Tx, withTx } from "@umiak/db";
 import { type RequestHash, requestHash } from "../canonical.ts";
-import { admit, checkQuota, QUOTA_ACTIVE_SANDBOX_STATES } from "../capacity.ts";
+import { checkQuota, QUOTA_ACTIVE_SANDBOX_STATES } from "../capacity.ts";
 import { operationDeadline } from "../deadlines.ts";
 import {
 	invalidState,
@@ -38,7 +38,7 @@ import {
 	sendSandboxOp,
 } from "./common.ts";
 import { resolveTemplate } from "./create-input.ts";
-import { admitOnNode } from "./create-placement.ts";
+import { admitOnNode, admitPortable } from "./create-placement.ts";
 import {
 	checkSecretPatch,
 	pickSecretPatch,
@@ -290,12 +290,18 @@ export async function resumeSandbox(
 			addSandboxes: 1,
 			addRamMb: size.memoryMb,
 		});
-		await admitOnNode(
+		const destination = await admitPortable(
 			tx,
 			deps,
-			row.node_id,
-			size.memoryMb,
+			{
+				nodeId: row.node_id,
+				storageId: machine.storageId,
+				providerId: row.provider_id,
+				templateBuildId: row.template_build_id,
+				templateSlug: row.template_slug,
+			},
 			`${row.template_slug}/${size.slug}`,
+			size.memoryMb,
 		);
 
 		if (size.slug !== row.size_slug || size.memoryMb !== machine.memoryMb) {
@@ -326,7 +332,7 @@ export async function resumeSandbox(
 		// Stays with the sandbox even if the resume fails later (S6 §7.6).
 		if (sets !== null) await writeSandboxSecrets(tx, deps.keys, row.id, sets);
 
-		return startOperation(tx, deps.jobs, row, {
+		const operation = await startOperation(tx, deps.jobs, row, {
 			kind: "resume",
 			// Non-secret parameters and the body hash only (S6 §13.1).
 			request: {
@@ -338,6 +344,27 @@ export async function resumeSandbox(
 			to,
 			reason: "resume",
 		});
+		if (destination.nodeId !== row.node_id) {
+			await tx.client.query(
+				"INSERT INTO runtime.move_reservations(machine_id,operation_id,node_id,storage_id,memory_mb) VALUES($1,$2,$3,$4,$5)",
+				[
+					machine.id,
+					operation.id,
+					destination.nodeId,
+					destination.storageId,
+					size.memoryMb,
+				],
+			);
+			await tx.client.query(
+				"UPDATE runtime.operations SET progress=progress || $2::jsonb WHERE id=$1",
+				[
+					operation.id,
+					JSON.stringify({ phase: "moving", targetNodeId: destination.nodeId }),
+				],
+			);
+			return mustLoadOperation(tx.client, operation.id);
+		}
+		return operation;
 	});
 }
 
@@ -369,14 +396,32 @@ export async function requestSystemResume(
 			machineState: machine?.state ?? null,
 		});
 	}
-	const res = await admit(tx, {
-		nodeId: row.node_id,
-		needMb: machine.memoryMb,
-		pairKey: `${row.template_slug}/${row.size_slug}`,
-		evict: true,
-		jobs,
-	});
-	if (!res.ok) return { ok: false };
+	let destination: Awaited<ReturnType<typeof admitPortable>>;
+	try {
+		destination = await admitPortable(
+			tx,
+			{ jobs },
+			{
+				nodeId: row.node_id,
+				storageId: machine.storageId,
+				providerId: row.provider_id,
+				templateBuildId: row.template_build_id,
+				templateSlug: row.template_slug,
+			},
+			`${row.template_slug}/${row.size_slug}`,
+			machine.memoryMb,
+		);
+	} catch (error) {
+		if (
+			error &&
+			typeof error === "object" &&
+			"code" in error &&
+			error.code === "out_of_capacity"
+		)
+			return { ok: false };
+		throw error;
+	}
+
 	await setStarting(tx, row, to);
 	const operation = await startOperation(tx, jobs, row, {
 		kind: "resume",
@@ -390,6 +435,30 @@ export async function requestSystemResume(
 		to,
 		reason: "unexpected_shutdown",
 	});
+	if (destination.nodeId !== row.node_id) {
+		await tx.client.query(
+			"INSERT INTO runtime.move_reservations(machine_id,operation_id,node_id,storage_id,memory_mb) VALUES($1,$2,$3,$4,$5)",
+			[
+				machine.id,
+				operation.id,
+				destination.nodeId,
+				destination.storageId,
+				machine.memoryMb,
+			],
+		);
+		await tx.client.query(
+			"UPDATE runtime.operations SET progress=progress || $2::jsonb WHERE id=$1",
+			[
+				operation.id,
+				JSON.stringify({ phase: "moving", targetNodeId: destination.nodeId }),
+			],
+		);
+		return {
+			ok: true,
+			operation: await mustLoadOperation(tx.client, operation.id),
+		};
+	}
+
 	return { ok: true, operation };
 }
 

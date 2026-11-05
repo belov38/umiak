@@ -11,9 +11,11 @@ from ..models.snapshot_consistency_type_1 import SnapshotConsistencyType1
 from ..models.snapshot_consistency_type_2_type_1 import SnapshotConsistencyType2Type1
 from ..models.snapshot_consistency_type_3_type_1 import SnapshotConsistencyType3Type1
 from ..models.snapshot_state import SnapshotState
+from ..types import UNSET, Unset
 
 if TYPE_CHECKING:
     from ..models.snapshot_error_type_0 import SnapshotErrorType0
+    from ..models.snapshot_progress import SnapshotProgress
 
 
 T = TypeVar("T", bound="Snapshot")
@@ -38,6 +40,7 @@ class Snapshot:
         state (SnapshotState):
         template (None | str):
         template_version (None | str):
+        progress (SnapshotProgress | Unset):
     """
 
     consistency: (
@@ -56,6 +59,7 @@ class Snapshot:
     state: SnapshotState
     template: None | str
     template_version: None | str
+    progress: SnapshotProgress | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -103,6 +107,10 @@ class Snapshot:
         template_version: None | str
         template_version = self.template_version
 
+        progress: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.progress, Unset):
+            progress = self.progress.to_dict()
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
@@ -120,12 +128,15 @@ class Snapshot:
                 "templateVersion": template_version,
             }
         )
+        if progress is not UNSET:
+            field_dict["progress"] = progress
 
         return field_dict
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.snapshot_error_type_0 import SnapshotErrorType0  # noqa: PLC0415
+        from ..models.snapshot_progress import SnapshotProgress  # noqa: PLC0415
 
         d = dict(src_dict)
 
@@ -239,6 +250,13 @@ class Snapshot:
 
         template_version = _parse_template_version(d.pop("templateVersion"))
 
+        _progress = d.pop("progress", UNSET)
+        progress: SnapshotProgress | Unset
+        if isinstance(_progress, Unset):
+            progress = UNSET
+        else:
+            progress = SnapshotProgress.from_dict(_progress)
+
         snapshot = cls(
             consistency=consistency,
             created_at=created_at,
@@ -251,6 +269,7 @@ class Snapshot:
             state=state,
             template=template,
             template_version=template_version,
+            progress=progress,
         )
 
         snapshot.additional_properties = d
