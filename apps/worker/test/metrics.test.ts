@@ -9,7 +9,6 @@ describe("PromMetrics", () => {
 		const m = new PromMetrics();
 		const text = await m.registry.metrics();
 		for (const name of [
-			"umiak_pool_machines",
 			"umiak_operation_duration_seconds",
 			"umiak_operation_errors_total",
 			"umiak_node_ram_mb",
@@ -114,12 +113,7 @@ describe("PromMetrics.collectDb", () => {
 		const m = new PromMetrics();
 		await m.collectDb(db.pool);
 		const text = await m.registry.metrics();
-		expect(text).toContain(
-			'umiak_pool_machines{pair="linux/2gb",state="warm"} 2',
-		);
-		expect(text).toContain(
-			'umiak_pool_machines{pair="linux/2gb",state="booting"} 1',
-		);
+		expect(text).not.toContain("umiak_pool_machines");
 		expect(text).not.toContain('state="deleted"');
 		const node = (
 			await db.pool.query("SELECT name FROM runtime.nodes WHERE id = $1", [

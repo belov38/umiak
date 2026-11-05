@@ -127,6 +127,22 @@ async function seenRows(w: TestWorld): Promise<string[]> {
 }
 
 describe("ctl-reconcile (§11.2, §11.3)", () => {
+	it("quarantines legacy warm rows and releasing leases without deleting VMs", async () => {
+		const w = await createWorld(db);
+		const id = await insertMachine(w, { state: "warm" });
+		await insertLease(w, 571, "releasing", id, 700);
+		w.infra.addVm({ vmid: 571, machineId: id, status: "stopped" });
+		await w.pool.query("UPDATE runtime.machines SET vmid=571 WHERE id=$1", [
+			id,
+		]);
+		await seenLongAgo(w);
+		expect(await reconcile(w)).toEqual([]);
+		expect(w.infra.vms.has(571)).toBe(true);
+		expect((await row(w, "machines", id)).state).toBe("warm");
+		expect(w.infra.callsOf("delete")).toHaveLength(0);
+		expect(w.jobs.sent).toEqual([]);
+	});
+
 	it("a consistent world gives no actions", async () => {
 		const w = await createWorld(db);
 		const e = opsEnv(w);
@@ -231,7 +247,7 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 
 	it("a releasing lease is finished: S1 delete again, the lease is freed", async () => {
 		const w = await createWorld(db);
-		const m = await insertMachine(w, { state: "deleted" });
+		const m = await insertMachine(w, { state: "deleted", poolKey: null });
 		await insertLease(w, 590, "releasing", m, 700);
 		w.infra.addVm({ vmid: 590, machineId: m, status: "stopped" });
 		await insertLease(w, 591, "releasing", m, 10);
@@ -248,7 +264,7 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 
 	it("lease_release never deletes a VM outside pool umiak, without the umiak tag or a template", async () => {
 		const w = await createWorld(db);
-		const m = await insertMachine(w, { state: "deleted" });
+		const m = await insertMachine(w, { state: "deleted", poolKey: null });
 		w.infra.addVm({ vmid: 593, pool: "other", machineId: m });
 		await insertLease(w, 593, "releasing", m, 700);
 		w.infra.addVm({ vmid: 594, tags: ["foo"], machineId: m });
@@ -273,7 +289,7 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 
 	it("lease_release re-checks the VM at apply: a foreign VM that appears after planning is not deleted", async () => {
 		const w = await createWorld(db);
-		const m = await insertMachine(w, { state: "deleted" });
+		const m = await insertMachine(w, { state: "deleted", poolKey: null });
 		await insertLease(w, 596, "releasing", m, 700);
 		// Planning sees no VM (list 1: the node part, list 2: lease planning);
 		// before the apply's re-list (3) a VM outside the pool shows up.
@@ -444,7 +460,7 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 
 	it("lease_release passes the lease's owner: a VMID whose lease changed owner is not deleted", async () => {
 		const w = await createWorld(db);
-		const m = await insertMachine(w, { state: "deleted" });
+		const m = await insertMachine(w, { state: "deleted", poolKey: null });
 		await insertLease(w, 592, "releasing", m, 700);
 		w.infra.addVm({ vmid: 592, machineId: m, status: "stopped" });
 		const other = randomUUID();
@@ -869,7 +885,7 @@ describe("ctl-reconcile (§11.2, §11.3)", () => {
 		if (svm) svm.status = "stopped";
 		w.infra.addVm({ vmid: 560 });
 		w.infra.addLv("vm-581-disk-0", ["umiak", "umiak-vm-581"]);
-		const m = await insertMachine(w, { state: "deleted" });
+		const m = await insertMachine(w, { state: "deleted", poolKey: null });
 		await insertLease(w, 592, "releasing", m, 700);
 		const s = await insertSandbox(w, { state: "creating" });
 		const op = await insertOperation(w, { sandboxId: s });

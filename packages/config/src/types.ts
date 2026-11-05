@@ -20,6 +20,7 @@ export interface SizeConfig {
 	memoryMb: number;
 }
 
+/** @deprecated remove after S24 drops the Payload reader import */
 export interface PoolTarget {
 	templateSlug: string;
 	sizeSlug: string;
@@ -58,7 +59,6 @@ export interface ConfigReader {
 	templates(): Promise<TemplateConfig[]>;
 	/** Every size, in configuration order. */
 	sizes(): Promise<SizeConfig[]>;
-	poolTargets(): Promise<PoolTarget[]>;
 	/** Unknown teams get the default quota. */
 	teamQuota(teamId: string): Promise<Quota>;
 	defaults(): Promise<PlatformDefaults>;

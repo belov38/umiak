@@ -25,7 +25,7 @@ import { runReconcile } from "../controllers/reconcile.ts";
 import { withMachineLocked } from "../db.ts";
 import type { ProviderOverride } from "../env.ts";
 import { errText } from "../log.ts";
-import { nodeRam, poolCounts } from "../pool-status.ts";
+import { nodeRam } from "../node-ram.ts";
 import type { AgentPort, GatewayPort, InfraRegistry } from "../ports.ts";
 
 type Line = Record<string, unknown>;
@@ -58,7 +58,7 @@ export const USAGE = `usage: umiak-admin <command>
   template register --template T --version V --os linux|windows --node N --storage S --pve-vmid N --boot-timeout-s N
                     [--agent-version V] [--disk-layout JSON] [--hw JSON] [--provider P] [--promote]
   template promote <buildId>
-  pool status
+  node ram
   reconcile --dry-run [--provider P]
   op retry <operationId>
   machine delete <machineId> [--force]`;
@@ -173,8 +173,8 @@ async function dispatch(argv: string[], d: AdminDeps): Promise<void> {
 			return cmdTemplateRegister(rest, d);
 		case "template promote":
 			return cmdTemplatePromote(rest, d);
-		case "pool status":
-			return cmdPoolStatus(rest, d);
+		case "node ram":
+			return cmdNodeRam(rest, d);
 		case "op retry":
 			return cmdOpRetry(rest, d);
 		case "machine delete":
@@ -817,37 +817,10 @@ async function cmdTemplatePromote(args: string[], d: AdminDeps): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// pool status
+// node ram
 
-async function cmdPoolStatus(args: string[], d: AdminDeps): Promise<void> {
+async function cmdNodeRam(args: string[], d: AdminDeps): Promise<void> {
 	parse(args, {});
-	const counts = await poolCounts(d.pool);
-	const targets = new Map<string, number>();
-	if (d.config) {
-		for (const t of await d.config().poolTargets()) {
-			const pair = `${t.templateSlug}/${t.sizeSlug}`;
-			targets.set(pair, (targets.get(pair) ?? 0) + t.target);
-		}
-	}
-	const pairs = new Map<string, Record<string, number>>();
-	for (const c of counts) {
-		const s = pairs.get(c.pair) ?? {};
-		s[c.state] = c.count;
-		pairs.set(c.pair, s);
-	}
-	for (const pair of targets.keys()) if (!pairs.has(pair)) pairs.set(pair, {});
-	const sorted = [...pairs].sort(([a], [b]) => a.localeCompare(b));
-	for (const [pair, states] of sorted) {
-		const target = targets.get(pair);
-		d.out({
-			kind: "pair",
-			pair,
-			states,
-			warm: states.warm ?? 0,
-			booting: states.booting ?? 0,
-			...(target !== undefined ? { target } : {}),
-		});
-	}
 	for (const n of await nodeRam(d.pool)) {
 		d.out({
 			kind: "node",
@@ -856,6 +829,7 @@ async function cmdPoolStatus(args: string[], d: AdminDeps): Promise<void> {
 			provider: n.provider,
 			state: n.state,
 			capMb: n.capMb,
+			quarantinedMachines: n.quarantinedMachines,
 			reservedMb: n.reservedMb,
 			poweredMb: n.poweredMb,
 		});
@@ -1009,6 +983,11 @@ async function cmdMachineDelete(args: string[], d: AdminDeps): Promise<void> {
 				);
 			}
 		}
+		// Explicit operator deletion releases a legacy row from quarantine.
+		await tx.client.query(
+			"UPDATE runtime.machines SET pool_key=NULL WHERE id=$1",
+			[id],
+		);
 		if (m.state !== "deleting") {
 			await tx.client.query(
 				`UPDATE runtime.machines

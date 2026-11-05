@@ -305,24 +305,6 @@ describe.skipIf(skipPg())(
 				expect(env.jobs.sent).toEqual([]);
 			});
 
-			it("evicts warm machines of other pairs on the sandbox's node", async () => {
-				const env = await serviceEnv(t.pool, {
-					topology: { node: { ramCapMb: 2048 } },
-				});
-				const s = await seedSandbox(t.pool, env, {
-					state: "stopped",
-					machineState: "stopped",
-				});
-				const warm = await insertMachine(t.pool, env.topo, {
-					state: "warm",
-					memoryMb: 2048,
-					poolKey: "other/2gb",
-					warmAgoSeconds: 60,
-				});
-				await env.svc.resume(env.p, s.sandboxId);
-				expect((await machineRow(t.pool, warm))?.state).toBe("deleting");
-			});
-
 			it("a repeated resume with the same body returns the active one without admission; another body is operation_in_progress", async () => {
 				// The node fits exactly this machine: a second admission would fail.
 				const env = await serviceEnv(t.pool, {

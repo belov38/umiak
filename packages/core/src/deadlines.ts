@@ -8,7 +8,6 @@ const MIN = 60_000;
 
 type Pair = { linux: number; windows: number };
 
-const CREATE_FROM_POOL: Pair = { linux: 2 * MIN, windows: 5 * MIN };
 // Cold create, create from a saved snapshot and the target of a fork.
 const CREATE_COLD: Pair = { linux: 6 * MIN, windows: 20 * MIN };
 
@@ -33,11 +32,11 @@ const DEADLINES: Record<Exclude<OperationKind, "create" | "delete">, Pair> = {
 export function operationDeadline(
 	kind: OperationKind,
 	os: TemplateOs,
-	opts: { fromPool?: boolean; forceStop?: boolean } = {},
+	opts: { forceStop?: boolean } = {},
 ): number | null {
 	if (kind === "delete") return null;
 	if (kind === "create") {
-		return (opts.fromPool ? CREATE_FROM_POOL : CREATE_COLD)[os];
+		return CREATE_COLD[os];
 	}
 	const base = DEADLINES[kind][os];
 	if (opts.forceStop && (kind === "fork" || kind === "save_snapshot")) {

@@ -21,7 +21,6 @@ import {
 	run,
 	stoppedSandbox,
 	until,
-	warmMachine,
 } from "./helpers/ops.ts";
 
 let db: TestDatabase;
@@ -194,12 +193,12 @@ describe("delete", () => {
 		expect(w.agent.callsOf("claim")).toHaveLength(0);
 	});
 
-	it("during a claim-path create stuck in System/Claim: everything is removed", async () => {
+	it("during a cold create stuck in System/Claim: everything is removed", async () => {
 		const w = await createWorld(db);
 		const e = opsEnv(w);
-		const warm = await warmMachine(w);
 		const { sandboxId, operationId } = await createSandbox(w, e);
-		expect((await row(w, "sandboxes", sandboxId)).machine_id).toBe(warm);
+		const machineId = (await row(w, "sandboxes", sandboxId))
+			.machine_id as string;
 		const blocked = blockAfter(w.agent, "claim");
 		w.ctx.agent = blocked.port;
 		const create = handleSandboxOp(w.ctx, { operationId });
@@ -210,7 +209,9 @@ describe("delete", () => {
 
 		expect(await create).toBe("fenced_out");
 		await expectAllGone(w, sandboxId);
-		expect((await row(w, "machines", warm)).provisioned_boot_id).toBeNull();
+		expect(
+			(await row(w, "machines", machineId)).provisioned_boot_id,
+		).toBeNull();
 	});
 
 	it("during a resume stuck in S1 start: everything is removed", async () => {

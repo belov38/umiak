@@ -17,7 +17,7 @@ import {
 	Registry,
 } from "prom-client";
 import type { Metrics } from "./context.ts";
-import { nodeRam, poolCounts } from "./pool-status.ts";
+import { nodeRam } from "./node-ram.ts";
 
 type Kind = "counter" | "gauge" | "histogram";
 
@@ -36,12 +36,6 @@ const DURATION_BUCKETS = [
 /** Metrics that exist from the start, with fixed label sets. */
 export const METRIC_DEFS: readonly MetricDef[] = [
 	// S6 §20
-	{
-		name: "umiak_pool_machines",
-		kind: "gauge",
-		help: "Warm pool machines (not claimed) per pair and state; computed on scrape",
-		labels: ["pair", "state"],
-	},
 	{
 		name: "umiak_operation_duration_seconds",
 		kind: "histogram",
@@ -146,18 +140,6 @@ export const METRIC_DEFS: readonly MetricDef[] = [
 		kind: "counter",
 		help: "Power operations S1 refused because the VMID's lease is not the machine's (freed and maybe reused)",
 		labels: ["op"],
-	},
-	{
-		name: "umiak_claim_retried_total",
-		kind: "counter",
-		help: "Creates that retried after a rejected pool claim",
-		labels: ["code", "path"],
-	},
-	{
-		name: "umiak_machine_provision_failed_total",
-		kind: "counter",
-		help: "Pool machine provisions that failed",
-		labels: ["code"],
 	},
 	{
 		name: "umiak_snapshot_in_use_requeued_total",
@@ -365,12 +347,10 @@ export class PromMetrics implements Metrics {
 	}
 
 	/**
-	 * Recomputes the database gauges. Label sets that disappeared (a pair with
-	 * no machines left, a removed node) are dropped.
+	 * Recomputes database gauges and drops label sets for removed nodes.
 	 */
 	async collectDb(q: Pick<pg.Pool, "query">): Promise<void> {
-		const [pool, ram, degraded, depth, lag] = await Promise.all([
-			poolCounts(q),
+		const [ram, degraded, depth, lag] = await Promise.all([
 			nodeRam(q),
 			q.query<{ n: number }>(
 				`SELECT count(*)::int AS n FROM runtime.sandboxes
@@ -385,9 +365,6 @@ export class PromMetrics implements Metrics {
 				 ) x`,
 			),
 		]);
-		const g = this.#gauge("umiak_pool_machines");
-		g.reset();
-		for (const p of pool) g.set({ pair: p.pair, state: p.state }, p.count);
 		const r = this.#gauge("umiak_node_ram_mb");
 		r.reset();
 		for (const n of ram) {

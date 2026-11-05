@@ -4,7 +4,7 @@ import {
 	type TestDatabase,
 } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DELETE_RETRY_LIMIT, type SecretSets } from "../src/index.ts";
+import type { SecretSets } from "../src/index.ts";
 import {
 	expectCode,
 	idempotencyRows,
@@ -30,7 +30,7 @@ describe.skipIf(skipPg())("SandboxService.create (S6 §7.3)", () => {
 		await t?.drop();
 	});
 
-	it("claims a warm machine of the pair: machine claiming, one sandbox-op job", async () => {
+	it("cold creates while legacy warm machines stay quarantined", async () => {
 		const env = await serviceEnv(t.pool);
 		const older = await insertMachine(t.pool, env.topo, {
 			state: "warm",
@@ -49,7 +49,7 @@ describe.skipIf(skipPg())("SandboxService.create (S6 §7.3)", () => {
 		});
 
 		expect(sandbox.state).toBe("creating");
-		expect(sandbox.machineId).toBe(older);
+		expect(sandbox.machineId).not.toBe(older);
 		expect(sandbox.nodeId).toBe(env.topo.nodeId);
 		expect(sandbox.providerId).toBe(env.topo.providerId);
 		expect(sandbox.templateBuildId).toBe(env.topo.templateBuildId);
@@ -74,22 +74,21 @@ describe.skipIf(skipPg())("SandboxService.create (S6 §7.3)", () => {
 		expect(operation.request).toMatchObject({
 			template: env.template,
 			size: "2gb",
-			fromPool: true,
-			failFast: false,
 		});
 		// 2 min deadline for a linux pool claim (both are now() of the insert,
 		// on the database clock).
 		const ms =
 			(operation.deadlineAt?.getTime() ?? 0) - operation.createdAt.getTime();
-		expect(ms).toBe(120_000);
+		expect(ms).toBe(360_000);
 
-		const m = await machineRow(t.pool, older);
+		const m = await machineRow(t.pool, sandbox.machineId as string);
 		expect(m).toMatchObject({
-			state: "claiming",
+			state: "allocating",
 			sandbox_id: sandbox.id,
 			pool_key: null,
 		});
-		expect(m?.claimed_at).not.toBeNull();
+		expect(m?.claimed_at).toBeNull();
+		expect((await machineRow(t.pool, older))?.state).toBe("warm");
 		expect((await machineRow(t.pool, newer))?.state).toBe("warm");
 
 		expect(env.jobs.sent).toEqual([
@@ -131,7 +130,7 @@ describe.skipIf(skipPg())("SandboxService.create (S6 §7.3)", () => {
 		expect(sandbox.machineId).not.toBe(other);
 		expect(sandbox.machineId).not.toBe(stale);
 		expect(sandbox.templateBuildId).toBe(env.topo.templateBuildId);
-		expect(operation.request).toMatchObject({ fromPool: false });
+		expect(operation.request).not.toHaveProperty("fromPool");
 		expect((await machineRow(t.pool, other))?.state).toBe("warm");
 		expect(await machineRow(t.pool, stale)).toMatchObject({
 			state: "warm",
@@ -159,41 +158,12 @@ describe.skipIf(skipPg())("SandboxService.create (S6 §7.3)", () => {
 			vcpu: 2,
 			memory_mb: 4096,
 		});
-		expect(operation.request).toMatchObject({ fromPool: false, size: "4gb" });
+		expect(operation.request).toMatchObject({ size: "4gb" });
 		// Windows cold create: 20 min after the insert.
 		const ms =
 			(operation.deadlineAt?.getTime() ?? 0) - operation.createdAt.getTime();
 		expect(ms).toBe(20 * 60_000);
 		expect(env.jobs.sent).toHaveLength(1);
-	});
-
-	it("evicts a warm machine of another pair when RAM is short", async () => {
-		const env = await serviceEnv(t.pool, {
-			topology: { node: { ramCapMb: 4096 } },
-		});
-		const other = await insertMachine(t.pool, env.topo, {
-			state: "warm",
-			poolKey: `${env.template}/4gb`,
-			sizeSlug: "4gb",
-			memoryMb: 4096,
-		});
-		const { sandbox, operation } = await env.svc.create(env.p, {});
-		expect((await machineRow(t.pool, other))?.state).toBe("deleting");
-		expect((await machineRow(t.pool, sandbox.machineId as string))?.state).toBe(
-			"allocating",
-		);
-		expect(env.jobs.sent).toEqual([
-			{
-				queue: "machine-op",
-				data: { machineId: other, action: "delete" },
-				opts: { singletonKey: other, retryLimit: DELETE_RETRY_LIMIT },
-			},
-			{
-				queue: "sandbox-op",
-				data: { operationId: operation.id },
-				opts: { singletonKey: sandbox.id },
-			},
-		]);
 	});
 
 	it("out_of_capacity without RAM: nothing new, no allocating or evicted machine", async () => {
@@ -221,45 +191,6 @@ describe.skipIf(skipPg())("SandboxService.create (S6 §7.3)", () => {
 		expect(env.jobs.sent).toEqual([]);
 	});
 
-	it("failFast without warm: pool_exhausted and no rows, key, machine or jobs", async () => {
-		const env = await serviceEnv(t.pool);
-		const err = await expectCode(
-			env.svc.create(
-				env.p,
-				{ failFast: true, secrets: { TOKEN: SECRET } },
-				"key-ff",
-			),
-			"pool_exhausted",
-		);
-		expect(err.retryable).toBe(true);
-		expect(err.details.retryAfterSeconds).toBe(60);
-		expect(await teamRowCounts(t.pool, env.p.teamId)).toEqual(NOTHING);
-		expect(await nodeMachines(t.pool, env.topo.nodeId)).toEqual([]);
-		expect(await idempotencyRows(t.pool, env.p.apiKeyId as string)).toBe(0);
-		expect(env.jobs.sent).toEqual([]);
-	});
-
-	it("failFast on a full node does not evict another pair's warm machine", async () => {
-		const env = await serviceEnv(t.pool, {
-			topology: { node: { ramCapMb: 2048 } },
-		});
-		const other = await insertMachine(t.pool, env.topo, {
-			state: "warm",
-			poolKey: `${env.template}/4gb`,
-			sizeSlug: "4gb",
-			memoryMb: 2048,
-		});
-		const before = await nodeMachines(t.pool, env.topo.nodeId);
-		await expectCode(
-			env.svc.create(env.p, { failFast: true }),
-			"pool_exhausted",
-		);
-		expect((await machineRow(t.pool, other))?.state).toBe("warm");
-		expect(await nodeMachines(t.pool, env.topo.nodeId)).toEqual(before);
-		expect(await teamRowCounts(t.pool, env.p.teamId)).toEqual(NOTHING);
-		expect(env.jobs.sent).toEqual([]);
-	});
-
 	it("slug_taken after a claim rolls the claim back: the machine is warm again", async () => {
 		const env = await serviceEnv(t.pool);
 		const slug = `taken-${env.template}`;
@@ -279,27 +210,6 @@ describe.skipIf(skipPg())("SandboxService.create (S6 §7.3)", () => {
 		});
 		expect(await nodeMachines(t.pool, env.topo.nodeId)).toEqual(before);
 		expect((await teamRowCounts(t.pool, env.p.teamId)).sandboxes).toBe(1);
-	});
-
-	it("failFast with warm claims as usual", async () => {
-		const env = await serviceEnv(t.pool);
-		const warm = await insertMachine(t.pool, env.topo, {
-			state: "warm",
-			poolKey: env.pairKey,
-		});
-		const { sandbox, operation } = await env.svc.create(env.p, {
-			failFast: true,
-		});
-		expect(sandbox.machineId).toBe(warm);
-		expect(operation.request).toMatchObject({ failFast: true, fromPool: true });
-	});
-
-	it("failFast with from is a validation error", async () => {
-		const env = await serviceEnv(t.pool);
-		await expectCode(
-			env.svc.create(env.p, { failFast: true, from: { snapshot: "x" } }),
-			"validation",
-		);
 	});
 
 	it("quota: maxActiveSandboxes and maxRamMb", async () => {
@@ -598,7 +508,6 @@ describe.skipIf(skipPg())("SandboxService.create (S6 §7.3)", () => {
 			});
 			expect(operation.request).toMatchObject({
 				from: { snapshot: "web-stack" },
-				fromPool: false,
 			});
 		});
 

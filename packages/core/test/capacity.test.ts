@@ -9,7 +9,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	admit,
 	checkQuota,
-	DELETE_RETRY_LIMIT,
 	isUmiakError,
 	lockNode,
 	lockTeam,
@@ -208,12 +207,9 @@ describe.skipIf(skipPg())("capacity", () => {
 				admit(tx, {
 					nodeId: topo.nodeId,
 					needMb: 4096,
-					pairKey: "linux/2gb",
-					evict: true,
-					jobs,
 				}),
 			);
-			expect(res).toEqual({ ok: true, evicted: [] });
+			expect(res).toEqual({ ok: true });
 			expect(jobs.sent).toEqual([]);
 		});
 
@@ -224,62 +220,12 @@ describe.skipIf(skipPg())("capacity", () => {
 				admit(tx, {
 					nodeId: topo.nodeId,
 					needMb: 2048,
-					pairKey: "linux/2gb",
-					evict: false,
-					jobs,
 				}),
 			);
 			expect(res).toEqual({ ok: false });
 			expect(await machineState(oldOther)).toBe("warm");
 			expect(await machineState(newOther)).toBe("warm");
 			expect(jobs.sent).toEqual([]);
-		});
-
-		it("evicts the oldest warm machine of another pair and sends machine-op delete", async () => {
-			const { topo, oldOther, newOther, ownPair } = await fullNode();
-			const jobs = new RecordingJobSender();
-			const res = await withTx(t.pool, (tx) =>
-				admit(tx, {
-					nodeId: topo.nodeId,
-					needMb: 2048,
-					pairKey: "linux/2gb",
-					evict: true,
-					jobs,
-				}),
-			);
-			expect(res).toEqual({ ok: true, evicted: [oldOther] });
-			expect(await machineState(oldOther)).toBe("deleting");
-			expect(await machineState(newOther)).toBe("warm");
-			expect(await machineState(ownPair)).toBe("warm");
-			// Strict: a missing retryLimit must fail (delete never gives up, §15.1).
-			expect(jobs.sent).toStrictEqual([
-				{
-					queue: "machine-op",
-					data: { machineId: oldOther, action: "delete" },
-					opts: { singletonKey: oldOther, retryLimit: DELETE_RETRY_LIMIT },
-				},
-			]);
-			expect((await ram(topo.nodeId)).reservedMb).toBe(6144);
-		});
-
-		it("evicts several machines, oldest first, never its own pair", async () => {
-			const { topo, oldOther, newOther, ownPair } = await fullNode();
-			const jobs = new RecordingJobSender();
-			const res = await withTx(t.pool, (tx) =>
-				admit(tx, {
-					nodeId: topo.nodeId,
-					needMb: 4096,
-					pairKey: "linux/2gb",
-					evict: true,
-					jobs,
-				}),
-			);
-			expect(res).toEqual({ ok: true, evicted: [oldOther, newOther] });
-			expect(await machineState(ownPair)).toBe("warm");
-			expect(jobs.sent.map((j) => j.data.machineId)).toEqual([
-				oldOther,
-				newOther,
-			]);
 		});
 
 		it("refuses and changes nothing when other pairs' warm RAM is not enough", async () => {
@@ -289,9 +235,6 @@ describe.skipIf(skipPg())("capacity", () => {
 				admit(tx, {
 					nodeId: topo.nodeId,
 					needMb: 6144,
-					pairKey: "linux/2gb",
-					evict: true,
-					jobs,
 				}),
 			);
 			expect(res).toEqual({ ok: false });
@@ -301,24 +244,9 @@ describe.skipIf(skipPg())("capacity", () => {
 			expect(jobs.sent).toEqual([]);
 		});
 
-		it("with pairKey null every warm machine may be evicted", async () => {
-			const { topo, ownPair } = await fullNode();
-			const jobs = new RecordingJobSender();
-			const res = await withTx(t.pool, (tx) =>
-				admit(tx, {
-					nodeId: topo.nodeId,
-					needMb: 2048,
-					pairKey: null,
-					evict: true,
-					jobs,
-				}),
-			);
-			expect(res).toEqual({ ok: true, evicted: [ownPair] });
-		});
-
 		it("30 concurrent admissions at cap 6144 admit exactly three 2048 MB machines", async () => {
 			const topo = await createTopology(t.pool, { node: { ramCapMb: 6144 } });
-			const jobs = new RecordingJobSender();
+			const _jobs = new RecordingJobSender();
 			const observed: number[] = [];
 			const results = await Promise.all(
 				Array.from({ length: 30 }, () =>
@@ -327,9 +255,6 @@ describe.skipIf(skipPg())("capacity", () => {
 						const res = await admit(tx, {
 							nodeId: topo.nodeId,
 							needMb: 2048,
-							pairKey: "linux/2gb",
-							evict: false,
-							jobs,
 						});
 						if (!res.ok) return false;
 						await insertMachine(tx.client, topo, {

@@ -116,14 +116,6 @@ export function outOfCapacity(
 	);
 }
 
-export function poolExhausted(retryAfterSeconds: number): UmiakError {
-	return new UmiakError(
-		"pool_exhausted",
-		`no warm machine available; retry in ${retryAfterSeconds} s`,
-		{ details: { retryAfterSeconds } },
-	);
-}
-
 export function quotaExceeded(
 	quota: string,
 	limit: number,

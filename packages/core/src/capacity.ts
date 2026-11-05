@@ -1,11 +1,9 @@
 import type { Quota } from "@umiak/config";
 import type { Tx } from "@umiak/db";
 import { invalidState, notFound, quotaExceeded } from "./errors.ts";
-import type { JobSender } from "./jobs.ts";
 import { lockNode, lockTeam } from "./locks.ts";
 import { nodeAcceptsStarts } from "./node-maintenance.ts";
 import { nodeUnplaceable } from "./placement.ts";
-import { DELETE_RETRY_LIMIT } from "./queues.ts";
 import {
 	type MachineState,
 	POWERED_MACHINE_STATES,
@@ -93,14 +91,9 @@ export interface AdmitInput {
 	templateBuildId?: string;
 	nodeId: string;
 	needMb: number;
-	/** `<template_slug>/<size_slug>` of the request; its warm machines are never evicted. */
-	pairKey: string | null;
-	/** Evict warm machines of other pairs when free RAM is short (not for pool refill). */
-	evict: boolean;
-	jobs: JobSender;
 }
 
-export type AdmitResult = { ok: true; evicted: string[] } | { ok: false };
+export type AdmitResult = { ok: true } | { ok: false };
 
 const ADMIT_SAVEPOINT = "umiak_admit";
 
@@ -116,12 +109,7 @@ const ADMIT_SAVEPOINT = "umiak_admit";
  * never two node locks out of order). A lock the transaction already held
  * before the call stays held.
  *
- * 1. `reserved + need <= cap` -> admitted.
- * 2. With `evict`: warm machines of other pairs on the node, oldest `warm_at`
- *    first, until the RAM fits. They go to `deleting` and get a `machine-op
- *    delete` job in this transaction (unlimited retries, S6 §15.1). If all
- *    of them are not enough, nothing changes.
- * 3. Otherwise refused; the caller maps it to `out_of_capacity`.
+ * Admission never reclaims another machine's RAM.
  */
 export async function admit(tx: Tx, input: AdmitInput): Promise<AdmitResult> {
 	await tx.client.query(`SAVEPOINT ${ADMIT_SAVEPOINT}`);
@@ -135,7 +123,7 @@ export async function admit(tx: Tx, input: AdmitInput): Promise<AdmitResult> {
 }
 
 async function admitLocked(tx: Tx, input: AdmitInput): Promise<AdmitResult> {
-	const { nodeId, needMb, pairKey, evict, jobs } = input;
+	const { nodeId, needMb } = input;
 	await lockNode(tx, nodeId);
 	if (!(await nodeAcceptsStarts(tx, nodeId))) return { ok: false };
 	if (
@@ -151,48 +139,7 @@ async function admitLocked(tx: Tx, input: AdmitInput): Promise<AdmitResult> {
 		if (!build.rowCount) return { ok: false };
 	}
 	const ram = await nodeRam(tx, nodeId);
-	const deficit = ram.reservedMb + needMb - ram.capMb;
-	if (deficit <= 0) return { ok: true, evicted: [] };
-	if (!evict) return { ok: false };
-
-	// Row locks keep a concurrent claim (FOR UPDATE SKIP LOCKED, §9.5) off the
-	// chosen machines; machines it already holds are skipped here.
-	const warm = await tx.client.query<{ id: string; memory_mb: number }>(
-		`SELECT id, memory_mb FROM runtime.machines
-		 WHERE node_id = $1 AND state = 'warm' AND pool_key IS DISTINCT FROM $2
-		 ORDER BY warm_at ASC NULLS FIRST, id
-		 FOR UPDATE SKIP LOCKED`,
-		[nodeId, pairKey],
-	);
-	const chosen: string[] = [];
-	let freed = 0;
-	for (const m of warm.rows) {
-		if (freed >= deficit) break;
-		chosen.push(m.id);
-		freed += m.memory_mb;
-	}
-	if (freed < deficit) return { ok: false };
-
-	const upd = await tx.client.query<{ id: string }>(
-		`UPDATE runtime.machines
-		 SET state = 'deleting', state_changed_at = now(), version = version + 1
-		 WHERE id = ANY($1::uuid[]) AND state = 'warm'
-		 RETURNING id`,
-		[chosen],
-	);
-	// The rows are locked by this transaction, so all of them were updated.
-	if (upd.rowCount !== chosen.length) {
-		throw new Error("admit: evicted machines changed under a row lock");
-	}
-	for (const machineId of chosen) {
-		await jobs.send(
-			tx,
-			"machine-op",
-			{ machineId, action: "delete" },
-			{ singletonKey: machineId, retryLimit: DELETE_RETRY_LIMIT },
-		);
-	}
-	return { ok: true, evicted: chosen };
+	return { ok: ram.reservedMb + needMb <= ram.capMb };
 }
 
 export type PoweredStartState = "booting" | "starting";

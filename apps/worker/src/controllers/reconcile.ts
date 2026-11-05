@@ -530,6 +530,8 @@ async function planNode(
 		 FROM runtime.machines m
 		 LEFT JOIN runtime.sandboxes s ON s.id = m.sandbox_id
 		 WHERE m.node_id = $1 AND m.state = ANY($2::text[])
+          AND NOT (m.sandbox_id IS NULL AND (m.pool_key IS NOT NULL OR m.state = 'warm')
+            AND NOT EXISTS (SELECT 1 FROM runtime.sandboxes allocated WHERE allocated.machine_id = m.id))
 		 ORDER BY m.id`,
 		[nodeId, VM_EXPECTED_STATES],
 	);
@@ -700,7 +702,7 @@ async function commandsLost(tx: Tx, machineId: string): Promise<void> {
  * §6.1 `machine_lost`: machine `failed` (`machine_lost`, as a step that
  * finds the VM gone), the sandbox whose current
  * machine it is → `error machine_lost` (kept for diagnostics; only delete is
- * allowed). A pool machine goes on to `deleting` with a delete job (§6.2).
+ * allowed). Unallocated legacy pool machines are quarantined before this path.
  * Lock order: sandbox row, then the machine row (the conditional UPDATE).
  */
 async function applyLost(ctx: WorkerCtx, m: MachineSnap): Promise<boolean> {
@@ -716,21 +718,9 @@ async function applyLost(ctx: WorkerCtx, m: MachineSnap): Promise<boolean> {
 		});
 		if (!lost) return false;
 		await commandsLost(tx, m.id);
-		if (m.sandbox_id === null) {
-			await tx.client.query(
-				`UPDATE runtime.machines
-				 SET state = 'deleting', state_changed_at = now(), version = version + 1
-				 WHERE id = $1 AND state = 'failed'`,
-				[m.id],
-			);
-			await ctx.jobs.send(
-				tx,
-				"machine-op",
-				{ machineId: m.id, action: "delete" },
-				{ singletonKey: m.id, retryLimit: DELETE_RETRY_LIMIT },
-			);
-			return true;
-		}
+		// An incomplete association is not evidence that a VM can be destroyed.
+		if (m.sandbox_id === null) return true;
+
 		const s = await tx.client.query<{ machine_id: string | null }>(
 			"SELECT machine_id FROM runtime.sandboxes WHERE id = $1",
 			[m.sandbox_id],
@@ -962,6 +952,7 @@ async function planLeases(
 		 LEFT JOIN runtime.machines m ON m.id = l.machine_id
 		 WHERE l.provider_id = $1 AND l.state = 'releasing' AND l.purpose = 'machine' AND l.build_job_id IS NULL
 		   AND l.updated_at < now() - make_interval(secs => $2)
+           AND NOT COALESCE(m.pool_key IS NOT NULL OR m.state = 'warm', false)
 		 ORDER BY l.vmid`,
 		[provider.id, RECONCILE_GRACE_S],
 	);
@@ -1045,7 +1036,8 @@ async function planLeases(
 					}
 					const still = await ctx.pool.query<{ machine_id: string | null }>(
 						`SELECT machine_id FROM runtime.vmid_leases
-					 WHERE provider_id = $1 AND vmid = $2 AND state = 'releasing' AND build_job_id IS NULL`,
+					 WHERE provider_id = $1 AND vmid = $2 AND state = 'releasing' AND build_job_id IS NULL
+                       AND NOT EXISTS (SELECT 1 FROM runtime.machines m WHERE m.id=machine_id AND (m.pool_key IS NOT NULL OR m.state='warm'))`,
 						[provider.id, vmid],
 					);
 					const lease = still.rows[0];

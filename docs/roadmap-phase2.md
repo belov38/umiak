@@ -12,7 +12,6 @@ Sources (local, not in git):
 
 Our plan: `docs/architecture.md`, `docs/roadmap.md`, the specifications S1, S2, S3, S4, S6. S5 and S7 are being written in other threads, their scope is taken from the roadmap; where I write "S7", it is an expectation, not a fact from a specification.
 
-A known debt for the warm pool (S30): with two or more nodes `retryClaim` (`apps/worker/src/ops/claim.ts`) holds the node lock of the rejected machine and calls `admitCold`, so a `40P01` deadlock is possible (S6 acceptance, round 2). Fix before enabling `ctl-pool`.
 
 Update 2026-10-29: the recommendations R1–R11 were incorporated into the MVP specifications. MVP authentication is now on Keycloak: `umiak login` through the device flow, people without long-lived keys, team keys `umiak_`, SSH certificates (S7 §7, §11.3; S4 §9; S8 §20.1). So K6, K8, SH1, and S24 are partly closed in the MVP, and the S24 rule "a child key is no wider than the parent" loses its meaning. The remainder is clarified at the S24 brainstorm.
 
@@ -53,7 +52,7 @@ The "Decision" column: where the item goes (S14+ or "MVP rec." — see §6) and 
 | L10 | Auto-rebuild of an `error` sandbox on a new machine from the latest snapshot | `docs:troubleshooting.md` | No: disks are local | ✗ | With a PBS archive — S18/S12, P3 |
 | L11 | Asynchronous delete with an operation `bdop_…`, stages `waiting_for_uploads`, `retrying` | `docs:data-retention/delete.md`, `docs:api/reference/account/get-deletion-operation.md` | The S6 `delete` operation; the public status — S7 | ◐ | S7 (operation status) |
 | L12 | `Idempotency-Key` on create and fork, 24 h, `idempotency_in_progress`, `idempotency_key_reused` | `docs:limits.md`, `docs:recipes/parallel-agents.md` | S6 §5.7, §14.1 | ✅ | Add resume — S30, P3 |
-| L13 | `failFast`: only from the warm pool, a response in ≈1.5 s or `503 no_ready_machine`, nothing is created; works with `from`, fork, resume too | `docs:machines/fail-fast.md`, `sdk:openapi/boat-v1.yaml` | No; a create from a snapshot is always cold for us (S6 §7.3) | ✗ | MVP rec. R2 (for templates); a warm pool for a saved snapshot — S30 |
+| L13 | `failFast`: only from the warm pool, a response in ≈1.5 s or `503 no_ready_machine`, nothing is created; works with `from`, fork, resume too | `docs:machines/fail-fast.md`, `sdk:openapi/boat-v1.yaml` | No; a create from a snapshot is always cold for us (S6 §7.3) | ✗ | Not planned: cold create only |
 | L14 | `count` 1–1000 on create from a snapshot, all or nothing | `docs:api/reference/sandboxes/create-sandbox.md`, `cli:new.txt` | No | ✗ | S30 (evals), P2 |
 | L15 | List filters: `state`, `namePrefix`, `label=k=v`, `stoppedBefore`, `dataExpired`, cursor | `docs:api/reference/sandboxes/list-sandboxes.md` | S6 labels, `ListFilter`; the form — S7 | ◐ | S7 |
 | L16 | Renaming the subdomain (`PATCH subdomain`, 3–40 characters, not ending in `-desktop` and `-<number>`) | `docs:hosting.md`, `docs:api/reference/sandboxes/update-sandbox.md` | S4 §4.2: the slug grammar is the same, generation and rename — S7; S6 §5.6 describes the slug differently (10 characters `[a-z0-9]`) | ◐ | S7; the slug format — MVP rec. R10 |
@@ -423,10 +422,10 @@ Boat's weak spots are taken from its own documentation and the card in `vr:battl
 | S24 | API keys v2 and agent login | Keys with resources (sandboxes, environments), lifetimes, a child no wider than its parent; rotate, usage; operations only from a browser session; a sandbox key and a port token inside the VM; a device flow for an agent with SSO confirmation; `WWW-Authenticate` with `resource_metadata` | S8 | S | P1 |
 | S25 | Data retention and deletion | Retention periods of stopped ones and of history with warnings; ephemeral sandboxes (stop = delete); turning off monitoring; ZDR per team. The public deletion status is in S7 | S6, S18, S19 | S | P3 |
 | S26 | CI runners | Ephemeral GitHub Actions runners (or GitLab — per the S13 answer): size labels, `from=<saved snapshot>`, `debug`, refusing public repos, a time limit; an API and CLI for jobs and logs; an OOM annotation | S13, S22; S28 optionally | M | P2/P3 |
-| S27 | Evals and adapters | Harbor `BaseEnvironment`, an Eve backend, on request an E2B-compatible wrapper; an RL/evals guide; uses batch create and the warm pool for a snapshot from S30 | S7, S22, S28, S17, S30 | M | P3 |
+| S27 | Evals and adapters | Harbor `BaseEnvironment`, an Eve backend, on request an E2B-compatible wrapper; an RL/evals guide; uses batch create from S30 | S7, S22, S28, S17, S30 | M | P3 |
 | S28 | Custom images and templates v2 | A template from a Dockerfile/OCI or a script (built on the node, cached); user templates of a team; versions and rollback; a template catalog in the admin | S5, S9 | L | P2 |
 | S29 | Desktop v2 | The computer-use API is already in the MVP (S10); here: browser-only with Chrome profiles; desktop recording; noVNC; clipboard, wallpapers | S10, S9 | M | P2 |
-| S30 | Lifecycle v2 | Waking a stopped sandbox on HTTP/SSH (the gateway holds the request); hibernation via a QEMU memory snapshot; batch create (`count`); a warm pool for a saved snapshot (for `failFast` with `from`); resume idempotency; disk growth on a size change; a user pre-stop hook; a policy for hung `degraded` ones | S1, S4, S6 | L | P2 |
+| S30 | Lifecycle v2 | Waking a stopped sandbox on HTTP/SSH (the gateway holds the request); hibernation via a QEMU memory snapshot; batch create (`count`); resume idempotency; disk growth on a size change; a user pre-stop hook; a policy for hung `degraded` ones | S1, S4, S6 | L | P2 |
 
 Order of waves:
 1. **P1** right after the MVP: S21 (reference skills and the plugin are cheap and immediately useful to agents from the MVP) and S24 → S22 (S22 builds the in-VM CLI on a sandbox key from S24), then S14 → S16 → S15 (S15 depends on the previous two).
@@ -567,7 +566,7 @@ Order of waves:
   - Harbor `BaseEnvironment`: uses per-command env/user, absolute paths, directory tars, the S17 network policies, images from S28 — what harbor-box is forced to refuse;
   - an Eve backend with a native `spawn` via detached + attach;
   - an E2B-compatible wrapper if the company's frameworks ask for it;
-  - an RL/evals guide; batch create and the warm pool for a snapshot come from S30.
+  - an RL/evals guide; batch create comes from S30.
 - Basis: `docs:evals.md`, `vr:harbor-box`, `vr:eve-box`.
 
 **S28. Custom images and templates v2.**
@@ -593,7 +592,6 @@ Order of waves:
   - wake-up on request: the gateway (S4) holds an HTTP request or an SSH connection and calls resume;
   - hibernation: `qm suspend --todisk` or a snapshot with vmstate (check the time and size on LVM-thin);
   - batch create with `count`;
-  - a warm pool for a saved snapshot so that `failFast` and mass start work with `from` too (currently a create from a snapshot is always cold, S6 §7.3);
   - `Idempotency-Key` on resume;
   - disk growth on a size change;
   - a user hook `~/.umiak/pre-stop` (save application state before stop);
@@ -721,7 +719,6 @@ Gaps that are cheaper to close now than to change after release.
 | # | Area | Recommendation | Why now |
 |---|---|---|---|
 | R1 | S7 | Fix the **CLI contract**: JSON automatically when stdout is not a TTY; JSONL with the `ready` event for `new`/`fork --wait`; an error is the last line `{"event":"error","code",…}`; the command's exit code and 124 on timeout; `current`. In the API: a delete confirmation header (`Umiak-Confirm-Delete: <id>`), `retryable` and `requestId` in every error. In the SDK — the helpers `waitUntilReady`, `runCommand`, `streamCommand` | Skills, MCP, CI, and scripts are built on this contract; changing it after release breaks everyone. Delete confirmation protects against agents' mistakes |
-| R2 | S6, S7 | `failFast` on create from a template: warm pool only, otherwise `503 pool_exhausted`, nothing is created. With `from` a create is always cold for us (S6 §7.3), so there `failFast` is either rejected or waits for a warm pool for a snapshot (S30) | The pool already exists (S6 §9), this is one admission branch; needed by evals and latency-sensitive agents |
 | R3 | S7/S8, S13 | A minimal **environment** entity (variables, secret files, repositories, default) and a flag "without the user's secrets" on create. Decide the owner: a Payload collection (S8) + applying at claim (S6) | S13 puts repositories into an environment, but the entity is in no specification. Versions and upgrade come later (S14) |
 | R4 | S8 | The key scope model right away as **action × resource** with a lifetime: actions as in boat (§2.14 K2), restriction by a list of sandboxes and environments (optionally templates), a 90 d default lifetime, a child key no wider than its parent. Reserve a "sandbox" key type (sees only its own sandbox) for the in-VM CLI | Changing the semantics of issued keys later is a migration and a security risk; S22/S24 are built on this |
 | R5 | S5 | Put into the `linux` template the coding-agent CLIs (`claude`, `codex`, `opencode`), our `umiak` CLI, and the tool set per `docs:machines/tools.md` (Node+pnpm, Python+uv, Go, Rust, Java, Docker+Compose+buildx, gh, rg, jq, Chrome, ffmpeg, xdotool) | Users will start running agents through exec and SSH long before S15; S15 relies on the versions in the template |

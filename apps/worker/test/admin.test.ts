@@ -300,8 +300,8 @@ describe("umiak-admin providers and nodes", () => {
 	});
 });
 
-describe("umiak-admin pool status", () => {
-	it("prints pool counts per pair and RAM per node", async () => {
+describe("umiak-admin node ram", () => {
+	it("prints RAM and quarantined legacy machine counts", async () => {
 		const n = await node();
 		const b = await db.pool.query(
 			`SELECT id, storage_id FROM runtime.template_builds
@@ -317,14 +317,7 @@ describe("umiak-admin pool status", () => {
 				[randomUUID(), n.provider_id, n.id, build.storage_id, build.id, state],
 			);
 		}
-		expect(await admin("pool", "status")).toBe(0);
-		expect(out).toContainEqual({
-			kind: "pair",
-			pair: "linux/2gb",
-			states: { warm: 2, booting: 1 },
-			warm: 2,
-			booting: 1,
-		});
+		expect(await admin("node", "ram")).toBe(0);
 		const nodeLine = out.find((o) => o.kind === "node" && o.node === "pve");
 		expect(nodeLine).toEqual({
 			kind: "node",
@@ -333,6 +326,7 @@ describe("umiak-admin pool status", () => {
 			provider: "pve-lab",
 			state: "active",
 			capMb: n.ram_cap_mb,
+			quarantinedMachines: 3,
 			reservedMb: 3 * 2048,
 			poweredMb: 3 * 2048,
 		});

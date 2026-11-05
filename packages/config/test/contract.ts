@@ -3,7 +3,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type {
 	ConfigReader,
 	PlatformDefaults,
-	PoolTarget,
 	Quota,
 	SizeConfig,
 	TemplateConfig,
@@ -21,7 +20,14 @@ export interface ConfigFixture {
 	templates: TemplateConfig[];
 	/** In configuration order (not slug order). */
 	sizes: SizeConfig[];
-	pools: PoolTarget[];
+	/** Legacy fixture consumed by the Payload reader until S24 retires it. */
+	pools: {
+		templateSlug: string;
+		sizeSlug: string;
+		target: number;
+		providerId?: string;
+		maxAgeHours?: number;
+	}[];
 	/** Every field set to a non-default value. */
 	defaults: PlatformDefaults;
 	/** The quota of teams (and of those fields a team leaves empty). */
@@ -98,12 +104,6 @@ export function makeConfigFixture(): ConfigFixture {
 	};
 }
 
-function byPool(a: PoolTarget, b: PoolTarget): number {
-	const k = (p: PoolTarget) =>
-		`${p.templateSlug}/${p.sizeSlug}/${p.providerId ?? ""}`;
-	return k(a).localeCompare(k(b));
-}
-
 export function runConfigReaderContract(
 	name: string,
 	make: (fx: ConfigFixture) => Promise<ConfigReaderSubject>,
@@ -156,12 +156,6 @@ export function runConfigReaderContract(
 
 		it("lists every size in configuration order", async () => {
 			expect(await reader.sizes()).toEqual(fx.sizes);
-		});
-
-		it("lists the pool targets", async () => {
-			expect([...(await reader.poolTargets())].sort(byPool)).toEqual(
-				[...fx.pools].sort(byPool),
-			);
 		});
 
 		it("fills the empty fields of a team quota from the default quota", async () => {

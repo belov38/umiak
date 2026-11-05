@@ -19,8 +19,6 @@ import {
 	run,
 	SECRETS,
 	sessionBoot,
-	until,
-	warmMachine,
 } from "./helpers/ops.ts";
 
 let db: TestDatabase;
@@ -51,7 +49,7 @@ async function events(w: TestWorld, sandboxId: string) {
 	return r.rows;
 }
 
-const byId = (xs: { id: string; state: string }[]) =>
+const _byId = (xs: { id: string; state: string }[]) =>
 	[...xs].sort((x, y) => (x.id < y.id ? -1 : 1));
 
 describe("create, cold path", () => {
@@ -326,158 +324,34 @@ describe("create, cold path", () => {
 	});
 });
 
-describe("create, pool claim path", () => {
-	it("claims a warm machine: rotate_token → claim → finish, no preparation", async () => {
-		const w = await createWorld(db);
-		const e = opsEnv(w);
-		const warm = await warmMachine(w);
-		const createsBefore = w.infra.callsOf("create").length;
-		const { sandboxId, operationId } = await createSandbox(w, e);
-		expect((await row(w, "operations", operationId)).request).toMatchObject({
-			fromPool: true,
-		});
-
-		expect(await run(w, operationId)).toBe("succeeded");
-
-		const s = await row(w, "sandboxes", sandboxId);
-		const m = await row(w, "machines", warm);
-		expect(s.machine_id).toBe(warm);
-		expect(s.state).toBe("ready");
-		expect(m.state).toBe("running");
-		expect(m.pool_key).toBeNull();
-		expect(m.provisioned_boot_id).toBe(await sessionBoot(w, warm));
-		expect(w.infra.callsOf("create")).toHaveLength(createsBefore);
-		expect(w.infra.callsOf("start")).toHaveLength(1);
-		expect(w.gateway.rotated).toEqual([warm]);
-		expect(claimsOf(w).map((c) => c.machineId)).toEqual([warm]);
-		expect((await row(w, "operations", operationId)).step).toBe("claim");
-	});
-
-	it("claim rejected → retry with another warm machine → rejected again → error create_failed", async () => {
-		const w = await createWorld(db);
-		const e = opsEnv(w);
-		const a = await warmMachine(w);
-		const b = await warmMachine(w);
-		w.agent.fail("claim", { rejected: "already_claimed" }, 2);
-		const { sandboxId, operationId } = await createSandbox(w, e);
-
-		expect(await run(w, operationId)).toBe("failed");
-
-		const s = await row(w, "sandboxes", sandboxId);
-		const op = await row(w, "operations", operationId);
-		expect(claimsOf(w).map((c) => c.machineId)).toEqual([a, b]);
-		expect(s.state).toBe("error");
-		expect(s.error_code).toBe("create_failed");
-		expect(s.machine_id).toBe(b);
-		expect(op.state).toBe("failed");
-		expect(op.error_code).toBe("already_claimed");
-		expect(op.progress).toMatchObject({
-			claimRetried: true,
-			rejectedMachineId: a,
-		});
-		expect(byId(await machinesOf(w, sandboxId))).toEqual(
-			byId([
-				{ id: a, state: "deleting" },
-				{ id: b, state: "deleting" },
-			]),
-		);
-		for (const id of [a, b]) {
-			expect(w.jobs.sent).toContainEqual({
-				queue: "machine-op",
-				data: { machineId: id, action: "delete" },
-				opts: { singletonKey: id, retryLimit: DELETE_RETRY_LIMIT },
-			});
-		}
-		expect(w.metrics.count("umiak_claim_retried_total")).toBe(1);
-	});
-
-	it("claim rejected with no other warm machine → retried cold and ready", async () => {
-		const w = await createWorld(db);
-		const e = opsEnv(w);
-		const warm = await warmMachine(w);
-		w.agent.fail("claim", { rejected: "bad_state" }, 1);
-		const { sandboxId, operationId } = await createSandbox(w, e);
-
-		expect(await run(w, operationId)).toBe("succeeded");
-
-		const s = await row(w, "sandboxes", sandboxId);
-		expect(s.state).toBe("ready");
-		expect(s.machine_id).not.toBe(warm);
-		expect((await row(w, "machines", warm)).state).toBe("deleting");
-		const m = await row(w, "machines", s.machine_id as string);
-		expect(m.state).toBe("running");
-		expect(m.pool_key).toBeNull();
-		expect(m.sandbox_id).toBe(sandboxId);
-		// The new path gets the cold deadline (6 min on Linux).
-		const op = await row(w, "operations", operationId);
-		const left = (op.deadline_at as Date).getTime() - (await dbNow(w));
-		expect(left).toBeGreaterThan(5 * 60_000);
-		expect(claimsOf(w).map((c) => c.machineId)).toEqual([warm, m.id]);
-	});
-
-	it("cold retry on a node that fits exactly one machine: the rejected machine's RAM is freed first", async () => {
-		const w = await createWorld(db, { ramCapMb: 2048 });
-		const e = opsEnv(w);
-		const warm = await warmMachine(w);
-		w.agent.fail("claim", { rejected: "bad_state" }, 1);
-		const { sandboxId, operationId } = await createSandbox(w, e);
-
-		const create = handleSandboxOp(w.ctx, { operationId });
-		// The new machine waits at the start gate until the rejected one is
-		// powered off by its machine-op delete.
-		await until("rejected machine deleting", async () => {
-			return (await row(w, "machines", warm)).state === "deleting";
-		});
-		expect(
-			await handleMachineOp(w.ctx, { machineId: warm, action: "delete" }),
-		).toBe("done");
-		expect(await create).toBe("succeeded");
-		await w.agentWorld.settled();
-
-		const s = await row(w, "sandboxes", sandboxId);
-		expect(s.state).toBe("ready");
-		expect(s.machine_id).not.toBe(warm);
-		expect((await row(w, "machines", warm)).state).toBe("deleted");
-		expect((await row(w, "machines", s.machine_id as string)).state).toBe(
-			"running",
-		);
-		expect(await infraState(w)).toMatchObject({ vms: 1, leases: 1 });
-	});
-
-	it("failFast: a rejected claim is retried only from the pool; none left → create_failed", async () => {
-		const w = await createWorld(db);
-		const e = opsEnv(w);
-		const warm = await warmMachine(w);
-		w.agent.fail("claim", { rejected: "already_claimed" }, 1);
-		const { sandboxId, operationId } = await createSandbox(w, e, {
-			failFast: true,
-		});
-
-		expect(await run(w, operationId)).toBe("failed");
-
-		const s = await row(w, "sandboxes", sandboxId);
-		expect(s.state).toBe("error");
-		expect(s.error_code).toBe("create_failed");
-		expect(await machinesOf(w, sandboxId)).toEqual([
-			{ id: warm, state: "deleting" },
-		]);
-		expect(w.infra.callsOf("create")).toHaveLength(1); // the pool machine only
-	});
-
-	it("claim not done before the deadline → one retry on a cold machine with a new deadline", async () => {
-		const w = await createWorld(db);
-		const e = opsEnv(w);
-		const warm = await warmMachine(w);
-		const { sandboxId, operationId } = await createSandbox(w, e);
-		await expireDeadline(w, operationId);
-
-		expect(await run(w, operationId)).toBe("succeeded");
-
-		const s = await row(w, "sandboxes", sandboxId);
-		expect(s.state).toBe("ready");
-		expect(s.machine_id).not.toBe(warm);
-		const old = await row(w, "machines", warm);
-		expect(old.state).toBe("deleting");
-		expect(old.error_code).toBe("deadline_exceeded");
-	});
+describe("legacy create requests", () => {
+	it.each([false, true])(
+		"finishes an allocated claim with persisted fromPool/failFast=%s",
+		async (legacy) => {
+			const w = await createWorld(db);
+			const e = opsEnv(w);
+			const { sandboxId, operationId } = await createSandbox(w, e);
+			const s = await row(w, "sandboxes", sandboxId);
+			// Simulate a persisted claim after provisioning completed on the old version.
+			expect(await run(w, operationId)).toBe("succeeded");
+			await w.pool.query(
+				"UPDATE runtime.operations SET state='pending',step='rotate_token',request=request || $2::jsonb WHERE id=$1",
+				[operationId, JSON.stringify({ fromPool: legacy, failFast: legacy })],
+			);
+			await w.pool.query(
+				"UPDATE runtime.sandboxes SET state='creating' WHERE id=$1",
+				[sandboxId],
+			);
+			await w.pool.query(
+				"UPDATE runtime.machines SET state='claiming' WHERE id=$1",
+				[s.machine_id],
+			);
+			const before = w.infra.callsOf("create").length;
+			expect(await run(w, operationId)).toBe("succeeded");
+			expect(w.infra.callsOf("create")).toHaveLength(before);
+			expect((await row(w, "machines", s.machine_id as string)).state).toBe(
+				"running",
+			);
+		},
+	);
 });

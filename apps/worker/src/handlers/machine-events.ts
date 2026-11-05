@@ -195,7 +195,7 @@ async function superseded(
  * A state-like event that arrived after a newer one of its type. The state
  * stays as it is, except for facts the newer event does not carry:
  * - `pool_ready` of the current boot still records `ready_boot_id` (and the
- *   pool machine's `warm`): the boot gate waits for it (decision 4);
+ *   cold claim): the boot gate waits for it (decision 4);
  * - a non-zero `activity` older than the newest one means the counters were
  *   not zero all along: the zero mark moves to the first later zero event
  *   (§12, order independence).
@@ -334,8 +334,7 @@ export async function ensureMachineProvision(
 
 /**
  * §10.2 `phase`: the last phase is kept in `agent_phase`. `pool_ready`
- * records its boot in `ready_boot_id` (decision 4) and moves a pool machine
- * that waits in `booting` to `warm`.
+ * records its boot in `ready_boot_id` (decision 4) for the cold boot gate.
  */
 async function onPhase(
 	s: EventScope,
@@ -362,9 +361,8 @@ async function onPhase(
 }
 
 /**
- * Records the boot of `pool_ready` in `ready_boot_id` (decision 4) and moves
- * a pool machine that waits in `booting` to `warm`; with `phase`, also sets
- * `agent_phase`.
+ * Records boot readiness using the legacy `pool_ready` protocol message.
+ * With `phase`, also sets `agent_phase`; machine state never changes.
  */
 async function setPoolReady(
 	s: EventScope,
@@ -372,22 +370,16 @@ async function setPoolReady(
 	o: { phase: boolean },
 ): Promise<void> {
 	const m = s.machine;
-	const toWarm =
-		m.state === "booting" && m.pool_key !== null && m.sandbox_id === null;
 	await s.tx.client.query(
 		`UPDATE runtime.machines
 		 SET ready_boot_id = $2,
-		     agent_phase = CASE WHEN $4 THEN 'pool_ready' ELSE agent_phase END,
-		     state = CASE WHEN $3 THEN 'warm' ELSE state END,
-		     warm_at = CASE WHEN $3 THEN now() ELSE warm_at END,
-		     state_changed_at = CASE WHEN $3 THEN now() ELSE state_changed_at END,
+		     agent_phase = CASE WHEN $3 THEN 'pool_ready' ELSE agent_phase END,
 		     version = version + 1
 		 WHERE id = $1`,
-		[m.id, bootId, toWarm, o.phase],
+		[m.id, bootId, o.phase],
 	);
 	m.ready_boot_id = bootId;
 	if (o.phase) m.agent_phase = "pool_ready";
-	if (toWarm) m.state = "warm";
 }
 
 /**

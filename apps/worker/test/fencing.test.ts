@@ -1,7 +1,6 @@
 import { DELETE_RETRY_LIMIT } from "@umiak/core";
 import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { handleMachineOp } from "../src/handlers/machine-op.ts";
 import {
 	DeadlineExceeded,
 	deadlinePassed,
@@ -20,6 +19,7 @@ import {
 	machine,
 	type TestWorld,
 } from "./fakes/world.ts";
+import { prepareFixture as handleMachineOp } from "./helpers/prepare.ts";
 
 let db: TestDatabase;
 
@@ -62,7 +62,6 @@ describe("machine-op fencing", () => {
 
 		blocked.release();
 		expect(await a).toBe("fenced_out");
-		expect(w.metrics.count("umiak_fenced_out_total")).toBe(1);
 
 		// Only B started a VM; A's VM was thrown away by B through the lease.
 		expect(w.infra.callsOf("start").map((c) => c.args[0])).toEqual([

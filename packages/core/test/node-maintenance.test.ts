@@ -25,7 +25,7 @@ beforeAll(async () => {
 afterAll(async () => {
 	await db?.drop();
 });
-const jobs = { send: async () => {} };
+const _jobs = { send: async () => {} };
 const reserve = (nodeId: string, jobId = randomUUID()) =>
 	withTx(db.pool, (tx) =>
 		beginNodeBuild(tx, { nodeId, jobId, templateSlug: "linux" }),
@@ -79,9 +79,6 @@ describe("node maintenance (S19)", () => {
 					storageId: a.storageId,
 					templateBuildId: a.templateBuildId,
 					needMb: 2048,
-					pairKey: null,
-					evict: false,
-					jobs,
 				});
 			});
 			await entered.promise;
@@ -101,9 +98,6 @@ describe("node maintenance (S19)", () => {
 				await admit(tx, {
 					nodeId: a.nodeId,
 					needMb: 2048,
-					pairKey: null,
-					evict: false,
-					jobs,
 				}),
 			).toMatchObject({ ok: true });
 			const entered = Promise.withResolvers<void>();
@@ -189,9 +183,6 @@ describe("node maintenance (S19)", () => {
 				admit(tx, {
 					nodeId: a.nodeId,
 					needMb: 2048,
-					pairKey: null,
-					evict: false,
-					jobs,
 				}),
 			),
 		).toEqual({ ok: false });
@@ -309,9 +300,6 @@ describe("node maintenance (S19)", () => {
 			storageId: a.storageId,
 			templateBuildId: a.templateBuildId,
 			needMb: 2048,
-			pairKey: null,
-			evict: false,
-			jobs,
 		};
 		await db.pool.query(
 			"UPDATE runtime.nodes SET state='cordoned' WHERE id=$1",

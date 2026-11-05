@@ -1,6 +1,5 @@
 import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { handleMachineOp } from "../src/handlers/machine-op.ts";
 import {
 	CapacityWaitTimeout,
 	prepareMachine,
@@ -27,6 +26,7 @@ import {
 	machine,
 	type TestWorld,
 } from "./fakes/world.ts";
+import { prepareFixture as handleMachineOp } from "./helpers/prepare.ts";
 
 let db: TestDatabase;
 

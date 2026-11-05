@@ -81,8 +81,8 @@ function fencedOut(
  * - the kind's steps. Errors are transient by default and thrown (pg-boss
  *   repeats the job; the deadline bounds the repeats). Only an error that
  *   says `retryable === false` (domain errors: agent rejection, lost machine,
- *   boot timeout, invalid state, deadline …) is permanent: the kind's `retry`
- *   (create: pool claim), else compensation and `failed` with its code;
+ *   boot timeout, invalid state, deadline …) is permanent: compensation
+ *   and `failed` with its code;
  * - `FencedOut` (another attempt or a delete took over) → exit quietly.
  * Delete never fails: every error of it is thrown.
  */
@@ -125,7 +125,6 @@ async function handleSandboxOpLocked(
 				return "succeeded";
 			} catch (e) {
 				if (e instanceof FencedOut || h.neverFails || !isPermanent(e)) throw e;
-				if (h.retry && (await h.retry(ctx, fenced, e))) continue;
 				const error = operationErrorOf(e);
 				ctx.log.warn(
 					{

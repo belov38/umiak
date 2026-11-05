@@ -1,33 +1,15 @@
-// Read-only status queries shared by `umiak-admin pool status` and the
-// scrape-time gauges of /metrics.
 import { POWERED_SQL, RESERVED_SQL } from "@umiak/core";
 import type pg from "pg";
 
 type Queryable = Pick<pg.Pool, "query">;
-
-export interface PoolCount {
-	pair: string;
-	state: string;
-	count: number;
-}
-
-/** Machines of the warm pool (not claimed yet) per pair and state. */
-export async function poolCounts(q: Queryable): Promise<PoolCount[]> {
-	const r = await q.query<{ pair: string; state: string; n: number }>(
-		`SELECT pool_key AS pair, state, count(*)::int AS n
-		 FROM runtime.machines
-		 WHERE pool_key IS NOT NULL AND state <> 'deleted'
-		 GROUP BY pool_key, state
-		 ORDER BY pool_key, state`,
-	);
-	return r.rows.map((x) => ({ pair: x.pair, state: x.state, count: x.n }));
-}
 
 export interface NodeRamStatus {
 	nodeId: string;
 	node: string;
 	provider: string;
 	state: string;
+	/** Legacy unallocated rows: retained for operator inspection, never reclaimed automatically. */
+	quarantinedMachines: number;
 	capMb: number;
 	reservedMb: number;
 	poweredMb: number;
@@ -40,12 +22,14 @@ export async function nodeRam(q: Queryable): Promise<NodeRamStatus[]> {
 		node: string;
 		provider: string;
 		state: string;
+		quarantined: number;
 		cap_mb: number;
 		reserved_mb: number;
 		powered_mb: number;
 	}>(
 		`SELECT n.id AS node_id, n.name AS node, p.name AS provider, n.state,
 		   n.ram_cap_mb AS cap_mb,
+           COUNT(m.id) FILTER (WHERE m.sandbox_id IS NULL AND (m.pool_key IS NOT NULL OR m.state = 'warm') AND NOT EXISTS (SELECT 1 FROM runtime.sandboxes s WHERE s.machine_id = m.id))::int AS quarantined,
 		   COALESCE(SUM(m.memory_mb) FILTER (WHERE ${RESERVED_SQL}), 0)::int AS reserved_mb,
 		   COALESCE(SUM(m.memory_mb) FILTER (WHERE ${POWERED_SQL}), 0)::int AS powered_mb
 		 FROM runtime.nodes n
@@ -60,6 +44,7 @@ export async function nodeRam(q: Queryable): Promise<NodeRamStatus[]> {
 		provider: x.provider,
 		state: x.state,
 		capMb: x.cap_mb,
+		quarantinedMachines: x.quarantined,
 		reservedMb: x.reserved_mb,
 		poweredMb: x.powered_mb,
 	}));

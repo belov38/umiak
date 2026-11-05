@@ -44,12 +44,6 @@ export interface CreateInput {
 	idleTimeoutSeconds?: number | null;
 	/** Create from a saved snapshot of the team (always cold). */
 	from?: { snapshot: string };
-	/**
-	 * Warm pool only, else `pool_exhausted` (S6 §7.3). Not part of the public
-	 * MVP contract: the pool controller is phase 2 (decision 17), so S7 must
-	 * not expose `failFast` or `pool_exhausted` until it exists.
-	 */
-	failFast?: boolean;
 	/** S8 §10; only null/absent until S8 provides environments. */
 	environment?: string | null;
 	/** S8 §10; only false/absent until S8 provides environments. */
@@ -69,7 +63,6 @@ const CREATE_KEYS: readonly (keyof CreateInput)[] = [
 	"ttlSeconds",
 	"idleTimeoutSeconds",
 	"from",
-	"failFast",
 	"environment",
 	"excludeOwnerSecrets",
 ];
@@ -117,16 +110,6 @@ export function validateCreateInput(input: CreateInput): SecretSets {
 				typeof input.excludeOwnerSecrets === "boolean"
 					? NO_ENVIRONMENTS
 					: "must be a boolean",
-		});
-	}
-	if (input.failFast !== undefined && typeof input.failFast !== "boolean") {
-		issues.push({ path: "failFast", message: "must be a boolean" });
-	}
-	if (input.failFast === true && input.from !== undefined) {
-		issues.push({
-			path: "failFast",
-			message:
-				"a create from a snapshot is always cold; failFast is not allowed",
 		});
 	}
 	if (issues.length > 0) throw validation(issues);

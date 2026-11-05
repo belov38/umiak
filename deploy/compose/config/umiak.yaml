@@ -36,10 +36,6 @@ sizes:
     vcpu: 8
     memoryMb: 8192
 
-# Warm pools are not implemented (cold create only): no controller refills
-# pool targets, so keep this empty.
-pools: []
-
 quotas:
   default:
     maxActiveSandboxes: 3

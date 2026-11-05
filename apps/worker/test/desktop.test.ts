@@ -24,7 +24,6 @@ async function desktopWorld() {
 		templates: base.templates.bind(base),
 		sizes: base.sizes.bind(base),
 		defaults: base.defaults.bind(base),
-		poolTargets: base.poolTargets.bind(base),
 		teamQuota: base.teamQuota.bind(base),
 	};
 	return w;

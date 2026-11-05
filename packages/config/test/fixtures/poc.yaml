@@ -11,11 +11,6 @@ sizes:
     vcpu: 2
     memoryMb: 2048
 
-pools:
-  - templateSlug: linux
-    sizeSlug: 2gb
-    target: 1
-
 quotas:
   default:
     maxActiveSandboxes: 3

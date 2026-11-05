@@ -23,7 +23,6 @@ import {
 	admitCold,
 	admitLocalSource,
 	admitOnSnapshotNode,
-	claimWarm,
 	type Placement,
 } from "./create-placement.ts";
 import { withServiceTx } from "./tx.ts";
@@ -47,7 +46,6 @@ export async function queuedPlacement(
 	if (!r) throw outOfCapacity(30);
 	const { uuidv7 } = await import("../ids.ts");
 	return {
-		fromPool: false,
 		machineId: uuidv7(),
 		nodeId: r.node_id,
 		providerId: r.provider_id,
@@ -138,7 +136,6 @@ export async function tryAdmitQueuedStart(
 					if (!snap) throw snapshotNotFound(m.origin_snapshot_id);
 					placement = await admitOnSnapshotNode(
 						tx,
-						deps,
 						{
 							id: snap.id,
 							nodeId: snap.node_id,
@@ -147,44 +144,20 @@ export async function tryAdmitQueuedStart(
 							templateBuildId: snap.template_build_id,
 							templateSlug: snap.template_slug,
 						},
-						`${s.template_slug}/${s.size_slug}`,
 						s.memory_mb,
 					);
-				} else
-					placement =
-						(await claimWarm(
-							tx,
-							s.id,
-							s.template_slug,
-							`${s.template_slug}/${s.size_slug}`,
-						)) ??
-						(await admitCold(
-							tx,
-							deps,
-							s.template_slug,
-							`${s.template_slug}/${s.size_slug}`,
-							s.memory_mb,
-						));
-				if (placement.fromPool) {
-					await tx.client.query(
-						"UPDATE runtime.machines SET state='deleted',deleted_at=now(),version=version+1 WHERE id=$1",
-						[m.id],
-					);
-					await tx.client.query(
-						"UPDATE runtime.sandboxes SET machine_id=$2 WHERE id=$1",
-						[s.id, placement.machineId],
-					);
-				} else
-					await tx.client.query(
-						"UPDATE runtime.machines SET node_id=$2,provider_id=$3,storage_id=$4,template_build_id=$5,state='allocating',version=version+1 WHERE id=$1",
-						[
-							m.id,
-							placement.nodeId,
-							placement.providerId,
-							placement.storageId,
-							placement.templateBuildId,
-						],
-					);
+				} else placement = await admitCold(tx, s.template_slug, s.memory_mb);
+
+				await tx.client.query(
+					"UPDATE runtime.machines SET node_id=$2,provider_id=$3,storage_id=$4,template_build_id=$5,state='allocating',version=version+1 WHERE id=$1",
+					[
+						m.id,
+						placement.nodeId,
+						placement.providerId,
+						placement.storageId,
+						placement.templateBuildId,
+					],
+				);
 				await tx.client.query(
 					"UPDATE runtime.sandboxes SET node_id=$2,provider_id=$3,template_build_id=$4,version=version+1 WHERE id=$1",
 					[
@@ -194,14 +167,9 @@ export async function tryAdmitQueuedStart(
 						placement.templateBuildId,
 					],
 				);
-				await tx.client.query(
-					"UPDATE runtime.operations SET request=request || $2::jsonb WHERE id=$1",
-					[operationId, JSON.stringify({ fromPool: placement.fromPool })],
-				);
 			} else if (op.kind === "resume") {
 				await admitLocalSource(
 					tx,
-					deps,
 					{
 						nodeId: s.node_id,
 						storageId: m.storage_id,
@@ -209,7 +177,6 @@ export async function tryAdmitQueuedStart(
 						templateBuildId: s.template_build_id,
 						templateSlug: s.template_slug,
 					},
-					`${s.template_slug}/${s.size_slug}`,
 					s.memory_mb,
 				);
 			} else

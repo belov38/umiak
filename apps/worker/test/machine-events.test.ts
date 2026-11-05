@@ -56,7 +56,7 @@ async function unprocessed(w: TestWorld, machineId: string): Promise<number> {
 }
 
 describe("machine-events (connected, phase)", () => {
-	it("pool_ready moves a booting pool machine to warm and records ready_boot_id", async () => {
+	it("pool_ready records readiness without producing a warm machine", async () => {
 		const w = await createWorld(db);
 		const id = await insertMachine(w, { state: "booting" });
 		const bootId = randomUUID();
@@ -81,8 +81,8 @@ describe("machine-events (connected, phase)", () => {
 			processed: 3,
 		});
 		const m = await machine(w, id);
-		expect(m.state).toBe("warm");
-		expect(m.warm_at).not.toBeNull();
+		expect(m.state).toBe("booting");
+		expect(m.warm_at).toBeNull();
 		expect(m.ready_boot_id).toBe(bootId);
 		expect(m.agent_phase).toBe("pool_ready");
 		expect(await unprocessed(w, id)).toBe(0);
@@ -97,7 +97,7 @@ describe("machine-events (connected, phase)", () => {
 			processed: 0,
 		});
 		const again = await machine(w, id);
-		expect(again.state).toBe("warm");
+		expect(again.state).toBe("booting");
 		expect(again.version).toBe(m.version);
 	});
 
@@ -281,7 +281,7 @@ describe("machine-events (§10.2)", () => {
 		await agentEvents(w, id, [phase(1, bootId, "pool_ready")]);
 		const m = await machine(w, id);
 		expect(m.ready_boot_id).toBe(bootId);
-		expect(m.state).toBe("warm");
+		expect(m.state).toBe("booting");
 		expect(m.agent_phase).toBe("ready");
 		// A late pool_ready of an older boot does not move ready_boot_id.
 		await agentEvents(w, id, [phase(0, randomUUID(), "pool_ready")]);

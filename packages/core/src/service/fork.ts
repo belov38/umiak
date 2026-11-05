@@ -269,7 +269,6 @@ export async function forkSandbox(
 
 			destination = await admitLocalSource(
 				tx,
-				deps,
 				{
 					nodeId: src.node_id,
 					storageId: srcMachine.storageId,
@@ -277,7 +276,6 @@ export async function forkSandbox(
 					templateBuildId: src.template_build_id,
 					templateSlug: src.template_slug,
 				},
-				`${src.template_slug}/${size.slug}`,
 				size.memoryMb,
 			);
 		} catch (error) {
@@ -363,8 +361,6 @@ export async function forkSandbox(
 				ttlSeconds,
 				idleTimeoutSeconds,
 				from: null,
-				failFast: false,
-				fromPool: false,
 				forkOf: src.id,
 			},
 			principal: p,
