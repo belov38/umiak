@@ -6,6 +6,10 @@ export * from "./identity.ts";
 export * from "./ids.ts";
 export * from "./owner-mode.ts";
 export * from "./pg-store.ts";
+export {
+	RuntimeIdentityStore,
+	type RuntimeIdentityStoreOptions,
+} from "./runtime-store.ts";
 export * from "./scopes.ts";
 export * from "./secret-sets.ts";
 export * from "./seed.ts";
