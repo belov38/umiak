@@ -126,6 +126,23 @@ export async function replicateActiveTemplates({
 							[root, target.nodeId],
 						)
 					).rows[0];
+					// A second runner may have waited on this lock while the first published.
+					if (
+						journal?.phase === "done" &&
+						(
+							await pool.query(
+								"SELECT 1 FROM runtime.template_builds WHERE node_id=$1 AND status='active' AND (id=$2 OR source_build_id=$2)",
+								[target.nodeId, root],
+							)
+						).rowCount
+					) {
+						await onProgress({
+							phase: "ready",
+							node: target.name,
+							nodeId: target.nodeId,
+						});
+						continue;
+					}
 					if (journal?.phase === "done" || journal?.phase === "cancelled")
 						journal = undefined;
 					if (!journal) {
