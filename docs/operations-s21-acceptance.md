@@ -1,7 +1,8 @@
 # S21 live acceptance (coordinator only)
 
-Implementation never contacted pve/pve2. Run this after the fresh installation and
-upgrade to the reported main commit. Use disposable test sandboxes and retain
+Partial live results are recorded in [the recovery report](s21-replication-recovery-acceptance.md).
+Run the remaining scenarios after upgrading to the reported main commit.
+Use disposable test sandboxes and retain
 logs/DB journal rows until the checks finish. No production guests are needed.
 
 ## Inspection helpers
@@ -48,10 +49,11 @@ comparison fallback, but that fallback does more local IO.
   VM steps. Repeat linux-desktop and windows (Windows includes EFI and TPM).
 - Query template rows above: each node has an active replica with the same root
   build identity/version/original manifest and equal per-disk
-  `sha256-block-tree-v1` checksums; template VMIDs differ cluster-wide. The
-  checksum is a canonical tree of SHA-256 block hashes, not `sha256sum` of a raw
-  disk. Independently export/read both immutable bases on operator consoles and
-  compare raw SHA-256 if desired; do not use a whole-disk node-agent digest RPC.
+  `sha256-pvesm-raw+size-v1` checksums for standard full copies; template VMIDs
+  differ cluster-wide. This hashes the eight-byte little-endian size header plus
+  raw bytes, not just the raw disk. Legacy block-relay proofs use
+  `sha256-block-tree-v1`; compare algorithms as well as values. Independent raw
+  reads on operator consoles are optional; no whole-disk digest RPC is needed.
 - Use Setup Smoke on each node. Create/exec/delete succeeds on both, including
   desktop/Windows boot and TPM persistence.
 - On an otherwise empty pve2, retire local replicas through the existing node

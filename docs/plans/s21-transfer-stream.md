@@ -20,7 +20,7 @@ and checksum. A cached receipt is reusable only for the same immutable source
 UUID and target LV UUID. Partial current disks restart with standard pvesm;
 completed disks resume via receipts. Deltas retain byte checkpoints.
 
-Delta copies keep thin_delta changed/zero ranges. Use one long-lived binary
+Experimental delta copies keep thin_delta changed/zero ranges. Use one long-lived binary
 node-agent session per endpoint, up to 8 MiB frames, four in flight, bounded
 memory, in-stream canonical 512-KiB hashes and target readback before durable
 acknowledgements. Resume revalidates the prefix. No new listener or credential.
@@ -30,3 +30,15 @@ UUID replay tests, frame bounds/corruption/truncation/resume tests, product canc
 and cleanup. Deploy only to pve/pve2/CT590. Measure full and cold-move transfer
 bytes and elapsed time live; then fresh build/copy, checksum identity and
 sandbox create/exec/delete on both nodes before fast-forward main.
+
+## Wrap-up decision
+
+Owner stopped further protocol work on 2026-11-05. Template full-copy streaming
+is enabled and live-verified. Delta sessions are behind explicit opt-in on both
+endpoints plus protocol negotiation; a live crash-resume test failed with
+`Invalid delta frame bounds`. Portable full-snapshot streaming is separately
+opt-in because its raw+size framing fallback has no live acceptance. Defaults
+keep cold moves on the old relay. No production configuration enables either
+experimental option. See [measured acceptance and remaining work](../s21-replication-recovery-acceptance.md).
+The original fresh-build/Windows/TPM acceptance remains incomplete; wrap-up must
+not present it as passed. Further transfer design is a separate task.

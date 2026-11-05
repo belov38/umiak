@@ -1,7 +1,8 @@
 # S21: Portable templates, cold moves and capacity waits
 
-Status: implemented; local verification recorded in the plan. Live acceptance
-on pve/pve2 remains with the coordinator. Replaces the S19 local-only rule.
+Status: implemented. Partial live acceptance on pve/pve2 is recorded in
+[the recovery report](../s21-replication-recovery-acceptance.md); remaining
+scenarios are explicit there. Replaces the S19 local-only rule.
 
 ## Decisions
 
@@ -12,23 +13,31 @@ node, storage, LV names and template VMID are replica-specific. Template VMIDs
 remain cluster-unique: the same template VMID cannot be registered twice in PVE.
 Adding a node replicates active builds before enabling cold placement there.
 
-Use existing pinned SSH forced-command node-agent RPCs for bounded block reads
-and writes. No shell, arbitrary path, host-to-host SSH credentials or new listener.
-Compare fixed-size logical blocks with the local base, transmit only changed
-blocks (including changed-to-zero blocks), and verify hashes at destination.
-Without an identical base copy nonzero blocks to a fresh zero-filled thin LV.
-Use reserved live-pool metadata snapshots with thin_dump (allocated extents) or
-thin_delta (source versus identical base, including unmapped/discarded ranges).
-Fall back to logical block comparison when metadata tooling is unavailable.
-Checksums use sha256-block-tree-v1: hash the domain, logical size, block size,
-base checksum (empty for full copies), then ordered offset/length/block SHA-256
-records; omit all-zero blocks for full copies. Verification uses bounded block
-RPCs and progress checkpoints, never a whole-volume hashing RPC.
+Full template replicas use a restricted source node-agent `volume.sendTo` op:
+Proxmox raw+size export/import, zstd level 1, and the cluster's existing root SSH
+trust. The op validates the owned immutable source, configured storage/thin pool,
+online cluster member and typed staging destination. The remote command is fixed;
+the control plane receives progress/receipts and never a root shell or payload.
+Both endpoints hash the raw+size stream in flight (`sha256-pvesm-raw+size-v1`);
+publication checks the verified staging origin/config reference. A partial disk
+restarts its standard import; completed immutable disks can reuse UUID-bound
+receipts. No extra credential or network listener is introduced.
 
-PVE export/import was considered: useful for full images, but not sufficient for
-base-relative deltas and per-block retry. Direct host-to-host copying adds a
-second trust/credential path. Bounded RPCs retain the existing security boundary
-and bound memory independently of disk size, at the cost of RPC overhead.
+Default cold moves retain the existing pinned SSH forced-command block relay.
+Compare logical blocks with an identical base, send changed blocks including
+changed-to-zero blocks, and verify hashes at destination. Without an identical
+base copy nonzero blocks to a fresh zero-filled thin LV. Use thin_dump allocated
+extents or thin_delta changes when available; otherwise compare logical blocks.
+Relay checksums remain `sha256-block-tree-v1`: domain, logical size, block size,
+base checksum and ordered offset/length/block hashes. Equal bases require equal
+checksum algorithm and value. Do not compare block-tree and raw+size hashes.
+
+The bounded binary delta-session prototype requires explicit opt-in at both
+endpoints and negotiated `delta-stream-v1`. It is disabled by default after a
+live crash-resume failure. Standard full imports for portable cold-move snapshots
+are also disabled by default: their snapshot framing fallback lacks live
+verification. A separate transfer design task decides these paths; cold moves do
+not depend on either experimental path.
 
 ## Storage protocol and safety
 
