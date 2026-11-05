@@ -27,6 +27,7 @@ from umiak_installer import release, stack  # noqa: E402
 REPO_ROOT = HERE.parent.parent
 VERSION_PLACEHOLDER = "${UMIAK_VERSION:?}"
 IMAGE_LINE = re.compile(r"^\s*image: ghcr\.io/belov38/umiak-[a-z-]+:(\S+)$", re.M)
+S24_MIN_UPDATER = "0.4.0-edge.20261105.5"
 
 
 def pinned_compose(text: str, version: str) -> str:
@@ -46,6 +47,14 @@ def pinned_compose(text: str, version: str) -> str:
 
 def collect(repo: Path, version: str, node_agent_sha256: str, db_compatible: bool = False,
             min_updater: str | None = None) -> dict[str, bytes]:
+    # This source tree contains the incompatible S24 configuration cutover.
+    # A future release may relax compatibility after the cutover is deployed.
+    if db_compatible:
+        raise ValueError("S24 requires database/state restoration on rollback; dbCompatible must be false")
+    if min_updater is None:
+        min_updater = S24_MIN_UPDATER
+    if release.version_key(min_updater) < release.version_key(S24_MIN_UPDATER):
+        raise ValueError("S24 requires the installed updater bridge " + S24_MIN_UPDATER)
     metadata = {"dbCompatible": db_compatible}
     if min_updater is not None:
         release.version_key(min_updater)

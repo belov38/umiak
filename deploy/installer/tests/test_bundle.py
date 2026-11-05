@@ -81,7 +81,9 @@ def test_rejects_bad_checksum(tmp_path):
 
 def test_bundle_cli_declares_database_compatibility(tmp_path):
     import build_bundle
-    assert build_bundle.main(["1.2.3", str(tmp_path), "--node-agent-sha256", SHA, "--db-compatible"]) == 0
+    with pytest.raises(ValueError, match="S24"):
+        build_bundle.main(["1.2.3", str(tmp_path), "--node-agent-sha256", SHA, "--db-compatible"])
+    assert build_bundle.main(["1.2.3", str(tmp_path), "--node-agent-sha256", SHA]) == 0
     import tarfile
     with tarfile.open(tmp_path / "umiak-installer-1.2.3.tar.gz") as archive:
-        assert json.loads(archive.extractfile("release.json").read())["dbCompatible"] is True
+        assert json.loads(archive.extractfile("release.json").read())["dbCompatible"] is False

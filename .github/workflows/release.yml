@@ -8,11 +8,7 @@ on:
       min_updater:
         description: Minimum installed updater bundle version (empty for legacy-compatible releases)
         type: string
-        default: ""
-      db_compatible:
-        description: Previous release can read this release database without restoration
-        type: boolean
-        default: false
+        default: "0.4.0-edge.20261105.5"
       channel:
         description: Release channel
         type: choice
@@ -174,12 +170,10 @@ jobs:
           cat "$RUNNER_TEMP/node-agent.sha256"
       - name: Build the installer bundle
         env:
-          DB_COMPATIBLE: ${{ inputs.db_compatible }}
           MIN_UPDATER: ${{ inputs.min_updater }}
         run: |
           mkdir -p dist
           compatibility=()
-          if [ "$DB_COMPATIBLE" = true ]; then compatibility+=(--db-compatible); fi
           if [ -n "$MIN_UPDATER" ]; then compatibility+=(--min-updater "$MIN_UPDATER"); fi
           uv run --project deploy/installer python deploy/installer/build_bundle.py "$VERSION" dist --node-agent-sha256 "$(cat "$RUNNER_TEMP/node-agent.sha256")" "${compatibility[@]}"
           (cd dist && sha256sum -c SHA256SUMS)
