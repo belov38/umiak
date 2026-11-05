@@ -9,7 +9,7 @@ Evidence and historical rounds: `docs/plans/s16-quickstart.md`.
 Run `docker compose up -d --build` from the repository root, claim ownership,
 configure a home Proxmox host, install the bundled CLI from the same origin and
 create/exec/delete a sandbox. No handwritten environment file is required for the
-LAN IP path. OIDC and S15 remain available through their existing compose files.
+LAN IP path. Owner authentication is the only supported mode.
 
 ## HTTP, proxies and ownership
 
@@ -126,7 +126,7 @@ operations. Serve8443 forwards to loopback HTTP4181; LAN is http://192.168.68.90
 
 Gate: pnpm build/lint/typecheck, sequential workspace tests, quickstart/local/
 meta-proxy Node tests including compiled HTTP CLI and custom-CA HTTPS proxy,
-shellcheck, Go build/vet/test/lint, Python SDK, OIDC23 and local Playwright.
+shellcheck, Go build/vet/test/lint, Python SDK, owner authentication tests and local Playwright.
 Use unique Compose projects/ports. Fresh-host prep/build remains fake/dry-run
 because the active stand forbids those mutations. No main merge in this branch.
 

@@ -1,3 +1,5 @@
+> Historical backlog: Keycloak, oauth2-proxy and OIDC deployments were removed on 2026-11-05. Only the installer-managed homelab owner deployment is supported; older comparisons below are historical.
+
 # Phase 2 roadmap: parity with boat.dev and beyond
 
 Status: draft v0.1, 2026-10-29. For the master session: an inventory of boat's capabilities, reconciliation with the S1–S13 plan, the areas S14+ for brainstorm, MVP recommendations. There is no implementation and no brainstorm with Ilia here.

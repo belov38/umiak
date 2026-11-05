@@ -1,3 +1,5 @@
+> Historical design: Keycloak, oauth2-proxy and OIDC authentication were removed on 2026-11-05. Current deployments use owner authentication over Tailscale; see [architecture](../architecture.md).
+
 # S16 UI follow-up execution ledger
 
 Spec: user acceptance follow-up to S16 rounds 1–5 and UI consistency.

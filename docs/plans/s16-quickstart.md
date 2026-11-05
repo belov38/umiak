@@ -1,3 +1,5 @@
+> Historical design: Keycloak, oauth2-proxy and OIDC authentication were removed on 2026-11-05. Current deployments use owner authentication over Tailscale; see [architecture](../architecture.md).
+
 # S16 quickstart implementation plan
 
 > Execute task by task with tests before implementation. Technical details are delegated by Ilia; no start/design confirmation is required.

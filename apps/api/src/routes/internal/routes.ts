@@ -31,8 +31,8 @@ export interface GatewayRoute {
 }
 
 /**
- * The route answer of a core target. `sso` routes add `ssoPolicyEpoch` to
- * their epoch (C7), so a policy change invalidates the sso cookies; `public`
+ * The route answer of a core target. Per-port epochs invalidate access
+ * cookies when the port changes; `public`
  * routes are blocked while public ports are off, unless already blocked
  * for another reason.
  */

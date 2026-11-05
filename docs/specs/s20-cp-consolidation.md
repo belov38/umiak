@@ -43,9 +43,7 @@ for every role and coupled web releases. Rejected.
 - Preserve owner ingress published ports, fixed trusted proxy addresses, control
   and web-internal networks, web isolation, readiness and shutdown contracts.
 - Root compose uses two pinned published image names; contributor override builds
-  those same two Dockerfiles once each. Corporate OIDC retains separate processes,
-  secrets and networks; its API/worker/MCP builds use the shared runtime with
-  explicit commands. Kubernetes can use the same commands with independent pods.
+  those same two Dockerfiles once each. All supported control-plane services use this owner deployment.
 - Release remains workflow_dispatch only; bundle tests expect exactly two Umiak
   image names. Installer changes are limited to image/stack-file contracts.
 

@@ -1,3 +1,5 @@
+> Historical design: Keycloak, oauth2-proxy and OIDC authentication were removed on 2026-11-05. Current deployments use owner authentication over Tailscale; see [architecture](../architecture.md).
+
 # Dashboard: boat.dev UI mapping
 
 Reference inspected read-only in Ilia's logged-in Chrome on 2026-11-02.

@@ -1,3 +1,5 @@
+> Historical design: Keycloak, oauth2-proxy and OIDC authentication were removed on 2026-11-05. Current deployments use owner authentication over Tailscale; see [architecture](../architecture.md).
+
 # S8. Web (Payload): admin panel, dashboard, users and teams — specification
 
 Status: agreed (the master session on Ilia's behalf), 2026-10-29. The IdP is Keycloak, offboarding is option A (Ilia's decision 2026-10-29, §5, §9.8, §20.1). Supplemented with the MVP recommendations R3, R4 (`docs/roadmap-phase2.md` §6, decisions of the master session 2026-10-29). Area S8 from `docs/roadmap.md`. Architecture: `docs/architecture.md` (§2, §10, §11). Relies on `docs/specs/s7-public-api.md` (listeners, keys, scopes, `IdentityStore`, §17.3, §22), `docs/specs/s6-control-plane.md` (§5.11 `ConfigReader`, §8.5 quotas, §13.1 secrets), `docs/specs/s4-gateway.md` (§6.1–6.2 routes and blocks, §8.4 SSO, §14.1 cookies).

@@ -1,3 +1,4 @@
+# Sigstore certificate issuer verification below protects the downloaded guest tool; it is not platform authentication.
 # S10 installer library. OS/network operations can be replaced by fake boundaries.
 Set-StrictMode -Version Latest
 function Get-UmiakDesktopArtifact {

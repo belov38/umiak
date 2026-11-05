@@ -1,3 +1,5 @@
+> Historical design: Keycloak, oauth2-proxy and OIDC authentication were removed on 2026-11-05. Current deployments use owner authentication over Tailscale; see [architecture](../architecture.md).
+
 # S2. Agent ↔ gateway tunnel protocol
 
 Status: agreed, 2026-10-29. Area S2 from `docs/roadmap.md`. Architecture: `docs/architecture.md` (§4, §10, §11).

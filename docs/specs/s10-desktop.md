@@ -1,3 +1,5 @@
+> Historical design: Keycloak, oauth2-proxy and OIDC authentication were removed on 2026-11-05. Current deployments use owner authentication over Tailscale; see [architecture](../architecture.md).
+
 # S10. Desktop and computer-use: specification
 
 > Superseded template selection (2026-11-03): [S17](s17-windows-single.md) makes `windows` the single Windows 11 desktop recipe (VM 595). `windows-desktop` is an input alias. VM 598 is retired, read-only, and retained for existing sandboxes/snapshots. Historical build evidence below is unchanged.

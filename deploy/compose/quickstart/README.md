@@ -187,7 +187,6 @@ This changes only owner access; setup, VM data and guest trust are preserved. Th
 recovery command is deliberately unavailable over HTTP. Protect and back up the
 named volumes; `down -v` deletes state.
 
-The corporate OIDC deployment (`deploy/compose/compose.yaml`) is a separate stack.
 Do not run two stacks over the same database.
 
 ## Local validation
@@ -348,7 +347,6 @@ MCP remains a separate secretless process; web-meta remains the GET-only private
 metadata bridge. The single offline `secrets-init` initializes the gateway before
 copying service secrets; renewal keeps its separate offline service. Existing
 volumes and the node-agent extraction path are preserved. Image sharing does not
-reduce the number of V8 heaps. Corporate OIDC keeps separate role commands.
 
 The host installer asks for a fixed LAN address for the control plane, and for
 LVM-thin storage only when several are available. LAN bridge and router/prefix

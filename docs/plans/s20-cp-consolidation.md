@@ -1,3 +1,5 @@
+> Historical design: Keycloak, oauth2-proxy and OIDC authentication were removed on 2026-11-05. Current deployments use owner authentication over Tailscale; see [architecture](../architecture.md).
+
 # S20 CP consolidation implementation plan
 
 > **For agentic workers:** Use superpowers:executing-plans for inline implementation; one fresh acceptance reviewer after verification.

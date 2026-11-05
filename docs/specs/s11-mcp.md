@@ -1,3 +1,5 @@
+> Historical design: Keycloak, oauth2-proxy and OIDC authentication were removed on 2026-11-05. Current deployments use owner authentication over Tailscale; see [architecture](../architecture.md).
+
 # S11. MCP server: specification
 
 Status: agreed by the master session, 2026-10-29 (§18). Area S11 from `docs/roadmap.md`. Architecture: `docs/architecture.md` (§2, §8, §10). Relies on S7 (the public API, authentication, the CLI contract §14, SDK §15) and S10 §13–§14 (the computer-use API). The brainstorm input is `docs/roadmap-phase2.md` §5.2 (MVP recommendation R8). The boundary with phase 2 is S21 (skills, plugins, slash commands) and S24 (OAuth for MCP via CIMD/DCR, keys restricted by sandbox).

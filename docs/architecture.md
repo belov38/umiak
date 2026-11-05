@@ -15,6 +15,8 @@ An API platform that gives AI agents and people isolated VMs (sandboxes) on Prox
 | `windows` | Windows 11 (user-supplied image and license; build: `docs/specs/s9-windows.md`) | exec (PowerShell), files, SSH, desktop |
 | `windows-core` | Windows Server 2025 Core (user-supplied image and license), **phase 2** (S9 §22) | exec (PowerShell), files, SSH |
 
+**Not supported:** corporate deployments, external identity services, Kubernetes.
+
 **Not in phase 1:** billing, public IPs for sandboxes, ZFS, Ceph, built-in coding agents (prompt/steer/events), AI credentials proxy, multi-region.
 
 ## 2. Components
@@ -40,12 +42,11 @@ An API platform that gives AI agents and people isolated VMs (sandboxes) on Prox
  |  SDN VNet + SNAT          |  out    | - SSH gateway             |
  +---------------------------+         | - TLS edge, L4 LB         |
                                        +---------------------------+
-                                         coturn (TURN) — a separate service (S10)
 ```
 
 | Component | Language | Responsibility |
 |---|---|---|
-| `apps/api` | TS, Hono + `@hono/zod-openapi`, Node 24 | Public REST API, OpenAPI, authorization by Keycloak JWT and team API keys, NDJSON streams, terminal WebSocket. Source of OpenAPI for the SDKs |
+| `apps/api` | TS, Hono + `@hono/zod-openapi`, Node 24 | Public REST API, OpenAPI, authorization by owner sessions and scoped team API keys, NDJSON streams, terminal WebSocket. Source of OpenAPI for the SDKs |
 | `apps/worker` | TS, pg-boss | Sandbox and machine state machines, warm pool, Proxmox operations, snapshots and fork, auto-stop, cleanup |
 | `apps/web` | TS, Next.js + Payload 3 | `/admin`: operators (users, teams, keys, templates, sizes, quotas). `/app`: customer dashboard (sandbox list, xterm.js terminal, desktop iframe, logs). Works with sandboxes only through `apps/api` |
 | `apps/cli` | TS (Bun compile) | Client of the public API |
@@ -53,7 +54,7 @@ An API platform that gives AI agents and people isolated VMs (sandboxes) on Prox
 | `packages/sdk-ts`, `sdk-py` | generation + facades | From OpenAPI; helpers for waiting, reconnecting streams, uploads, PTY |
 | `packages/auth` | TS | API key format, scopes, the `IdentityStore` interface (shared by `api` and `web`) |
 | `services/guest-agent` | Go | Agent inside the VM (Linux: systemd unit, Windows: service) |
-| `services/gateway` | Go | Agent tunnel intake, HTTP port proxy, SSH gateway, TLS edge for `*.umiak`, `tunnel`, `ssh` (S2, S4). TURN is a separate coturn (S10) |
+| `services/gateway` | Go | Agent tunnel intake, HTTP port proxy, SSH gateway, TLS edge for `*.umiak`, `tunnel`, `ssh` (S2, S4). Desktop uses the agent tunnel |
 | `services/node-agent` | Go | On each Proxmox node: LVM-thin operations, QMP, node metrics. In the PoC it can be replaced by an SSH executor with the same interface |
 | Postgres | — | One DB: the Payload schema (configuration) + the API schema (runtime) |
 
@@ -142,7 +143,7 @@ Driver interface: `cloneFromTemplate`, `snapshot`, `cloneFromSnapshot`, `delete`
 - All inbound traffic goes through the agent tunnel to `gateway`:
   - **HTTP:** `https://<slug>-<port>.umiak.<domain>` → any gateway pod → tunnel (locally or via the owner pod) → `localhost:port`. Access modes `token`, `sso`, `public`. In detail: `docs/specs/s4-gateway.md`.
   - **SSH:** `ssh <sandbox>@ssh.<domain>` → the gateway terminates SSH and verifies a short-lived certificate from `api` or the user key via `api` → tunnel → the VM's system sshd on `127.0.0.1:22` with a short-lived certificate from the gateway SSH CA (`TrustedUserCAKeys`). User keys are not copied into the VM.
-  - **Desktop:** moonlight-web signaling through the tunnel (`<slug>-desktop.umiak`); WebRTC media through a separate TURN (coturn, relay only between its own allocations), fallback transport — WebSocket through the gateway and the tunnel (S10 §9).
+  - **Desktop:** moonlight-web signaling through the tunnel (`<slug>-desktop.umiak`); WebSocket media through the gateway and agent tunnel (S18).
 
 ## 8. Desktop and computer-use
 
@@ -160,80 +161,43 @@ In detail: `docs/specs/s7-public-api.md`.
 
 - `/v1/sandboxes` (create, get with long-poll, list, update, delete, `stop`, `resume`, `fork`, `recover`, `extend`, `env`), `/v1/operations`, `/commands` (sync, NDJSON stream, detached, attach by offset, output, input, kill), `/ptys` (WebSocket), `/files` (Range, streaming write, chunked upload, directory tar, list/stat/mkdir/move/chmod/delete), `/ports`, `/ssh`, `/desktop` (links, access, screenshot, actions, clipboard; S10 §13), `/v1/ssh-keys`, `/v1/snapshots` (saved), `/v1/environments`, `/v1/templates`, `/v1/sizes`, `/v1/api-keys`, `/v1/me`, `/v1/limits`, `/v1/meta`. Semantics as in boat (`research/03-api-sdk-surface.md`), own format, not wire-compatible.
 - IDs with prefixes (`sb_`, `op_`, `cmd_`, `snap_`, `key_`), a slug can be passed in the path. Resources without a wrapper, lists `{data, nextCursor}`, errors `{error: {code, message, retryable, details, requestId}}`. `Idempotency-Key` for create, fork, and commands: a retry does not run the command twice. Deleting a sandbox and a saved snapshot only with `Umiak-Confirm-Delete: <id>`. The CLI without a TTY prints JSON and JSONL (S7 §14.3).
-- Three `api` listeners: public (Keycloak JWT and team keys), behind oauth2-proxy (browser, Origin check), internal (gateway, service tokens).
+- Three `api` listeners: public (owner session and team keys), private browser listener (owner ingress, Origin check), internal (gateway, service tokens).
 - OpenAPI is generated from zod schemas; the TS SDK (`openapi-typescript` + `openapi-fetch`) and Python (`openapi-python-client`) with handwritten helpers; the `umiak` CLI on the TS SDK via Bun compile.
 
 ## 10. Deployment and authentication
 
-The default mode is `UMIAK_AUTH_MODE=oidc` (described below). The `owner` mode
-(home setup, S18 installer, root `compose.yaml`) is a single owner/operator behind a trusted
-ingress (`deploy/compose/quickstart/server.mjs`): the backend accepts only the
-socket peer of the ingress from `UMIAK_LOCAL_ALLOWED_CIDRS` and runs under the fixed
-identity `umiak:local`, without Keycloak and oauth2-proxy.
+Umiak is homelab-only. `curl … install.sh | sh` on a Proxmox VE node creates
+an LXC running the root Compose stack. The installer manages updates, owner
+recovery, Tailscale access and uninstall. See `docs/getting-started.md`.
 
-### Homelab mode (S18)
+The control plane is reachable only over the owner's tailnet. A one-time claim
+link establishes the first browser session. Additional browsers use one-time
+sign-in codes, and `umiak login` pairs a CLI credential with an already claimed
+owner browser. Sessions and paired credentials can be revoked independently.
+The installer can recover ownership without any external identity service.
 
-The home setup is installed with one command on a Proxmox VE 9 node (`install.sh` → the Python installer `deploy/installer`, a release bundle from GitHub with `SHA256SUMS` verification). The installer creates Umiak objects in PVE (user and token `umiak@pve`, roles, pool `umiak`, SDN zone `umiak` / VNet `umiak0` `10.88.0.0/24`, IPSet `umiak-gateway`, group `umiak-egress`) and a restricted `node-agent`. The control plane is an unprivileged Debian 13 LXC with Docker and Tailscale; the root `compose.yaml` pulls the published GHCR images (`UMIAK_VERSION`) into `/opt/umiak`. Tailscale runs inside the CT, not on the PVE host.
+The quickstart ingress verifies the owner cookie or paired credential, checks
+client networks, removes forged identity headers and forwards requests to the
+private API, MCP and web listeners. Those listeners verify their trusted ingress
+peer or the ingress's client stamp and enforce Origin checks. Public metadata
+advertises `authMode: owner` and `tenancy: single`.
 
-Access is only over tailnet HTTPS (`https://umiak.<tailnet>.ts.net`, Tailscale Serve → trusted ingress `quickstart` :4181). `owner` mode: one owner, claim through a one-time link `/claim#<code>`, cookie `__Host-umiak_owner`. Emergency path: an SSH tunnel to :4180 (Host `localhost` only). Port previews — `http://<slug>-<port>.<tailnet-ip-dashed>.sslip.io:8085` over the tailnet, SSH — tailnet IP :2222. The desktop is embedded in the dashboard on the same origin (`/desktop/<slug>/`): the ingress serves its own trusted copy of the moonlight-web frontend and passes from the guest only JSON/SDP/NDJSON/binary, not HTML and JS. Browser wizard: Templates and Smoke test. Day 2 (Update, new browser, owner reset, Uninstall) is a rerun of the installer. Spec: `docs/specs/s18-onboarding.md`.
+Payload remains the dashboard/admin configuration store. The owner has a stable
+internal session subject (`umiak:local`), operator rights and a personal team.
+Teams, memberships, scoped team API keys and their quotas remain part of the
+internal authorization model. They are not a second login mechanism.
 
-S19 adds sandbox nodes through the original root installer console. The source of truth is `runtime.nodes/storages/providers`; install-state records installation bookkeeping. The PVE token and forced-command SSH key are shared within the cluster; SSH endpoints, pinned host keys, LVM-thin and media storage are per node. Preparation validates configuration and persists a cordoned reservation before checking local DHCP/SNAT, the guest listener and restricted RPC, then activating the node. A template build reserves an idle node and uses the shared PostgreSQL allocator; an interrupted build continues to block starts. Removing the sandbox role preserves topology/history and refuses while machines, snapshots, templates, build jobs or leases remain. The control-plane CT is independent of this role. Details: `docs/specs/s19-multi-node.md`, `docs/operations-multi-node.md`.
+Published port access `sso` is the wire name for owner-session access; it uses
+the owner ingress and the gateway's short-lived access codes. It has no
+external sign-in provider or configurable corporate port policy. `token` and
+`public` port access remain available subject to platform settings.
 
-**S20 packaging:** two published images: `umiak-quickstart` (shared runtime for
-API, worker, MCP, ingress, gateway, web-meta, offline bootstrap and renewal;
-different commands, separate processes, and the previous mounts/networks) and `umiak-web`
-(Next standalone + Payload migrations). MCP has no secrets and talks to the
-public REST API; merging the image does not merge the processes. Postgres is an
-upstream image. See `docs/specs/s20-cp-consolidation.md`.
-
-**The control plane runs in Kubernetes:** `api`, `worker`, `web`, `gateway`, `mcp`, Keycloak (IdP, operations — S12). Postgres is in the cluster (operator) or external. Proxmox nodes, VMs, and `umiak-node` stay outside Kubernetes.
-
-**IdP — Keycloak** (Ilia's decision 2026-10-29), one realm `umiak`. Later it may broker a corporate IdP (Google, Entra, LDAP); not in the MVP. Roles and teams come from Keycloak groups and claims (S8 §5).
-
-**Users (browser) — through oauth2-proxy** (provider `keycloak-oidc`, `--cookie-refresh=5m`: a user disabled in Keycloak loses the dashboard and `/admin` within 5 min).
-- `web` (`/admin`, `/app`) and browser API calls are fronted by oauth2-proxy.
-- The user is created at first login (JIT) from oauth2-proxy headers: `X-Auth-Request-Email`, `-User`, `-Groups`. This is a custom Payload auth strategy; the API reads the same user.
-- Roles come from Keycloak groups: a group from `UMIAK_OPERATOR_GROUPS` → platform operator. Operator rights (including blocks and `allTeams`, S8 §17.1 C3) apply only in a browser session, not by API key and not by the CLI JWT. Teams and `owner`/`member` roles are in Payload; a personal team is created at first login (S8 §6).
-- We trust headers only from oauth2-proxy. Direct access to pods is closed by NetworkPolicy. oauth2-proxy runs in upstream mode and routes `app.<domain>`: `/api/*` (without `/api`), `/umiak-auth/*` → `api :8081`, the rest → `web` (S8 §5.1).
-
-**People in the CLI, SDK, and MCP — Keycloak JWT, no personal long-lived keys** (S7 §7.6, §7.10). The remote MCP accepts the same JWT; browser login uses the client `umiak-mcp` (S11 §6.4).
-- `umiak login` — OAuth 2.0 Device Authorization Grant with the public client `umiak-cli`. The access token lives 5 min, the refresh token is bound to the Keycloak SSO session and stored in the OS keychain (fallback — a `0600` file). The SDK and MCP get the token from the CLI (`umiak auth token`).
-- `api` verifies the JWT itself (JWKS, `iss`, `aud=umiak-api`, `exp`), no introspection per request; `sub` → the same Payload user as in the browser. A disabled user cannot refresh the token: access ends within 5 min.
-
-**Automation and CI — team keys `umiak_`** (S7 §7.2). Owned by the team, issued by an `owner` in the dashboard, the creator is recorded for audit; "resource × action" scopes, lifetime 90 d by default, maximum 365 d. The creator leaving does not disable the keys, `owner`s revoke them.
-
-`/v1/*` routes with `Authorization: Bearer` (JWT or `umiak_`) go to `api.<domain>` bypassing oauth2-proxy: oauth2-proxy is for the browser only. The paths `/mcp` and `/.well-known/oauth-protected-resource/mcp` on the same host go to the `mcp` Deployment (S11 §6.2).
-
-**Deactivation (offboarding, option A, S8 §20.1).** `worker` reads users through the Keycloak Admin API (client `umiak-worker`) every 5 min. A disabled or deleted user is deactivated in Payload; their streams, PTYs, and SSH sessions are closed immediately; the `owner`s of their teams get the list of team keys the user created. Keys are not revoked automatically.
-
-**Keycloak settings** (realm `umiak`, Keycloak 26.8; installed by S12):
-
-| What | Setting |
-|---|---|
-| Shared client scope `groups` | Group Membership mapper → claim `groups`, Full group path off; attached by default to `oauth2-proxy`, `umiak-cli`, and `umiak-mcp` so that the browser and the CLI get groups in the same format |
-| Client `oauth2-proxy` | confidential (Client authentication on), Standard flow; Audience mapper to itself; scope `groups` |
-| Client `umiak-cli` | public (Client authentication off), only OAuth 2.0 Device Authorization Grant; Audience mapper (Included Client Audience `umiak-api`, Add to access token); default scopes `basic` (`sub`), `email`, `profile`, `groups`; `offline_access` removed from both default and optional (the refresh does not outlive the SSO session); lightweight access token off |
-| Client `umiak-mcp` | public, only Standard flow (authorization code) with PKCE `S256`; redirect URIs `http://127.0.0.1:33418/*`, `http://localhost:33418/*`; Audience mapper `umiak-api`; scopes and the `offline_access` ban as for `umiak-cli`; login to the remote MCP via the browser (S11 §6.4) |
-| Client `umiak-api` | audience only: no flow, gets no tokens itself |
-| Client `umiak-worker` | confidential, Service accounts only; role `view-users` of client `realm-management` |
-| Lifetimes | Access Token Lifespan 5 min; SSO Session Idle 24 h; SSO Session Max 7 d (CLI login once a week, with daily use); Client Session Idle/Max as in the realm; Revoke Refresh Token off (the CLI refreshes under a lock); device code 600 s, polling interval 5 s |
-| Users | email required and verified; the operator group is `UMIAK_OPERATOR_GROUPS` |
-
-**Bypassing oauth2-proxy (own authentication):**
-- `tunnel.<domain>`: agent tunnels (WSS, bootstrap secret / machine token, see S2).
-- The internal gateway listener (ClusterIP) for `api` and `worker` calls, authorized by service tokens.
-- `*.umiak.<domain>`: public port URLs. Access modes: `token` (as in boat), `sso` (login via oauth2-proxy on the main domain and a one-time code, the IdP cookie does not reach umiak), `public`.
-- `ssh.<domain>`: SSH gateway. Login with short-lived SSH certificates that `api` issues from a person's JWT or a team key, or with a person's registered key; identity is verified by `api` on every connection (S4 §9.2, S7 §11.3).
-
-**Edge gateway.** `tunnel.<domain>`, `*.umiak.<domain>`, and `ssh.<domain>` go not through the ingress but through a separate L4 LoadBalancer Service `gateway-edge` (443 and 22; client IP via PROXY protocol v2 or `externalTrafficPolicy: Local`). TLS is terminated by the gateway itself: wildcard `*.umiak` from cert-manager (DNS-01), `tunnel` from the tunnel CA. A fallback "behind ingress" mode is supported (S4 §5). All platform cookies on the main domain are host-only with the `__Host-` prefix, otherwise code in a sandbox could plant them (S4 §14.1).
-
-**Gateway deploy.** Rolling update: `preStop` starts the drain (S2, S4 §10). HTTP streams live up to 2 min, SSH sessions up to 15 min with a warning, `terminationGracePeriodSeconds: 960`.
-
-**Network.** `worker` reaches the Proxmox API (`:8006`) and `umiak-node` over SSH from the cluster (secrets in a Kubernetes Secret). The sandbox network allows outbound connections only to the `gateway-edge` address (`tunnel.<domain>:443`, IPSet `umiak-gateway`). TURN (UDP) for the desktop is a separate coturn `turn.<domain>` with hostNetwork on a dedicated node or a UDP LoadBalancer (S12); sandboxes reach it over UDP 3478 (IPSet `umiak-turn`, S10 §9.2).
+Desktop streaming uses WebSocket through the gateway and agent tunnel (S18).
+It needs no media relay service or separate media address.
 
 ## 11. Security
 
-- Team API keys with "resource × action" scopes (`sandboxes:read`, `commands:exec`, …) and a mandatory lifetime, stored as hashes in Payload. People have no long-lived keys: the CLI works with short-lived Keycloak JWTs. The key type `sandbox` (one sandbox, for the CLI inside the VM) is reserved and not issued in the MVP (S7 §7.2–7.3).
+- Team API keys with "resource × action" scopes (`sandboxes:read`, `commands:exec`, …) and a mandatory lifetime, stored as hashes in Payload. People have no long-lived keys: the CLI works with short-lived owner sessions. The key type `sandbox` (one sandbox, for the CLI inside the VM) is reserved and not issued in the MVP (S7 §7.2–7.3).
 - Each machine has its own bootstrap secret in `smbios1` and a machine token for the tunnel only in agent memory; the token is reissued at claim. A machine is not reused between sandboxes (S2).
 - Secrets in the guest are in tmpfs (Linux). On Windows `secret_env` is in memory only, `secret_files` are in a directory with an ACL (SYSTEM and `user`), wiped on every boot before user login, at stop, and before a saved snapshot; pagefile cleared at shutdown. Remnants in the pagefile and NTFS metadata of a snapshot of a running VM are an accepted risk (S9 §12.8).
 - Proxmox: a separate user and API token with rights only on the pool `umiak` and the needed storages.
@@ -249,6 +213,5 @@ upstream image. See `docs/specs/s20-cp-consolidation.md`.
 ## 13. Open questions
 
 - PoC resources on `pve`: RAM, VMID range, consent to host changes (user and token, SDN, pool).
-- Domain for `*.umiak`: `umiak.<domain>` by default; a separate registrable domain is Ilia's choice, possible later (S4 §14.1). TLS: wildcard via cert-manager DNS-01 (S4 §5).
-- Kubernetes: which cluster and ingress controller; which Keycloak group grants the operator role. ~~Which IdP~~ — Keycloak (Ilia's decision 2026-10-29).
+- Domain for `*.umiak`: `umiak.<domain>` by default; a separate registrable domain is Ilia's choice, possible later (S4 §14.1). Tailnet HTTPS is configured by the installer; custom wildcard DNS/TLS remains deferred.
 - ~~SSH in the guest: system sshd or a built-in SSH server in the agent.~~ Decided in S4: system sshd on loopback with certificates from the gateway SSH CA.

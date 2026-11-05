@@ -1,3 +1,5 @@
+> Historical design: Keycloak, oauth2-proxy and OIDC authentication were removed on 2026-11-05. Current deployments use owner authentication over Tailscale; see [architecture](../architecture.md).
+
 # S4. Gateway: public port URLs, SSH, edge
 
 Status: draft for agreement, 2026-10-29. Supplemented by Ilia's decision of 2026-10-29 (Keycloak, offboarding option A): login by short-lived SSH certificates and session termination on deactivation (§9.2, §9.3, §9.5). Area S4 from `docs/roadmap.md`. Architecture: `docs/architecture.md` (§7, §10, §11). Basis: `docs/specs/s2-tunnel-protocol.md` (below "S2").

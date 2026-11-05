@@ -55,6 +55,21 @@ describe.skipIf(skipPg())("payload migrations on an empty database", () => {
 		);
 	});
 
+	it("drops retired port policy storage and directory-only deactivation reasons", async () => {
+		const columns = await t.pool.query(
+			"SELECT column_name FROM information_schema.columns WHERE table_schema='payload' AND table_name='platform_defaults' AND column_name IN ('sso_port_policy','sso_policy_epoch')",
+		);
+		expect(columns.rows).toEqual([]);
+		const policyEnum = await t.pool.query(
+			"SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='payload' AND t.typname='enum_platform_defaults_sso_port_policy'",
+		);
+		expect(policyEnum.rows).toEqual([]);
+		const reasons = await t.pool.query(
+			"SELECT e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='payload' AND t.typname='enum_users_deactivated_reason' ORDER BY e.enumsortorder",
+		);
+		expect(reasons.rows).toEqual([{ enumlabel: "operator" }]);
+	});
+
 	it("applied migrations unknown to the code are allowed", async () => {
 		await t.pool.query(
 			"INSERT INTO payload.payload_migrations (id, name, batch) VALUES (uuidv7(), '29991231_000000_future', 99)",

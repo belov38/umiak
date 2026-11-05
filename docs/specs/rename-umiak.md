@@ -1,3 +1,5 @@
+> Historical design: Keycloak, oauth2-proxy and OIDC authentication were removed on 2026-11-05. Current deployments use owner authentication over Tailscale; see [architecture](../architecture.md).
+
 # R1. Rename to Umiak
 
 > S17 update (2026-11-03): `windows` now includes desktop; `windows-desktop` is a compatibility alias. VM 598 is retired and read-only; VM 595 is the active Windows build. Historical build notes below do not authorize template mutations. See [S17](s17-windows-single.md).

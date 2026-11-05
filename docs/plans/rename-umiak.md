@@ -1,3 +1,5 @@
+> Historical design: Keycloak, oauth2-proxy and OIDC authentication were removed on 2026-11-05. Current deployments use owner authentication over Tailscale; see [architecture](../architecture.md).
+
 # R1: Umiak implementation plan
 
 > Execution: superpowers:executing-plans, a single implementer working sequentially.

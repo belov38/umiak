@@ -32,7 +32,7 @@ CP_LAN="${UMIAK_CP_LAN:-192.168.68.0/24}"
 CP_NAME="${UMIAK_CP_HOSTNAME:-umiak-dev-cp}"
 CP_PUBKEY="${UMIAK_CP_SSH_PUBKEY:-$HOME/.ssh/id_ed25519.pub}"
 # TCP ports of the CT open to the LAN: SSH, gateway TLS (tunnel and previews), gateway SSH,
-# api public (S7), oauth2-proxy (S8). Sandboxes reach only 443 (group umiak-egress).
+# api public (S7), owner ingress. Sandboxes reach only 443 (group umiak-egress).
 CP_LAN_TCP="${UMIAK_CP_LAN_TCP:-22 443 2222 8080 4180}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"

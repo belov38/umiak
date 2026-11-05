@@ -1,3 +1,5 @@
+> Historical design: Keycloak, oauth2-proxy and OIDC authentication were removed on 2026-11-05. Current deployments use owner authentication over Tailscale; see [architecture](../architecture.md).
+
 # S7 Public API v1, SDK, CLI: implementation plan
 
 > Historical plan, predating R1. Current names and contracts: `docs/specs/rename-umiak.md`.

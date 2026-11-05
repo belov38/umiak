@@ -1,3 +1,5 @@
+> Historical design: Keycloak, oauth2-proxy and OIDC authentication were removed on 2026-11-05. Current deployments use owner authentication over Tailscale; see [architecture](../architecture.md).
+
 # S7. Public API v1, SDK, CLI: specification
 
 Status: agreed (the master session on Ilia's behalf), 2026-10-29. Supplemented with the MVP recommendations R1, R2, R4, R7, R9–R11 (`docs/roadmap-phase2.md` §6, decisions of the master session 2026-10-29). Area S7 from `docs/roadmap.md`. Architecture: `docs/architecture.md` (§2, §9, §10, §11). Relies on `docs/specs/s6-control-plane.md` (`SandboxService`, states, idempotency), `docs/specs/s2-tunnel-protocol.md` (§8.4 `agent-client`, §9 resumability), `docs/specs/s3-guest-agent.md` (agent RPC), `docs/specs/s4-gateway.md` (internal endpoints for the gateway).

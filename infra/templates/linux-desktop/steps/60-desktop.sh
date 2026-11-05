@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Sigstore certificate issuer verification below protects the downloaded guest tool; it is not platform authentication.
 # Desktop packages inherit the parent recipe's apt snapshot and Chrome pin.
 set -euo pipefail
 # shellcheck source=SCRIPTDIR/../../linux/lib.sh

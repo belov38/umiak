@@ -5,7 +5,7 @@ Supersedes the S16 rulings on how a homelab deployment is installed and reached:
 LAN HTTP access, the bring-your-own-Docker-host quickstart, the browser
 Connect/Prepare steps and the read-only adoption report. S16 owner gate
 (claim, sessions, sign-in codes, CLI pairing), templates, smoke and the guest
-gateway CA remain. Corporate OIDC mode (S6/S7) is untouched.
+gateway CA remain. The former corporate authentication mode was removed.
 
 ## Why
 
@@ -38,8 +38,8 @@ their tailnet. Nothing in their tailnet or LAN has to be configured by hand.
 - Access from the public Internet. Funnel stays unsupported.
 - Running without Tailscale in homelab mode. A later option ("own domain +
   DNS-01 wildcard certificate") is explicitly deferred.
-- Kubernetes or an operator for homelab. Kubernetes remains the corporate
-  production target only.
+- Kubernetes or an operator for homelab. There is no separate corporate
+  production target.
 - Multi-tenant teams in homelab mode (S16 single-owner tenancy remains).
 
 ## Anti-goals
@@ -176,7 +176,7 @@ A `--non-interactive` mode with flags for every answer exists for tests.
     unprefixed);
   - homelab desktop links default to `dataTransport=websocket`: media goes
     through gateway and tunnel, no TURN, no 15-second WebRTC wait.
-  Hostname-based desktop/preview routing stays for corporate deployments.
+  Hostname-based preview routing remains an internal gateway capability.
 - **Port previews** keep hostname routing over plain HTTP on the
   control plane's **tailnet IP** (`http://<slug>-<port>.<tailnet-ip-dashed>.sslip.io:8085`).
   Tailnet traffic is WireGuard-encrypted; apps keep running at `/`.
@@ -196,7 +196,7 @@ A `--non-interactive` mode with flags for every answer exists for tests.
   warnings.
 - S15 `UMIAK_AUTH_MODE=none` local mode, `deploy/compose/local.yaml`, its
   ingress, tests and docs (Ilia, 2026-11-04: remove everything superfluous).
-  Two modes remain: homelab (owner + Tailscale) and corporate (OIDC).
+  Only homelab (owner + Tailscale) remains supported.
 
 ## Builder rulings (Claude's calls, 2026-11-04; Ilia may override)
 

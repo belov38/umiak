@@ -154,7 +154,7 @@ describe.skipIf(skipPg())("GET /internal/v1/gateway/routes/{label}", () => {
 		}
 	});
 
-	it("sso: authEpoch = auth_epoch + ssoPolicyEpoch; token ports keep auth_epoch", async () => {
+	it("owner-session and token ports use the stored per-port epoch", async () => {
 		const s = await hosted("sso");
 		const t = await hosted("token");
 		try {
