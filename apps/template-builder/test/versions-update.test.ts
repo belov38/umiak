@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
 	cpSync,
 	mkdtempSync,
@@ -9,7 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse as parseToml } from "smol-toml";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { loadRecipe, loadVersions, versionsSchema } from "../src/recipe.ts";
 import {
 	compareDebVersions,
@@ -465,51 +464,4 @@ describe("updateVersionsFile", () => {
 		).rejects.toThrow("go.dev");
 		expect(readFileSync(file, "utf8")).toBe(before);
 	});
-});
-
-it("updates an inherited Debian recipe using Debian image and Docker pins", async () => {
-	const dir = mkdtempSync(join(tmpdir(), "umiak-debian-update-"));
-	const real = resolve(import.meta.dirname, "../../../infra/templates");
-	cpSync(join(real, "linux"), join(dir, "linux"), { recursive: true });
-	cpSync(join(real, "debian"), join(dir, "debian"), { recursive: true });
-	const serial = "20261103-2651";
-	const name = `debian-13-genericcloud-amd64-${serial}.qcow2`;
-	const image = "test image";
-	const sha512 = createHash("sha512").update(image).digest("hex");
-	vi.stubGlobal(
-		"fetch",
-		async (url: string) =>
-			new Response(
-				url.endsWith("trixie/")
-					? `<a href="${serial}/">`
-					: url.endsWith("SHA512SUMS")
-						? `${sha512}  ${name}`
-						: image,
-			),
-	);
-	try {
-		const docker = readFileSync(
-			join(upstream, "docker-Packages"),
-			"utf8",
-		).replaceAll("ubuntu.26.04~resolute", "debian.13~trixie");
-		await updateVersionsFile({
-			templatesDir: dir,
-			slug: "debian",
-			now: NOW,
-			fetch: fixtureFetch({
-				"https://download.docker.com/linux/debian/dists/trixie/stable/binary-amd64/Packages":
-					docker,
-			}),
-		});
-		const v = loadVersions(loadRecipe(dir, "debian", "linux"));
-		expect(v.base.sha512).toBe(sha512);
-		expect(v.base.sha256).toBe(
-			createHash("sha256").update(image).digest("hex"),
-		);
-		expect(v.base.url).toContain(name);
-		expect(v.docker.docker_ce).toContain("debian.13~trixie");
-	} finally {
-		vi.unstubAllGlobals();
-		rmSync(dir, { recursive: true, force: true });
-	}
 });

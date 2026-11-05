@@ -8,7 +8,7 @@ set -euo pipefail
 
 # Kernel: keep only the running generic kernel of linux-image-virtual.
 running=$(uname -r)
-[[ $running == *-"$UMIAK_KERNEL_SUFFIX" ]] || die "running kernel $running does not end in $UMIAK_KERNEL_SUFFIX: GRUB did not boot $UMIAK_KERNEL_PACKAGE"
+[[ $running == *-"$UMIAK_KERNEL_SUFFIX" ]] || die "running kernel $running is not generic: GRUB did not boot linux-image-virtual"
 abi=${running%-"$UMIAK_KERNEL_SUFFIX"}
 mapfile -t old < <(installed_packages 'linux-*' | while read -r pkg; do
 	case $pkg in

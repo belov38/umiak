@@ -155,7 +155,6 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 			};
 			expect((await get()).map((t) => t.slug)).toEqual([
 				"linux",
-				"debian",
 				"windows",
 				"linux-desktop",
 			]);

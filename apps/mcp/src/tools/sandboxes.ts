@@ -200,7 +200,7 @@ export const sandboxCreate = defineTool({
 			.string()
 			.optional()
 			.describe(
-				"linux=Ubuntu 26.04 (default), debian=Debian 13, linux-desktop, windows (desktop). Ignored with from_snapshot",
+				"Slug: linux (Ubuntu 26.04, default), debian (Debian 13), linux-desktop, windows (desktop; alias windows-desktop). Ignored with from_snapshot",
 			),
 		size: sizeShape,
 		name: nameShape,
