@@ -242,3 +242,9 @@ modest test workloads demonstrating placement on both, verify exec/tunnel,
 snapshot/fork/resume locality and refusal to remove an occupied node. Stop
 and delete test sandboxes, explicitly clean only test artifacts, and record
 what was actually exercised. Coordinate live testing with S18 first.
+
+## S21 successor
+
+S21 (`s21-portable-sandboxes.md`) replaces independent builds with verified
+replicas and node locality with journaled cold moves. Until those paths are
+implemented and enabled, the S19 local-only safety rules above remain in force.
