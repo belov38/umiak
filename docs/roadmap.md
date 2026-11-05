@@ -31,6 +31,14 @@ PoC limits on `pve`: VMIDs from 500, at most 8 GB RAM in total, storage `local-l
 | S20 | CP consolidation | Two images: shared umiak-quickstart + web, MCP as a separate process, a single offline bootstrap | S18 | Accepted and merged into main with Ilia's/the coordinator's permission 2026-11-04; full gate and local image smoke PASS. Spec `docs/specs/s20-cp-consolidation.md`, plan `docs/plans/s20-cp-consolidation.md`. |
 | S21 | Build-once templates and capacity waits | pvesm template copy and FIFO start queue done; sandbox/snapshot cold moves deferred | S19, S20 | See `docs/specs/s21-portable-sandboxes.md` and `docs/plans/s21-portable-sandboxes.md`. Future moves: pvesm, rsync over base snapshot, or ZFS send -i. |
 
+S24: **Static SPA, no Payload** — API-owned configuration and SQL import,
+Vite + React 19 + TanStack Router/Query, owner settings and S22-safe rollback.
+Depends on S7/S8/S18/S20/S22. Spec approved; implementation and
+acceptance pending on `s24-spa`, after `s24-updater-bridge` release/installation. [Spec](specs/s24-spa-no-payload.md),
+[plan](plans/s24-spa-no-payload.md). SQL migration range `0800–0899` reserved for S24.
+S24b follow-up: integrate quickstart setup/claim/signin/pairing/recovery into SPA;
+these remain separate server-rendered flows during S24 by owner decision.
+
 Order: S1 → S2 → S3/S4 → S5 → S6 → S7 → S8 → S9 → S10 → S11. S12, S13, and S14 are phase 2; the MVP is deployed via docker compose (`deploy/compose`).
 
 Ilia's decision 2026-10-29: sandbox creation time is not optimized, up to ~1 min is acceptable. A warm pool is not part of the MVP: Linux is created by a cold clone (~12 s), `failFast` / `pool_exhausted` (S6, S7) are not implemented, warm pools are not built (S26a removes the legacy machinery). Windows (S9) and `linux-desktop` (S10) also have no idle pools. For Windows up to 5 min is acceptable, 2–3 min is good: create takes the S9 cold path (template clone + sysprep specialize on first boot), the vTPM + `suspend --todisk` spike is not needed.
