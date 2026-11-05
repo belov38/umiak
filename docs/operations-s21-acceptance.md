@@ -15,7 +15,7 @@ CTID=<installed-control-plane-ctid>
 cpctl() { pct exec "$CTID" -- docker compose --project-directory /opt/umiak -p umiak "$@"; }
 sql() {
   cpctl exec -T quickstart node deploy/compose/quickstart/run.mjs node --input-type=module -e '
-    import pg from "pg";
+    import pg from "/app/packages/db/node_modules/pg/lib/index.js";
     const p = new pg.Pool({connectionString:process.env.DATABASE_URL});
     try { console.log(JSON.stringify((await p.query(process.argv[1])).rows,null,2)); }
     finally { await p.end(); }
@@ -70,6 +70,7 @@ On the workstation (JSONL ready event is the final line):
 ```sh
 SB=$(umiak --json create --template linux --wait-ready | tail -n 1 | jq -r '.sandbox.id')
 umiak exec "$SB" -- 'printf s21-marker > /root/s21-marker; sha256sum /root/s21-marker'
+umiak exec "$SB" -- hostname -I
 umiak stop "$SB" --wait
 ```
 
@@ -79,7 +80,6 @@ Record VMID/MAC/IP, node/storage and disks before pressure:
 sql "SELECT s.slug,n.name,m.id,m.vmid,m.mac,(SELECT jsonb_agg(to_jsonb(d)) FROM runtime.disks d WHERE d.machine_id=m.id) AS disks FROM runtime.sandboxes s JOIN runtime.machines m ON m.id=s.machine_id JOIN runtime.nodes n ON n.id=m.node_id WHERE s.state='stopped' ORDER BY s.created_at DESC"
 ```
 
-Record guest IP with `umiak exec "$SB" -- 'hostname -I'` before stopping.
 Cordon that home, leaving the other node active with enough RAM. Then:
 
 ```sh
