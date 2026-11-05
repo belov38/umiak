@@ -71,21 +71,9 @@ it("copies a base once, verifies it before publication, and retries without rebu
 		async delete() {},
 		async waitTask() {},
 	};
-	const reader = (
-		data: Buffer,
-		args: { offset: number; length: number; hashOnly?: boolean },
-	) => {
-		const b = data.subarray(args.offset, args.offset + args.length);
-		return {
-			sizeBytes: 512,
-			sha256: createHash("sha256").update(b).digest("hex"),
-			zero: b.every((v) => v === 0),
-			...(!args.hashOnly ? { data: b.toString("base64") } : {}),
-		};
-	};
 	const source = {
 		close() {},
-		async call<T>(op: string, args?: object): Promise<T> {
+		async call<T>(op: string): Promise<T> {
 			if (op === "volume.sendTo") {
 				if (!stage.equals(bytes)) {
 					bytes.copy(stage);
@@ -110,18 +98,12 @@ it("copies a base once, verifies it before publication, and retries without rebu
 			}
 			if (op === "lv.list")
 				return { lvs: [{ name: "base-600-disk-0", sizeBytes: 512 }] } as T;
-			if (op === "lv.transferMap")
-				return {
-					sizeBytes: 512,
-					next: 0,
-					ranges: [{ offset: 0, length: 512 }],
-				} as T;
-			return reader(bytes, args as never) as T;
+			throw new Error(`unexpected source op ${op}`);
 		},
 	};
 	const target = {
 		close() {},
-		async call<T>(op: string, args?: object): Promise<T> {
+		async call<T>(op: string): Promise<T> {
 			if (op === "lv.list")
 				return {
 					lvs: [
@@ -133,15 +115,6 @@ it("copies a base once, verifies it before publication, and retries without rebu
 						},
 					],
 				} as T;
-			const a = args as { data: string; offset: number; length: number };
-			if (op === "lv.transferPrepare")
-				return { name: `umiak-snap-${"a".repeat(32)}-scsi0` } as T;
-			if (op === "lv.transferRead") return reader(stage, a) as T;
-			if (op === "lv.transferWrite") {
-				Buffer.from(a.data, "base64").copy(stage, a.offset);
-				writes++;
-				return {} as T;
-			}
 			if (op === "lv.transferPublish") {
 				expect(stage.equals(bytes)).toBe(true);
 				published = true;
