@@ -1,9 +1,9 @@
 # Proxmox host runbook (S1 PoC)
 
-Current R1 dev stand: CT 590 is retained, and the only active template slots are Linux 597,
-Linux desktop 596, Windows desktop 595 and Windows 598. Slot 599 is empty and reserved.
-The S1 `template` bootstrap below is historical; current templates come from the four recipes,
-without modifying 9000/9001. Rebuild one exact slot at a time, after its consumers are gone.
+Historical: this runbook prepared the early R1 dev stand (fixed template slots 595–599). Homelab installs
+are prepared by the installer (`deploy/installer`, `prepare_host.py`) and allocate templates from the
+configured template VMID range (new installs: 20000–20099). Keep this file only as a reference for the
+restricted node tool commands below.
 
 `setup.sh` prepares the host `pve` for sandboxes as described in `docs/specs/s1-proxmox-foundation.md` §4. It runs on the operator Mac and executes every step on the host as root over `ssh pve`.
 

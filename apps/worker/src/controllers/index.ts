@@ -9,7 +9,7 @@ import { runStartQueue } from "./start-queue.ts";
 // Periodic controllers (S6 §15.1). Each is an `exclusive` pg-boss queue whose
 // job runs `run(ctx)` and then sends itself again with `startAfter =
 // intervalMs`; a pg-boss cron once a minute per queue is the safety net
-// (Task 13 wires both). `ctl-pool` is phase 2 (decision 17). `ctl-reconcile`
+// (Task 13 wires both). Warm pools are not built (cold create only). `ctl-reconcile`
 // runs in dry run unless `WorkerCtx.reconcileDryRun` is false
 // (`UMIAK_RECONCILE_DRY_RUN`, wired by Task 13).
 

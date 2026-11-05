@@ -175,7 +175,7 @@ describe.skipIf(skipPg())(
 			const ctl = uuidv7();
 			for (let i = 0; i < 2; i++) {
 				await withTx(t.pool, (tx) =>
-					jobs.send(tx, "ctl-pool", {}, { singletonKey: ctl }),
+					jobs.send(tx, "ctl-health", {}, { singletonKey: ctl }),
 				);
 			}
 			expect(await jobsWith(ctl)).toHaveLength(1);

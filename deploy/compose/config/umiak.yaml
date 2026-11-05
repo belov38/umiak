@@ -36,9 +36,8 @@ sizes:
     vcpu: 8
     memoryMb: 8192
 
-# Decision 17: warm pools are off. The worker must not create VMs on pve by
-# itself. Pool targets live in Payload (/admin, collection pool-targets; none
-# seeded); one there plus UMIAK_RECONCILE_DRY_RUN=0 enables a pool.
+# Warm pools are not implemented (cold create only): no controller refills
+# pool targets, so keep this empty.
 pools: []
 
 quotas:

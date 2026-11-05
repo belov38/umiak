@@ -16,7 +16,6 @@ describe("QUEUES (S6 §15.1)", () => {
 				"machine-op",
 				"snapshot-op",
 				"machine-events",
-				"ctl-pool",
 				"ctl-health",
 				"ctl-autostop",
 				"ctl-reconcile",
@@ -67,7 +66,6 @@ describe("QUEUES (S6 §15.1)", () => {
 			retryBackoff: true,
 		});
 		for (const q of [
-			"ctl-pool",
 			"ctl-health",
 			"ctl-autostop",
 			"ctl-reconcile",
@@ -94,14 +92,14 @@ describe("RecordingJobSender", () => {
 				retryLimit: DELETE_RETRY_LIMIT,
 			},
 		);
-		await jobs.send(tx, "ctl-pool", {});
+		await jobs.send(tx, "ctl-health", {});
 		expect(jobs.sent).toEqual([
 			{
 				queue: "sandbox-op",
 				data: { operationId: "o1" },
 				opts: { singletonKey: "s1", retryLimit: DELETE_RETRY_LIMIT },
 			},
-			{ queue: "ctl-pool", data: {} },
+			{ queue: "ctl-health", data: {} },
 		]);
 	});
 });
