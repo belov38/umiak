@@ -59,9 +59,11 @@ it("console explicitly retires only a verified idle Umiak template, enabling nod
 		[a.templateBuildId],
 	);
 	await db.pool.query("CREATE SCHEMA IF NOT EXISTS quickstart");
+	// Migration 0900 creates the table; replace any row a previous test left.
 	await db.pool.query(
-		"CREATE TABLE quickstart.setup (id boolean PRIMARY KEY, state jsonb)",
+		"CREATE TABLE IF NOT EXISTS quickstart.setup (id boolean PRIMARY KEY, state jsonb)",
 	);
+	await db.pool.query("DELETE FROM quickstart.setup");
 	await db.pool.query("INSERT INTO quickstart.setup VALUES(true,$1)", [
 		{
 			steps: {
