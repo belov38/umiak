@@ -478,3 +478,67 @@ test("a failed build shows one line of error, not the whole tool output", () => 
 	);
 	assert.ok(error.length < 400);
 });
+
+test("copy retry displays live activity instead of the preceding failed build", async () => {
+	const browser = setupBrowser(async () => ({
+		ok: true,
+		json: async () => ({
+			buildJob: {
+				status: "error",
+				startedAt: "2026-11-05T00:00:00Z",
+				finishedAt: "2026-11-05T00:01:00Z",
+				replication: {
+					phase: "copying",
+					node: "pve2",
+					processedBytes: 1048576,
+					totalBytes: 2097152,
+					elapsedSeconds: 3,
+				},
+			},
+			buildQueue: {
+				active: true,
+				nodes: ["a", "b"],
+				states: { a: "Ready", b: "Copying" },
+			},
+		}),
+	}));
+	await browser.timers.shift()();
+	assert.match(
+		browser.element("#build-progress").textContent,
+		/Copying to pve2.*Elapsed: 0m 3s/,
+	);
+	assert.doesNotMatch(
+		browser.element("#build-progress").textContent,
+		/Build stopped/,
+	);
+	assert.equal(browser.element("#build-linux").disabled, true);
+});
+test("partial copy failure keeps step 3 open even on a completed installation", () => {
+	const html = renderSetup({
+		complete: true,
+		steps: {},
+		buildJob: {
+			status: "error",
+			error: "Linux is ready on pve. Copy to pve2 failed.",
+		},
+		buildQueue: { active: false, states: { b: "Copy failed" } },
+		sandboxNodes: [
+			{
+				nodeId: "a",
+				name: "pve",
+				state: "active",
+				templates: [{ templateSlug: "linux" }],
+			},
+			{
+				nodeId: "b",
+				name: "pve2",
+				state: "active",
+				templates: [],
+				buildJobId: "copy-" + "a".repeat(32),
+			},
+		],
+	});
+	assert.match(html, /id="step-templates" open/);
+	assert.match(html, />Copy failed<\/span>/);
+	assert.match(html, /Clean up and retry/);
+});

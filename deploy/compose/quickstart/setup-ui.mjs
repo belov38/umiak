@@ -139,9 +139,12 @@ function setupInteractions() {
 		const elapsed = Math.max(
 			0,
 			Math.floor(
-				((job.finishedAt ? Date.parse(job.finishedAt) : Date.now()) -
-					Date.parse(job.startedAt)) /
-					1000,
+				job.replication?.phase === "copying" &&
+					job.replication.elapsedSeconds !== undefined
+					? job.replication.elapsedSeconds
+					: ((job.finishedAt ? Date.parse(job.finishedAt) : Date.now()) -
+							Date.parse(job.startedAt)) /
+							1000,
 			),
 		);
 
@@ -158,7 +161,7 @@ function setupInteractions() {
 				: `Building on ${nodeRow?.dataset.name || job.nodeId || "selected node"} · ${clipped}`;
 
 		$("#build-progress").textContent =
-			job.status === "running"
+			job.status === "running" || plan?.active
 				? activity +
 					" · Elapsed: " +
 					Math.floor(elapsed / 60) +
@@ -182,7 +185,11 @@ function setupInteractions() {
 			plan = result.buildQueue;
 			showJob(result.buildJob);
 			showQueue();
-			if (result.buildJob?.status === "error" && $("#build-recoveries")) {
+			if (
+				result.buildJob?.status === "error" &&
+				!plan?.active &&
+				$("#build-recoveries")
+			) {
 				$("#step-templates").open = true;
 				try {
 					const html = await (await fetch("/setup")).text();
@@ -485,11 +492,12 @@ export function renderSetup(state) {
 		(name) => steps[name]?.status === "ready",
 	).length;
 	const section = (name, summary, body) =>
-		`<details name="setup-step" id="step-${name}"${!state.complete && ((name === "templates" && ["running", "error"].includes(state.buildJob?.status)) || (name === current && state.buildJob?.status !== "running")) ? " open" : ""}><summary>${steps[name]?.status === "ready" ? "✓ " : ""}${summary}</summary>${body}</details>`;
+		`<details name="setup-step" id="step-${name}"${(name === "templates" && (state.buildQueue?.active || ["running", "error"].includes(state.buildJob?.status))) || (!state.complete && name === current && state.buildJob?.status !== "running") ? " open" : ""}><summary>${steps[name]?.status === "ready" ? "✓ " : ""}${summary}</summary>${body}</details>`;
 	const form = (name, fields, button = "Verify and save") =>
 		`<form data-step="${name}">${fields}<button type="submit"${name === "smoke" ? ` id="smoke-submit"${!(nodes[0]?.templates || []).some((t) => t.templateSlug === "linux") || state.buildJob?.status === "running" ? " disabled" : ""}` : ""}>${button}</button><div data-result role="status">${status(name)}</div></form>`;
 	const linuxReady = steps.templates?.status === "ready";
-	const running = state.buildJob?.status === "running";
+	const running =
+		state.buildJob?.status === "running" || Boolean(state.buildQueue?.active);
 	const hasTemplates =
 		(steps.templates?.data?.builds || []).length > 0 ||
 		nodes.some((n) => n.templates?.length);
