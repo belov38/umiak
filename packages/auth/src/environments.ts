@@ -102,6 +102,7 @@ export interface EnvironmentStore {
 }
 
 export interface PgEnvironmentStoreOptions {
+	teamExists?: (teamId: string, client: pg.PoolClient) => Promise<boolean>;
 	/**
 	 * Called with the sets to be stored (after a patch is merged), inside the
 	 * write; throwing aborts it. apps/api passes core's validateSecretSets.
@@ -145,6 +146,7 @@ function idParam(idOrName: string): string | null {
 export class PgEnvironmentStore implements EnvironmentStore {
 	readonly #pool: pg.Pool;
 	readonly #keys: EnvironmentKeys;
+	readonly #teamExists: PgEnvironmentStoreOptions["teamExists"];
 	readonly #validate: (sets: SecretSets) => void;
 
 	constructor(
@@ -154,6 +156,7 @@ export class PgEnvironmentStore implements EnvironmentStore {
 	) {
 		this.#pool = pool;
 		this.#keys = keys;
+		this.#teamExists = opts.teamExists;
 		this.#validate = opts.validateSets ?? (() => {});
 	}
 
@@ -288,6 +291,12 @@ export class PgEnvironmentStore implements EnvironmentStore {
 	): Promise<EnvironmentRecord> {
 		try {
 			const row = await inTx(this.#pool, async (c) => {
+				await c.query(
+					"SELECT pg_advisory_xact_lock(hashtextextended('team:' || $1::text,0))",
+					[teamId],
+				);
+				if (this.#teamExists && !(await this.#teamExists(teamId, c)))
+					throw new IdentityError("not_found", "workspace not found");
 				if (makeDefault) {
 					await c.query(
 						"SELECT pg_advisory_xact_lock(hashtextextended('runtime.environments:' || $1, 0))",

@@ -158,6 +158,7 @@ export async function createSandbox(
 		const quota = await deps.config.teamQuota(p.teamId);
 		// Team lock before any node lock (S6 §8.5).
 		await checkQuota(tx, p.teamId, quota, {
+			teamExists: deps.config.teamExists?.bind(deps.config),
 			addSandboxes: 1,
 			addRamMb: size.memoryMb,
 		});

@@ -6,6 +6,7 @@ export * from "./identity.ts";
 export * from "./ids.ts";
 export * from "./owner-mode.ts";
 export * from "./pg-store.ts";
+export { seedRuntimeIdentity } from "./runtime-seed.ts";
 export {
 	RuntimeIdentityStore,
 	type RuntimeIdentityStoreOptions,

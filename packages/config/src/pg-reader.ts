@@ -10,7 +10,6 @@ import { canonicalTemplateSlug } from "./template-slug.ts";
 import type {
 	ConfigReader,
 	PlatformDefaults,
-	PoolTarget,
 	Quota,
 	SizeConfig,
 	TemplateConfig,
@@ -90,19 +89,6 @@ function size(d: Doc): SizeConfig {
 		slug: String(d.slug),
 		vcpu: Number(d.vcpu),
 		memoryMb: Number(d.memoryMb),
-	};
-}
-
-function poolTarget(d: Doc): PoolTarget {
-	const maxAge = num(d.maxAgeHours);
-	return {
-		templateSlug: String(d.template),
-		sizeSlug: String(d.size),
-		target: Number(d.target),
-		...(typeof d.providerId === "string" && d.providerId !== ""
-			? { providerId: d.providerId }
-			: {}),
-		...(maxAge === null ? {} : { maxAgeHours: maxAge }),
 	};
 }
 
@@ -194,19 +180,16 @@ export class PgConfigReader implements ConfigReader {
 		return (await this.#sizes()).map((s) => ({ ...s }));
 	}
 
-	async poolTargets(): Promise<PoolTarget[]> {
-		const list = await this.#cached("pools", async () => {
-			const docs = await this.#all("pool-targets");
-			docs.sort((a, b) => {
-				const x = String(a.createdAt);
-				const y = String(b.createdAt);
-				return x < y ? -1 : x > y ? 1 : String(a.id) < String(b.id) ? -1 : 1;
-			});
-			return docs.map(poolTarget);
-		});
-		return list.map((p) => ({ ...p }));
+	async poolTargets() {
+		return [];
 	}
 
+	async teamExists(teamId: string, client: pg.PoolClient): Promise<boolean> {
+		return (
+			(await client.query("SELECT 1 FROM runtime.teams WHERE id=$1", [teamId]))
+				.rowCount !== 0
+		);
+	}
 	async teamQuota(teamId: string): Promise<Quota> {
 		// A malformed id is an unknown team; Postgres would reject it.
 		if (!UUID_RE.test(teamId)) return { ...NO_QUOTA };
@@ -266,13 +249,10 @@ export class PgConfigReader implements ConfigReader {
 		return document(row);
 	}
 
-	async #all(
-		collection: "templates" | "sizes" | "pool-targets",
-	): Promise<Doc[]> {
+	async #all(collection: "templates" | "sizes"): Promise<Doc[]> {
 		const table = {
 			templates: "templates",
 			sizes: "sizes",
-			"pool-targets": "pool_targets",
 		}[collection];
 		const result = await this.#pool.query(`SELECT * FROM runtime.${table}`);
 		return result.rows.map(document);

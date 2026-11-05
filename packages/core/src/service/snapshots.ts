@@ -150,6 +150,7 @@ export async function saveSnapshot(
 
 		const quota = await deps.config.teamQuota(p.teamId);
 		await checkQuota(tx, p.teamId, quota, {
+			teamExists: deps.config.teamExists?.bind(deps.config),
 			addSavedSnapshots: 1,
 			replacingSavedName: name,
 		});

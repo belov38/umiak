@@ -303,6 +303,7 @@ export async function resumeSandbox(
 		// Team lock, then node lock (S6 §8.5).
 		const quota = await deps.config.teamQuota(row.team_id);
 		await checkQuota(tx, row.team_id, quota, {
+			teamExists: deps.config.teamExists?.bind(deps.config),
 			addSandboxes: 1,
 			addRamMb: size.memoryMb,
 		});
@@ -492,6 +493,7 @@ export async function recoverSandbox(
 		if (!QUOTA_ACTIVE_SANDBOX_STATES.includes(row.state)) {
 			const quota = await deps.config.teamQuota(row.team_id);
 			await checkQuota(tx, row.team_id, quota, {
+				teamExists: deps.config.teamExists?.bind(deps.config),
 				addSandboxes: 1,
 				addRamMb: row.memory_mb,
 			});

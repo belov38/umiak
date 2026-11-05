@@ -103,16 +103,6 @@ export const configSizes = runtime.table("sizes", {
 	updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 });
-export const configPoolTargets = runtime.table("pool_targets", {
-	id: uuid("id").primaryKey().default(sql`uuidv7()`),
-	template: text("template").notNull(),
-	size: text("size").notNull(),
-	providerId: text("provider_id"),
-	target: numeric("target").notNull(),
-	maxAgeHours: numeric("max_age_hours"),
-	updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
-	createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
-});
 export const configPlatformDefaults = runtime.table("platform_defaults", {
 	id: uuid("id").primaryKey().default(sql`uuidv7()`),
 	ttlSeconds: numeric("ttl_seconds"),
@@ -149,6 +139,5 @@ export const configurationTables = {
 	configSshKeys,
 	configTemplates,
 	configSizes,
-	configPoolTargets,
 	configPlatformDefaults,
 };

@@ -64,7 +64,7 @@ export interface WorkerOptions {
 	 * Throws while the Payload schema is not ready (main: assertPayloadMigrated
 	 * over the config reader's instance); /readyz reports `payload_migrations`.
 	 */
-	payloadReady?: () => Promise<void>;
+
 	/** HTTP port; null = no server; 0 = any free port (tests). */
 	httpPort?: number | null;
 	httpHost?: string;
@@ -232,7 +232,7 @@ export class Worker {
 
 	/**
 	 * S6 §15.2: pg-boss started, Postgres answers, every known migration
-	 * applied, runtime and (with `payloadReady`) Payload.
+	 * applied in the unified SQL migration journal.
 	 */
 	async readiness(): Promise<Readiness> {
 		const reasons: string[] = [];
@@ -258,17 +258,7 @@ export class Worker {
 		} catch (err) {
 			reasons.push(`postgres: ${errText(err)}`);
 		}
-		if (this.#o.payloadReady !== undefined) {
-			try {
-				await withTimeout(
-					this.#o.payloadReady(),
-					READINESS_TIMEOUT_MS,
-					"payload migration check",
-				);
-			} catch (err) {
-				reasons.push(`payload_migrations: ${errText(err)}`);
-			}
-		}
+
 		return { ready: reasons.length === 0, reasons };
 	}
 

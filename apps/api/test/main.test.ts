@@ -15,11 +15,6 @@ import {
 	skipPg,
 	type TestDatabase,
 } from "@umiak/db/testing";
-import {
-	closeUmiakPayload,
-	getUmiakPayload,
-	migrateUmiakPayload,
-} from "@umiak/payload";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { onShutdownSignals, type RunningApi, startApi } from "../src/index.ts";
 import { testSettings } from "../src/testing/index.ts";
@@ -48,15 +43,7 @@ describe.skipIf(skipPg())("startApi with production dependencies", () => {
 
 	beforeAll(async () => {
 		db = await createTestDatabase();
-		const payloadSecret = "main-test-payload-secret-0123456789";
-		const p = await getUmiakPayload({
-			databaseUrl: db.url,
-			secret: payloadSecret,
-			operatorGroups: [],
-			poolMax: 4,
-		});
-		await migrateUmiakPayload(p, () => {});
-		await closeUmiakPayload(db.url);
+
 		dir = mkdtempSync(join(tmpdir(), "umiak-api-main-"));
 		const file = (name: string, text: string) => {
 			const p = join(dir, name);
@@ -65,7 +52,6 @@ describe.skipIf(skipPg())("startApi with production dependencies", () => {
 		};
 		env = {
 			DATABASE_URL: db.url,
-			PAYLOAD_SECRET: payloadSecret,
 			UMIAK_DATA_KEYS_FILE: file(
 				"data-keys.json",
 				JSON.stringify({

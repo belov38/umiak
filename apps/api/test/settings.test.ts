@@ -117,18 +117,9 @@ describe("loadSettings", () => {
 		}
 	});
 
-	it("PAYLOAD_SECRET is required; UMIAK_CONFIG_FILE is not read (S8: config from Payload)", () => {
+	it("does not require a CMS secret or configuration file", () => {
 		const { PAYLOAD_SECRET: _, ...rest } = TEST_ENV;
-		expect(errorOf(rest)).toMatch(/PAYLOAD_SECRET: required/);
-		expect(errorOf({ ...TEST_ENV, PAYLOAD_SECRET: "" })).toMatch(
-			/PAYLOAD_SECRET: required/,
-		);
-		const s = loadSettings(TEST_ENV);
-		expect(s.payloadSecret).toBe(TEST_ENV.PAYLOAD_SECRET);
-		expect(s).not.toHaveProperty("configFile");
-		expect(
-			loadSettings({ ...TEST_ENV, UMIAK_CONFIG_FILE: "/etc/umiak/umiak.yaml" }),
-		).toEqual(s);
+		expect(loadSettings(rest)).not.toHaveProperty("payloadSecret");
 	});
 
 	it("rejects a cursor key that is not base64", () => {

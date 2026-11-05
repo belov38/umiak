@@ -5,11 +5,6 @@ import { join } from "node:path";
 import { StaticConfigReader } from "@umiak/config";
 import { MIGRATIONS_DIR, migrate } from "@umiak/db";
 import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
-import {
-	closeUmiakPayload,
-	getUmiakPayload,
-	migrateUmiakPayload,
-} from "@umiak/payload";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { type AdminDeps, runAdmin } from "../src/admin/commands.ts";
 import { testLogger } from "./helpers/worker.ts";
@@ -29,7 +24,6 @@ beforeAll(async () => {
 	await migrate(db.pool, { dir: legacyDir });
 });
 afterAll(async () => {
-	if (db) await closeUmiakPayload(db.url);
 	await db?.drop();
 	if (legacyDir) await rm(legacyDir, { recursive: true });
 });
@@ -129,13 +123,12 @@ it("bootstraps the canonical YAML before Payload migration without duplicating t
 			)
 		).rows[0].n,
 	).toBe(2);
-	const payload = await getUmiakPayload({
-		databaseUrl: db.url,
-		secret: "s17-bootstrap-test-secret-0123456789",
-		operatorGroups: [],
-		poolMax: 4,
-	});
-	await migrateUmiakPayload(payload);
+	await db.pool.query(
+		await readFile(
+			new URL("./fixtures/s17-runtime-transition.sql", import.meta.url),
+			"utf8",
+		),
+	);
 	expect(
 		(
 			await db.pool.query(
@@ -155,7 +148,7 @@ it("bootstraps the canonical YAML before Payload migration without duplicating t
 		).rows[0].template_build_id,
 	).toBe(desktop);
 	expect(await runAdmin(["bootstrap"], deps)).toBe(0);
-	expect(await migrateUmiakPayload(payload)).toEqual([]);
+	expect((await migrate(db.pool)).applied).toEqual([]);
 	expect(
 		(
 			await db.pool.query(

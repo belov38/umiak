@@ -5,15 +5,18 @@
 //   internal UMIAK_API_INTERNAL_PORT (8082)  gateway, service tokens
 //   ops      UMIAK_API_METRICS_PORT  (9090)  /healthz, /readyz, /metrics
 // `close()` is the graceful stop of shutdown.ts (at most 10 s).
-// Identities and config come from Payload (S8 plan decision 5): the Local
-// API of `@umiak/payload` with its own pg pool; its migrations are applied by
-// `node packages/payload/src/migrate.ts` (compose: web-migrate), not here.
+// Identity and configuration use the API-owned runtime tables (S24).
 import { readFileSync } from "node:fs";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createAdaptorServer } from "@hono/node-server";
 import { AgentClient, PgRegistry } from "@umiak/agent-client";
-import { PgEnvironmentStore } from "@umiak/auth";
+import {
+	PgEnvironmentStore,
+	RuntimeIdentityStore,
+	seedRuntimeIdentity,
+} from "@umiak/auth";
+import { PgConfigReader } from "@umiak/config";
 import {
 	ensureQueues,
 	KeyRing,
@@ -22,7 +25,7 @@ import {
 	SandboxServiceImpl,
 	validateSecretSets,
 } from "@umiak/core";
-import { createPool } from "@umiak/db";
+import { createPool, missingMigrations } from "@umiak/db";
 import { PgBoss } from "pg-boss";
 import type { Logger } from "pino";
 import { ConnectAgentApi } from "./agent/connect.ts";
@@ -50,12 +53,6 @@ import { ApiLifecycle, type Listener, shutdown } from "./shutdown.ts";
 
 /** Postgres connections of the request pool. */
 const DB_POOL_MAX = 20;
-
-/**
- * Connections of the Payload adapter pool (identity reads on key cache
- * misses and session resolution, config reads; the adapter keeps one).
- */
-const PAYLOAD_POOL_MAX = 10;
 
 /** How long an agent call waits for the machine's tunnel (S7 §9.7). */
 const AGENT_WAIT_MS = 30_000;
@@ -135,35 +132,24 @@ export async function buildDeps(
 		cleanups.push(() => events.close());
 		events.start();
 
-		// Loaded here, not at module load: tests import this module through
-		// the package index without needing Payload.
-		const umiak = await import("@umiak/payload");
 		const databaseUrl = settings.databaseUrl;
-		const payload = await umiak.getUmiakPayload({
-			databaseUrl,
-			secret: settings.payloadSecret,
-			operatorGroups: settings.operatorGroups,
-			appOrigin: settings.appOrigin,
-			poolMax: PAYLOAD_POOL_MAX,
-		});
-		cleanups.push(() => umiak.closeUmiakPayload(databaseUrl));
-		const config = new umiak.PayloadConfigReader({
-			payload,
+		const configurationReady = async () => {
+			const missing = await missingMigrations(pool);
+			if (missing.length)
+				throw new Error(`SQL migrations not applied: ${missing.join(", ")}`);
+		};
+		const config = new PgConfigReader({
+			pool,
 			listen: { databaseUrl },
 			onListenError: (err) =>
-				log.warn({ err: errText(err) }, "LISTEN umiak_config: connection lost"),
+				log.warn({ err: errText(err) }, "LISTEN umiak_config lost"),
 		});
 		await config.start();
 		cleanups.push(() => config.close());
-
 		if (identityYaml !== null) {
-			await umiak.assertPayloadMigrated(payload).catch((e: unknown) => {
-				throw new Error(
-					`UMIAK_IDENTITY_FILE cannot be loaded: ${errText(e)} (run packages/payload/src/migrate.ts)`,
-				);
-			});
-			const r = await umiak.seedPayloadIdentity(payload, identityYaml);
-			log.info({ ...r }, "identity file loaded");
+			await configurationReady();
+			const result = await seedRuntimeIdentity(pool, identityYaml);
+			log.info(result, "identity bootstrap loaded");
 		}
 
 		const boss = new PgBoss({
@@ -205,8 +191,8 @@ export async function buildDeps(
 			cleanups.push(() => client.close());
 		}
 
-		const identity = new umiak.PayloadIdentityStore({
-			payload,
+		const identity = new RuntimeIdentityStore({
+			pool,
 			operatorGroups: settings.operatorGroups,
 		});
 		const streams = new StreamRegistry({
@@ -242,13 +228,14 @@ export async function buildDeps(
 			config,
 			environments: new PgEnvironmentStore(pool, keys, {
 				validateSets: validateSecretSets,
+				teamExists: config.teamExists.bind(config),
 			}),
 			agent: new ConnectAgentApi(agentClient, pool),
 			streams,
 			commandTimings: { ...DEFAULT_COMMAND_TIMINGS },
 			ptyTimings: { ...DEFAULT_PTY_TIMINGS },
 			lifecycle: new ApiLifecycle(),
-			payloadReady: () => umiak.assertPayloadMigrated(payload),
+			configurationReady,
 		};
 		cleanups.push(watchDesktopAccess(deps));
 		return { deps, dispose };

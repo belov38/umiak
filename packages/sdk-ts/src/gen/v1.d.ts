@@ -1212,6 +1212,218 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/settings/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * updateAccount
+         * @description Owner-only updateAccount. Requires a browser or paired owner session; scoped team keys are refused.
+         */
+        patch: operations["settings.updateAccount"];
+        trace?: never;
+    };
+    "/v1/settings/platform-defaults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * defaults
+         * @description Owner-only defaults. Requires a browser or paired owner session; scoped team keys are refused.
+         */
+        get: operations["settings.defaults"];
+        /**
+         * updateDefaults
+         * @description Owner-only updateDefaults. Requires a browser or paired owner session; scoped team keys are refused.
+         */
+        put: operations["settings.updateDefaults"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * session
+         * @description Owner-only session. Requires a browser or paired owner session; scoped team keys are refused.
+         */
+        get: operations["settings.session"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings/sizes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * listsizes
+         * @description Owner-only listsizes. Requires a browser or paired owner session; scoped team keys are refused.
+         */
+        get: operations["settings.listsizes"];
+        put?: never;
+        /**
+         * createsizes
+         * @description Owner-only createsizes. Requires a browser or paired owner session; scoped team keys are refused.
+         */
+        post: operations["settings.createsizes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings/sizes/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * deletesizes
+         * @description Owner-only deletesizes. Requires a browser or paired owner session; scoped team keys are refused.
+         */
+        delete: operations["settings.deletesizes"];
+        options?: never;
+        head?: never;
+        /**
+         * updatesizes
+         * @description Owner-only updatesizes. Requires a browser or paired owner session; scoped team keys are refused.
+         */
+        patch: operations["settings.updatesizes"];
+        trace?: never;
+    };
+    "/v1/settings/teams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * listTeams
+         * @description Owner-only listTeams. Requires a browser or paired owner session; scoped team keys are refused.
+         */
+        get: operations["settings.listTeams"];
+        put?: never;
+        /**
+         * createTeam
+         * @description Owner-only createTeam. Requires a browser or paired owner session; scoped team keys are refused.
+         */
+        post: operations["settings.createTeam"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings/teams/{teamId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * getTeam
+         * @description Owner-only getTeam. Requires a browser or paired owner session; scoped team keys are refused.
+         */
+        get: operations["settings.getTeam"];
+        put?: never;
+        post?: never;
+        /**
+         * deleteTeam
+         * @description Owner-only deleteTeam. Requires a browser or paired owner session; scoped team keys are refused.
+         */
+        delete: operations["settings.deleteTeam"];
+        options?: never;
+        head?: never;
+        /**
+         * updateTeam
+         * @description Owner-only updateTeam. Requires a browser or paired owner session; scoped team keys are refused.
+         */
+        patch: operations["settings.updateTeam"];
+        trace?: never;
+    };
+    "/v1/settings/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * listtemplates
+         * @description Owner-only listtemplates. Requires a browser or paired owner session; scoped team keys are refused.
+         */
+        get: operations["settings.listtemplates"];
+        put?: never;
+        /**
+         * createtemplates
+         * @description Owner-only createtemplates. Requires a browser or paired owner session; scoped team keys are refused.
+         */
+        post: operations["settings.createtemplates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings/templates/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * deletetemplates
+         * @description Owner-only deletetemplates. Requires a browser or paired owner session; scoped team keys are refused.
+         */
+        delete: operations["settings.deletetemplates"];
+        options?: never;
+        head?: never;
+        /**
+         * updatetemplates
+         * @description Owner-only updatetemplates. Requires a browser or paired owner session; scoped team keys are refused.
+         */
+        patch: operations["settings.updatetemplates"];
+        trace?: never;
+    };
     "/v1/sizes": {
         parameters: {
             query?: never;
@@ -1724,6 +1936,29 @@ export interface components {
             template?: string;
             /** @description Lifetime from ready in seconds; the deadline is ready + ttl; null: no TTL */
             ttlSeconds?: number | null;
+        };
+        CreateSettingsSize: {
+            memoryMb: number;
+            slug: string;
+            sortOrder?: number;
+            vcpu: number;
+        };
+        CreateSettingsTeam: {
+            name: string;
+        };
+        CreateSettingsTemplate: {
+            allowedSizes: string[];
+            capabilities?: ("exec" | "files" | "ssh" | "desktop")[] | null;
+            defaultSize: string;
+            description?: string | null;
+            /** @default true */
+            enabled: boolean;
+            loginUser?: string | null;
+            name?: string | null;
+            /** @enum {string} */
+            os: "linux" | "windows";
+            slug: string;
+            sortOrder?: number;
         };
         /** @description A ready snapshot with this name is replaced once the new one is ready */
         CreateSnapshotRequest: {
@@ -2527,6 +2762,71 @@ export interface components {
                 mode?: number;
             } | null;
         };
+        SettingsMutationResult: {
+            /** @enum {boolean} */
+            ok: true;
+        };
+        SettingsPlatformDefaults: {
+            defaultQuota: components["schemas"]["SettingsQuota"];
+            defaultTemplate: string;
+            errorRetentionDays: number;
+            idleTimeoutSeconds: number | null;
+            maxOwnedTeamsPerUser: number | null;
+            maxTtlSeconds: number;
+            newSharedTeamQuota: components["schemas"]["SettingsQuota"];
+            publicDesktopEnabled: boolean | null;
+            publicPortsEnabled: boolean | null;
+            rateLimits: {
+                burst: number | null;
+                requestsPerSecond: number | null;
+                startsPerMinute: number | null;
+            };
+            recoverMinIntervalSeconds: number;
+            stoppedRetentionDays: number | null;
+            ttlSeconds: number | null;
+        };
+        SettingsQuota: {
+            maxActiveSandboxes: number | null;
+            maxRamMb: number | null;
+            maxSavedSnapshots: number | null;
+        };
+        SettingsSession: {
+            defaultTeamId: string;
+            isOperator: boolean;
+            teams: components["schemas"]["SettingsTeam"][];
+            user: {
+                email: string;
+                id: string;
+                name: string;
+            };
+        };
+        SettingsSize: {
+            memoryMb: number;
+            slug: string;
+            sortOrder: number | null;
+            vcpu: number;
+        };
+        SettingsTeam: {
+            id: string;
+            name: string;
+            personal: boolean;
+            quota: components["schemas"]["SettingsQuota"];
+            /** @enum {string|null} */
+            role: "owner" | "member" | null;
+        };
+        SettingsTemplate: {
+            allowedSizes: string[];
+            capabilities: string[] | null;
+            defaultSize: string;
+            description: string | null;
+            enabled: boolean | null;
+            loginUser: string | null;
+            name: string | null;
+            /** @enum {string} */
+            os: "linux" | "windows";
+            slug: string;
+            sortOrder: number | null;
+        };
         Size: {
             memoryMb: number;
             /** @example 2gb */
@@ -2801,6 +3101,31 @@ export interface components {
             slug?: string;
             /** @description New TTL: deadline = now + ttl on a ready sandbox; null removes it */
             ttlSeconds?: number | null;
+        };
+        UpdateSettingsSize: {
+            memoryMb?: number;
+            sortOrder?: number;
+            vcpu?: number;
+        };
+        UpdateSettingsTeam: {
+            name?: string;
+            quota?: {
+                maxActiveSandboxes?: number | null;
+                maxRamMb?: number | null;
+                maxSavedSnapshots?: number | null;
+            };
+        };
+        UpdateSettingsTemplate: {
+            allowedSizes?: string[];
+            capabilities?: ("exec" | "files" | "ssh" | "desktop")[] | null;
+            defaultSize?: string;
+            description?: string | null;
+            enabled?: boolean;
+            loginUser?: string | null;
+            name?: string | null;
+            /** @enum {string} */
+            os?: "linux" | "windows";
+            sortOrder?: number;
         };
         Upload: {
             /**
@@ -7097,6 +7422,555 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "settings.updateAccount": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Settings */
+        requestBody: {
+            content: {
+                "application/json": {
+                    defaultTeamId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsMutationResult"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "settings.defaults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsPlatformDefaults"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "settings.updateDefaults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Settings */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsPlatformDefaults"];
+            };
+        };
+        responses: {
+            /** @description Settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsMutationResult"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "settings.session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsSession"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "settings.listsizes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsSize"][];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "settings.createsizes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Settings */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSettingsSize"];
+            };
+        };
+        responses: {
+            /** @description Settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsMutationResult"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "settings.deletesizes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsMutationResult"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "settings.updatesizes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        /** @description Settings */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSettingsSize"];
+            };
+        };
+        responses: {
+            /** @description Settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsMutationResult"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "settings.listTeams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsTeam"][];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "settings.createTeam": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Settings */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSettingsTeam"];
+            };
+        };
+        responses: {
+            /** @description Settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsTeam"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "settings.getTeam": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                teamId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsTeam"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "settings.deleteTeam": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                teamId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsMutationResult"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "settings.updateTeam": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                teamId: string;
+            };
+            cookie?: never;
+        };
+        /** @description Settings */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSettingsTeam"];
+            };
+        };
+        responses: {
+            /** @description Settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsMutationResult"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "settings.listtemplates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsTemplate"][];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "settings.createtemplates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Settings */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSettingsTemplate"];
+            };
+        };
+        responses: {
+            /** @description Settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsMutationResult"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "settings.deletetemplates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsMutationResult"];
+                };
+            };
+            /** @description Error; `error.code` says what happened */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "settings.updatetemplates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        /** @description Settings */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSettingsTemplate"];
+            };
+        };
+        responses: {
+            /** @description Settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsMutationResult"];
                 };
             };
             /** @description Error; `error.code` says what happened */

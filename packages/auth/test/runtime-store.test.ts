@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	runIdentityStoreContract,
 	runtimeContractSubject,
-} from "../src/runtime-testing.ts";
+} from "./runtime-subject.ts";
 
 describe.skipIf(skipPg())("runtime identity", () => {
 	let db: TestDatabase;

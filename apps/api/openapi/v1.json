@@ -1197,6 +1197,128 @@
 				},
 				"type": "object"
 			},
+			"CreateSettingsSize": {
+				"additionalProperties": false,
+				"properties": {
+					"memoryMb": {
+						"maximum": 1048576,
+						"minimum": 1,
+						"type": "integer"
+					},
+					"slug": {
+						"pattern": "^[a-z0-9-]{1,40}$",
+						"type": "string"
+					},
+					"sortOrder": {
+						"type": "integer"
+					},
+					"vcpu": {
+						"maximum": 256,
+						"minimum": 1,
+						"type": "integer"
+					}
+				},
+				"required": [
+					"slug",
+					"vcpu",
+					"memoryMb"
+				],
+				"type": "object"
+			},
+			"CreateSettingsTeam": {
+				"additionalProperties": false,
+				"properties": {
+					"name": {
+						"maxLength": 64,
+						"minLength": 1,
+						"type": "string"
+					}
+				},
+				"required": [
+					"name"
+				],
+				"type": "object"
+			},
+			"CreateSettingsTemplate": {
+				"additionalProperties": false,
+				"properties": {
+					"allowedSizes": {
+						"items": {
+							"pattern": "^[a-z0-9-]{1,40}$",
+							"type": "string"
+						},
+						"maxItems": 100,
+						"minItems": 1,
+						"type": "array"
+					},
+					"capabilities": {
+						"items": {
+							"enum": [
+								"exec",
+								"files",
+								"ssh",
+								"desktop"
+							],
+							"type": "string"
+						},
+						"type": [
+							"array",
+							"null"
+						]
+					},
+					"defaultSize": {
+						"pattern": "^[a-z0-9-]{1,40}$",
+						"type": "string"
+					},
+					"description": {
+						"maxLength": 4096,
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"enabled": {
+						"default": true,
+						"type": "boolean"
+					},
+					"loginUser": {
+						"maxLength": 64,
+						"minLength": 1,
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"name": {
+						"maxLength": 128,
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"os": {
+						"enum": [
+							"linux",
+							"windows"
+						],
+						"type": "string"
+					},
+					"slug": {
+						"pattern": "^[a-z0-9-]{1,40}$",
+						"type": "string"
+					},
+					"sortOrder": {
+						"type": "integer"
+					}
+				},
+				"required": [
+					"slug",
+					"os",
+					"defaultSize",
+					"allowedSizes"
+				],
+				"type": "object"
+			},
 			"CreateSnapshotRequest": {
 				"additionalProperties": false,
 				"description": "A ready snapshot with this name is replaced once the new one is ready",
@@ -3531,6 +3653,347 @@
 				"description": "Secret files by name: a file replaces the one with that name, null deletes it",
 				"type": "object"
 			},
+			"SettingsMutationResult": {
+				"properties": {
+					"ok": {
+						"enum": [
+							true
+						],
+						"type": "boolean"
+					}
+				},
+				"required": [
+					"ok"
+				],
+				"type": "object"
+			},
+			"SettingsPlatformDefaults": {
+				"additionalProperties": false,
+				"properties": {
+					"defaultQuota": {
+						"$ref": "#/components/schemas/SettingsQuota"
+					},
+					"defaultTemplate": {
+						"pattern": "^[a-z0-9-]{1,40}$",
+						"type": "string"
+					},
+					"errorRetentionDays": {
+						"minimum": 1,
+						"type": "integer"
+					},
+					"idleTimeoutSeconds": {
+						"minimum": 1,
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"maxOwnedTeamsPerUser": {
+						"minimum": 0,
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"maxTtlSeconds": {
+						"minimum": 1,
+						"type": "integer"
+					},
+					"newSharedTeamQuota": {
+						"$ref": "#/components/schemas/SettingsQuota"
+					},
+					"publicDesktopEnabled": {
+						"type": [
+							"boolean",
+							"null"
+						]
+					},
+					"publicPortsEnabled": {
+						"type": [
+							"boolean",
+							"null"
+						]
+					},
+					"rateLimits": {
+						"additionalProperties": false,
+						"properties": {
+							"burst": {
+								"minimum": 1,
+								"type": [
+									"integer",
+									"null"
+								]
+							},
+							"requestsPerSecond": {
+								"minimum": 1,
+								"type": [
+									"integer",
+									"null"
+								]
+							},
+							"startsPerMinute": {
+								"minimum": 1,
+								"type": [
+									"integer",
+									"null"
+								]
+							}
+						},
+						"required": [
+							"requestsPerSecond",
+							"burst",
+							"startsPerMinute"
+						],
+						"type": "object"
+					},
+					"recoverMinIntervalSeconds": {
+						"minimum": 0,
+						"type": "integer"
+					},
+					"stoppedRetentionDays": {
+						"minimum": 1,
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"ttlSeconds": {
+						"minimum": 1,
+						"type": [
+							"integer",
+							"null"
+						]
+					}
+				},
+				"required": [
+					"ttlSeconds",
+					"maxTtlSeconds",
+					"idleTimeoutSeconds",
+					"stoppedRetentionDays",
+					"errorRetentionDays",
+					"recoverMinIntervalSeconds",
+					"defaultTemplate",
+					"publicPortsEnabled",
+					"publicDesktopEnabled",
+					"rateLimits",
+					"defaultQuota",
+					"newSharedTeamQuota",
+					"maxOwnedTeamsPerUser"
+				],
+				"type": "object"
+			},
+			"SettingsQuota": {
+				"additionalProperties": false,
+				"properties": {
+					"maxActiveSandboxes": {
+						"minimum": 0,
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"maxRamMb": {
+						"minimum": 0,
+						"type": [
+							"integer",
+							"null"
+						]
+					},
+					"maxSavedSnapshots": {
+						"minimum": 0,
+						"type": [
+							"integer",
+							"null"
+						]
+					}
+				},
+				"required": [
+					"maxActiveSandboxes",
+					"maxRamMb",
+					"maxSavedSnapshots"
+				],
+				"type": "object"
+			},
+			"SettingsSession": {
+				"properties": {
+					"defaultTeamId": {
+						"type": "string"
+					},
+					"isOperator": {
+						"type": "boolean"
+					},
+					"teams": {
+						"items": {
+							"$ref": "#/components/schemas/SettingsTeam"
+						},
+						"type": "array"
+					},
+					"user": {
+						"properties": {
+							"email": {
+								"type": "string"
+							},
+							"id": {
+								"type": "string"
+							},
+							"name": {
+								"type": "string"
+							}
+						},
+						"required": [
+							"id",
+							"email",
+							"name"
+						],
+						"type": "object"
+					}
+				},
+				"required": [
+					"user",
+					"teams",
+					"defaultTeamId",
+					"isOperator"
+				],
+				"type": "object"
+			},
+			"SettingsSize": {
+				"properties": {
+					"memoryMb": {
+						"type": "number"
+					},
+					"slug": {
+						"pattern": "^[a-z0-9-]{1,40}$",
+						"type": "string"
+					},
+					"sortOrder": {
+						"type": [
+							"number",
+							"null"
+						]
+					},
+					"vcpu": {
+						"type": "number"
+					}
+				},
+				"required": [
+					"slug",
+					"vcpu",
+					"memoryMb",
+					"sortOrder"
+				],
+				"type": "object"
+			},
+			"SettingsTeam": {
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"name": {
+						"type": "string"
+					},
+					"personal": {
+						"type": "boolean"
+					},
+					"quota": {
+						"$ref": "#/components/schemas/SettingsQuota"
+					},
+					"role": {
+						"enum": [
+							"owner",
+							"member",
+							null
+						],
+						"type": [
+							"string",
+							"null"
+						]
+					}
+				},
+				"required": [
+					"id",
+					"name",
+					"personal",
+					"role",
+					"quota"
+				],
+				"type": "object"
+			},
+			"SettingsTemplate": {
+				"properties": {
+					"allowedSizes": {
+						"items": {
+							"type": "string"
+						},
+						"type": "array"
+					},
+					"capabilities": {
+						"items": {
+							"type": "string"
+						},
+						"type": [
+							"array",
+							"null"
+						]
+					},
+					"defaultSize": {
+						"type": "string"
+					},
+					"description": {
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"enabled": {
+						"type": [
+							"boolean",
+							"null"
+						]
+					},
+					"loginUser": {
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"name": {
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"os": {
+						"enum": [
+							"linux",
+							"windows"
+						],
+						"type": "string"
+					},
+					"slug": {
+						"pattern": "^[a-z0-9-]{1,40}$",
+						"type": "string"
+					},
+					"sortOrder": {
+						"type": [
+							"number",
+							"null"
+						]
+					}
+				},
+				"required": [
+					"slug",
+					"name",
+					"description",
+					"os",
+					"enabled",
+					"defaultSize",
+					"allowedSizes",
+					"loginUser",
+					"capabilities",
+					"sortOrder"
+				],
+				"type": "object"
+			},
 			"Size": {
 				"properties": {
 					"memoryMb": {
@@ -4261,6 +4724,132 @@
 							"integer",
 							"null"
 						]
+					}
+				},
+				"type": "object"
+			},
+			"UpdateSettingsSize": {
+				"additionalProperties": false,
+				"properties": {
+					"memoryMb": {
+						"maximum": 1048576,
+						"minimum": 1,
+						"type": "integer"
+					},
+					"sortOrder": {
+						"type": "integer"
+					},
+					"vcpu": {
+						"maximum": 256,
+						"minimum": 1,
+						"type": "integer"
+					}
+				},
+				"type": "object"
+			},
+			"UpdateSettingsTeam": {
+				"additionalProperties": false,
+				"properties": {
+					"name": {
+						"maxLength": 64,
+						"minLength": 1,
+						"type": "string"
+					},
+					"quota": {
+						"additionalProperties": false,
+						"properties": {
+							"maxActiveSandboxes": {
+								"minimum": 0,
+								"type": [
+									"integer",
+									"null"
+								]
+							},
+							"maxRamMb": {
+								"minimum": 0,
+								"type": [
+									"integer",
+									"null"
+								]
+							},
+							"maxSavedSnapshots": {
+								"minimum": 0,
+								"type": [
+									"integer",
+									"null"
+								]
+							}
+						},
+						"type": "object"
+					}
+				},
+				"type": "object"
+			},
+			"UpdateSettingsTemplate": {
+				"additionalProperties": false,
+				"properties": {
+					"allowedSizes": {
+						"items": {
+							"pattern": "^[a-z0-9-]{1,40}$",
+							"type": "string"
+						},
+						"maxItems": 100,
+						"minItems": 1,
+						"type": "array"
+					},
+					"capabilities": {
+						"items": {
+							"enum": [
+								"exec",
+								"files",
+								"ssh",
+								"desktop"
+							],
+							"type": "string"
+						},
+						"type": [
+							"array",
+							"null"
+						]
+					},
+					"defaultSize": {
+						"pattern": "^[a-z0-9-]{1,40}$",
+						"type": "string"
+					},
+					"description": {
+						"maxLength": 4096,
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"enabled": {
+						"type": "boolean"
+					},
+					"loginUser": {
+						"maxLength": 64,
+						"minLength": 1,
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"name": {
+						"maxLength": 128,
+						"type": [
+							"string",
+							"null"
+						]
+					},
+					"os": {
+						"enum": [
+							"linux",
+							"windows"
+						],
+						"type": "string"
+					},
+					"sortOrder": {
+						"type": "integer"
 					}
 				},
 				"type": "object"
@@ -11343,6 +11932,795 @@
 				"summary": "Unblock a sandbox (operator)",
 				"tags": [
 					"sandboxes"
+				]
+			}
+		},
+		"/v1/settings/account": {
+			"patch": {
+				"description": "Owner-only updateAccount. Requires a browser or paired owner session; scoped team keys are refused.",
+				"operationId": "settings.updateAccount",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"additionalProperties": false,
+								"properties": {
+									"defaultTeamId": {
+										"type": "string"
+									}
+								},
+								"required": [
+									"defaultTeamId"
+								],
+								"type": "object"
+							}
+						}
+					},
+					"description": "Settings",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SettingsMutationResult"
+								}
+							}
+						},
+						"description": "Settings"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"owner": []
+					}
+				],
+				"summary": "updateAccount",
+				"tags": [
+					"settings"
+				]
+			}
+		},
+		"/v1/settings/platform-defaults": {
+			"get": {
+				"description": "Owner-only defaults. Requires a browser or paired owner session; scoped team keys are refused.",
+				"operationId": "settings.defaults",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SettingsPlatformDefaults"
+								}
+							}
+						},
+						"description": "Settings"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"owner": []
+					}
+				],
+				"summary": "defaults",
+				"tags": [
+					"settings"
+				]
+			},
+			"put": {
+				"description": "Owner-only updateDefaults. Requires a browser or paired owner session; scoped team keys are refused.",
+				"operationId": "settings.updateDefaults",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/SettingsPlatformDefaults"
+							}
+						}
+					},
+					"description": "Settings",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SettingsMutationResult"
+								}
+							}
+						},
+						"description": "Settings"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"owner": []
+					}
+				],
+				"summary": "updateDefaults",
+				"tags": [
+					"settings"
+				]
+			}
+		},
+		"/v1/settings/session": {
+			"get": {
+				"description": "Owner-only session. Requires a browser or paired owner session; scoped team keys are refused.",
+				"operationId": "settings.session",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SettingsSession"
+								}
+							}
+						},
+						"description": "Settings"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"owner": []
+					}
+				],
+				"summary": "session",
+				"tags": [
+					"settings"
+				]
+			}
+		},
+		"/v1/settings/sizes": {
+			"get": {
+				"description": "Owner-only listsizes. Requires a browser or paired owner session; scoped team keys are refused.",
+				"operationId": "settings.listsizes",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"items": {
+										"$ref": "#/components/schemas/SettingsSize"
+									},
+									"type": "array"
+								}
+							}
+						},
+						"description": "Settings"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"owner": []
+					}
+				],
+				"summary": "listsizes",
+				"tags": [
+					"settings"
+				]
+			},
+			"post": {
+				"description": "Owner-only createsizes. Requires a browser or paired owner session; scoped team keys are refused.",
+				"operationId": "settings.createsizes",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/CreateSettingsSize"
+							}
+						}
+					},
+					"description": "Settings",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SettingsMutationResult"
+								}
+							}
+						},
+						"description": "Settings"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"owner": []
+					}
+				],
+				"summary": "createsizes",
+				"tags": [
+					"settings"
+				]
+			}
+		},
+		"/v1/settings/sizes/{slug}": {
+			"delete": {
+				"description": "Owner-only deletesizes. Requires a browser or paired owner session; scoped team keys are refused.",
+				"operationId": "settings.deletesizes",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "slug",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SettingsMutationResult"
+								}
+							}
+						},
+						"description": "Settings"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"owner": []
+					}
+				],
+				"summary": "deletesizes",
+				"tags": [
+					"settings"
+				]
+			},
+			"patch": {
+				"description": "Owner-only updatesizes. Requires a browser or paired owner session; scoped team keys are refused.",
+				"operationId": "settings.updatesizes",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "slug",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/UpdateSettingsSize"
+							}
+						}
+					},
+					"description": "Settings",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SettingsMutationResult"
+								}
+							}
+						},
+						"description": "Settings"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"owner": []
+					}
+				],
+				"summary": "updatesizes",
+				"tags": [
+					"settings"
+				]
+			}
+		},
+		"/v1/settings/teams": {
+			"get": {
+				"description": "Owner-only listTeams. Requires a browser or paired owner session; scoped team keys are refused.",
+				"operationId": "settings.listTeams",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"items": {
+										"$ref": "#/components/schemas/SettingsTeam"
+									},
+									"type": "array"
+								}
+							}
+						},
+						"description": "Settings"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"owner": []
+					}
+				],
+				"summary": "listTeams",
+				"tags": [
+					"settings"
+				]
+			},
+			"post": {
+				"description": "Owner-only createTeam. Requires a browser or paired owner session; scoped team keys are refused.",
+				"operationId": "settings.createTeam",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/CreateSettingsTeam"
+							}
+						}
+					},
+					"description": "Settings",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SettingsTeam"
+								}
+							}
+						},
+						"description": "Settings"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"owner": []
+					}
+				],
+				"summary": "createTeam",
+				"tags": [
+					"settings"
+				]
+			}
+		},
+		"/v1/settings/teams/{teamId}": {
+			"delete": {
+				"description": "Owner-only deleteTeam. Requires a browser or paired owner session; scoped team keys are refused.",
+				"operationId": "settings.deleteTeam",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "teamId",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SettingsMutationResult"
+								}
+							}
+						},
+						"description": "Settings"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"owner": []
+					}
+				],
+				"summary": "deleteTeam",
+				"tags": [
+					"settings"
+				]
+			},
+			"get": {
+				"description": "Owner-only getTeam. Requires a browser or paired owner session; scoped team keys are refused.",
+				"operationId": "settings.getTeam",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "teamId",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SettingsTeam"
+								}
+							}
+						},
+						"description": "Settings"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"owner": []
+					}
+				],
+				"summary": "getTeam",
+				"tags": [
+					"settings"
+				]
+			},
+			"patch": {
+				"description": "Owner-only updateTeam. Requires a browser or paired owner session; scoped team keys are refused.",
+				"operationId": "settings.updateTeam",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "teamId",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/UpdateSettingsTeam"
+							}
+						}
+					},
+					"description": "Settings",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SettingsMutationResult"
+								}
+							}
+						},
+						"description": "Settings"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"owner": []
+					}
+				],
+				"summary": "updateTeam",
+				"tags": [
+					"settings"
+				]
+			}
+		},
+		"/v1/settings/templates": {
+			"get": {
+				"description": "Owner-only listtemplates. Requires a browser or paired owner session; scoped team keys are refused.",
+				"operationId": "settings.listtemplates",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"items": {
+										"$ref": "#/components/schemas/SettingsTemplate"
+									},
+									"type": "array"
+								}
+							}
+						},
+						"description": "Settings"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"owner": []
+					}
+				],
+				"summary": "listtemplates",
+				"tags": [
+					"settings"
+				]
+			},
+			"post": {
+				"description": "Owner-only createtemplates. Requires a browser or paired owner session; scoped team keys are refused.",
+				"operationId": "settings.createtemplates",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/CreateSettingsTemplate"
+							}
+						}
+					},
+					"description": "Settings",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SettingsMutationResult"
+								}
+							}
+						},
+						"description": "Settings"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"owner": []
+					}
+				],
+				"summary": "createtemplates",
+				"tags": [
+					"settings"
+				]
+			}
+		},
+		"/v1/settings/templates/{slug}": {
+			"delete": {
+				"description": "Owner-only deletetemplates. Requires a browser or paired owner session; scoped team keys are refused.",
+				"operationId": "settings.deletetemplates",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "slug",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SettingsMutationResult"
+								}
+							}
+						},
+						"description": "Settings"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"owner": []
+					}
+				],
+				"summary": "deletetemplates",
+				"tags": [
+					"settings"
+				]
+			},
+			"patch": {
+				"description": "Owner-only updatetemplates. Requires a browser or paired owner session; scoped team keys are refused.",
+				"operationId": "settings.updatetemplates",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "slug",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/UpdateSettingsTemplate"
+							}
+						}
+					},
+					"description": "Settings",
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SettingsMutationResult"
+								}
+							}
+						},
+						"description": "Settings"
+					},
+					"default": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								}
+							}
+						},
+						"description": "Error; `error.code` says what happened"
+					}
+				},
+				"security": [
+					{
+						"owner": []
+					}
+				],
+				"summary": "updatetemplates",
+				"tags": [
+					"settings"
 				]
 			}
 		},

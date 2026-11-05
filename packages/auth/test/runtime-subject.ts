@@ -1,19 +1,19 @@
 // Test helpers of @umiak/auth (export "./testing"). Imports vitest: never import
 // this from production code.
 import type pg from "pg";
+import { RuntimeIdentityStore } from "../src/runtime-store.ts";
 import {
 	CONTRACT_OPERATOR_GROUP,
 	type IdentityContractSeeding,
 	type IdentityContractSubject,
-} from "../test/contract.ts";
-import { RuntimeIdentityStore } from "./runtime-store.ts";
+} from "./contract.ts";
 
 export {
 	CONTRACT_OPERATOR_GROUP,
 	type IdentityContractSeeding,
 	type IdentityContractSubject,
 	runIdentityStoreContract,
-} from "../test/contract.ts";
+} from "./contract.ts";
 
 /** Direct writes into schema `runtime` for tests (users, teams, members). */
 export function runtimeIdentitySeeding(pool: pg.Pool): IdentityContractSeeding {

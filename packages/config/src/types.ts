@@ -1,3 +1,4 @@
+import type pg from "pg";
 export type TemplateOs = "linux" | "windows";
 
 export interface TemplateConfig {
@@ -53,6 +54,8 @@ export interface PlatformDefaults {
 
 /** S6 §5.11. Implementations: StaticConfigReader (YAML), PayloadConfigReader (S8). */
 export interface ConfigReader {
+	/** Production stores revalidate under the team admission lock. */
+	teamExists?(teamId: string, client: pg.PoolClient): Promise<boolean>;
 	template(slug: string): Promise<TemplateConfig | null>;
 	size(slug: string): Promise<SizeConfig | null>;
 	/** Every template, enabled or not, in configuration order (S7 §13 catalog). */

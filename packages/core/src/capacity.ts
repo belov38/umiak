@@ -1,4 +1,4 @@
-import type { Quota } from "@umiak/config";
+import type { ConfigReader, Quota } from "@umiak/config";
 import type { Tx } from "@umiak/db";
 import { invalidState, notFound, quotaExceeded } from "./errors.ts";
 import { lockNode, lockTeam } from "./locks.ts";
@@ -223,6 +223,7 @@ export const QUOTA_ACTIVE_SANDBOX_STATES: readonly SandboxState[] = [
 ];
 
 export interface QuotaDelta {
+	teamExists?: ConfigReader["teamExists"];
 	addSandboxes?: number;
 	addRamMb?: number;
 	addSavedSnapshots?: number;
@@ -249,6 +250,8 @@ export async function checkQuota(
 	delta: QuotaDelta,
 ): Promise<void> {
 	await lockTeam(tx, teamId);
+	if (delta.teamExists && !(await delta.teamExists(teamId, tx.client)))
+		throw notFound("workspace");
 	const addSandboxes = delta.addSandboxes ?? 0;
 	const addRamMb = delta.addRamMb ?? 0;
 	const addSaved = delta.addSavedSnapshots ?? 0;

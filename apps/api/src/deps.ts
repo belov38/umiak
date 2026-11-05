@@ -59,12 +59,8 @@ export interface ApiDeps {
 	ptyTimings: PtyTimings;
 	/** Shutting down: `/readyz` 503 and new requests 503 (S7 §9.7). */
 	lifecycle: ApiLifecycle;
-	/**
-	 * Throws while a Payload migration known to the code is not applied
-	 * (`assertPayloadMigrated`): `/readyz` reason `payload_migrations`. Null
-	 * without Payload (tests with the stand-in stores).
-	 */
-	payloadReady: (() => Promise<void>) | null;
+	/** Unified SQL migration readiness; null for in-memory test stores. */
+	configurationReady: (() => Promise<void>) | null;
 }
 
 /** Hono env of every listener app. */

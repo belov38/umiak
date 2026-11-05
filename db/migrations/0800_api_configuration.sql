@@ -99,16 +99,6 @@ CREATE TABLE runtime."sizes" (
   	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL
   );
 
-CREATE TABLE runtime."pool_targets" (
-  	"id" uuid PRIMARY KEY DEFAULT uuidv7() NOT NULL,
-  	"template" text NOT NULL,
-  	"size" text NOT NULL,
-  	"provider_id" text,
-  	"target" numeric NOT NULL,
-  	"max_age_hours" numeric,
-  	"updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
-  	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL
-  );
 
 CREATE TABLE runtime."platform_defaults" (
   	"id" uuid PRIMARY KEY DEFAULT uuidv7() NOT NULL,
@@ -152,5 +142,4 @@ CREATE UNIQUE INDEX ssh_keys_fingerprint_idx ON runtime.ssh_keys (fingerprint);
 CREATE UNIQUE INDEX templates_slug_idx ON runtime.templates (slug);
 CREATE UNIQUE INDEX sizes_slug_idx ON runtime.sizes (slug);
 CREATE UNIQUE INDEX memberships_pair_idx ON runtime.memberships(user_id,team_id);
-CREATE UNIQUE INDEX pool_targets_pair_idx ON runtime.pool_targets(template,size,provider_id) NULLS NOT DISTINCT;
 CREATE UNIQUE INDEX platform_defaults_singleton_idx ON runtime.platform_defaults((true));

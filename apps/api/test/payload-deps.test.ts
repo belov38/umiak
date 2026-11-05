@@ -1,23 +1,21 @@
 // Production dependencies on Payload (S8 plan decision 5): `buildDeps` takes
-// identities and config from Payload (PayloadIdentityStore,
-// PayloadConfigReader), loads UMIAK_IDENTITY_FILE into Payload, and `/readyz`
-// reports `payload_migrations` while the Payload schema is behind the code.
+// identities and config from Payload (RuntimeIdentityStore,
+// PgConfigReader), loads UMIAK_IDENTITY_FILE into Payload, and `/readyz`
+// reports `configuration_migrations` while the Payload schema is behind the code.
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { apiKeyHash, generateApiKeySecret } from "@umiak/auth";
+import {
+	apiKeyHash,
+	generateApiKeySecret,
+	RuntimeIdentityStore,
+} from "@umiak/auth";
+import { PgConfigReader } from "@umiak/config";
 import {
 	createTestDatabase,
 	skipPg,
 	type TestDatabase,
 } from "@umiak/db/testing";
-import {
-	closeUmiakPayload,
-	getUmiakPayload,
-	migrateUmiakPayload,
-	PayloadConfigReader,
-	PayloadIdentityStore,
-} from "@umiak/payload";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	type ApiDeps,
@@ -77,14 +75,7 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 
 		beforeAll(async () => {
 			db = await createTestDatabase();
-			const p = await getUmiakPayload({
-				databaseUrl: db.url,
-				secret: PAYLOAD_SECRET,
-				operatorGroups: [],
-				poolMax: 4,
-			});
-			await migrateUmiakPayload(p, () => {});
-			await closeUmiakPayload(db.url);
+
 			const settings = testSettings({
 				DATABASE_URL: db.url,
 				PAYLOAD_SECRET,
@@ -112,8 +103,8 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 		});
 
 		it("identity and config are the Payload ones", () => {
-			expect(deps.identity).toBeInstanceOf(PayloadIdentityStore);
-			expect(deps.config).toBeInstanceOf(PayloadConfigReader);
+			expect(deps.identity).toBeInstanceOf(RuntimeIdentityStore);
+			expect(deps.config).toBeInstanceOf(PgConfigReader);
 		});
 
 		it("the identity file is loaded into Payload: its key answers /v1/me", async () => {
@@ -130,7 +121,7 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 			expect(r.status).toBe(200);
 			expect(await r.json()).toMatchObject({ team: { name: "payload-team" } });
 			const rows = await db.pool.query<{ name: string }>(
-				"SELECT name FROM payload.teams WHERE id = $1",
+				"SELECT name FROM runtime.teams WHERE id = $1",
 				[TEAM_ID],
 			);
 			expect(rows.rows).toEqual([{ name: "payload-team" }]);
@@ -159,24 +150,11 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 				"linux-desktop",
 			]);
 			// A change through Payload reaches the cached reader (LISTEN umiak_config).
-			const payload = await getUmiakPayload({
-				databaseUrl: db.url,
-				secret: PAYLOAD_SECRET,
-				operatorGroups: [],
-			});
-			try {
-				await payload.update({
-					collection: "templates",
-					where: { slug: { equals: "linux" } },
-					data: { name: "Linux (Payload)" },
-					overrideAccess: true,
-				});
-			} finally {
-				// Releases this reference only: buildDeps keeps its own.
-				await closeUmiakPayload(db.url);
-			}
+			await db.pool.query(
+				"UPDATE runtime.templates SET name='Linux (SQL)' WHERE slug='linux'",
+			);
 			await until(
-				async () => (await get())[0]?.name === "Linux (Payload)",
+				async () => (await get())[0]?.name === "Linux (SQL)",
 				"the renamed template",
 			);
 		});
@@ -195,7 +173,7 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 			);
 			expect(r.status).toBe(200);
 			const rows = await db.pool.query<{ email: string }>(
-				"SELECT email FROM payload.users WHERE idp_subject = 'umiak:local'",
+				"SELECT email FROM runtime.users WHERE idp_subject = 'umiak:local'",
 			);
 			expect(rows.rows).toEqual([{ email: "local@umiak.invalid" }]);
 		});
@@ -213,13 +191,16 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 
 		beforeAll(async () => {
 			db = await createTestDatabase();
+			await db.pool.query(
+				"DELETE FROM public.umiak_schema_migrations WHERE version=803",
+			);
 		});
 		afterAll(async () => {
 			await built?.dispose();
 			await db?.drop();
 		});
 
-		it("/readyz is 503 with reason payload_migrations", async () => {
+		it("/readyz is 503 with reason configuration_migrations", async () => {
 			built = await buildDeps(
 				testSettings({ DATABASE_URL: db.url, PAYLOAD_SECRET, ...files(null) }),
 				log,
@@ -230,7 +211,7 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 				error: {
 					code: "not_ready",
 					retryable: true,
-					details: { reasons: ["payload_migrations"] },
+					details: { reasons: ["configuration_migrations"] },
 				},
 			});
 		});
@@ -247,7 +228,7 @@ describe.skipIf(skipPg())("buildDeps on Payload", () => {
 					}),
 					log,
 				),
-			).rejects.toThrow(/payload migrations not applied/);
+			).rejects.toThrow(/SQL migrations not applied/);
 		});
 	});
 });

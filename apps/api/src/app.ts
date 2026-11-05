@@ -27,6 +27,7 @@ import { cancelHeadBodies } from "./http/head.ts";
 import { requestLog } from "./http/logger.ts";
 import { requestMetrics } from "./http/metrics.ts";
 import { requestId } from "./http/request-id.ts";
+import { mountSpa } from "./http/spa.ts";
 import { registerSecuritySchemes } from "./openapi/registry.ts";
 import { registerApiKeyRoutes } from "./routes/api-keys.ts";
 import { registerCatalogRoutes } from "./routes/catalog.ts";
@@ -43,6 +44,7 @@ import { registerOperationRoutes } from "./routes/operations.ts";
 import { registerPortRoutes } from "./routes/ports.ts";
 import { registerPtyRoutes } from "./routes/ptys.ts";
 import { registerSandboxRoutes } from "./routes/sandboxes.ts";
+import { registerSettingsRoutes } from "./routes/settings.ts";
 import { registerSetupSmoke } from "./routes/setup-smoke.ts";
 import { registerSnapshotRoutes } from "./routes/snapshots.ts";
 import { registerSshRoutes } from "./routes/ssh.ts";
@@ -105,6 +107,7 @@ export function mountV1(
 	registerSnapshotRoutes(app, deps);
 	registerEnvironmentRoutes(app, deps);
 	registerCatalogRoutes(app, deps);
+	registerSettingsRoutes(app, deps);
 	registerLimitsRoutes(app, deps);
 	registerApiKeyRoutes(app, deps);
 }
@@ -126,6 +129,7 @@ export function createProxiedApp(deps: ApiDeps): ApiApp {
 	mountV1(app, deps, { docs: false });
 	registerUmiakAuthRoutes(app, deps);
 	registerSetupSmoke(app, deps);
+	mountSpa(app, deps);
 	return app;
 }
 
@@ -177,8 +181,11 @@ export function createOpsApp(deps: ApiDeps): ApiApp {
 			reasons.push("postgres");
 		}
 		if (!deps.identityEvents.isReady()) reasons.push("identity_listener");
-		if (deps.payloadReady !== null && !(await passes(deps.payloadReady))) {
-			reasons.push("payload_migrations");
+		if (
+			deps.configurationReady !== null &&
+			!(await passes(deps.configurationReady))
+		) {
+			reasons.push("configuration_migrations");
 		}
 		if (reasons.length > 0) {
 			throw new ApiError(503, "not_ready", `not ready: ${reasons.join(", ")}`, {

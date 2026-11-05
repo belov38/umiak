@@ -83,7 +83,6 @@ const workerSchema = z.object({
 	DATABASE_URL: databaseUrl,
 	// Templates, sizes, quotas and defaults come from Payload (S8 plan
 	// decision 5); UMIAK_CONFIG_FILE is read only by `umiak-admin bootstrap`.
-	PAYLOAD_SECRET: required("secret of the Payload config, as web"),
 	UMIAK_DATA_KEYS_FILE: required("path of the data key ring JSON"),
 	UMIAK_SECRETS_DIR: required("directory with the PVE and umiak-node secrets"),
 	UMIAK_GATEWAY_SERVICE_TOKEN_FILE: optional,
@@ -125,8 +124,6 @@ const adminSchema = z.object({
 
 export interface WorkerEnv {
 	databaseUrl: string;
-	/** PAYLOAD_SECRET: the Payload instance of the config reader. */
-	payloadSecret: string;
 	dataKeysFile: string;
 	secretsDir: string;
 	gatewayServiceTokenFile: string | undefined;
@@ -171,7 +168,6 @@ export function parseWorkerEnv(env: Env = process.env): WorkerEnv {
 	const e = r.data;
 	return {
 		databaseUrl: e.DATABASE_URL,
-		payloadSecret: e.PAYLOAD_SECRET,
 		dataKeysFile: e.UMIAK_DATA_KEYS_FILE,
 		secretsDir: e.UMIAK_SECRETS_DIR,
 		gatewayServiceTokenFile: e.UMIAK_GATEWAY_SERVICE_TOKEN_FILE,

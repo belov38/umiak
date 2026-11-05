@@ -42,7 +42,7 @@ BEGIN
   ELSE message := slug || ':' || (doc->>'id'); END IF;
   PERFORM pg_notify('umiak_identity',message);
  END IF;
- IF TG_TABLE_NAME IN ('templates','sizes','pool_targets','platform_defaults') OR
+ IF TG_TABLE_NAME IN ('templates','sizes','platform_defaults') OR
     (TG_TABLE_NAME='teams' AND (TG_OP<>'UPDATE' OR
       (to_jsonb(OLD)->'quota_max_active_sandboxes') IS DISTINCT FROM (doc->'quota_max_active_sandboxes') OR
       (to_jsonb(OLD)->'quota_max_ram_mb') IS DISTINCT FROM (doc->'quota_max_ram_mb') OR
@@ -76,5 +76,4 @@ CREATE TRIGGER configuration_notify AFTER INSERT OR UPDATE OR DELETE ON runtime.
 CREATE TRIGGER configuration_notify AFTER INSERT OR UPDATE OR DELETE ON runtime.ssh_keys FOR EACH ROW EXECUTE FUNCTION runtime.configuration_notify();
 CREATE TRIGGER configuration_notify AFTER INSERT OR UPDATE OR DELETE ON runtime.templates FOR EACH ROW EXECUTE FUNCTION runtime.configuration_notify();
 CREATE TRIGGER configuration_notify AFTER INSERT OR UPDATE OR DELETE ON runtime.sizes FOR EACH ROW EXECUTE FUNCTION runtime.configuration_notify();
-CREATE TRIGGER configuration_notify AFTER INSERT OR UPDATE OR DELETE ON runtime.pool_targets FOR EACH ROW EXECUTE FUNCTION runtime.configuration_notify();
 CREATE TRIGGER configuration_notify AFTER INSERT OR UPDATE OR DELETE ON runtime.platform_defaults FOR EACH ROW EXECUTE FUNCTION runtime.configuration_notify();

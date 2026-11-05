@@ -30,7 +30,6 @@ describe("worker env", () => {
 		}
 		for (const name of [
 			"DATABASE_URL",
-			"PAYLOAD_SECRET",
 			"UMIAK_DATA_KEYS_FILE",
 			"UMIAK_SECRETS_DIR",
 			"UMIAK_HTTP_PORT",
@@ -39,25 +38,15 @@ describe("worker env", () => {
 		}
 	});
 
-	it("PAYLOAD_SECRET is required; UMIAK_CONFIG_FILE is not (config comes from Payload)", () => {
+	it("does not require a CMS secret", () => {
 		const { PAYLOAD_SECRET: _, ...rest } = BASE;
-		expect(() => parseWorkerEnv(rest)).toThrow(/PAYLOAD_SECRET: required/);
-		expect(() => parseWorkerEnv({ ...BASE, PAYLOAD_SECRET: "" })).toThrow(
-			/PAYLOAD_SECRET: required/,
-		);
-		const env = parseWorkerEnv(BASE);
-		expect(env).not.toHaveProperty("configFile");
-		// A leftover UMIAK_CONFIG_FILE is ignored.
-		expect(
-			parseWorkerEnv({ ...BASE, UMIAK_CONFIG_FILE: "/etc/umiak/umiak.yaml" }),
-		).toEqual(env);
+		expect(parseWorkerEnv(rest)).not.toHaveProperty("payloadSecret");
 	});
 
 	it("defaults", () => {
 		const env = parseWorkerEnv(BASE);
 		expect(env).toMatchObject({
 			databaseUrl: BASE.DATABASE_URL,
-			payloadSecret: BASE.PAYLOAD_SECRET,
 			dataKeysFile: BASE.UMIAK_DATA_KEYS_FILE,
 			secretsDir: BASE.UMIAK_SECRETS_DIR,
 			gatewayServiceTokenFile: undefined,

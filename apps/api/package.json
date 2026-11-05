@@ -23,7 +23,6 @@
 		"@umiak/config": "workspace:*",
 		"@umiak/core": "workspace:*",
 		"@umiak/db": "workspace:*",
-		"@umiak/payload": "workspace:*",
 		"@umiak/proto": "workspace:*",
 		"hono": "4.13.14",
 		"pg": "8.23.1",

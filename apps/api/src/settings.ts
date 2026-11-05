@@ -44,11 +44,6 @@ export interface Settings {
 	/** The proxied listener (owner ingress) is started. */
 	proxiedEnabled: boolean;
 	databaseUrl: string;
-	/**
-	 * PAYLOAD_SECRET: identities and config come from Payload (S8 plan
-	 * decision 5); there is no config file any more.
-	 */
-	payloadSecret: string;
 	dataKeysFile: string;
 	/** HMAC key of list cursors, at least 32 bytes. */
 	cursorKey: Buffer;
@@ -200,7 +195,6 @@ const schema = z.object({
 	UMIAK_API_METRICS_PORT: port(9090),
 	UMIAK_API_PROXIED_ENABLED: bool(true),
 	DATABASE_URL: url("postgres connection string", ["postgres:", "postgresql:"]),
-	PAYLOAD_SECRET: required("secret of the Payload config, as web"),
 	UMIAK_DATA_KEYS_FILE: required("path of the data key ring JSON"),
 	UMIAK_API_CURSOR_KEY: cursorKey,
 	UMIAK_API_SERVICE_TOKENS_FILE: required("path of the service tokens JSON"),
@@ -282,7 +276,6 @@ export function loadSettings(
 		metricsPort: e.UMIAK_API_METRICS_PORT,
 		proxiedEnabled: e.UMIAK_API_PROXIED_ENABLED,
 		databaseUrl: e.DATABASE_URL,
-		payloadSecret: e.PAYLOAD_SECRET,
 		dataKeysFile: e.UMIAK_DATA_KEYS_FILE,
 		cursorKey: e.UMIAK_API_CURSOR_KEY,
 		serviceTokensFile: e.UMIAK_API_SERVICE_TOKENS_FILE,

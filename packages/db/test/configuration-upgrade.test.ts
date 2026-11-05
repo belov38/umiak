@@ -29,7 +29,6 @@ describe.skipIf(skipPg())("API configuration cutover", () => {
 			"ssh_keys",
 			"templates",
 			"sizes",
-			"pool_targets",
 			"platform_defaults",
 		]) {
 			await db.pool.query(`DROP TABLE IF EXISTS runtime.${table} CASCADE`);
@@ -71,7 +70,6 @@ INSERT INTO payload.platform_defaults(id,stopped_retention_days,default_template
 			"ssh_keys",
 			"templates",
 			"sizes",
-			"pool_targets",
 			"platform_defaults",
 		]) {
 			const source = await db.pool.query(
@@ -150,9 +148,5 @@ INSERT INTO payload.pool_targets(id,template,size,target) VALUES(uuidv7(),'debia
 				)
 			).rows[0].default_template,
 		).toBe("linux");
-		expect(
-			(await db.pool.query("SELECT count(*) FROM runtime.pool_targets")).rows[0]
-				.count,
-		).toBe("0");
 	});
 });

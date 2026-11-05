@@ -113,6 +113,7 @@ export async function tryAdmitQueuedStart(
 		try {
 			const quota = await deps.config.teamQuota(s.team_id);
 			await checkQuota(tx, s.team_id, quota, {
+				teamExists: deps.config.teamExists?.bind(deps.config),
 				addSandboxes: 1,
 				addRamMb: s.memory_mb,
 			});

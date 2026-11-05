@@ -1,14 +1,15 @@
 // The worker on Payload (S8 plan decision 5): templates, sizes, quotas and
 // defaults come from PayloadConfigReader, and /readyz waits for the Payload
 // migrations (assertPayloadMigrated) as for the runtime ones.
+
+import type { PgConfigReader } from "@umiak/config";
 import {
 	createTestDatabase,
 	skipPg,
 	type TestDatabase,
 } from "@umiak/db/testing";
-import { migrateUmiakPayload } from "@umiak/payload";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { openWorkerPayload, type WorkerPayload } from "../src/payload.ts";
+import { openWorkerConfig } from "../src/config.ts";
 import { createWorker, type Worker } from "../src/worker.ts";
 import { FakeInfraRegistry } from "./fakes/infra.ts";
 import {
@@ -21,7 +22,7 @@ import {
 
 describe.skipIf(skipPg())("worker with Payload", () => {
 	let db: TestDatabase;
-	let wp: WorkerPayload | undefined;
+	let wp: PgConfigReader | undefined;
 	let worker: Worker | undefined;
 
 	beforeAll(async () => {
@@ -35,35 +36,38 @@ describe.skipIf(skipPg())("worker with Payload", () => {
 
 	it("/readyz says payload_migrations until they are applied; config is the Payload seed", async () => {
 		const { log } = testLogger("warn");
-		wp = await openWorkerPayload({
-			databaseUrl: db.url,
-			secret: "worker-payload-secret-0123456789",
-			log,
-		});
+		wp = await openWorkerConfig(db.pool, db.url, log);
+		await db.pool.query(
+			"DELETE FROM public.umiak_schema_migrations WHERE version=803",
+		);
 		const p = wp;
 		worker = createWorker(
 			workerOptions(db.pool, {
 				infra: new FakeInfraRegistry(),
-				config: p.config,
+				config: p,
 				keys: testKeys(),
-				payloadReady: () => p.ready(),
 				httpPort: 0,
 				httpHost: "127.0.0.1",
 				controllers: [],
+				migrateOnStart: false,
 			}),
 		);
 		const w = worker;
-		await w.start();
+		const started = w.start();
 		const port = await until(() => w.httpPort, { what: "http listening" });
 		const base = `http://127.0.0.1:${port}`;
 
 		const notReady = await getText(`${base}/readyz`);
 		expect(notReady.status).toBe(503);
 		const body = JSON.parse(notReady.body) as { reasons: string[] };
-		expect(body.reasons).toHaveLength(1);
-		expect(body.reasons[0]).toMatch(/^payload_migrations: /);
+		expect(
+			body.reasons.some((reason) => reason.startsWith("migrations pending:")),
+		).toBe(true);
 
-		await migrateUmiakPayload(p.payload, () => {});
+		await db.pool.query(
+			"INSERT INTO public.umiak_schema_migrations(version,name,sha256) VALUES(803,'0803_configuration_notifications.sql','test')",
+		);
+		await started;
 		const ready = await getText(`${base}/readyz`);
 		expect(ready.status).toBe(200);
 		expect(JSON.parse(ready.body)).toEqual({ ready: true, reasons: [] });

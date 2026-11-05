@@ -9,6 +9,7 @@
 // `pnpm build` once before `node src/main.ts` (the image does it).
 import { readFileSync } from "node:fs";
 import { AgentClient, PgRegistry } from "@umiak/agent-client";
+import type { PgConfigReader } from "@umiak/config";
 import { KeyRing } from "@umiak/core";
 import { createPool } from "@umiak/db";
 import { ConnectAgentPort, parseCaKeys } from "./adapters/agent-connect.ts";
@@ -18,10 +19,10 @@ import {
 	UnconfiguredGatewayPort,
 } from "./adapters/gateway-http.ts";
 import { PveInfraRegistry } from "./adapters/pve-infra.ts";
+import { openWorkerConfig } from "./config.ts";
 import { parseWorkerEnv, type WorkerEnv } from "./env.ts";
 import { errText, processLogger } from "./log.ts";
 import { PromMetrics } from "./metrics.ts";
-import { openWorkerPayload, type WorkerPayload } from "./payload.ts";
 import type { AgentPort, GatewayPort } from "./ports.ts";
 import { createWorker, STOP_TIMEOUT_MS, type Worker } from "./worker.ts";
 
@@ -55,7 +56,7 @@ async function main(): Promise<void> {
 	// Agent RPC client over the same registry; closed before it.
 	let agentClient: AgentClient | undefined;
 	// Payload instance of the config reader; its own pool and LISTEN connection.
-	let payload: WorkerPayload | undefined;
+	let config: PgConfigReader | undefined;
 	let exiting = false;
 	const shutdown = async (signal: string) => {
 		if (exiting) {
@@ -68,7 +69,7 @@ async function main(): Promise<void> {
 			await worker?.stop({ graceful: true, timeoutMs: STOP_TIMEOUT_MS });
 			await agentClient?.close();
 			await registry?.close();
-			await payload?.close();
+			await config?.close();
 			await pool.end();
 		} catch (err) {
 			log.error({ err: errText(err) }, "shutdown failed");
@@ -81,12 +82,8 @@ async function main(): Promise<void> {
 
 	try {
 		const keys = KeyRing.fromFile(env.dataKeysFile);
-		payload = await openWorkerPayload({
-			databaseUrl: env.databaseUrl,
-			secret: env.payloadSecret,
-			log,
-		});
-		const p = payload;
+		config = await openWorkerConfig(pool, env.databaseUrl, log);
+
 		let gateway: GatewayPort;
 		let agent: AgentPort;
 		if (env.gatewayServiceTokenFile !== undefined) {
@@ -117,7 +114,7 @@ async function main(): Promise<void> {
 		}
 		worker = createWorker({
 			pool,
-			config: p.config,
+			config,
 			keys,
 			infra: new PveInfraRegistry(pool, { secretsDir: env.secretsDir }),
 			agent,
@@ -127,7 +124,6 @@ async function main(): Promise<void> {
 			reconcileDryRun: env.reconcileDryRun,
 			migrateOnStart: env.migrateOnStart,
 			httpPort: env.httpPort,
-			payloadReady: () => p.ready(),
 		});
 		await worker.start();
 	} catch (err) {
@@ -135,7 +131,7 @@ async function main(): Promise<void> {
 		await worker?.stop({ graceful: false }).catch(() => {});
 		await agentClient?.close().catch(() => {});
 		await registry?.close().catch(() => {});
-		await payload?.close().catch(() => {});
+		await config?.close().catch(() => {});
 		await pool.end().catch(() => {});
 		process.exit(1);
 	}

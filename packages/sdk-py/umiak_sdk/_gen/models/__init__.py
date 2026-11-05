@@ -60,6 +60,13 @@ from .create_pty_request_env import CreatePtyRequestEnv
 from .create_sandbox_request import CreateSandboxRequest
 from .create_sandbox_request_from import CreateSandboxRequestFrom
 from .create_sandbox_request_secrets import CreateSandboxRequestSecrets
+from .create_settings_size import CreateSettingsSize
+from .create_settings_team import CreateSettingsTeam
+from .create_settings_template import CreateSettingsTemplate
+from .create_settings_template_capabilities_type_0_item import (
+    CreateSettingsTemplateCapabilitiesType0Item,
+)
+from .create_settings_template_os import CreateSettingsTemplateOs
 from .create_snapshot_request import CreateSnapshotRequest
 from .create_ssh_key_request import CreateSshKeyRequest
 from .create_upload_request import CreateUploadRequest
@@ -253,6 +260,20 @@ from .sandboxes_list_all_teams import SandboxesListAllTeams
 from .secret_file_input import SecretFileInput
 from .secret_files_patch import SecretFilesPatch
 from .secret_files_patch_additional_property_type_0 import SecretFilesPatchAdditionalPropertyType0
+from .settings_mutation_result import SettingsMutationResult
+from .settings_platform_defaults import SettingsPlatformDefaults
+from .settings_platform_defaults_rate_limits import SettingsPlatformDefaultsRateLimits
+from .settings_quota import SettingsQuota
+from .settings_session import SettingsSession
+from .settings_session_user import SettingsSessionUser
+from .settings_size import SettingsSize
+from .settings_team import SettingsTeam
+from .settings_team_role_type_1 import SettingsTeamRoleType1
+from .settings_team_role_type_2_type_1 import SettingsTeamRoleType2Type1
+from .settings_team_role_type_3_type_1 import SettingsTeamRoleType3Type1
+from .settings_template import SettingsTemplate
+from .settings_template_os import SettingsTemplateOs
+from .settings_update_account_body import SettingsUpdateAccountBody
 from .size import Size
 from .size_list import SizeList
 from .snapshot import Snapshot
@@ -284,6 +305,14 @@ from .update_environment_request import UpdateEnvironmentRequest
 from .update_environment_request_secrets import UpdateEnvironmentRequestSecrets
 from .update_sandbox_request import UpdateSandboxRequest
 from .update_sandbox_request_labels import UpdateSandboxRequestLabels
+from .update_settings_size import UpdateSettingsSize
+from .update_settings_team import UpdateSettingsTeam
+from .update_settings_team_quota import UpdateSettingsTeamQuota
+from .update_settings_template import UpdateSettingsTemplate
+from .update_settings_template_capabilities_type_0_item import (
+    UpdateSettingsTemplateCapabilitiesType0Item,
+)
+from .update_settings_template_os import UpdateSettingsTemplateOs
 from .upload import Upload
 from .upload_offset import UploadOffset
 
@@ -348,6 +377,11 @@ __all__ = (
     "CreateSandboxRequest",
     "CreateSandboxRequestFrom",
     "CreateSandboxRequestSecrets",
+    "CreateSettingsSize",
+    "CreateSettingsTeam",
+    "CreateSettingsTemplate",
+    "CreateSettingsTemplateCapabilitiesType0Item",
+    "CreateSettingsTemplateOs",
     "CreateSnapshotRequest",
     "CreateSshKeyRequest",
     "CreateUploadRequest",
@@ -531,6 +565,20 @@ __all__ = (
     "SecretFileInput",
     "SecretFilesPatch",
     "SecretFilesPatchAdditionalPropertyType0",
+    "SettingsMutationResult",
+    "SettingsPlatformDefaults",
+    "SettingsPlatformDefaultsRateLimits",
+    "SettingsQuota",
+    "SettingsSession",
+    "SettingsSessionUser",
+    "SettingsSize",
+    "SettingsTeam",
+    "SettingsTeamRoleType1",
+    "SettingsTeamRoleType2Type1",
+    "SettingsTeamRoleType3Type1",
+    "SettingsTemplate",
+    "SettingsTemplateOs",
+    "SettingsUpdateAccountBody",
     "Size",
     "SizeList",
     "Snapshot",
@@ -562,6 +610,12 @@ __all__ = (
     "UpdateEnvironmentRequestSecrets",
     "UpdateSandboxRequest",
     "UpdateSandboxRequestLabels",
+    "UpdateSettingsSize",
+    "UpdateSettingsTeam",
+    "UpdateSettingsTeamQuota",
+    "UpdateSettingsTemplate",
+    "UpdateSettingsTemplateCapabilitiesType0Item",
+    "UpdateSettingsTemplateOs",
     "Upload",
     "UploadOffset",
 )

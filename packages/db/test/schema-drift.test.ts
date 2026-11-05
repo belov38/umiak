@@ -46,7 +46,6 @@ describe("drizzle schema", () => {
 				"runtime.ssh_keys",
 				"runtime.templates",
 				"runtime.sizes",
-				"runtime.pool_targets",
 				"runtime.platform_defaults",
 
 				"runtime.nodes",

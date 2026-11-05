@@ -24,7 +24,6 @@
 		"@umiak/config": "workspace:*",
 		"@umiak/core": "workspace:*",
 		"@umiak/db": "workspace:*",
-		"@umiak/payload": "workspace:*",
 		"@umiak/proto": "workspace:*",
 		"@umiak/pve": "workspace:*",
 		"pg": "8.23.1",

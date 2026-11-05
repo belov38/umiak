@@ -71,7 +71,8 @@ describe("the route table", () => {
 		for (const [path, item] of Object.entries(OPENAPI_DOC.paths)) {
 			for (const [method, op] of Object.entries(item)) {
 				const id = (op as { operationId?: string }).operationId;
-				if (id !== undefined) {
+				// Owner settings have a separate exhaustive matrix over runtime identities.
+				if (id !== undefined && !id.startsWith("settings.")) {
 					documented.set(id, `${method.toUpperCase()} ${path}`);
 				}
 			}

@@ -116,7 +116,7 @@ export function emptyEnvironmentStore(): EnvironmentStore {
  *   commandTimings: the defaults (60 s, 15 s, 60 min); ptyTimings: the
  *   defaults (ping 15 s, input 5 ms, 1 MiB);
  * - lifecycle: running (not shutting down);
- * - payloadReady: null (no Payload: `/readyz` does not check it).
+ * - configurationReady: null (no Payload: `/readyz` does not check it).
  */
 export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 	const settings = over.settings ?? testSettings();
@@ -177,7 +177,7 @@ export function makeTestDeps(over: Partial<ApiDeps> = {}): ApiDeps {
 		commandTimings: { ...DEFAULT_COMMAND_TIMINGS },
 		ptyTimings: { ...DEFAULT_PTY_TIMINGS },
 		lifecycle: new ApiLifecycle(),
-		payloadReady: null,
+		configurationReady: null,
 		...over,
 	};
 }

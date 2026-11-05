@@ -246,6 +246,7 @@ export async function forkSandbox(
 		// The running source is already counted once; forceStop only restarts
 		// it, so the fork needs room next to it.
 		await checkQuota(tx, p.teamId, quota, {
+			teamExists: deps.config.teamExists?.bind(deps.config),
 			addSandboxes: 1,
 			addRamMb: size.memoryMb,
 			...(forceStop
