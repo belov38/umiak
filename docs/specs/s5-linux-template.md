@@ -1,5 +1,9 @@
 # S5. Linux template: specification
 
+> Historical record: references below to `infra/pve` describe the retired PoC host-preparation path.
+> For supported installation and host preparation, use the [Proxmox installer](../getting-started.md#install-on-proxmox);
+> for added-node checks and preparation, use the [installer node console](../operations-multi-node.md).
+
 > S17 update (2026-11-03): `windows` now includes desktop; `windows-desktop` is a compatibility alias. VM 598 is retired and read-only; VM 595 is the active Windows build. Historical build notes below do not authorize template mutations. See [S17](s17-windows-single.md).
 
 Status: agreed (master session), 2026-10-29; implementer review passed, remarks incorporated. Supplemented with the MVP recommendations R5, R6 (`docs/roadmap-phase2.md` §6, decisions of the master session 2026-10-29). Area S5 from `docs/roadmap.md`. Architecture: `docs/architecture.md` (§4 agent, §5 storage, §6 warm pool). Relies on `docs/specs/s1-proxmox-foundation.md` (primitives, `packages/pve`, `umiak-bench`), `docs/specs/s3-guest-agent.md` (§7.3 `seal`, §17 package, §20 template requirements), `docs/specs/s6-control-plane.md` (§5.2 `template_builds`, §9 warm pool, §14.3 registration), `docs/specs/s2-tunnel-protocol.md` (§5.2 smbios, §5.4 TLS).

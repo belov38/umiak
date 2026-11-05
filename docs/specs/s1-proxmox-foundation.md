@@ -1,5 +1,9 @@
 # S1. Proxmox foundation: specification
 
+> Historical record: references below to `infra/pve` describe the retired PoC host-preparation path.
+> For supported installation and host preparation, use the [Proxmox installer](../getting-started.md#install-on-proxmox);
+> for added-node checks and preparation, use the [installer node console](../operations-multi-node.md).
+
 Status: agreed (the master session on Ilia's behalf), 2026-10-29. Implemented on branch `s1-impl`, results in §11. Architecture: `docs/architecture.md` (§5 storage, §7 network, §10 deployment). Roadmap: `docs/roadmap.md`. Supplemented with the MVP recommendations R6 (an entry in §12 only) (`docs/roadmap-phase2.md` §6, decisions of the master session 2026-10-29).
 
 The mark **[S1 decision]** means a decision made in this session without separate agreement with Ilia; it can be revisited during planning if there is a reason.

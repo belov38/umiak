@@ -153,7 +153,8 @@ async function windowsChecks(
 			return {
 				ok: p["VM.Console"] === 1,
 				detail:
-					Object.keys(p).join(",") || "none (run infra/pve/setup.sh console)",
+					Object.keys(p).join(",") ||
+					"none (host preparation is managed by the Proxmox installer; see docs/getting-started.md)",
 			};
 		}),
 		await check("machine types (pc-q35-*+pve*)", async () => ({

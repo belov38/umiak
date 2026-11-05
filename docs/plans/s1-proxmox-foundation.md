@@ -1,5 +1,9 @@
 # S1 Proxmox foundation: implementation plan
 
+> Historical record: references below to `infra/pve` describe the retired PoC host-preparation path.
+> For supported installation and host preparation, use the [Proxmox installer](../getting-started.md#install-on-proxmox);
+> for added-node checks and preparation, use the [installer node console](../operations-multi-node.md).
+
 > Historical plan, predating R1. Current names and contracts: `docs/specs/rename-umiak.md`.
 
 > **For implementers:** REQUIRED SUB-SKILL: superpowers:executing-plans (or subagent-driven-development for independent tasks). Steps are `- [ ]` checkboxes.

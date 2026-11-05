@@ -90,19 +90,38 @@ func TestDefaultLayout(t *testing.T) {
 	}
 }
 
-func TestDevelopmentDesktopSlots(t *testing.T) {
-	c, err := Load("../../../../infra/pve/umiak-node.toml")
+// Match prepare_host._node_config with the installer's default VMID ranges.
+func TestLoadInstallerRanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "umiak-node.toml")
+	body := `vmidMin = 10000
+vmidMax = 19999
+templateVmidMin = 20000
+templateVmidMax = 20099
+templateVmid = 0
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []int{595, 596, 597, 598, 599} {
-		if !c.IsTemplateSlot(id) {
-			t.Fatalf("template slot %d denied", id)
+	if c.TemplateVMID != 0 {
+		t.Fatalf("legacy template reservation = %d, want 0", c.TemplateVMID)
+	}
+	for _, id := range []int{10000, 15000, 19999} {
+		if !c.InRange(id) || c.IsTemplateSlot(id) {
+			t.Fatalf("sandbox %d must be in the sandbox range only", id)
 		}
 	}
-	for _, id := range []int{590, 591, 592, 593, 594} {
-		if c.IsTemplateSlot(id) {
-			t.Fatalf("infrastructure %d allowed", id)
+	for _, id := range []int{20000, 20050, 20099} {
+		if !c.IsTemplateSlot(id) || c.InRange(id) {
+			t.Fatalf("template %d must be in the template range only", id)
+		}
+	}
+	for _, id := range []int{590, 595, 599, 9999, 20100} {
+		if c.InRange(id) || c.IsTemplateSlot(id) {
+			t.Fatalf("unallocated VMID %d allowed", id)
 		}
 	}
 }

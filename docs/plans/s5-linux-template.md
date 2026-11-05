@@ -1,5 +1,9 @@
 # S5 Linux template Implementation Plan
 
+> Historical record: references below to `infra/pve` describe the retired PoC host-preparation path.
+> For supported installation and host preparation, use the [Proxmox installer](../getting-started.md#install-on-proxmox);
+> for added-node checks and preparation, use the [installer node console](../operations-multi-node.md).
+
 > Historical plan, predating R1. Current names and contracts: `docs/specs/rename-umiak.md`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

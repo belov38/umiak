@@ -1,5 +1,9 @@
 > Historical design: Keycloak, oauth2-proxy and OIDC authentication were removed on 2026-11-05. Current deployments use owner authentication over Tailscale; see [architecture](../architecture.md).
 
+> Historical record: references below to `infra/pve` describe the retired PoC host-preparation path.
+> For supported installation and host preparation, use the [Proxmox installer](../getting-started.md#install-on-proxmox);
+> for added-node checks and preparation, use the [installer node console](../operations-multi-node.md).
+
 # R1. Rename to Umiak
 
 > S17 update (2026-11-03): `windows` now includes desktop; `windows-desktop` is a compatibility alias. VM 598 is retired and read-only; VM 595 is the active Windows build. Historical build notes below do not authorize template mutations. See [S17](s17-windows-single.md).

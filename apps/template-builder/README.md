@@ -8,8 +8,11 @@ plan: `docs/plans/s5-linux-template.md`). The build VM is driven only through th
 
 - Tools through mise (`mise exec -- node ...`); `xorriso` in `PATH` (macOS: `brew install xorriso`).
   `hdiutil` is not used: it shortens names with dots (`sudoers.d` became `sudoersd`).
-- Host runbook steps done: `infra/pve/setup.sh media` (role `UmiakTemplateMedia` on `/storage/local`) and
-  `infra/pve/setup.sh node` (an `umiak-node` with `media.list`/`media.remove` and template origins in its range).
+- Host prepared by the [Proxmox installer](../../docs/getting-started.md#install-on-proxmox)
+  (`deploy/installer/umiak_installer/prepare_host.py`; added nodes use `node_host.py`).
+  It grants media permissions, installs the restricted `umiak-node` and configures the template VMID range.
+  Use the installer prerequisite checklist during install/resume and its
+  [sandbox-node console](../../docs/operations-multi-node.md) for added-node checks and preparation.
 - The S1 client config (`UMIAK_PVE_URL`, `UMIAK_PVE_TLS_NAME`, `UMIAK_NODE_SSH_HOST`, `~/.config/umiak/`).
 - Dev template slots: `linux` 597, `linux-desktop` 596, `windows` 595. Templates 595–597 are read-only on the active stand: no rebuilds or deletes. VM 598 (old headless Windows) was deleted on 2026-11-04; slots 598 and 599 are free.
 
@@ -45,8 +48,8 @@ Other commands: `versions <slug> [--update]`, `verify <buildId>`, `list`, `show 
 Spec: `docs/specs/s9-windows.md`. Recipe `infra/templates/windows` (Windows 11), shared steps, unattend files
 and keys in `infra/templates/_windows`. Windows includes Sunshine, moonlight-web and cua-driver (`60-desktop` / `65-streamer`). Services remain Manual and start on first desktop open. `verify: windows` runs baseline and desktop checks. The legacy `windows-desktop` builder argument resolves to `windows`; only one recipe is stored. Dev template slot 595; VM 598 stays retired and read-only.
 
-Host prerequisites on top of the Linux ones: `infra/pve/setup.sh console` (role `UmiakConsole` with
-`VM.Console` on `/pool/umiak`, needed for `sendkey`), an `umiak-node` with `media.sha256`, and the user's
+Host prerequisites on top of the Linux ones: the installer-managed `VM.Console` permission
+on `/pool/umiak` (needed for `sendkey`), an `umiak-node` with `media.sha256`, and the user's
 Windows ISO in `local:iso` under its Microsoft name (`umiak-tpl iso upload <file>` or the Proxmox web UI).
 `preflight windows` checks the `VM.Console` right, the pinned machine type and the ISO sha256 through
 `media.sha256`.
