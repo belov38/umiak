@@ -23,6 +23,7 @@ import {
 	storages,
 	templateBuilds,
 	vmidLeases,
+	volumeTransfers,
 } from "./runtime.ts";
 import {
 	gatewayInstances,
@@ -41,6 +42,7 @@ export const schema = {
 	nodes,
 	storages,
 	templateBuilds,
+	volumeTransfers,
 	vmidLeases,
 	machines,
 	disks,

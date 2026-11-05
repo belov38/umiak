@@ -179,6 +179,9 @@ export const storages = runtime.table("storages", {
 // §5.2 Template builds
 
 export const templateBuilds = runtime.table("template_builds", {
+	sourceBuildId: uuid("source_build_id"),
+	manifest: jsonb("manifest"),
+	checksums: jsonb("checksums"),
 	id: pk(),
 	templateSlug: text("template_slug").notNull(),
 	version: text("version").notNull(),
@@ -644,4 +647,19 @@ export const nodeBuildJobs = runtime.table("node_build_jobs", {
 		.default("running"),
 	createdAt: createdAt(),
 	finishedAt: tstz("finished_at"),
+});
+
+export const volumeTransfers = runtime.table("volume_transfers", {
+	id: text("id").primaryKey(),
+	kind: text("kind").notNull(),
+	sourceId: uuid("source_id").notNull(),
+	sourceNodeId: uuid("source_node_id").notNull(),
+	targetNodeId: uuid("target_node_id").notNull(),
+	targetStorageId: uuid("target_storage_id").notNull(),
+	targetVmid: integer("target_vmid"),
+	phase: text("phase").notNull().default("preparing"),
+	progress: jsonb("progress").notNull().default({}),
+	result: jsonb("result"),
+	createdAt: createdAt(),
+	updatedAt: updatedAt(),
 });

@@ -1,6 +1,6 @@
 # S21: Portable templates, cold moves and capacity waits
 
-Status: phase 1 transport primitives implemented; remaining phases pending. Supersedes S19 locality only when the S21
+Status: phases 1–2 implemented; cold moves and capacity waits in progress. Supersedes S19 locality only when the S21
 transfer and admission paths are enabled; existing paths remain local until then.
 
 ## Decisions
@@ -17,8 +17,13 @@ and writes. No shell, arbitrary path, host-to-host SSH credentials or new listen
 Compare fixed-size logical blocks with the local base, transmit only changed
 blocks (including changed-to-zero blocks), and verify hashes at destination.
 Without an identical base copy nonzero blocks to a fresh zero-filled thin LV.
-This is sparse-aware on the wire and target, but scans the whole logical disk;
-metadata-based thin_delta can optimize this later without changing semantics.
+Use reserved live-pool metadata snapshots with thin_dump (allocated extents) or
+thin_delta (source versus identical base, including unmapped/discarded ranges).
+Fall back to logical block comparison when metadata tooling is unavailable.
+Checksums use sha256-block-tree-v1: hash the domain, logical size, block size,
+base checksum (empty for full copies), then ordered offset/length/block SHA-256
+records; omit all-zero blocks for full copies. Verification uses bounded block
+RPCs and progress checkpoints, never a whole-volume hashing RPC.
 
 PVE export/import was considered: useful for full images, but not sufficient for
 base-relative deltas and per-block retry. Direct host-to-host copying adds a

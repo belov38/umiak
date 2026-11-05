@@ -14,7 +14,7 @@ only after their relevant gate passes. Implement inline without delegates.
   `services/node-agent/internal/ops`, with Go fakes and adversarial tests.
   Add a retryable base-relative sparse relay to `packages/pve/src/storage` with
   fake-node tests. Verify corruption, zero changes, offsets, live/foreign volumes.
-- [ ] 2. Add replica/journal migrations and DB types, build-once replication in
+- [x] 2. Add replica/journal migrations and DB types, build-once replication in
   `deploy/compose/quickstart/setup-build.mjs`, per-node progress, installer node
   activation copies templates. Preserve per-node previous build on failure.
 - [ ] 3. Extend placement/admission and worker resume/fork/snapshot steps with
@@ -89,3 +89,17 @@ informational String.raw diagnostic). After final relay cancellation tests,
 @umiak/pve: 208 tests PASS and typecheck PASS. Node-agent tests/vet/golangci-lint
 PASS; native race tests PASS; Linux amd64 cross-build PASS. Installer: 247
 pytest tests PASS with mise Python 3.15.2; ruff PASS. No live hosts contacted.
+
+
+Phase 2: added source build identity, original manifest and per-disk block-tree
+checksums; journaled template copies with provider VMID leases; setup registration
+builds once and copies to other active nodes, node registration copies existing
+active templates. Setup records manifest before copy and polls durable replication
+progress. Startup retries unfinished copies. Commit precedes staging cleanup;
+previous active destination build survives any pre-commit failure. Retirement and
+node removal include unfinished transfer blockers. Native thin_dump/thin_delta
+metadata limits reads to allocated/changed extents; legacy metadata failures use
+safe block comparison. Relay no longer invokes whole-disk digest RPC; legacy
+lv.transferDigest refuses disks above 8 MiB. Checksums explicitly identify their
+sha256-block-tree-v1 algorithm. Full-copy verification includes target allocations
+to catch unexpected target data. Published template bases are verified again.

@@ -123,12 +123,19 @@ function setupInteractions() {
 					1000,
 			),
 		);
-		const last = (job.log || "").trim().split("\n").at(-1) || "";
-		const activity = last
-			? last.length > 110
-				? `${last.slice(0, 110)}…`
-				: last
-			: "Preparing the build";
+
+		const last =
+			(job.log || "").trim().split("\n").at(-1) || "Preparing the build";
+		const clipped = last.length > 110 ? `${last.slice(0, 110)}…` : last;
+		const r = job.replication;
+		const nodeRow = [...document.querySelectorAll("[data-queue-node]")].find(
+			(row) => row.dataset.queueNode === job.nodeId,
+		);
+		const activity =
+			r?.phase === "copying"
+				? `Copying to ${r.node} · ${Math.floor((r.verifiedBytes || 0) / 1048576)} / ${Math.ceil((r.totalBytes || 0) / 1048576)} MiB`
+				: `Building on ${nodeRow?.dataset.name || job.nodeId || "selected node"} · ${clipped}`;
+
 		$("#build-progress").textContent =
 			job.status === "running"
 				? activity +
@@ -238,6 +245,8 @@ function setupInteractions() {
 		if (!plan) return;
 		const id = plan.nodes.find((id) => plan.states[id] === "Building");
 		if (id) plan.states[id] = job.status === "ready" ? "Ready" : "Failed";
+		if (job.status === "ready")
+			for (const node of plan.nodes) plan.states[node] = "Ready";
 		if (
 			job.status !== "ready" ||
 			plan.nodes.every((id) => plan.states[id] === "Ready")

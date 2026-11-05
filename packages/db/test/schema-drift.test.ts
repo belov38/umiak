@@ -42,6 +42,7 @@ describe("drizzle schema", () => {
 				"runtime.node_build_jobs",
 				"runtime.storages",
 				"runtime.template_builds",
+				"runtime.volume_transfers",
 				"runtime.vmid_leases",
 				"runtime.machines",
 				"runtime.disks",

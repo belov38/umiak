@@ -3,6 +3,7 @@ import { gatewayCertificates } from "./certificates.mjs";
 import { windowsDesktop } from "./setup-desktop.mjs";
 import { prepareWindowsMedia, validateWindowsMedia } from "./setup-iso.mjs";
 import { nodeService } from "./setup-nodes.mjs";
+import { replicateActiveTemplates } from "./template-replication.mjs";
 // Owner-only setup orchestration. PVE adoption never writes to the host API.
 
 import { randomBytes, X509Certificate } from "node:crypto";
@@ -919,6 +920,33 @@ export function createSetupHandler({
 				{ builds: [{ ...manifest, nodeId: context.job.nodeId }] },
 				{ ...context, dashboardBuild: true },
 			);
+			const source = (
+				await query(
+					"SELECT id FROM runtime.template_builds WHERE node_id=$1 AND pve_vmid=$2 AND status='active'",
+					[context.job.nodeId, manifest.pveVmid],
+				)
+			).rows[0];
+			if (source) {
+				await query(
+					"UPDATE runtime.template_builds SET manifest=$2 WHERE id=$1",
+					[source.id, JSON.stringify(manifest)],
+				);
+				const current = await store.read();
+				await replicateActiveTemplates({
+					pool,
+					state: current,
+					sourceBuildId: source.id,
+					api: await pveOf(current),
+					nodeCheck,
+					secretsDir,
+					onProgress: async (progress) => {
+						await jobs.update((state) => {
+							if (state.buildJob?.id === context.job.id)
+								state.buildJob.replication = progress;
+						});
+					},
+				});
+			}
 		},
 	});
 	const handler = async (req, res, context) => {
@@ -1149,6 +1177,79 @@ export function createSetupHandler({
 	handler.init = async () => {
 		await store.init?.();
 		await jobs.init();
+		// Retry incomplete copies after restart without ever launching another build.
+		const retryCopies = async () => {
+			const current = await store.read();
+			if (!current.steps?.limits?.data?.providerId) return;
+			const ready = (
+				await query(
+					"SELECT to_regclass('runtime.volume_transfers') IS NOT NULL AS ready",
+				)
+			).rows[0]?.ready;
+			if (ready !== true) return;
+			const pending = (
+				await query(
+					"SELECT DISTINCT source_id FROM runtime.volume_transfers WHERE kind='template' AND phase<>'done'",
+				)
+			).rows;
+			if (current.buildJob?.manifest) {
+				const b = (
+					await query(
+						"SELECT id FROM runtime.template_builds WHERE node_id=$1 AND pve_vmid=$2 AND status='active'",
+						[current.buildJob.nodeId, current.buildJob.manifest.pveVmid],
+					)
+				).rows[0];
+				if (b && !pending.some((p) => p.source_id === b.id))
+					pending.push({ source_id: b.id });
+			}
+			for (const p of pending)
+				await replicateActiveTemplates({
+					pool,
+					state: current,
+					sourceBuildId: p.source_id,
+					api: await pveOf(current),
+					nodeCheck,
+					secretsDir,
+					onProgress: async (progress) =>
+						jobs.update((s) => {
+							if (s.buildJob) s.buildJob.replication = progress;
+						}),
+				});
+
+			const job = current.buildJob;
+			if (job?.manifest && job.status === "error") {
+				const found = (
+					await query(
+						"SELECT id FROM runtime.template_builds WHERE node_id=$1 AND pve_vmid=$2 AND status='active'",
+						[job.nodeId, job.manifest.pveVmid],
+					)
+				).rowCount;
+				if (found) {
+					await jobs.finish(job, current);
+					await jobs.update((s) => {
+						if (s.buildJob?.id === job.id) {
+							s.buildJob.status = "ready";
+							s.buildJob.error = null;
+							s.buildJob.finishedAt = new Date().toISOString();
+						}
+					});
+				}
+			}
+		};
+		let copying = false;
+		const sweep = () => {
+			if (copying || jobs.pending === null) return;
+			copying = true;
+			retryCopies()
+				.catch(() => {})
+				.finally(() => {
+					copying = false;
+				});
+		};
+		const timer = setInterval(sweep, 30000);
+		timer.unref();
+		handler.close = () => clearInterval(timer);
+		sweep();
 	};
 	handler.nodes = nodes;
 	handler.wizard = wizard;

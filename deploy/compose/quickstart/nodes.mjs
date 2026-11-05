@@ -14,6 +14,7 @@ import { retireNodeTemplate } from "./node-template-retirement.mjs";
 import { PgSetupStore } from "./setup.mjs";
 import { checkNode, pinnedPve } from "./setup-host.mjs";
 import { nodeService } from "./setup-nodes.mjs";
+import { replicateActiveTemplates } from "./template-replication.mjs";
 
 export async function nodeCommand(
 	pool,
@@ -86,7 +87,7 @@ export async function nodeCommand(
 				if (open) {
 					const staged = (
 						await tx.client.query(
-							"SELECT n.node_agent_ref,n.ram_cap_mb,n.media_storage,s.name AS storage FROM runtime.nodes n JOIN runtime.storages s ON s.node_id=n.id AND s.driver='lvmthin' WHERE n.id=$1",
+							"SELECT s.id AS storage_id,n.node_agent_ref,n.ram_cap_mb,n.media_storage,s.name AS storage FROM runtime.nodes n JOIN runtime.storages s ON s.node_id=n.id AND s.driver='lvmthin' WHERE n.id=$1",
 							[existing.id],
 						)
 					).rows[0];
@@ -144,7 +145,7 @@ export async function nodeCommand(
 		);
 		if (st.type !== "lvmthin" || Number(st.active ?? 1) !== 1)
 			throw Error("Node storage is not active LVM-thin");
-		return service.transact(async (tx) => {
+		const registered = await service.transact(async (tx) => {
 			const existing = (
 				await tx.client.query(
 					"SELECT id FROM runtime.nodes WHERE provider_id=$1 AND name=$2",
@@ -156,14 +157,14 @@ export async function nodeCommand(
 			await lockNode(tx, existing.id);
 			const job = (
 				await tx.client.query(
-					"SELECT id FROM runtime.node_build_jobs WHERE id=$1 AND node_id=$2 AND template_slug='node-prepare' AND status IN ('running','interrupted')",
+					"SELECT id,status FROM runtime.node_build_jobs WHERE id=$1 AND node_id=$2 AND template_slug='node-prepare' AND status IN ('running','interrupted','succeeded')",
 					[request.preparationId, existing.id],
 				)
 			).rows[0];
 			if (!job) throw Error("Missing matching node preparation reservation");
 			const staged = (
 				await tx.client.query(
-					"SELECT n.node_agent_ref,n.ram_cap_mb,n.media_storage,s.name AS storage FROM runtime.nodes n JOIN runtime.storages s ON s.node_id=n.id AND s.driver='lvmthin' WHERE n.id=$1",
+					"SELECT s.id AS storage_id,n.node_agent_ref,n.ram_cap_mb,n.media_storage,s.name AS storage FROM runtime.nodes n JOIN runtime.storages s ON s.node_id=n.id AND s.driver='lvmthin' WHERE n.id=$1",
 					[existing.id],
 				)
 			).rows[0];
@@ -174,13 +175,25 @@ export async function nodeCommand(
 				staged.storage !== cfg.storage
 			)
 				throw Error("Prepared node configuration differs from its reservation");
-			await finishNodeBuild(tx, {
-				nodeId: existing.id,
-				jobId: job.id,
-				status: "succeeded",
-			});
+			if (job.status === "succeeded")
+				return { ok: true, nodeId: existing.id, storageId: staged.storage_id };
+			if (job.status !== "succeeded")
+				await finishNodeBuild(tx, {
+					nodeId: existing.id,
+					jobId: job.id,
+					status: "succeeded",
+				});
 			return { ok: true, ...(await registerSandboxNode(tx, cfg)) };
 		});
+		await replicateActiveTemplates({
+			pool,
+			state,
+			targetNodeId: registered.nodeId,
+			api: await api(),
+			nodeCheck: probe,
+			secretsDir,
+		});
+		return registered;
 	}
 	const inventory = await service.list(limits.providerId);
 	const node = inventory.find((n) => n.nodeId === request.nodeId);

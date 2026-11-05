@@ -371,6 +371,10 @@ export class TemplateBuildJobs {
 					onProgress,
 				);
 				await progressWrites;
+				await this.update((current) => {
+					if (current.buildJob?.id === job.id)
+						current.buildJob.manifest = manifest;
+				});
 				await this.register(manifest, { ...context, job });
 				await this.finish(job, state, input, manifest);
 				await this.update((current) => {

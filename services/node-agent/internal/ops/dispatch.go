@@ -85,6 +85,8 @@ var handlers = map[string]handler{
 	"lv.scan":            (*Server).lvScan,
 	"lv.usage":           (*Server).lvUsage,
 	"lv.tagTemplate":     (*Server).lvTagTemplate,
+	"lv.transferPublish": (*Server).lvTransferPublish,
+	"lv.transferMap":     (*Server).lvTransferMap,
 	"lv.transferDigest":  (*Server).lvTransferDigest,
 	"lv.transferRead":    (*Server).lvTransferRead,
 	"lv.transferPrepare": (*Server).lvTransferPrepare,

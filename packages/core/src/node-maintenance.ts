@@ -98,6 +98,7 @@ export async function nodeRemovalBlockers(
  UNION ALL SELECT 'snapshot',id::text FROM runtime.snapshots WHERE node_id=$1 AND state <> 'deleted'
  UNION ALL SELECT 'template',id::text FROM runtime.template_builds WHERE node_id=$1 AND status <> 'retired'
  UNION ALL SELECT 'build',id FROM runtime.node_build_jobs WHERE node_id=$1 AND status IN ('running','interrupted')
+ UNION ALL SELECT 'build',v.id FROM runtime.volume_transfers v WHERE (v.source_node_id=$1 OR v.target_node_id=$1) AND v.phase<>'done'
  UNION ALL SELECT 'lease',l.vmid::text FROM runtime.vmid_leases l JOIN runtime.node_build_jobs b ON b.id=l.build_job_id WHERE b.node_id=$1
  UNION ALL SELECT 'disk',d.id::text FROM runtime.disks d
  LEFT JOIN runtime.machines m ON m.id=d.machine_id

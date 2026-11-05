@@ -354,8 +354,7 @@ test("several nodes: one Linux action builds on every node that lacks it", () =>
 });
 
 const queueKey = "umiak-linux-build-queue";
-const tick = () => new Promise((resolve) => setImmediate(resolve));
-test("queue retains per-node progress and resumes node 2 after registration reload", async () => {
+test("one server build copies both nodes without scheduling a second build", async () => {
 	const storage = new Map();
 	let finish = false;
 	const respond = async (_url, options) => ({
@@ -384,17 +383,6 @@ test("queue retains per-node progress and resumes node 2 after registration relo
 	await first.timers.shift()();
 	assert.equal(first.reloads(), 1);
 	assert.equal(JSON.parse(storage.get(queueKey)).states.one, "Ready");
-	finish = false;
-	const second = setupBrowser(respond, { storage, ready: true });
-	await tick();
-	assert.match(
-		second.element("#queue-progress").textContent,
-		/Preparing node 2 of 2/,
-	);
-	assert.equal(JSON.parse(storage.get(queueKey)).states.two, "Building");
-	assert.equal(second.element("#smoke-submit").disabled, true);
-	finish = true;
-	await second.timers.shift()();
 	assert.deepEqual(JSON.parse(storage.get(queueKey)).states, {
 		one: "Ready",
 		two: "Ready",
@@ -426,7 +414,7 @@ test("queue failure stops waiting nodes and keeps the error visible", async () =
 	assert.equal(browser.element("#smoke-submit").disabled, false);
 });
 
-test("stopping the queue lets the current build finish without starting another node", async () => {
+test("hiding the queue does not cancel server-side template replication", async () => {
 	const storage = new Map();
 	let finish = false;
 	const respond = async (_url, options) => ({
@@ -451,7 +439,7 @@ test("stopping the queue lets the current build finish without starting another 
 	await browser.timers.shift()();
 	const plan = JSON.parse(storage.get(queueKey));
 	assert.equal(plan.active, false);
-	assert.deepEqual(plan.states, { one: "Ready", two: "Waiting" });
+	assert.deepEqual(plan.states, { one: "Ready", two: "Ready" });
 	const reloaded = setupBrowser(respond, { storage, ready: true });
 	assert.equal(reloaded.timers.length, 0);
 	assert.equal(reloaded.element("#smoke-submit").disabled, false);

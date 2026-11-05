@@ -266,8 +266,8 @@ func (s *Server) lvTransferDigest(ctx context.Context, raw json.RawMessage) (any
 	if err != nil {
 		return nil, err
 	}
-	if lv.SizeBytes == 0 || lv.SizeBytes > 1<<50 {
-		return nil, badReq("invalid volume size")
+	if lv.SizeBytes == 0 || lv.SizeBytes > 8<<20 {
+		return nil, badReq("digest RPC is limited to 8 MiB; use chunked transferRead hashes for larger disks")
 	}
 	release, err := s.activate(ctx, lv)
 	if err != nil {
