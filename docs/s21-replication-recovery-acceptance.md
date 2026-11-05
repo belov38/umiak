@@ -1,3 +1,8 @@
+> Historical report from before the owner’s simplification decision. The block
+> relay, experimental delta stream and sandbox FULL path described below have
+> since been deleted. Cold moves are deferred; only standard pvesm template copy
+> and the local FIFO start queue remain. Current runbook: operations-s21-acceptance.md.
+
 # S21 recovery and transfer acceptance — 2026-11-05
 
 Owner requested wrap-up before further transfer-protocol work. This report
