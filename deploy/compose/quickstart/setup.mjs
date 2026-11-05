@@ -1438,6 +1438,27 @@ export function createSetupHandler({
 					onProgress: async (progress) =>
 						jobs.update((s) => {
 							if (s.buildJob) s.buildJob.replication = progress;
+							if (s.buildQueue?.nodes.includes(progress.nodeId)) {
+								s.buildQueue.states[progress.nodeId] =
+									progress.phase === "ready"
+										? "Ready"
+										: progress.phase === "failed"
+											? "Copy failed"
+											: "Copying";
+								s.buildQueue.active = progress.phase === "copying";
+								if (
+									progress.phase === "ready" &&
+									s.buildQueue.nodes.every(
+										(id) => s.buildQueue.states[id] === "Ready",
+									)
+								) {
+									s.buildQueue.message = "Build queue complete";
+									if (s.buildJob) {
+										s.buildJob.status = "ready";
+										s.buildJob.error = null;
+									}
+								}
+							}
 						}),
 				});
 		};
