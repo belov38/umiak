@@ -21,10 +21,6 @@ set -uo pipefail
 
 STD_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH=$STD_PATH LC_ALL=C.UTF-8
-. /etc/os-release
-EXPECTED_VERSION=26.04
-KERNEL_SUFFIX=generic
-if [ "$ID" = debian ]; then EXPECTED_VERSION=13; KERNEL_SUFFIX=amd64; fi
 
 # Same lists as lib.sh (this script runs on its own, without the seed).
 PURGED=(snapd 'apport*' unattended-upgrades 'ubuntu-pro-client*' update-notifier-common landscape-common pollinate fwupd modemmanager multipath-tools open-iscsi udisks2 lxd-installer ufw open-vm-tools rsyslog sysstat avahi-daemon 'cups*' 'tailscale*' systemd-zram-generator)
@@ -73,18 +69,12 @@ ip_in_cidr() {
 check_system() {
 	local v k n rc
 	v=$(. /etc/os-release && echo "$VERSION_ID")
-	[ "$v" = "$EXPECTED_VERSION" ]
-	report os $? "ID=$ID VERSION_ID=$v"
-
-	local pkg packages_ok=0
-	for pkg in cloud-init qemu-guest-agent docker-ce openssh-server netplan.io systemd-resolved; do
-		[ "$(dpkg-query -W -f '${db:Status-Abbrev}' "$pkg" 2>/dev/null)" = "ii " ] || packages_ok=1
-	done
-	report packages "$packages_ok" "cloud-init qemu-guest-agent docker-ce openssh-server netplan.io systemd-resolved"
+	[ "$v" = 26.04 ]
+	report os $? "VERSION_ID=$v"
 
 	k=$(compgen -G '/boot/vmlinuz-*' | tr '\n' ' ')
 	n=$(compgen -G '/boot/vmlinuz-*' | wc -l)
-	[ "$n" -eq 1 ] && [[ $(uname -r) == *-"$KERNEL_SUFFIX" ]] && [[ $k == *"/vmlinuz-$(uname -r) "* ]]
+	[ "$n" -eq 1 ] && [[ $(uname -r) == *-generic ]] && [[ $k == *"/vmlinuz-$(uname -r) "* ]]
 	report kernel $? "running $(uname -r); /boot: $k"
 
 	v=$(systemctl --version | awk 'NR == 1 { print $2 }')
@@ -149,7 +139,7 @@ check_system() {
 	report no_tailscale $? "$ts"
 
 	local sys
-	sys=$({ if [ "$ID" = ubuntu ]; then sysctl -n kernel.apparmor_restrict_unprivileged_userns; else echo 0; fi; sysctl -n fs.inotify.max_user_watches fs.inotify.max_user_instances; } 2>&1 | tr '\n' ' ')
+	sys=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns fs.inotify.max_user_watches fs.inotify.max_user_instances 2>&1 | tr '\n' ' ')
 	[ "$sys" = "0 524288 1024 " ]
 	report sysctl $? "apparmor_restrict_unprivileged_userns, max_user_watches, max_user_instances = $sys"
 

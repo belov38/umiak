@@ -72,26 +72,6 @@ cat "$2.new" > "$2"
 rm -f "$2.new"
 `;
 
-export const DEBIAN_APT_SNAPSHOT_SCRIPT = `set -eu
-  rm -f /etc/apt/sources.list /etc/apt/sources.list.d/debian.list
-  cat >/etc/apt/sources.list.d/debian.sources <<EOF
-Types: deb
-URIs: https://snapshot.debian.org/archive/debian/$1
-Suites: trixie trixie-updates
-Components: main
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
-Check-Valid-Until: no
-
-Types: deb
-URIs: https://snapshot.debian.org/archive/debian-security/$1
-Suites: trixie-security
-Components: main
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
-Check-Valid-Until: no
-EOF
-  exit 0
-`;
-
 /** Replaces `{{name}}` with the value; a placeholder without a value is an error. */
 export function fillTemplate(
 	tmpl: string,
@@ -182,11 +162,7 @@ export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 	const values = {
 		build_id: JSON.stringify(i.buildId),
 		apt_snapshot: JSON.stringify(snapshot),
-		apt_snapshot_script: JSON.stringify(
-			recipe.source.kind === "cloud-image" && recipe.source.distro === "debian"
-				? DEBIAN_APT_SNAPSHOT_SCRIPT
-				: APT_SNAPSHOT_SCRIPT,
-		),
+		apt_snapshot_script: JSON.stringify(APT_SNAPSHOT_SCRIPT),
 	};
 	for (const name of ["meta-data", "user-data"]) {
 		const file = requireInRecipe(recipe, `seed/${name}.tmpl`);

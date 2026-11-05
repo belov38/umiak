@@ -10,7 +10,7 @@ DOCKER_KEY_FPR=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 key=/etc/apt/keyrings/docker.asc
 
 install -d -m 0755 /etc/apt/keyrings
-curl -fsSL --retry 5 --retry-all-errors -o "$key.part" https://download.docker.com/linux/$UMIAK_DISTRO/gpg
+curl -fsSL --retry 5 --retry-all-errors -o "$key.part" https://download.docker.com/linux/ubuntu/gpg
 # apt trusts every key of the Signed-By file: it must hold exactly this one.
 fprs=$(gpg_primary_fprs "$key.part") || die "cannot read the Docker key file"
 [ "$fprs" = "$DOCKER_KEY_FPR" ] || die "Docker key file must hold only $DOCKER_KEY_FPR, has: $(echo "$fprs" | tr '\n' ' ')"
@@ -19,8 +19,8 @@ mv "$key.part" "$key"
 
 cat >/etc/apt/sources.list.d/docker.sources <<EOF
 Types: deb
-URIs: https://download.docker.com/linux/$UMIAK_DISTRO
-Suites: $UMIAK_CODENAME
+URIs: https://download.docker.com/linux/ubuntu
+Suites: resolute
 Components: stable
 Architectures: amd64
 Signed-By: $key

@@ -22,7 +22,6 @@ import {
 	registryDir,
 	templateRamCapMb,
 } from "./context.ts";
-import { fetchDebianImage } from "./debian.ts";
 import { devCpRegistrar } from "./devcp.ts";
 import {
 	defaultDownloadFetch,
@@ -331,7 +330,7 @@ async function cmdBuild(
 				allocator: ctx.allocator,
 				registry,
 				fetchImage: (base) =>
-					(slug === "debian" ? fetchDebianImage : fetchBaseImage)({
+					fetchBaseImage({
 						fetch: defaultDownloadFetch,
 						cacheDir: imageCacheDir(),
 						base,

@@ -8,11 +8,11 @@ set -euo pipefail
 
 # Kernel: keep only the running generic kernel of linux-image-virtual.
 running=$(uname -r)
-[[ $running == *-"$UMIAK_KERNEL_SUFFIX" ]] || die "running kernel $running is not generic: GRUB did not boot linux-image-virtual"
-abi=${running%-"$UMIAK_KERNEL_SUFFIX"}
+[[ $running == *-generic ]] || die "running kernel $running is not generic: GRUB did not boot linux-image-virtual"
+abi=${running%-generic}
 mapfile -t old < <(installed_packages 'linux-*' | while read -r pkg; do
 	case $pkg in
-	linux-image-amd64 | linux-image-virtual | linux-virtual | linux-base | linux-libc-dev | linux-firmware | linux-sysctl-defaults) ;;
+	linux-image-virtual | linux-virtual | linux-base | linux-libc-dev | linux-firmware | linux-sysctl-defaults) ;;
 	*"-$abi-"* | *"-$abi") ;;
 	linux-image-* | linux-modules-* | linux-headers-* | linux-tools-* | linux-cloud-tools-* | linux-buildinfo-* | linux-kvm* | linux-*-headers-* | linux-*-tools-*)
 		echo "$pkg"
@@ -36,10 +36,8 @@ rm -f /swap.img /swapfile
 # User `user` (spec 8.2). The skeleton .bash_logout runs clear_console, which
 # adds bytes to the output of `bash -lc` commands.
 rm -f /etc/skel/.bash_logout
-for cloud_user in ubuntu debian; do
-    if id "$cloud_user" >/dev/null 2>&1; then userdel -r "$cloud_user" 2>/dev/null || userdel "$cloud_user"; fi
-    if getent group "$cloud_user" >/dev/null; then groupdel "$cloud_user"; fi
-done
+if id ubuntu >/dev/null 2>&1; then userdel -r ubuntu 2>/dev/null || userdel ubuntu; fi
+if getent group ubuntu >/dev/null; then groupdel ubuntu; fi
 getent group kvm >/dev/null || groupadd --system kvm
 if ! id user >/dev/null 2>&1; then
 	getent passwd 1000 >/dev/null && die "uid 1000 is taken: $(getent passwd 1000)"
@@ -82,21 +80,11 @@ for line in \
 done
 install -d -m 0755 /run/sshd
 sshd -t
-if [ "$UMIAK_DISTRO" = debian ]; then
-    systemctl disable --now ssh.socket 2>/dev/null || true
-    systemctl enable ssh.service
-fi
-if [ "$UMIAK_DISTRO" = ubuntu ]; then systemctl enable ssh.socket; fi
+systemctl enable ssh.socket
 
 # Network (spec 8.4).
 install_file etc/netplan/10-umiak.yaml 0600
 rm -f /etc/netplan/50-cloud-init.yaml
-if [ "$UMIAK_DISTRO" = debian ]; then
-    rm -f /etc/network/interfaces /etc/network/interfaces.d/* /etc/systemd/network/*cloud* /etc/systemd/network/*default*
-    systemctl disable networking.service 2>/dev/null || true
-    systemctl enable systemd-networkd.service systemd-resolved.service
-    ln -sfn /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
-fi
 netplan generate
 install_file etc/systemd/system/systemd-networkd-wait-online.service.d/10-umiak.conf
 install_file etc/systemd/resolved.conf.d/10-umiak.conf
@@ -105,9 +93,6 @@ install_file etc/systemd/resolved.conf.d/10-umiak.conf
 install_file etc/sysctl.d/90-umiak.conf
 install_file etc/systemd/system.conf.d/90-umiak.conf
 install_file etc/systemd/journald.conf.d/90-umiak.conf
-if [ "$UMIAK_DISTRO" = debian ]; then
-    sed -i '/^kernel.apparmor_restrict_unprivileged_userns/d' /etc/sysctl.d/90-umiak.conf
-fi
 sysctl -q -p /etc/sysctl.d/90-umiak.conf
 systemctl daemon-reload
 

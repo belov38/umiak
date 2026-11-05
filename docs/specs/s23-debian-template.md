@@ -14,7 +14,7 @@ Debian current cloud images do not publish signed checksums:
 https://cloud.debian.org/images/cloud/ documents this explicitly. Parent approved
 HTTPS TOFU at pin time, weaker than Ubuntu's signed SHA256SUMS. The versions
 updater fetches SHA512SUMS over strict HTTPS restricted to cloud.debian.org,
-downloads the image (at most five HTTPS redirects, never HTTP downgrade) and verifies SHA512, then records serial, SHA512, SHA256 and
+downloads the image and verifies SHA512, then records serial, SHA512, SHA256 and
 source URL. Signed Umiak recipe bundles distribute these pins. Every build checks
 both hashes, including cached files. Do not add a misleading legacy signing key.
 If Debian starts publishing signed checksums, migrate to signature verification.

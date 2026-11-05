@@ -58,12 +58,12 @@ log "full-upgrade"
 apt_get full-upgrade
 
 log "install packages"
-apt_install "$UMIAK_KERNEL_PACKAGE" netplan.io systemd-resolved \
+apt_install linux-image-virtual \
 	build-essential pkg-config libssl-dev git git-lfs curl wget ca-certificates \
 	gnupg jq ripgrep fd-find tmux vim nano less man-db htop rsync unzip zip \
 	xz-utils zstd file tree sqlite3 make cmake openssh-server openssh-client \
 	sudo bash-completion python3 python3-venv python3-pip python3-dev \
-	"$UMIAK_JAVA_PACKAGE" ffmpeg xdotool qemu-guest-agent chrony iproute2 \
+	openjdk-25-jdk-headless ffmpeg xdotool qemu-guest-agent chrony iproute2 \
 	iputils-ping dnsutils netcat-openbsd lsof strace tzdata
 ln -sfn /usr/bin/fdfind /usr/local/bin/fd
 apt_get autoremove --purge
@@ -79,7 +79,7 @@ done
 # running one (often linux-kvm in the minimal image) cannot be removed now;
 # 10-system removes it after the reboot. GRUB_TOP_LEVEL puts this kernel
 # into the default menu entry; 10-system deletes the file.
-kernel=$(dpkg-query -W -f '${Depends}' "$UMIAK_KERNEL_PACKAGE" | grep -o "linux-image-[^ ,]*-$UMIAK_KERNEL_SUFFIX" | head -n1 || true)
+kernel=$(dpkg-query -W -f '${Depends}' linux-image-virtual | grep -o 'linux-image-[^ ,]*-generic' | head -n1 || true)
 kernel=${kernel#linux-image-}
 [ -n "$kernel" ] && [ -f "/boot/vmlinuz-$kernel" ] || die "no generic kernel from linux-image-virtual"
 log "next boot: $kernel"

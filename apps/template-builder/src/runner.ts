@@ -435,14 +435,7 @@ export async function runStep(
 		);
 	const exitStatus = Number(text);
 	if (exitStatus !== 0)
-		throw new StepFailedError(
-			name,
-			exitStatus,
-			follower.lines(),
-			follower
-				.lines()
-				.findLast((line) => line.includes("APT_ARCHIVE_UNAVAILABLE:")),
-		);
+		throw new StepFailedError(name, exitStatus, follower.lines());
 	return { exitStatus, tail: follower.lines() };
 }
 

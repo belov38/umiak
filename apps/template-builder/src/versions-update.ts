@@ -58,7 +58,7 @@ export async function updateVersionsFile(opts: UpdateOptions): Promise<{
 	warnings: string[];
 }> {
 	const recipe = loadRecipe(opts.templatesDir, opts.slug);
-	if (recipe.extends !== null && recipe.slug !== "debian")
+	if (recipe.extends !== null)
 		throw new Error(
 			`recipe "${recipe.slug}" extends "${recipe.extends}": versions --update supports root recipes only`,
 		);
@@ -88,8 +88,6 @@ export async function updateVersionsFile(opts: UpdateOptions): Promise<{
 						prev,
 						fetch,
 						opts.now ?? new Date(),
-						recipe.source.kind === "cloud-image" &&
-							recipe.source.distro === "debian",
 					)),
 					warnings: [],
 				};

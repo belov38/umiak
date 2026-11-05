@@ -14,19 +14,6 @@ set -a
 . "$UMIAK_BUILD_DIR/env"
 set +a
 
-# The guest OS selects package names and archive behavior for all shared steps.
-. /etc/os-release
-UMIAK_DISTRO=$ID
-UMIAK_CODENAME=$VERSION_CODENAME
-UMIAK_KERNEL_PACKAGE=linux-image-virtual
-UMIAK_KERNEL_SUFFIX=generic
-UMIAK_JAVA_PACKAGE=openjdk-25-jdk-headless
-if [ "$ID" = debian ]; then
-    UMIAK_KERNEL_PACKAGE=linux-image-amd64
-    UMIAK_KERNEL_SUFFIX=amd64
-    UMIAK_JAVA_PACKAGE=openjdk-21-jdk-headless
-fi
-
 export DEBIAN_FRONTEND=noninteractive
 export UCF_FORCE_CONFFOLD=1
 export NEEDRESTART_MODE=a
@@ -54,17 +41,22 @@ die() {
 apt_get() {
 	apt-get -q -y \
 		-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
-		-o DPkg::Lock::Timeout=600 -o Acquire::Retries=10 \
-        -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
-        -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=5 "$@" ||
-        die "APT_ARCHIVE_UNAVAILABLE: $UMIAK_DISTRO apt $* failed after retries (snapshot ${UMIAK_APT_SNAPSHOT:-none})"
+		-o DPkg::Lock::Timeout=600 -o Acquire::Retries=5 "$@"
 }
 
 apt_install() { apt_get install --no-install-recommends "$@"; }
 
 # apt-get update that fails when an index could not be fetched (plain update only warns, and
 # the step would go on with stale or no lists); snapshot.ubuntu.com answers 503 at times.
-apt_update() { apt_get update --error-on=any; }
+apt_update() {
+	local i
+	for i in 1 2 3 4 5; do
+		apt_get update --error-on=any && return 0
+		log "apt-get update failed (attempt $i), retrying in $((i * 15)) s"
+		sleep $((i * 15))
+	done
+	die "apt-get update failed 5 times"
+}
 
 # Installed packages (any dpkg state but "not installed", so leftover
 # configuration counts) whose names match one of the glob patterns.
@@ -88,32 +80,6 @@ installed_packages() {
 # section 6.2); an empty ts removes the Snapshot lines.
 apt_snapshot() {
 	local ts=$1 f=${2:-/etc/apt/sources.list.d/ubuntu.sources}
-    if [ "$UMIAK_DISTRO" = debian ]; then
-        rm -f /etc/apt/sources.list
-        rm -f /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list.d/debian.list
-        local archive=https://deb.debian.org/debian security=https://security.debian.org/debian-security valid_until=yes
-        if [ -n "$ts" ]; then
-            valid_until=no
-            archive="https://snapshot.debian.org/archive/debian/$ts"
-            security="https://snapshot.debian.org/archive/debian-security/$ts"
-        fi
-        cat >/etc/apt/sources.list.d/debian.sources <<EOF
-Types: deb
-URIs: $archive
-Suites: trixie trixie-updates
-Components: main
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
-Check-Valid-Until: $valid_until
-
-Types: deb
-URIs: $security
-Suites: trixie-security
-Components: main
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
-Check-Valid-Until: $valid_until
-EOF
-        return
-    fi
 	[ -f "$f" ] || die "$f not found"
 	awk -v ts="$ts" '
 function flush() {
