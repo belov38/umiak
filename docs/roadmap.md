@@ -33,8 +33,8 @@ PoC limits on `pve`: VMIDs from 500, at most 8 GB RAM in total, storage `local-l
 
 S24: **Static SPA, no Payload** — API-owned configuration and SQL import,
 Vite + React 19 + TanStack Router/Query, owner settings and S22-safe rollback.
-Depends on S7/S8/S18/S20/S22. Spec approved; implementation and
-acceptance pending on `s24-spa`, after `s24-updater-bridge` release/installation. [Spec](specs/s24-spa-no-payload.md),
+Depends on S7/S8/S18/S20/S22. Implementation on `s24-spa`; local populated-stack upgrade/rollback verified,
+owner live acceptance pending. Bridge updater `0.4.0-edge.20261105.5` is installed. [Spec](specs/s24-spa-no-payload.md),
 [plan](plans/s24-spa-no-payload.md). SQL migration range `0800–0899` reserved for S24.
 S24b follow-up: integrate quickstart setup/claim/signin/pairing/recovery into SPA;
 these remain separate server-rendered flows during S24 by owner decision.
