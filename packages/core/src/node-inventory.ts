@@ -40,7 +40,7 @@ export async function sandboxNodeInventory(
  COALESCE((SELECT jsonb_agg(jsonb_build_object('templateSlug',tb.template_slug,'version',tb.version,'pveVmid',tb.pve_vmid) ORDER BY tb.template_slug) FROM runtime.template_builds tb WHERE tb.node_id=n.id AND tb.status='active'),'[]'::jsonb) AS templates
  FROM runtime.nodes n
  JOIN LATERAL (SELECT id,name FROM runtime.storages WHERE node_id=n.id AND provider_id=n.provider_id AND driver='lvmthin' ORDER BY name LIMIT 1) st ON true
- LEFT JOIN runtime.node_build_jobs b ON b.node_id=n.id AND b.status IN ('running','interrupted')
+ LEFT JOIN LATERAL (SELECT j.id FROM runtime.node_build_jobs j WHERE j.node_id=n.id AND (j.status IN ('running','interrupted') OR (j.status='failed' AND EXISTS (SELECT 1 FROM runtime.volume_transfers v WHERE 'copy-' || v.id=j.id AND v.phase NOT IN ('done','cancelled')))) ORDER BY (j.status IN ('running','interrupted')) DESC,j.created_at DESC LIMIT 1) b ON true
  WHERE n.provider_id=$1 AND n.retired_at IS NULL ORDER BY n.name,n.id`,
 		[providerId],
 	);

@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+	beginNodeBuild,
 	lockNode,
 	promoteNodeTemplate,
 } from "../../../packages/core/src/index.ts";
@@ -150,10 +151,11 @@ export async function replicateActiveTemplates({
 								)
 							).rowCount;
 							if (!eligible) throw Error("Replica target no longer eligible");
-							await tx.client.query(
-								"INSERT INTO runtime.node_build_jobs(id,node_id,template_slug) VALUES($1,$2,$3)",
-								[job, target.nodeId, source.template_slug],
-							);
+							await beginNodeBuild(tx, {
+								jobId: job,
+								nodeId: target.nodeId,
+								templateSlug: source.template_slug,
+							});
 							let vmid;
 							for (
 								let v = range.templateVmidMin;
@@ -317,6 +319,23 @@ export async function replicateActiveTemplates({
 						node: target.name,
 						nodeId: target.nodeId,
 					});
+				} catch (error) {
+					await pool.query(
+						"UPDATE runtime.node_build_jobs SET status='interrupted' WHERE node_id=$1 AND id IN (SELECT 'copy-' || id FROM runtime.volume_transfers WHERE kind='template' AND source_id=$2 AND target_node_id=$1 AND phase NOT IN ('done','cancelled')) AND status='running'",
+						[target.nodeId, root],
+					);
+					await pool.query(
+						"UPDATE runtime.volume_transfers SET phase='failed',updated_at=now() WHERE kind='template' AND source_id=$1 AND target_node_id=$2 AND phase NOT IN ('done','cancelled','committed')",
+						[root, target.nodeId],
+					);
+					await onProgress({
+						phase: "failed",
+						node: target.name,
+						nodeId: target.nodeId,
+					});
+					throw Error(
+						`${source.template_slug} is ready on ${origin.name}. Copy to ${target.name} failed: ${error.message}`,
+					);
 				} finally {
 					await conn
 						.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [key])

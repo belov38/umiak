@@ -278,6 +278,8 @@ export class TemplateBuildJobs {
 		run,
 		validate = async () => {},
 		register = async () => {},
+		replicate = async () => {},
+		copyExisting = async () => false,
 		reserve = async () => {},
 		interrupt = async () => {},
 		finish = async () => {},
@@ -290,6 +292,8 @@ export class TemplateBuildJobs {
 		this.run = run;
 		this.validate = validate;
 		this.register = register;
+		this.replicate = replicate;
+		this.copyExisting = copyExisting;
 		this.reserve = reserve;
 		this.interrupt = interrupt;
 		this.finish = finish;
@@ -378,6 +382,22 @@ export class TemplateBuildJobs {
 		});
 	}
 	async runQueue(queue, input, context) {
+		try {
+			if (await this.copyExisting(input.slug || "linux", input, context)) {
+				await this.update((s) => {
+					s.buildQueue.active = false;
+					s.buildQueue.message = "Build queue complete";
+				});
+				return;
+			}
+		} catch (error) {
+			await this.update((s) => {
+				s.buildQueue.active = false;
+				s.buildQueue.error = error.message;
+				s.buildQueue.message = error.message;
+			});
+			return;
+		}
 		for (const nodeId of queue.nodes) {
 			let proceed = false;
 			await this.update((s) => {
@@ -417,7 +437,14 @@ export class TemplateBuildJobs {
 			}
 			await this.update((s) => {
 				if (s.buildQueue?.id !== queue.id) return;
-				s.buildQueue.states[nodeId] = failure ? "Failed" : "Ready";
+				const copy = s.buildJob?.replication;
+				const copyFailed = failure && s.buildJob?.manifest && copy?.nodeId;
+				s.buildQueue.states[nodeId] = copyFailed
+					? "Ready"
+					: failure
+						? "Failed"
+						: "Ready";
+				if (copyFailed) s.buildQueue.states[copy.nodeId] = "Copy failed";
 				if (failure) {
 					s.buildQueue.active = false;
 					const phase =
@@ -425,6 +452,8 @@ export class TemplateBuildJobs {
 							failure,
 						)?.[1];
 					s.buildQueue.message = `Queue stopped: ${queue.names[nodeId] || nodeId} failed${phase ? ` during ${phase}` : ""}`;
+					if (copyFailed)
+						s.buildQueue.message = `Linux is ready on ${queue.names[nodeId] || nodeId}. Copy to ${copy.node} failed.`;
 					s.buildQueue.error = failure;
 					for (const id of queue.nodes)
 						if (s.buildQueue.states[id] === "Waiting")
@@ -510,6 +539,8 @@ export class TemplateBuildJobs {
 				});
 				await this.register(manifest, { ...context, job });
 				await this.finish(job, state, input, manifest);
+				job.registered = true;
+				await this.replicate(manifest, { ...context, job });
 				await this.update((current) => {
 					current.buildJob = {
 						...current.buildJob,
@@ -531,7 +562,7 @@ export class TemplateBuildJobs {
 			} catch (error) {
 				let message = error.message;
 				try {
-					await this.interrupt(job, state);
+					if (!job.registered) await this.interrupt(job, state);
 					if (!job.manifest && !(await this.store.read()).buildJob?.manifest)
 						await this.release(job, state);
 				} catch (reservationError) {

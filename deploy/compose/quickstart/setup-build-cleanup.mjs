@@ -23,12 +23,26 @@ export async function cleanupBuild({
 				"Template retirement has a durable intent; retry retire-template with its buildId instead of cleanup-build",
 			);
 		if (
-			!["running", "interrupted"].includes(job?.status) ||
+			!(
+				["running", "interrupted"].includes(job?.status) ||
+				(job?.status === "failed" && /^copy-[a-f0-9]{32}$/.test(request.jobId))
+			) ||
 			job.template_slug === "node-prepare"
 		)
 			throw Error(
 				"Only an interrupted template build can be cleaned up; a running runner or node preparation must finish first",
 			);
+		const copyId = /^copy-([a-f0-9]{32})$/.exec(request.jobId)?.[1];
+		if (copyId) {
+			const copyLock = (
+				await tx.client.query(
+					"SELECT pg_try_advisory_xact_lock(hashtextextended('template-copy:' || source_id::text || ':' || target_node_id::text,0)) AS ok FROM runtime.volume_transfers WHERE id=$1 AND target_node_id=$2",
+					[copyId, node.nodeId],
+				)
+			).rows[0];
+			if (!copyLock?.ok)
+				throw Error("Template copy is still running; wait before cleanup");
+		}
 		const runner = (
 			await tx.client.query(
 				"SELECT pg_try_advisory_xact_lock(hashtextextended('template-runner:' || $1::text,0)) AS ok",
@@ -70,14 +84,62 @@ export async function cleanupBuild({
 				[request.jobId],
 			)
 		).rows;
+		if (copyId && !leases.length) {
+			const journal = (
+				await tx.client.query(
+					"SELECT target_vmid FROM runtime.volume_transfers v WHERE id=$1 AND target_node_id=$2 AND phase NOT IN ('done','cancelled') AND NOT EXISTS (SELECT 1 FROM runtime.vmid_leases l WHERE l.vmid=v.target_vmid) AND NOT EXISTS (SELECT 1 FROM runtime.template_builds tb WHERE tb.pve_vmid=v.target_vmid)",
+					[copyId, node.nodeId],
+				)
+			).rows[0];
+			if (!journal)
+				throw Error(
+					"Replica lease/journal ownership cannot be verified; reservation retained",
+				);
+			leases.push({ vmid: journal.target_vmid });
+		}
 		const published = await tx.client.query(
-			"SELECT pve_vmid FROM runtime.template_builds WHERE node_id=$1 AND status IN ('active','retired') AND pve_vmid IN (SELECT vmid FROM runtime.vmid_leases WHERE build_job_id=$2)",
+			"SELECT pve_vmid FROM runtime.template_builds WHERE node_id=$1 AND status IN ('active','deprecated','retired') AND pve_vmid IN (SELECT vmid FROM runtime.vmid_leases WHERE build_job_id=$2)",
 			[node.nodeId, request.jobId],
 		);
-		if (published.rows.length)
-			throw Error(
-				"A registered template still uses this build's lease; reservation retained",
-			);
+		if (published.rows.length) {
+			// Recover the old registration-before-copy crash boundary without deleting the template.
+			for (const vm of vms.filter((v) =>
+				leases.some((l) => Number(l.vmid) === Number(v.vmid)),
+			)) {
+				if (!published.rows.some((p) => Number(p.pve_vmid) === Number(vm.vmid)))
+					throw Error(
+						"Unpublished verification VM remains; reservation retained",
+					);
+				const cfg = await pve.get(`/nodes/${node.name}/qemu/${vm.vmid}/config`);
+				if (
+					vm.status !== "stopped" ||
+					Number(cfg.template) !== 1 ||
+					!/^umiak-/.test(cfg.name || "") ||
+					(copyId && cfg.name !== `umiak-replica-${copyId}`) ||
+					(!(copyId && cfg.name === `umiak-replica-${copyId}`) &&
+						!String(cfg.tags || "")
+							.split(/[;,]/)
+							.some((t) => ["umiak", "umiak-tpl"].includes(t)))
+				)
+					throw Error(
+						"Registered template ownership cannot be verified; reservation retained",
+					);
+			}
+			if (request.inspect)
+				return {
+					jobId: request.jobId,
+					vms: [],
+					disks: [],
+					unknown: [],
+					registered: true,
+				};
+			await finishNodeBuild(tx, {
+				nodeId: node.nodeId,
+				jobId: request.jobId,
+				status: "succeeded",
+			});
+			return { ok: true, registered: true };
+		}
 		const leased = new Set(leases.map((l) => Number(l.vmid)));
 		const leftovers = vms.filter((vm) => leased.has(Number(vm.vmid)));
 		const unknown = vms.filter(
@@ -100,8 +162,13 @@ export async function cleanupBuild({
 		);
 		if (!Array.isArray(local.lvs))
 			throw Error("Cannot verify local disks; reservation retained");
-		const disks = local.lvs.filter((lv) =>
-			leases.some((l) => new RegExp(`^(?:base|vm)-${l.vmid}-`).test(lv.name)),
+		const disks = local.lvs.filter(
+			(lv) =>
+				leases.some((l) =>
+					new RegExp(`^(?:base|vm)-${l.vmid}-`).test(lv.name),
+				) ||
+				(copyId &&
+					new RegExp(`^umiak-(?:import|snap)-${copyId}-`).test(lv.name)),
 		);
 		if (request.inspect)
 			return {
@@ -123,10 +190,12 @@ export async function cleanupBuild({
 			if (
 				Number(vm.vmid) === 590 ||
 				Number(cfg.template) === 1 ||
-				!String(cfg.tags || "")
-					.split(/[;,]/)
-					.some((t) => ["umiak-tpl", "umiak"].includes(t)) ||
-				!/^umiak-/.test(cfg.name || "")
+				(!(copyId && cfg.name === `umiak-replica-${copyId}`) &&
+					!String(cfg.tags || "")
+						.split(/[;,]/)
+						.some((t) => ["umiak-tpl", "umiak"].includes(t))) ||
+				!/^umiak-/.test(cfg.name || "") ||
+				(copyId && cfg.name !== `umiak-replica-${copyId}`)
 			)
 				throw Error(
 					`VM ${vm.vmid} ownership cannot be verified; reservation retained`,
@@ -173,8 +242,13 @@ export async function cleanupBuild({
 		if (
 			finalVms.some((v) => leased.has(Number(v.vmid))) ||
 			!Array.isArray(finalDisks.lvs) ||
-			finalDisks.lvs.some((lv) =>
-				leases.some((l) => new RegExp(`^(?:base|vm)-${l.vmid}-`).test(lv.name)),
+			finalDisks.lvs.some(
+				(lv) =>
+					leases.some((l) =>
+						new RegExp(`^(?:base|vm)-${l.vmid}-`).test(lv.name),
+					) ||
+					(copyId &&
+						new RegExp(`^umiak-(?:import|snap)-${copyId}-`).test(lv.name)),
 			)
 		)
 			throw Error("Build resources remain; reservation retained");
@@ -183,11 +257,17 @@ export async function cleanupBuild({
 			"DELETE FROM runtime.vmid_leases WHERE build_job_id=$1",
 			[request.jobId],
 		);
-		await finishNodeBuild(tx, {
-			nodeId: node.nodeId,
-			jobId: request.jobId,
-			status: "failed",
-		});
+		if (copyId)
+			await tx.client.query(
+				"UPDATE runtime.volume_transfers SET phase='cancelled',updated_at=now() WHERE id=$1",
+				[copyId],
+			);
+		if (job.status !== "failed")
+			await finishNodeBuild(tx, {
+				nodeId: node.nodeId,
+				jobId: request.jobId,
+				status: "failed",
+			});
 		return { ok: true };
 	});
 }

@@ -356,3 +356,71 @@ test("wizard recovery releases the reservation before retry and supports cleanup
 		assert.equal(retried, retry);
 	}
 });
+
+test("copy failure preserves ready source and finishes its reservation before copying", async () => {
+	const store = memory();
+	const events = [];
+	const jobs = new TemplateBuildJobs({
+		store,
+		run: async () => ({ pveVmid: 20000 }),
+		register: async () => events.push("register"),
+		finish: async () => events.push("finish"),
+		interrupt: async () => events.push("interrupt"),
+		replicate: async () => {
+			events.push("copy");
+			await jobs.update((s) => {
+				s.buildJob.replication = { phase: "failed", node: "pve2", nodeId: "b" };
+			});
+			throw Error("copy refused");
+		},
+	});
+	await jobs.startQueue({ nodes: ["a", "b"], names: { a: "pve", b: "pve2" } });
+	await jobs.settled();
+	assert.deepEqual(events, ["register", "finish", "copy"]);
+	const state = await store.read();
+	assert.deepEqual(state.buildQueue.states, { a: "Ready", b: "Copy failed" });
+	assert.equal(
+		state.buildQueue.message,
+		"Linux is ready on pve. Copy to pve2 failed.",
+	);
+});
+
+test("queue uses a ready source for copy retry without reserving or building", async () => {
+	const store = memory();
+	const events = [];
+	const jobs = new TemplateBuildJobs({
+		store,
+		copyExisting: async () => {
+			events.push("copy");
+			return true;
+		},
+		reserve: async () => events.push("reserve"),
+		run: async () => events.push("build"),
+	});
+	await jobs.startQueue({ nodes: ["b"] });
+	await jobs.settled();
+	assert.deepEqual(events, ["copy"]);
+});
+
+test("copy cleanup accepts exact replica name with lease, refuses foreign untagged VM", async () => {
+	const id = "a".repeat(32);
+	for (const name of [`umiak-replica-${id}`, "umiak-foreign"]) {
+		const f = cleanupFixture({
+			vms: [{ vmid: 701, status: "stopped" }],
+			cfg: { name },
+		});
+		const options = {
+			...f.options,
+			request: { jobId: `copy-${id}`, confirmRemove: true },
+		};
+		if (name.endsWith(id)) {
+			await cleanupBuild(options);
+			assert.deepEqual(f.mutations, ["delete"]);
+			assert.ok(f.queries.some((q) => q.includes("phase='cancelled'")));
+		} else
+			await assert.rejects(
+				cleanupBuild(options),
+				/ownership cannot be verified/,
+			);
+	}
+});

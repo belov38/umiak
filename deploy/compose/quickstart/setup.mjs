@@ -870,6 +870,38 @@ export function createSetupHandler({
 				"Stop running sandbox VMs before a sequential template build",
 			);
 		},
+		copyExisting: async (slug, input) => {
+			const source = (
+				await query(
+					"SELECT id FROM runtime.template_builds WHERE template_slug=$1 AND status='active' ORDER BY (source_build_id IS NOT NULL),created_at DESC LIMIT 1",
+					[slug],
+				)
+			).rows[0];
+			if (!source) return false;
+			const current = await store.read();
+			await replicateActiveTemplates({
+				pool,
+				state: current,
+				sourceBuildId: source.id,
+				api: await pveOf(current),
+				nodeCheck,
+				secretsDir,
+				onProgress: (p) =>
+					jobs.update((s) => {
+						if (s.buildQueue?.states)
+							s.buildQueue.states[p.nodeId] =
+								p.phase === "ready"
+									? "Ready"
+									: p.phase === "failed"
+										? "Copy failed"
+										: "Copying";
+					}),
+			});
+			await jobs.update((s) => {
+				for (const id of input.nodes) s.buildQueue.states[id] = "Ready";
+			});
+			return true;
+		},
 		reserve: (job) => nodes.reserve(job),
 		interrupt: (job, state) => nodes.interrupt(job, state),
 		release: (job, state) =>
@@ -952,6 +984,8 @@ export function createSetupHandler({
 				{ builds: [{ ...manifest, nodeId: context.job.nodeId }] },
 				{ ...context, dashboardBuild: true },
 			);
+		},
+		replicate: async (manifest, context) => {
 			const source = (
 				await query(
 					"SELECT id FROM runtime.template_builds WHERE node_id=$1 AND pve_vmid=$2 AND status='active'",
@@ -1262,8 +1296,14 @@ export function createSetupHandler({
 				if (state.buildJob?.status === "running" || state.buildQueue?.active)
 					throw Error("Wait for the current build to finish");
 				const result = await recoverBuild(state, input);
-				if (input.retry && !input.inspect)
-					await jobs.start("linux", { nodeId: input.nodeId }, context);
+				if (input.retry && !input.inspect) {
+					if (input.jobId.startsWith("copy-") || result.registered)
+						await jobs.startQueue(
+							{ nodes: [input.nodeId], slug: "linux" },
+							context,
+						);
+					else await jobs.start("linux", { nodeId: input.nodeId }, context);
+				}
 				json(res, 200, result);
 			} catch (error) {
 				await jobs
@@ -1344,7 +1384,7 @@ export function createSetupHandler({
 			if (ready !== true) return;
 			const pending = (
 				await query(
-					"SELECT DISTINCT source_id FROM runtime.volume_transfers WHERE kind='template' AND phase<>'done'",
+					"SELECT DISTINCT source_id FROM runtime.volume_transfers WHERE kind='template' AND phase NOT IN ('done','cancelled','failed')",
 				)
 			).rows;
 			if (current.buildJob?.manifest) {
@@ -1356,6 +1396,31 @@ export function createSetupHandler({
 				).rows[0];
 				if (b && !pending.some((p) => p.source_id === b.id))
 					pending.push({ source_id: b.id });
+			}
+			const job = current.buildJob;
+			if (job?.manifest && job.status === "error") {
+				const found = (
+					await query(
+						"SELECT id FROM runtime.template_builds WHERE node_id=$1 AND pve_vmid=$2 AND status='active'",
+						[job.nodeId, job.manifest.pveVmid],
+					)
+				).rowCount;
+				if (found) {
+					const unfinished = (
+						await query(
+							"SELECT 1 FROM runtime.node_build_jobs WHERE id=$1 AND status IN ('running','interrupted')",
+							[job.id],
+						)
+					).rowCount;
+					if (unfinished) await jobs.finish(job, current);
+					await jobs.update((s) => {
+						if (s.buildJob?.id === job.id) {
+							s.buildJob.status = "ready";
+							s.buildJob.error = null;
+							s.buildJob.finishedAt = new Date().toISOString();
+						}
+					});
+				}
 			}
 			for (const p of pending)
 				await replicateActiveTemplates({
@@ -1370,26 +1435,6 @@ export function createSetupHandler({
 							if (s.buildJob) s.buildJob.replication = progress;
 						}),
 				});
-
-			const job = current.buildJob;
-			if (job?.manifest && job.status === "error") {
-				const found = (
-					await query(
-						"SELECT id FROM runtime.template_builds WHERE node_id=$1 AND pve_vmid=$2 AND status='active'",
-						[job.nodeId, job.manifest.pveVmid],
-					)
-				).rowCount;
-				if (found) {
-					await jobs.finish(job, current);
-					await jobs.update((s) => {
-						if (s.buildJob?.id === job.id) {
-							s.buildJob.status = "ready";
-							s.buildJob.error = null;
-							s.buildJob.finishedAt = new Date().toISOString();
-						}
-					});
-				}
-			}
 		};
 		let copying = false;
 		const sweep = () => {
