@@ -338,7 +338,8 @@ export class TemplateBuildJobs {
 				}
 			}
 			if (state.buildJob?.status === "running") {
-				await this.interrupt(state.buildJob, state);
+				if (!state.buildJob.registered)
+					await this.interrupt(state.buildJob, state);
 				state.buildJob = {
 					...state.buildJob,
 					status: "error",
@@ -540,6 +541,9 @@ export class TemplateBuildJobs {
 				await this.register(manifest, { ...context, job });
 				await this.finish(job, state, input, manifest);
 				job.registered = true;
+				await this.update((s) => {
+					s.buildJob.registered = true;
+				});
 				await this.replicate(manifest, { ...context, job });
 				await this.update((current) => {
 					current.buildJob = {
