@@ -1,15 +1,18 @@
 "use client";
 import { useEffect, useState } from "react";
 import { CopyButton } from "@/components/app/copy-button";
+import { useAppSession } from "@/components/app/session-context";
 import { CodeBlock } from "@/components/ui/feedback";
 import { PageHeader } from "@/components/ui/panel";
 import { type GuideDeployment, guideSections } from "./content";
+import { FirstSandboxAction } from "./first-sandbox-action";
 
 export function GettingStarted({
 	deployment,
 }: {
 	deployment: GuideDeployment;
 }) {
+	const session = useAppSession();
 	const [current, setCurrent] = useState(deployment);
 	useEffect(() => {
 		const controller = new AbortController();
@@ -62,6 +65,17 @@ export function GettingStarted({
 					A virtual machine for your code, tools and agents. Start in the
 					dashboard or follow the CLI guide below.
 				</p>
+				<FirstSandboxAction teamId={session.defaultTeamId} />
+				<ol className="space-y-2 text-sm">
+					<li>1. Create a sandbox.</li>
+					<li>
+						2. Open Terminal and run <code>uname -a</code>.
+					</li>
+					<li>
+						3. Optional: install the CLI and connect an agent using the guide
+						below.
+					</li>
+				</ol>
 				<dl className="guide-addresses grid gap-3 border bg-muted/30 p-4 text-sm sm:grid-cols-2">
 					<div>
 						<dt className="text-muted-foreground">Dashboard</dt>

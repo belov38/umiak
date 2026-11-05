@@ -38,6 +38,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import { FirstSandboxAction } from "@/features/getting-started/first-sandbox-action";
 import { useUmiak } from "@/lib/api";
 import type { ApiKey } from "@/lib/api-keys";
 import { formatAgo, formatTime } from "@/lib/format";
@@ -230,6 +231,7 @@ function EmptyState({
 					<p className="text-muted-foreground">
 						Create a VM for your project, then connect your tools.
 					</p>
+					<FirstSandboxAction teamId={teamId} />
 					<ol className="onboarding-checklist">
 						<li>
 							<span className="onboarding-number">1</span>
@@ -239,11 +241,15 @@ function EmptyState({
 						</li>
 						<li>
 							<span className="onboarding-number">2</span>
-							<Link href="/app/getting-started#install">Install the CLI</Link>
+							<span>
+								Open Terminal and run <code>uname -a</code>
+							</span>
 						</li>
 						<li>
 							<span className="onboarding-number">3</span>
-							<Link href="/app/getting-started#agents">Connect an agent</Link>
+							<Link href="/app/getting-started#install">
+								Optional: install the CLI and connect an agent
+							</Link>
 						</li>
 					</ol>
 				</div>

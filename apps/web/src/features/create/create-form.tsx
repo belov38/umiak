@@ -6,6 +6,7 @@
 // form; out_of_capacity offers a retry. Secrets never leave React state
 // except in the request body: no URL, no storage, no logs.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
 	type FormEvent,
@@ -181,6 +182,10 @@ export function CreateSandboxForm({
 		() => (templates.data ?? []).filter((t) => t.enabled),
 		[templates.data],
 	);
+	const usable = useMemo(
+		() => enabled.filter((t) => t.version !== null),
+		[enabled],
+	);
 	const readySnapshots = useMemo(
 		() => (snapshots.data ?? []).filter((s) => s.state === "ready"),
 		[snapshots.data],
@@ -199,14 +204,14 @@ export function CreateSandboxForm({
 
 	// Pick a template, and a size of it, once the catalog is there.
 	useEffect(() => {
-		if (form.source !== "template" || enabled.length === 0) return;
-		const t = enabled.find((x) => x.slug === form.template) ?? enabled[0];
+		if (form.source !== "template" || usable.length === 0) return;
+		const t = usable.find((x) => x.slug === form.template) ?? usable[0];
 		if (t === undefined) return;
 		const size = t.allowedSizes.includes(form.size) ? form.size : t.defaultSize;
 		if (t.slug !== form.template || size !== form.size) {
 			setForm((f) => ({ ...f, template: t.slug, size }));
 		}
-	}, [enabled, form.source, form.template, form.size]);
+	}, [usable, form.source, form.template, form.size]);
 
 	// From a snapshot: its size unless the user picked another allowed one.
 	useEffect(() => {
@@ -219,6 +224,11 @@ export function CreateSandboxForm({
 
 	const submit = async (e?: FormEvent) => {
 		e?.preventDefault();
+		if (
+			form.source === "template" &&
+			!usable.some((t) => t.slug === form.template)
+		)
+			return;
 		setSubmitError(null);
 		const r = toCreateRequest(form);
 		if (!r.ok) {
@@ -284,360 +294,407 @@ export function CreateSandboxForm({
 								onRetry={() => templates.refetch()}
 							/>
 						)}
-						<form
-							method="post"
-							onSubmit={submit}
-							className="min-w-0 space-y-3"
-							autoComplete="off"
-							data-testid="create-form"
-						>
-							<Row label="From">
-								<div className="flex flex-wrap items-center gap-4 text-sm">
-									<label className="flex items-center gap-1.5">
-										<Radio
-											checked={form.source === "template"}
-											onChange={() => patch({ source: "template" })}
-										/>
-										template
-									</label>
-									<label className="flex items-center gap-1.5">
-										<Radio
-											checked={form.source === "snapshot"}
-											disabled={readySnapshots.length === 0}
-											onChange={() =>
-												patch({
-													source: "snapshot",
-													snapshot:
-														form.snapshot || (readySnapshots[0]?.name ?? ""),
-													size: "",
-												})
-											}
-										/>
-										saved snapshot
-									</label>
-									{form.source === "snapshot" && (
-										<Select
-											value={form.snapshot}
-											onValueChange={(v) => patch({ snapshot: v, size: "" })}
-										>
-											<SelectTrigger
-												aria-label="Saved snapshot"
-												className="w-56"
-											>
-												<SelectValue placeholder="Pick a snapshot" />
-											</SelectTrigger>
-											<SelectContent>
-												{readySnapshots.map((s) => (
-													<SelectItem key={s.id} value={s.name}>
-														{s.name}
-													</SelectItem>
-												))}
-											</SelectContent>
-										</Select>
-									)}
-								</div>
-								{form.source === "snapshot" &&
-									form.snapshot !== "" &&
-									snapshots.data &&
-									snapshot === undefined && (
-										<p className="text-xs text-destructive">
-											No ready snapshot named {form.snapshot}.
-										</p>
-									)}
-								{errors.snapshot && (
-									<p className="text-xs text-destructive">{errors.snapshot}</p>
-								)}
-							</Row>
-
-							{form.source === "template" ? (
-								<Row label="Template">
-									{templates.isPending && <LoadingState />}
-									{templates.data && enabled.length === 0 && (
-										<p className="text-sm text-muted-foreground">
-											No template is available. Ask a platform operator.
-										</p>
-									)}
-									<div className="flex flex-col gap-1 text-sm">
-										{enabled.map((t) => (
-											<label key={t.slug} className="flex items-center gap-1.5">
-												<Radio
-													checked={form.template === t.slug}
-													onChange={() =>
-														patch({ template: t.slug, size: t.defaultSize })
-													}
-												/>
-												<span className="font-medium">{t.slug}</span>
-												<span className="text-muted-foreground">
-													— {t.name}
-												</span>
-												{t.version === null && (
-													<span className="text-xs text-warning">
-														(no active build)
-													</span>
-												)}
-											</label>
-										))}
-									</div>
-								</Row>
-							) : (
-								<Row label="Template">
-									<p className="pt-1.5 text-sm text-muted-foreground">
-										{snapshot
-											? `${snapshot.template ?? "?"}${snapshot.templateVersion ? ` ${snapshot.templateVersion}` : ""}, from the snapshot`
-											: "From the snapshot"}
-									</p>
-								</Row>
-							)}
-
-							<Row label="Size">
-								<Select
-									value={form.size}
-									onValueChange={(v) => patch({ size: v })}
-									disabled={sizeChoices.length === 0}
-								>
-									<SelectTrigger aria-label="Size" className="w-80">
-										<SelectValue
-											placeholder={
-												template
-													? `Template default (${template.defaultSize})`
-													: "Loading sizes…"
-											}
-										/>
-									</SelectTrigger>
-									<SelectContent>
-										{sizeChoices.map((slug) => {
-											const s = sizeInfo.get(slug);
-											const l = sizeLimits.get(slug);
-											const why =
-												l && !l.allowed && l.reason
-													? (SIZE_REASONS[l.reason] ?? l.reason)
-													: null;
-											return (
-												<SelectItem key={slug} value={slug}>
-													{slug}
-													{slug === template?.defaultSize
-														? " (template default)"
-														: ""}
-													{s ? ` · ${s.vcpu} vCPU · ${s.memoryMb} MB` : ""}
-													{why ? ` (${why})` : ""}
-												</SelectItem>
-											);
-										})}
-									</SelectContent>
-								</Select>
-							</Row>
-
-							<Row
-								label="Name"
-								hint="Optional display name, up to 255 characters."
-							>
-								<Input
-									aria-label="Name"
-									placeholder="ci-run-42"
-									className="w-80"
-									maxLength={255}
-									aria-invalid={errors.name !== undefined}
-									value={form.name}
-									onChange={(e) => patch({ name: e.target.value })}
-								/>
-								{errors.name && (
-									<p className="text-xs text-destructive">{errors.name}</p>
-								)}
-							</Row>
-
-							<Row
-								label="Slug"
-								hint="Used in port URLs, SSH and the hostname. Empty: three random words."
-							>
-								<Input
-									aria-label="Slug"
-									placeholder="auto: three words"
-									className="w-80 font-mono"
-									spellCheck={false}
-									aria-invalid={slugHint !== null || errors.slug !== undefined}
-									value={form.slug}
-									onChange={(e) =>
-										patch({ slug: e.target.value.toLowerCase() })
-									}
-								/>
-								{(slugHint ?? errors.slug) && (
-									<p className="text-xs text-destructive">
-										Slug: {slugHint ?? errors.slug}
-									</p>
-								)}
-							</Row>
-
-							<Row
-								label="Environment"
-								hint="Its env, secrets and secret files are applied first; the ones below win on the same name."
-							>
-								<Select
-									value={envValue(form.environment)}
-									onValueChange={(v) => patch({ environment: envChoice(v) })}
-								>
-									<SelectTrigger aria-label="Environment" className="w-80">
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value={ENV_DEFAULT}>
-											{defaultEnv
-												? `${singleOwner ? "default" : "team default"}: ${defaultEnv.name}`
-												: singleOwner
-													? "default (none set)"
-													: "team default (none set)"}
-										</SelectItem>
-										{envs.map((x) => (
-											<SelectItem key={x.id} value={`env:${x.name}`}>
-												{x.name}
-											</SelectItem>
-										))}
-										<SelectItem value={ENV_NONE}>none</SelectItem>
-									</SelectContent>
-								</Select>
-							</Row>
-
-							<Row
-								label="Labels"
-								hint="For filtering and automation, key=value."
-							>
-								<KvRows
-									label="Label"
-									field="labels"
-									keyPlaceholder="key"
-									rows={form.labels}
-									errors={errors}
-									onChange={(labels) => patch({ labels })}
-								/>
-							</Row>
-
-							<Row
-								label="Env vars"
-								hint={
-									singleOwner
-										? "Visible to commands and agents in this sandbox."
-										: "Visible to everyone in the team."
-								}
-							>
-								<KvRows
-									label="Env var"
-									field="env"
-									rows={form.env}
-									errors={errors}
-									onChange={(env) => patch({ env })}
-								/>
-							</Row>
-
-							<Row
-								label="Secrets"
-								hint="Env variables kept on tmpfs in the guest; their values are never shown again."
-							>
-								<KvRows
-									label="Secret"
-									field="secrets"
-									secret
-									rows={form.secrets}
-									errors={errors}
-									onChange={(secrets) => patch({ secrets })}
-								/>
-							</Row>
-
-							<Row label="Secret files">
-								<SecretFiles
-									files={form.secretFiles}
-									errors={errors}
-									onChange={(secretFiles) => patch({ secretFiles })}
-								/>
-							</Row>
-
-							<Row label="Lifetime">
-								<div className="flex flex-wrap items-center gap-3 text-sm">
-									<span>TTL</span>
-									<DurationSelect
-										label="TTL"
-										choices={TTL_CHOICES.map((c) =>
-											c.value === "default"
-												? {
-														...c,
-														label: platformDefaultLabel(
-															limits.data?.defaults?.ttlSeconds,
-															"no TTL",
-														),
-													}
-												: c,
-										)}
-										value={form.ttl}
-										onChange={(ttl) => patch({ ttl })}
-									/>
-									<span>Idle stop after</span>
-									<DurationSelect
-										label="Idle stop after"
-										choices={IDLE_CHOICES.map((c) =>
-											c.value === "default"
-												? {
-														...c,
-														label: platformDefaultLabel(
-															limits.data?.defaults?.idleTimeoutSeconds,
-															"never",
-														),
-													}
-												: c,
-										)}
-										value={form.idle}
-										onChange={(idle) => patch({ idle })}
-									/>
-								</div>
-							</Row>
-
-							{limits.data && !limits.data.canCreate && (
-								<p className="text-sm text-warning">
-									{singleOwner
-										? "The deployment quota is used up: stop or delete a sandbox first."
-										: "The team's quota is used up: stop or delete a sandbox first."}
-								</p>
-							)}
-							{Object.keys(errors).length > 0 && (
-								<p role="alert" className="text-sm text-destructive">
-									Fix the fields marked above.
-								</p>
-							)}
-							{submitError && (
-								<div
-									role="alert"
-									data-testid="create-error"
-									className={cn(
-										"flex flex-wrap items-center gap-2 border p-3 text-sm",
-										submitError.apiUnavailable || submitError.retry
-											? "border-warning/35 bg-warning-tint text-warning"
-											: "border-destructive/30 bg-destructive/5 text-destructive",
-									)}
-								>
-									<p className="flex-1">{submitError.message}</p>
-									{submitError.retry && (
-										<Button
-											type="button"
-											size="sm"
-											variant="outline"
-											disabled={pending}
-											onClick={() => void submit()}
-										>
-											Try again
-										</Button>
-									)}
-								</div>
-							)}
-							<div className="flex justify-end gap-2">
-								<Button
-									type="button"
-									variant="outline"
-									onClick={() => router.push(teamPath(teamId))}
-								>
-									Cancel
-								</Button>
-								<Button type="submit" disabled={pending}>
-									{pending ? "Creating…" : "Create"}
+						{templates.data &&
+						usable.length === 0 &&
+						readySnapshots.length === 0 ? (
+							<div className="space-y-4" data-testid="no-usable-template">
+								<p>Build a Linux template before creating your first sandbox</p>
+								<Button asChild>
+									<Link href="/setup">Finish setup</Link>
 								</Button>
 							</div>
-						</form>
+						) : (
+							<form
+								method="post"
+								onSubmit={submit}
+								className="min-w-0 space-y-3"
+								autoComplete="off"
+								data-testid="create-form"
+							>
+								{readySnapshots.length > 0 && (
+									<Row label="From">
+										<div className="flex flex-wrap items-center gap-4 text-sm">
+											<label className="flex items-center gap-1.5">
+												<Radio
+													checked={form.source === "template"}
+													onChange={() => patch({ source: "template" })}
+												/>
+												template
+											</label>
+											<label className="flex items-center gap-1.5">
+												<Radio
+													checked={form.source === "snapshot"}
+													disabled={readySnapshots.length === 0}
+													onChange={() =>
+														patch({
+															source: "snapshot",
+															snapshot:
+																form.snapshot ||
+																(readySnapshots[0]?.name ?? ""),
+															size: "",
+														})
+													}
+												/>
+												saved snapshot
+											</label>
+											{form.source === "snapshot" && (
+												<Select
+													value={form.snapshot}
+													onValueChange={(v) =>
+														patch({ snapshot: v, size: "" })
+													}
+												>
+													<SelectTrigger
+														aria-label="Saved snapshot"
+														className="w-56"
+													>
+														<SelectValue placeholder="Pick a snapshot" />
+													</SelectTrigger>
+													<SelectContent>
+														{readySnapshots.map((s) => (
+															<SelectItem key={s.id} value={s.name}>
+																{s.name}
+															</SelectItem>
+														))}
+													</SelectContent>
+												</Select>
+											)}
+										</div>
+										{form.source === "snapshot" &&
+											form.snapshot !== "" &&
+											snapshots.data &&
+											snapshot === undefined && (
+												<p className="text-xs text-destructive">
+													No ready snapshot named {form.snapshot}.
+												</p>
+											)}
+										{errors.snapshot && (
+											<p className="text-xs text-destructive">
+												{errors.snapshot}
+											</p>
+										)}
+									</Row>
+								)}
+
+								{form.source === "template" ? (
+									<Row label="Template">
+										{templates.isPending && <LoadingState />}
+										{templates.data && enabled.length === 0 && (
+											<p className="text-sm text-muted-foreground">
+												No template is available. Ask a platform operator.
+											</p>
+										)}
+										<div className="flex flex-col gap-1 text-sm">
+											{enabled.map((t) => (
+												<label
+													key={t.slug}
+													className="flex items-center gap-1.5"
+												>
+													<Radio
+														disabled={t.version === null}
+														checked={
+															t.version !== null && form.template === t.slug
+														}
+														onChange={() =>
+															patch({ template: t.slug, size: t.defaultSize })
+														}
+													/>
+													<span className="font-medium">{t.slug}</span>
+													<span className="text-muted-foreground">
+														— {t.name}
+													</span>
+													{t.version === null && (
+														<span className="text-xs text-warning">
+															(Build this template first)
+														</span>
+													)}
+												</label>
+											))}
+										</div>
+									</Row>
+								) : (
+									<Row label="Template">
+										<p className="pt-1.5 text-sm text-muted-foreground">
+											{snapshot
+												? `${snapshot.template ?? "?"}${snapshot.templateVersion ? ` ${snapshot.templateVersion}` : ""}, from the snapshot`
+												: "From the snapshot"}
+										</p>
+									</Row>
+								)}
+
+								<Row label="Size">
+									<Select
+										value={form.size}
+										onValueChange={(v) => patch({ size: v })}
+										disabled={sizeChoices.length === 0}
+									>
+										<SelectTrigger aria-label="Size" className="w-80">
+											<SelectValue
+												placeholder={
+													template
+														? `Template default (${template.defaultSize})`
+														: "Loading sizes…"
+												}
+											/>
+										</SelectTrigger>
+										<SelectContent>
+											{sizeChoices.map((slug) => {
+												const s = sizeInfo.get(slug);
+												const l = sizeLimits.get(slug);
+												const why =
+													l && !l.allowed && l.reason
+														? (SIZE_REASONS[l.reason] ?? l.reason)
+														: null;
+												return (
+													<SelectItem key={slug} value={slug}>
+														{slug}
+														{slug === template?.defaultSize
+															? " (template default)"
+															: ""}
+														{s ? ` · ${s.vcpu} vCPU · ${s.memoryMb} MB` : ""}
+														{why ? ` (${why})` : ""}
+													</SelectItem>
+												);
+											})}
+										</SelectContent>
+									</Select>
+								</Row>
+
+								<Row
+									label="Name"
+									hint="Optional display name, up to 255 characters."
+								>
+									<Input
+										aria-label="Name"
+										placeholder="ci-run-42"
+										className="w-80"
+										maxLength={255}
+										aria-invalid={errors.name !== undefined}
+										value={form.name}
+										onChange={(e) => patch({ name: e.target.value })}
+									/>
+									{errors.name && (
+										<p className="text-xs text-destructive">{errors.name}</p>
+									)}
+								</Row>
+
+								<details
+									className="space-y-3"
+									open={
+										Object.keys(errors).some(
+											(key) => key !== "name" && key !== "snapshot",
+										) || undefined
+									}
+								>
+									<summary className="cursor-pointer text-sm font-medium">
+										Advanced settings
+									</summary>
+									<Row
+										label="Slug"
+										hint="Used in port URLs, SSH and the hostname. Empty: three random words."
+									>
+										<Input
+											aria-label="Slug"
+											placeholder="auto: three words"
+											className="w-80 font-mono"
+											spellCheck={false}
+											aria-invalid={
+												slugHint !== null || errors.slug !== undefined
+											}
+											value={form.slug}
+											onChange={(e) =>
+												patch({ slug: e.target.value.toLowerCase() })
+											}
+										/>
+										{(slugHint ?? errors.slug) && (
+											<p className="text-xs text-destructive">
+												Slug: {slugHint ?? errors.slug}
+											</p>
+										)}
+									</Row>
+
+									<Row
+										label="Environment"
+										hint="Its env, secrets and secret files are applied first; the ones below win on the same name."
+									>
+										<Select
+											value={envValue(form.environment)}
+											onValueChange={(v) =>
+												patch({ environment: envChoice(v) })
+											}
+										>
+											<SelectTrigger aria-label="Environment" className="w-80">
+												<SelectValue />
+											</SelectTrigger>
+											<SelectContent>
+												<SelectItem value={ENV_DEFAULT}>
+													{defaultEnv
+														? `${singleOwner ? "default" : "team default"}: ${defaultEnv.name}`
+														: singleOwner
+															? "default (none set)"
+															: "team default (none set)"}
+												</SelectItem>
+												{envs.map((x) => (
+													<SelectItem key={x.id} value={`env:${x.name}`}>
+														{x.name}
+													</SelectItem>
+												))}
+												<SelectItem value={ENV_NONE}>none</SelectItem>
+											</SelectContent>
+										</Select>
+									</Row>
+
+									<Row
+										label="Labels"
+										hint="For filtering and automation, key=value."
+									>
+										<KvRows
+											label="Label"
+											field="labels"
+											keyPlaceholder="key"
+											rows={form.labels}
+											errors={errors}
+											onChange={(labels) => patch({ labels })}
+										/>
+									</Row>
+
+									<Row
+										label="Env vars"
+										hint={
+											singleOwner
+												? "Visible to commands and agents in this sandbox."
+												: "Visible to everyone in the team."
+										}
+									>
+										<KvRows
+											label="Env var"
+											field="env"
+											rows={form.env}
+											errors={errors}
+											onChange={(env) => patch({ env })}
+										/>
+									</Row>
+
+									<Row
+										label="Secrets"
+										hint="Env variables kept on tmpfs in the guest; their values are never shown again."
+									>
+										<KvRows
+											label="Secret"
+											field="secrets"
+											secret
+											rows={form.secrets}
+											errors={errors}
+											onChange={(secrets) => patch({ secrets })}
+										/>
+									</Row>
+
+									<Row label="Secret files">
+										<SecretFiles
+											files={form.secretFiles}
+											errors={errors}
+											onChange={(secretFiles) => patch({ secretFiles })}
+										/>
+									</Row>
+
+									<Row label="Lifetime">
+										<div className="flex flex-wrap items-center gap-3 text-sm">
+											<span>TTL</span>
+											<DurationSelect
+												label="TTL"
+												choices={TTL_CHOICES.map((c) =>
+													c.value === "default"
+														? {
+																...c,
+																label: platformDefaultLabel(
+																	limits.data?.defaults?.ttlSeconds,
+																	"no TTL",
+																),
+															}
+														: c,
+												)}
+												value={form.ttl}
+												onChange={(ttl) => patch({ ttl })}
+											/>
+											<span>Idle stop after</span>
+											<DurationSelect
+												label="Idle stop after"
+												choices={IDLE_CHOICES.map((c) =>
+													c.value === "default"
+														? {
+																...c,
+																label: platformDefaultLabel(
+																	limits.data?.defaults?.idleTimeoutSeconds,
+																	"never",
+																),
+															}
+														: c,
+												)}
+												value={form.idle}
+												onChange={(idle) => patch({ idle })}
+											/>
+										</div>
+									</Row>
+								</details>
+								{limits.data && !limits.data.canCreate && (
+									<p className="text-sm text-warning">
+										{singleOwner
+											? "The deployment quota is used up: stop or delete a sandbox first."
+											: "The team's quota is used up: stop or delete a sandbox first."}
+									</p>
+								)}
+								{Object.keys(errors).length > 0 && (
+									<p role="alert" className="text-sm text-destructive">
+										Fix the fields marked above.
+									</p>
+								)}
+								{submitError && (
+									<div
+										role="alert"
+										data-testid="create-error"
+										className={cn(
+											"flex flex-wrap items-center gap-2 border p-3 text-sm",
+											submitError.apiUnavailable || submitError.retry
+												? "border-warning/35 bg-warning-tint text-warning"
+												: "border-destructive/30 bg-destructive/5 text-destructive",
+										)}
+									>
+										<p className="flex-1">{submitError.message}</p>
+										{submitError.retry && (
+											<Button
+												type="button"
+												size="sm"
+												variant="outline"
+												disabled={pending}
+												onClick={() => void submit()}
+											>
+												Try again
+											</Button>
+										)}
+									</div>
+								)}
+								<div className="create-footer sticky bottom-0 z-10 flex justify-end gap-2 border-t bg-background py-3">
+									<Button
+										type="button"
+										variant="outline"
+										onClick={() => router.push(teamPath(teamId))}
+									>
+										Cancel
+									</Button>
+									<Button
+										type="submit"
+										disabled={
+											pending ||
+											templates.isPending ||
+											(form.source === "template" &&
+												!usable.some((t) => t.slug === form.template))
+										}
+									>
+										{pending ? "Creating…" : "Create sandbox"}
+									</Button>
+								</div>
+							</form>
+						)}
 					</section>
 				</DialogContent>
 			</Dialog>
