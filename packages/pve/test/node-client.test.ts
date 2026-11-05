@@ -251,6 +251,7 @@ it("does not enable experimental delta sessions by default", async () => {
 	const server = await startServer();
 	const node = client(server.port);
 	expect(node.deltaStreamEnabled).toBe(false);
+	expect(node.portableFullStreamEnabled).toBe(false);
 	await expect(node.openTransfer({})).rejects.toThrow(/disabled/);
 	expect(server.requests).toHaveLength(0);
 });

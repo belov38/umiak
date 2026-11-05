@@ -140,9 +140,8 @@ function harness(start = 0, corrupt = false, truncated = false) {
 	const targetNode: NodeOps = {
 		deltaStreamEnabled: true,
 		close() {},
-		async call<T>() {
+		async call<T>(): Promise<T> {
 			throw Error("per-block RPC must not run");
-			return {} as T;
 		},
 		async openTransfer() {
 			targetOpens++;

@@ -80,6 +80,7 @@ function bridge(
 			{ uuid: string; data: Buffer }
 		>;
 		const node: NodeOps = {
+			portableFullStreamEnabled: opts.standardFull === true,
 			close() {},
 			async call<T>(op: string, raw?: object): Promise<T> {
 				const a = raw as {
@@ -235,9 +236,7 @@ function bridge(
 				throw Error(op);
 			},
 		};
-		if (opts.standardFull)
-			node.sendVolume = <T>(args: object) =>
-				node.call<T>("volume.sendTo", args);
+		node.sendVolume = <T>(args: object) => node.call<T>("volume.sendTo", args);
 
 		const invoke = node.call.bind(node);
 		node.call = async <T>(op: string, args?: object): Promise<T> => {

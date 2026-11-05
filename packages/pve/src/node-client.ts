@@ -9,6 +9,7 @@ export interface TransferSession {
 /** Transport-independent umiak-node interface; tests use a fake. */
 export interface NodeOps {
 	readonly deltaStreamEnabled?: boolean;
+	readonly portableFullStreamEnabled?: boolean;
 	call<T = unknown>(
 		op: string,
 		args?: object,
@@ -75,6 +76,7 @@ export function parseKnownHosts(
 export interface SshNodeOpsOptions {
 	/** Experimental; only opt in after a separate transfer-protocol design review. */
 	experimentalDeltaStream?: boolean;
+	experimentalPortableFullCopies?: boolean;
 	host: string;
 	port?: number;
 	username?: string;
@@ -109,6 +111,10 @@ export class SshNodeOps implements NodeOps {
 	#deltaReady: Promise<void> | undefined;
 	get deltaStreamEnabled() {
 		return this.#opts.experimentalDeltaStream === true;
+	}
+
+	get portableFullStreamEnabled() {
+		return this.#opts.experimentalPortableFullCopies === true;
 	}
 
 	readonly #opts: SshNodeOpsOptions;

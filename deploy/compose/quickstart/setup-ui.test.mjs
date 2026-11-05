@@ -534,7 +534,7 @@ test("partial copy failure keeps step 3 open even on a completed installation", 
 				name: "pve2",
 				state: "active",
 				templates: [],
-				buildJobId: "copy-" + "a".repeat(32),
+				buildJobId: `copy-${"a".repeat(32)}`,
 			},
 		],
 	});

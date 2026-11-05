@@ -240,7 +240,10 @@ async function copyDisks(
 		const targetBase = identical
 			? `base-${bases.target?.pve_vmid}-disk-${bases.target?.disk_layout[disk.slot]?.index ?? 0}`
 			: "";
-		const useFull = !sourceBase && Boolean(src.node.sendVolume);
+		const useFull =
+			!sourceBase &&
+			src.node.portableFullStreamEnabled === true &&
+			dst.node.portableFullStreamEnabled === true;
 		const staging = useFull
 			? { name: `umiak-snap-${j.id}-${disk.slot}` }
 			: await dst.node.call<{ name: string }>("lv.transferPrepare", {
@@ -282,7 +285,9 @@ async function copyDisks(
 			}
 		};
 		const started = performance.now();
-		let transferResult;
+		let transferResult:
+			| Awaited<ReturnType<typeof fullVolumeCopy>>
+			| Awaited<ReturnType<typeof relayVolume>>;
 		if (useFull)
 			transferResult = await fullVolumeCopy({
 				source: src.node,
@@ -375,7 +380,7 @@ async function clearStaging(ctx: WorkerCtx, j: Journal) {
 			l.name.startsWith(`umiak-snap-${j.id}-`),
 	);
 	const destination = portable(await ctx.infra.forNode(j.target_node_id));
-	if (destination.node.sendVolume)
+	if (destination.node.portableFullStreamEnabled === true)
 		for (const slot of ["scsi0", "efidisk0", "tpmstate0"])
 			await destination.node.call("volume.cleanupImport", {
 				name: `umiak-snap-${j.id}-${slot}`,
