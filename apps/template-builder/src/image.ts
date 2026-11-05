@@ -42,7 +42,9 @@ export function imageFileName(_base: Versions["base"]): string {
 
 /** Name of the image in the Proxmox `local:import` storage. */
 export function pveImageName(serial: string): string {
-	return `umiak-ubuntu-26.04-minimal-${serial}.qcow2`;
+	return serial.includes("-")
+		? `umiak-debian-13-genericcloud-${serial}.qcow2`
+		: `umiak-ubuntu-26.04-minimal-${serial}.qcow2`;
 }
 
 /** Fingerprint of the Ubuntu Cloud Image signing key committed in infra/templates/keys/. */

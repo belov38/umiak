@@ -60,9 +60,9 @@ type FirmwareDisk = (typeof FIRMWARE_DISKS)[number];
 
 const cloudImageSourceSchema = z.strictObject({
 	kind: z.literal("cloud-image"),
-	distro: z.literal("ubuntu"),
+	distro: z.enum(["ubuntu", "debian"]),
 	release: z.string().min(1),
-	flavor: z.enum(["minimal", "server"]),
+	flavor: z.enum(["minimal", "server", "genericcloud"]),
 });
 
 const LOCALE_RE = /^[A-Za-z0-9:-]+$/;
@@ -514,7 +514,12 @@ const nonEmpty = z.string().min(1);
 
 export const versionsSchema = z.strictObject({
 	base: z.strictObject({
-		serial: z.string().regex(/^\d{8}(\.\d+)?$/),
+		serial: z.string().regex(/^\d{8}([.-]\d+)?$/),
+		sha512: z
+			.string()
+			.regex(/^[0-9a-f]{128}$/)
+			.optional(),
+		url: z.url().optional(),
 		sha256: hex64,
 	}),
 	apt: z.strictObject({ snapshot: z.string().regex(/^\d{8}T\d{6}Z$/) }),
@@ -714,6 +719,18 @@ export function loadVersions(recipe: Recipe): Versions | WindowsVersions;
 /** Pins from the parent recipes' versions.toml, overridden by the recipe's own file. */
 export function loadVersions(recipe: Recipe): Versions | WindowsVersions {
 	const { merged, label } = mergedVersionsFiles(recipe);
+	if (recipe.os === "linux" && recipe.source.distro === "debian") {
+		const base = versionsSchema.shape.base.parse(merged.base);
+		if (
+			!base.sha512 ||
+			base.url !==
+				`https://cloud.debian.org/images/cloud/trixie/${base.serial}/debian-13-genericcloud-amd64-${base.serial}.qcow2` ||
+			!/^\d{8}-\d+$/.test(base.serial)
+		)
+			throw new Error(
+				`${label}: Debian requires serial, SHA512, SHA256 and canonical source URL`,
+			);
+	}
 	try {
 		return recipe.os === "windows"
 			? windowsVersionsFromToml(windowsVersionsSchema.parse(merged))

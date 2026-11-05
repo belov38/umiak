@@ -1,5 +1,6 @@
 import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
+import { resolveDebianBase } from "./debian.ts";
 import { type Versions, versionsSchema } from "./recipe.ts";
 import {
 	assertSemver,
@@ -243,8 +244,14 @@ async function resolveRust(fetch: Fetch): Promise<Versions["tools"]["rust"]> {
 	};
 }
 
-async function resolveDocker(fetch: Fetch): Promise<Versions["docker"]> {
-	const stanzas = parsePackages(await get(fetch, DOCKER_PACKAGES));
+export async function resolveDocker(
+	fetch: Fetch,
+	debian = false,
+): Promise<Versions["docker"]> {
+	const url = debian
+		? DOCKER_PACKAGES.replace("ubuntu/dists/resolute", "debian/dists/trixie")
+		: DOCKER_PACKAGES;
+	const stanzas = parsePackages(await get(fetch, url));
 	const newest = (name: string) =>
 		newestPackage(stanzas, name, DOCKER_PACKAGES).Version;
 	return {
@@ -273,17 +280,18 @@ export async function resolveLatest(
 	fetch: Fetch,
 	now: Date,
 	npmNames: string[],
+	debian = false,
 ): Promise<Versions> {
 	const [base, node, go, bun, uv, gh, rust, docker, chrome, npm] =
 		await Promise.all([
-			resolveBase(fetch),
+			debian ? resolveDebianBase() : resolveBase(fetch),
 			resolveNode(fetch),
 			resolveGo(fetch),
 			resolveBun(fetch),
 			resolveUv(fetch),
 			resolveGh(fetch),
 			resolveRust(fetch),
-			resolveDocker(fetch),
+			resolveDocker(fetch, debian),
 			resolveChrome(fetch),
 			resolveNpm(fetch, npmNames),
 		]);
@@ -318,6 +326,10 @@ export function formatVersionsToml(v: Versions): string {
 		table("base", [
 			["serial", str(v.base.serial)],
 			["sha256", str(v.base.sha256)],
+			...(v.base.sha512
+				? [["sha512", str(v.base.sha512)] as [string, string]]
+				: []),
+			...(v.base.url ? [["url", str(v.base.url)] as [string, string]] : []),
 		]),
 		table("apt", [["snapshot", str(v.apt.snapshot)]]),
 		table("docker", [
@@ -368,12 +380,14 @@ export async function updateLinuxVersions(
 	prev: Section | null,
 	fetch: Fetch,
 	now: Date,
+	debian = false,
 ): Promise<{ text: string; changes: string[] }> {
 	// Packages already pinned by hand stay in the file.
 	const resolved = await resolveLatest(
 		fetch,
 		now,
 		npmNames(DEFAULT_NPM_PACKAGES, prev?.npm),
+		debian,
 	);
 
 	let umiak: Versions["umiak"];

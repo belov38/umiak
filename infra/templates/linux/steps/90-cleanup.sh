@@ -75,7 +75,7 @@ for f in /etc/skel/.bash_logout /home/user/.bash_logout /root/.bash_logout; do
 done
 [ -e /etc/cloud/cloud-init.disabled ] || bad+=("cloud-init is not disabled")
 [ "$(cat /etc/hostname)" = umiak ] || bad+=("hostname is $(cat /etc/hostname)")
-! grep -q '^Snapshot:' /etc/apt/sources.list.d/ubuntu.sources || bad+=("apt sources still pin a snapshot")
+! grep -rEq '^Snapshot:|snapshot.debian.org' /etc/apt/sources.list.d || bad+=("apt sources still pin a snapshot")
 for u in root user; do
 	[[ $(passwd -S "$u" | awk '{ print $2 }') == L ]] || bad+=("password of $u is not locked")
 done

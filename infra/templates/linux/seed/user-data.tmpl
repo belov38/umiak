@@ -10,6 +10,10 @@ apt:
   # snapshot.ubuntu.com answers 503 at times; apt retries those fetches.
   conf: |
     Acquire::Retries "10";
+    Acquire::http::Timeout "30";
+    Acquire::https::Timeout "30";
+    Acquire::Queue-Mode "access";
+    Acquire::http::Pipeline-Depth "5";
 package_update: true
 packages:
   - qemu-guest-agent
