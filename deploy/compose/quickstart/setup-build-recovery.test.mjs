@@ -488,3 +488,20 @@ test("legacy failed copy recovers via journal after old cleanup lost its lease",
 	assert.deepEqual(f.mutations, ["delete"]);
 	assert.ok(f.queries.some((q) => q.includes("phase='cancelled'")));
 });
+
+test("cleanup can remove an owned replica converted to a template before registry publication", async () => {
+	const id = "c".repeat(32);
+	const f = cleanupFixture({
+		vms: [{ vmid: 701, status: "stopped" }],
+		cfg: {
+			template: 1,
+			name: `umiak-replica-${id}`,
+			tags: `umiak-tpl;umiak-copy-${id}`,
+		},
+	});
+	await cleanupBuild({
+		...f.options,
+		request: { jobId: `copy-${id}`, confirmRemove: true },
+	});
+	assert.deepEqual(f.mutations, ["delete"]);
+});

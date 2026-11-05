@@ -195,7 +195,7 @@ export async function cleanupBuild({
 			const cfg = await pve.get(`/nodes/${node.name}/qemu/${vm.vmid}/config`);
 			if (
 				Number(vm.vmid) === 590 ||
-				Number(cfg.template) === 1 ||
+				(Number(cfg.template) === 1 && !copyId) ||
 				(!(copyId && cfg.name === `umiak-replica-${copyId}`) &&
 					!String(cfg.tags || "")
 						.split(/[;,]/)
