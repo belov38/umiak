@@ -18,7 +18,7 @@ export async function fullVolumeCopy(input: {
 	sourceName: string;
 	targetNode: string;
 	targetName: string;
-	targetVmid?: number;
+	targetVmid: number;
 	sizeBytes: number;
 	onProgress?: (p: TransferProgress) => Promise<void>;
 }) {
@@ -28,7 +28,7 @@ export async function fullVolumeCopy(input: {
 			volume: `${input.sourceStorage}:${input.sourceName}`,
 			targetNode: input.targetNode,
 			targetName: input.targetName,
-			targetVmid: input.targetVmid ?? 0,
+			targetVmid: input.targetVmid,
 		},
 		async (p) =>
 			input.onProgress?.({

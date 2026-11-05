@@ -119,7 +119,7 @@ func (s *Server) validateReceive(a VolumeReceiveArgs) (string, string, error) {
 	if m == nil || !transferIDRe.MatchString(m[1]) || !regexp.MustCompile(`^[a-z0-9]{1,16}$`).MatchString(m[2]) {
 		return "", "", badReq("invalid Umiak staging name")
 	}
-	if (!s.Cfg.InRange(a.TargetVmid) && !s.Cfg.IsTemplateSlot(a.TargetVmid)) || a.TargetVmid == 590 {
+	if !s.Cfg.IsTemplateSlot(a.TargetVmid) || a.TargetVmid == 590 {
 		return "", "", forbidden("target VMID outside Umiak ranges")
 	}
 	if !lvUUIDRe.MatchString(a.SourceUUID) || a.SizeBytes == 0 || a.SizeBytes > 1<<50 || a.SizeBytes%512 != 0 || !storageNameRe.MatchString(s.Cfg.Storage) {

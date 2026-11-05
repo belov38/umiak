@@ -108,3 +108,18 @@ func TestRemovedTransferOpsAreUnknown(t *testing.T) {
 		t.Fatal("removed operations ran commands")
 	}
 }
+
+func TestTemplateExportKeepsOwnershipAndPoolGuards(t *testing.T) {
+	for _, mutate := range []func(*lvm.LV){
+		func(l *lvm.LV) { l.Tags = nil },
+		func(l *lvm.LV) { l.PoolLV = "foreign" },
+		func(l *lvm.LV) { l.Attr = "Vri-aotz-k" },
+	} {
+		h := newHarness(nil)
+		h.lvm.lvs[1].Attr = "Vri---tz-k"
+		mutate(&h.lvm.lvs[1])
+		if _, err := h.srv.transferTarget(t.Context(), "base-599-disk-0"); err == nil {
+			t.Fatal("accepted unsafe source")
+		}
+	}
+}
