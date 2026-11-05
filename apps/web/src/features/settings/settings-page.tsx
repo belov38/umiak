@@ -93,8 +93,8 @@ function Fields({
 										: "text"
 								}
 								value={
-									Array.isArray(item)
-										? item.join(", ")
+									Array.isArray(item) || key === "capabilities"
+										? (Array.isArray(item) ? item : []).join(", ")
 										: item == null
 											? ""
 											: String(item)
@@ -102,7 +102,7 @@ function Fields({
 								onChange={(e) => {
 									const text = e.target.value;
 									set(
-										Array.isArray(item)
+										Array.isArray(item) || key === "capabilities"
 											? text
 													.split(",")
 													.map((s) => s.trim())

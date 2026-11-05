@@ -4737,7 +4737,10 @@
 						"type": "integer"
 					},
 					"sortOrder": {
-						"type": "integer"
+						"type": [
+							"integer",
+							"null"
+						]
 					},
 					"vcpu": {
 						"maximum": 256,
@@ -4824,7 +4827,10 @@
 						]
 					},
 					"enabled": {
-						"type": "boolean"
+						"type": [
+							"boolean",
+							"null"
+						]
 					},
 					"loginUser": {
 						"maxLength": 64,
@@ -4849,7 +4855,10 @@
 						"type": "string"
 					},
 					"sortOrder": {
-						"type": "integer"
+						"type": [
+							"integer",
+							"null"
+						]
 					}
 				},
 				"type": "object"

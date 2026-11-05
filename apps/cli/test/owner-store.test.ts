@@ -2,7 +2,7 @@ import { createTestDatabase } from "@umiak/db/testing";
 import { expect, it } from "vitest";
 
 it("serializes concurrent claims and pair delivery in Postgres and preserves owner after restart", async () => {
-	const database = await createTestDatabase({ migrated: false });
+	const database = await createTestDatabase();
 	const moduleUrl = new URL(
 		"../../../deploy/compose/quickstart/owner.mjs",
 		import.meta.url,

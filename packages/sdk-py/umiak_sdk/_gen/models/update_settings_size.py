@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from attrs import define as _attrs_define
 
@@ -15,18 +15,22 @@ class UpdateSettingsSize:
     """
     Attributes:
         memory_mb (int | Unset):
-        sort_order (int | Unset):
+        sort_order (int | None | Unset):
         vcpu (int | Unset):
     """
 
     memory_mb: int | Unset = UNSET
-    sort_order: int | Unset = UNSET
+    sort_order: int | None | Unset = UNSET
     vcpu: int | Unset = UNSET
 
     def to_dict(self) -> dict[str, Any]:
         memory_mb = self.memory_mb
 
-        sort_order = self.sort_order
+        sort_order: int | None | Unset
+        if isinstance(self.sort_order, Unset):
+            sort_order = UNSET
+        else:
+            sort_order = self.sort_order
 
         vcpu = self.vcpu
 
@@ -47,7 +51,14 @@ class UpdateSettingsSize:
         d = dict(src_dict)
         memory_mb = d.pop("memoryMb", UNSET)
 
-        sort_order = d.pop("sortOrder", UNSET)
+        def _parse_sort_order(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        sort_order = _parse_sort_order(d.pop("sortOrder", UNSET))
 
         vcpu = d.pop("vcpu", UNSET)
 

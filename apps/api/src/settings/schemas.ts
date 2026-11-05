@@ -50,7 +50,10 @@ export const TemplateCreate = z
 	.openapi("CreateSettingsTemplate");
 export const TemplatePatch = TemplateCreate.omit({ slug: true })
 	.partial()
-	.extend({ enabled: z.boolean().optional() })
+	.extend({
+		enabled: z.boolean().nullable().optional(),
+		sortOrder: z.number().int().nullable().optional(),
+	})
 	.strict()
 	.openapi("UpdateSettingsTemplate");
 export const Template = z
@@ -77,6 +80,7 @@ export const SizeCreate = z
 	.openapi("CreateSettingsSize");
 export const SizePatch = SizeCreate.omit({ slug: true })
 	.partial()
+	.extend({ sortOrder: z.number().int().nullable().optional() })
 	.strict()
 	.openapi("UpdateSettingsSize");
 export const Size = z

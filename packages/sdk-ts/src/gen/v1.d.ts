@@ -3104,7 +3104,7 @@ export interface components {
         };
         UpdateSettingsSize: {
             memoryMb?: number;
-            sortOrder?: number;
+            sortOrder?: number | null;
             vcpu?: number;
         };
         UpdateSettingsTeam: {
@@ -3120,12 +3120,12 @@ export interface components {
             capabilities?: ("exec" | "files" | "ssh" | "desktop")[] | null;
             defaultSize?: string;
             description?: string | null;
-            enabled?: boolean;
+            enabled?: boolean | null;
             loginUser?: string | null;
             name?: string | null;
             /** @enum {string} */
             os?: "linux" | "windows";
-            sortOrder?: number;
+            sortOrder?: number | null;
         };
         Upload: {
             /**

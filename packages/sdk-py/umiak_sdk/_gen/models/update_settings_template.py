@@ -22,22 +22,22 @@ class UpdateSettingsTemplate:
         capabilities (list[UpdateSettingsTemplateCapabilitiesType0Item] | None | Unset):
         default_size (str | Unset):
         description (None | str | Unset):
-        enabled (bool | Unset):
+        enabled (bool | None | Unset):
         login_user (None | str | Unset):
         name (None | str | Unset):
         os (UpdateSettingsTemplateOs | Unset):
-        sort_order (int | Unset):
+        sort_order (int | None | Unset):
     """
 
     allowed_sizes: list[str] | Unset = UNSET
     capabilities: list[UpdateSettingsTemplateCapabilitiesType0Item] | None | Unset = UNSET
     default_size: str | Unset = UNSET
     description: None | str | Unset = UNSET
-    enabled: bool | Unset = UNSET
+    enabled: bool | None | Unset = UNSET
     login_user: None | str | Unset = UNSET
     name: None | str | Unset = UNSET
     os: UpdateSettingsTemplateOs | Unset = UNSET
-    sort_order: int | Unset = UNSET
+    sort_order: int | None | Unset = UNSET
 
     def to_dict(self) -> dict[str, Any]:
         allowed_sizes: list[str] | Unset = UNSET
@@ -64,7 +64,11 @@ class UpdateSettingsTemplate:
         else:
             description = self.description
 
-        enabled = self.enabled
+        enabled: bool | None | Unset
+        if isinstance(self.enabled, Unset):
+            enabled = UNSET
+        else:
+            enabled = self.enabled
 
         login_user: None | str | Unset
         if isinstance(self.login_user, Unset):
@@ -82,7 +86,11 @@ class UpdateSettingsTemplate:
         if not isinstance(self.os, Unset):
             os = self.os.value
 
-        sort_order = self.sort_order
+        sort_order: int | None | Unset
+        if isinstance(self.sort_order, Unset):
+            sort_order = UNSET
+        else:
+            sort_order = self.sort_order
 
         field_dict: dict[str, Any] = {}
 
@@ -150,7 +158,14 @@ class UpdateSettingsTemplate:
 
         description = _parse_description(d.pop("description", UNSET))
 
-        enabled = d.pop("enabled", UNSET)
+        def _parse_enabled(data: object) -> bool | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(bool | None | Unset, data)
+
+        enabled = _parse_enabled(d.pop("enabled", UNSET))
 
         def _parse_login_user(data: object) -> None | str | Unset:
             if data is None:
@@ -177,7 +192,14 @@ class UpdateSettingsTemplate:
         else:
             os = UpdateSettingsTemplateOs(_os)
 
-        sort_order = d.pop("sortOrder", UNSET)
+        def _parse_sort_order(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        sort_order = _parse_sort_order(d.pop("sortOrder", UNSET))
 
         update_settings_template = cls(
             allowed_sizes=allowed_sizes,

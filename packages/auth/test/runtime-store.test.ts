@@ -4,6 +4,7 @@ import {
 	type TestDatabase,
 } from "@umiak/db/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { seedRuntimeIdentity } from "../src/runtime-seed.ts";
 import {
 	runIdentityStoreContract,
 	runtimeContractSubject,
@@ -64,4 +65,84 @@ describe.skipIf(skipPg())("runtime identity", () => {
 		).rows[0];
 		expect(team.created_by_id).toBe(session.user.id);
 	});
+});
+
+it("bootstrap seeds insert missing rows and preserve imported operator edits", async () => {
+	const database = await createTestDatabase();
+	const team = "00000000-0000-0000-0000-00000000aaa1",
+		user = "00000000-0000-0000-0000-00000000aaa2",
+		key = "00000000-0000-0000-0000-00000000aaa3";
+	const file = JSON.stringify({
+		teams: [{ id: team, name: "Seed team" }],
+		users: [
+			{
+				id: user,
+				email: "seed@example.test",
+				name: "Seed owner",
+				teams: { [team]: "owner" },
+			},
+		],
+		apiKeys: [
+			{
+				id: key,
+				teamId: team,
+				name: "Seed key",
+				sha256: "a".repeat(64),
+				preset: "read-only",
+				expiresAt: "2030-01-01T00:00:00Z",
+			},
+		],
+	});
+	try {
+		expect(await seedRuntimeIdentity(database.pool, file)).toEqual({
+			teams: 1,
+			users: 1,
+			memberships: 1,
+			apiKeys: 1,
+		});
+		await database.pool.query(
+			"UPDATE runtime.teams SET name='Operator edit' WHERE id=$1",
+			[team],
+		);
+		await database.pool.query(
+			"UPDATE runtime.users SET active=false WHERE id=$1",
+			[user],
+		);
+		await database.pool.query(
+			"UPDATE runtime.api_keys SET revoked_at=now() WHERE id=$1",
+			[key],
+		);
+		expect(await seedRuntimeIdentity(database.pool, file)).toEqual({
+			teams: 0,
+			users: 0,
+			memberships: 0,
+			apiKeys: 0,
+		});
+		expect(
+			(
+				await database.pool.query(
+					"SELECT name FROM runtime.teams WHERE id=$1",
+					[team],
+				)
+			).rows[0].name,
+		).toBe("Operator edit");
+		expect(
+			(
+				await database.pool.query(
+					"SELECT active FROM runtime.users WHERE id=$1",
+					[user],
+				)
+			).rows[0].active,
+		).toBe(false);
+		expect(
+			(
+				await database.pool.query(
+					"SELECT revoked_at FROM runtime.api_keys WHERE id=$1",
+					[key],
+				)
+			).rows[0].revoked_at,
+		).not.toBeNull();
+	} finally {
+		await database.drop();
+	}
 });
