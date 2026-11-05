@@ -228,6 +228,11 @@ export async function replicateActiveTemplates({
 								[journal.id],
 							);
 						});
+						await onProgress({
+							phase: "ready",
+							node: target.name,
+							nodeId: target.nodeId,
+						});
 						continue;
 					}
 
