@@ -173,6 +173,7 @@ describe.skipIf(skipPg())("stream chaos across api restarts", () => {
 		current = await startInstance();
 		({ secret } = await issueApiKey(current.deps.identity, { teamId }));
 		proxy = await startTcpProxy(current.ports.public);
+		settings.ownerHosts.push(`127.0.0.1:${proxy.port}`);
 	});
 
 	afterAll(async () => {

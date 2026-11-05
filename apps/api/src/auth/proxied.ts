@@ -1,6 +1,6 @@
-// Authentication of the proxied listener (S7 §7.4, S8 §5.2, C4, C6): the
-// browser behind owner ingress. Only owner ingress reaches this port
-// (NetworkPolicy), so its X-Auth-Request-* headers are trusted here.
+// Private browser API listener behind the owner ingress.
+// Socket-peer admission is mandatory; client identity headers are ignored.
+// Unsafe requests and WebSocket upgrades require the dashboard Origin.
 
 import type { Context, MiddlewareHandler } from "hono";
 import type { ApiDeps, ApiEnv } from "../deps.ts";

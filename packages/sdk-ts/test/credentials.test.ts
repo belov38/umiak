@@ -17,7 +17,7 @@ afterEach(async () => {
 
 function profile(over: Record<string, unknown> = {}) {
 	return {
-		kind: "owner",
+		kind: "key",
 		token: "jwt-1",
 		expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
 		apiUrl: API,

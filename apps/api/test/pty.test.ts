@@ -961,7 +961,7 @@ describe.skipIf(skipPg())("PTY over WebSocket", () => {
 				});
 				sock.on("error", () => {});
 			});
-		const auth = `Authorization: Bearer ${w.secret}\r\nHost: x\r\n`;
+		const auth = `Authorization: Bearer ${w.secret}\r\nHost: 127.0.0.1:${port}\r\n`;
 
 		const body = JSON.stringify({ command: "printf posted", mode: "sync" });
 		const post = await raw(
