@@ -47,7 +47,7 @@
             "maximum": 604800
           },
           "template": {
-            "description": "Slug: linux (default), linux-desktop, windows (desktop; alias windows-desktop). Ignored with from_snapshot",
+            "description": "linux=Ubuntu 26.04 (default), debian=Debian 13, linux-desktop, windows (desktop). Ignored with from_snapshot",
             "type": "string"
           },
           "size": {
