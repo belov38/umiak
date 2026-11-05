@@ -1,3 +1,4 @@
+import { validatePinnedTunnelUrl } from "../../../packages/pve/src/boot-trust.ts";
 import { canonicalFetch } from "../canonical-fetch.mjs";
 import { platformReleaseChannel } from "../release-channel.mjs";
 import { gatewayCertificates } from "./certificates.mjs";
@@ -161,6 +162,7 @@ export function validateNetwork(input) {
 	const tunnelUrl =
 		input.tunnelUrl ||
 		`wss://${/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) ? `tunnel.${host.replaceAll(".", "-")}.sslip.io` : host}/v1/connect`;
+	validatePinnedTunnelUrl(tunnelUrl);
 	const url = new URL(tunnelUrl);
 	requireValue(
 		url.protocol === "wss:" && !url.username && !url.password,
@@ -454,6 +456,14 @@ export function createSetupHandler({
 						state.steps.network?.data?.guestSubnet ||
 						input.guestSubnet,
 			});
+			const ca = await readOptional(
+				process.env.UMIAK_GATEWAY_SECRETS_DIR || "/gateway-secrets",
+				"ca.pem",
+			);
+			if (ca)
+				network.tunnelCAPin = new X509Certificate(ca).fingerprint256
+					.replaceAll(":", "")
+					.toLowerCase();
 			const report = state.steps.host.data;
 			verifyIsolation(
 				report.rules,

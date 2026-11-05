@@ -691,3 +691,15 @@ test("network accepts aligned /18 pools and rejects noncanonical or public pools
 	])
 		assert.throws(() => validateNetwork({ ...base, guestSubnet }));
 });
+
+test("network rejects an overlong firmware tunnel endpoint before provisioning", () => {
+	const hostname = ["a".repeat(60), "b".repeat(60), "c".repeat(22)].join(".");
+	assert.throws(
+		() =>
+			validateNetwork({
+				gatewayAddress: "192.168.1.2",
+				tunnelUrl: `wss://${hostname}/v1/connect`,
+			}),
+		/tunnel hostname too long.*max 143 chars/,
+	);
+});

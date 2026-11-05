@@ -621,3 +621,13 @@ func (h *holdEmitter) release() {
 	}
 	h.held, h.open = nil, true
 }
+
+// tunnelCAPin returns the immutable boot trust in memory, never a disk fallback.
+func (s *identityState) tunnelCAPin() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.id == nil {
+		return ""
+	}
+	return s.id.TunnelCAPin
+}

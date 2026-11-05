@@ -13,6 +13,7 @@ import {
 	type SshCa,
 } from "@umiak/auth";
 import { z } from "zod";
+import { validatePinnedTunnelUrl } from "../../../packages/pve/src/boot-trust.ts";
 
 export class SettingsError extends Error {
 	constructor(message: string) {
@@ -250,6 +251,15 @@ const schema = z.object({
 export function loadSettings(
 	env: Record<string, string | undefined>,
 ): Settings {
+	if (env.UMIAK_TUNNEL_URL) {
+		try {
+			validatePinnedTunnelUrl(env.UMIAK_TUNNEL_URL);
+		} catch (err) {
+			throw new SettingsError(
+				`UMIAK_TUNNEL_URL: ${err instanceof Error ? err.message : String(err)}`,
+			);
+		}
+	}
 	const mode = parseAuthMode(env);
 	const allowed = ownerAllowedCidrs(env);
 	const r = schema.safeParse(env);

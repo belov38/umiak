@@ -168,3 +168,10 @@ describe("readSshCa", () => {
 		expect(() => readSshCa(join(dir, "missing"))).toThrow();
 	});
 });
+
+it("rejects tunnel hostnames exceeding firmware capacity at API configuration", () => {
+	const hostname = ["a".repeat(60), "b".repeat(60), "c".repeat(22)].join(".");
+	expect(
+		errorOf({ ...TEST_ENV, UMIAK_TUNNEL_URL: `wss://${hostname}/v1/connect` }),
+	).toMatch(/tunnel hostname too long.*max 143 chars/);
+});

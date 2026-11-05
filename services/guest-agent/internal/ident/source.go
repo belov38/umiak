@@ -13,6 +13,8 @@ type Raw struct {
 	UUID string
 	// Family is the smbios product family: umiakt1:<tunnel url> or empty.
 	Family string
+	// SKU carries the optional versioned installation CA fingerprint.
+	SKU string
 	// BootID is the kernel boot id.
 	BootID string
 }

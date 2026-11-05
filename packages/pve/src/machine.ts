@@ -1,3 +1,7 @@
+import { skuForTunnelCA } from "./boot-trust.ts";
+
+export { skuForTunnelCA, validatePinnedTunnelUrl } from "./boot-trust.ts";
+
 import {
 	type Allocator,
 	macFor,
@@ -30,6 +34,8 @@ export interface Smbios {
 	serial: string;
 	/** Tunnel descriptor, see familyForTunnelUrl. */
 	family?: string;
+	/** Versioned CA fingerprint for generic Linux guests. */
+	sku?: string;
 }
 
 /** Proxmox rejects an smbios1 string longer than this. */
@@ -45,7 +51,8 @@ export class SmbiosTooLongError extends Error {
 export function formatSmbios1(s: Smbios): string {
 	const b64 = (v: string) => Buffer.from(v, "utf8").toString("base64");
 	const family = s.family !== undefined ? `,family=${b64(s.family)}` : "";
-	const out = `uuid=${s.uuid},serial=${b64(s.serial)}${family},base64=1`;
+	const sku = s.sku !== undefined ? `,sku=${b64(s.sku)}` : "";
+	const out = `uuid=${s.uuid},serial=${b64(s.serial)}${family}${sku},base64=1`;
 	if (out.length > SMBIOS1_MAX) throw new SmbiosTooLongError(out.length);
 	return out;
 }
@@ -295,6 +302,8 @@ export async function checkLeaseOwner(o: {
 
 /** Options of start/stop/shutdown/delete. */
 export interface PowerOpts {
+	/** Installation CA to apply immediately before boot, preserving identity. */
+	tunnelCAPin?: string;
 	/** See checkLeaseOwner. Read right before the action. */
 	expectedOwner?: string | null;
 }
@@ -626,6 +635,31 @@ export class Machines {
 
 	async start(vmid: number, opts: PowerOpts = {}): Promise<void> {
 		await this.#checkOwner("start", vmid, opts);
+		if (opts.tunnelCAPin !== undefined) {
+			const conf = await this.#o.api.get<Record<string, string>>(
+				`/nodes/${this.#node}/qemu/${vmid}/config`,
+			);
+			if (conf.ostype?.startsWith("win")) {
+				await this.#task(vmid, "start");
+				return;
+			}
+			const fields = (conf.smbios1 || "").split(",");
+			if (
+				!fields.includes("base64=1") ||
+				!fields.some((f) => f.startsWith("serial="))
+			)
+				throw new Error("Missing boot firmware identity");
+			const value = [
+				...fields.filter((f) => !f.startsWith("sku=") && f !== "base64=1"),
+				`sku=${Buffer.from(skuForTunnelCA(opts.tunnelCAPin)).toString("base64")}`,
+				"base64=1",
+			].join(",");
+			if (value.length > SMBIOS1_MAX)
+				throw new SmbiosTooLongError(value.length);
+			await this.#o.api.put(`/nodes/${this.#node}/qemu/${vmid}/config`, {
+				smbios1: value,
+			});
+		}
 		await this.#task(vmid, "start");
 	}
 

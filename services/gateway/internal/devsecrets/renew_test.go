@@ -174,3 +174,21 @@ func TestRenewBeforeUpdatesNamesWithoutChangingKeys(t *testing.T) {
 		t.Fatalf("stable names wrote %v: %v", again, err)
 	}
 }
+
+func TestTunnelChainContainsInstallCA(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := devsecrets.Generate(devsecrets.Options{Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	pair, err := tls.LoadX509KeyPair(filepath.Join(dir, "tunnel.pem"), filepath.Join(dir, "tunnel.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pair.Certificate) != 2 {
+		t.Fatalf("chain has %d certificates, want leaf and CA", len(pair.Certificate))
+	}
+	ca, err := x509.ParseCertificate(pair.Certificate[1])
+	if err != nil || !ca.IsCA {
+		t.Fatal("chain lacks CA", err)
+	}
+}

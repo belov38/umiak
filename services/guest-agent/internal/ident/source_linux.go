@@ -20,6 +20,11 @@ func (s SysfsSource) Read(ctx context.Context) (Raw, error) {
 	if err != nil {
 		return Raw{}, fmt.Errorf("ident: read product_serial: %w", err)
 	}
+	sku, err := os.ReadFile(filepath.Join(s.Dir, "product_sku"))
+	if err != nil && !os.IsNotExist(err) {
+		return Raw{}, fmt.Errorf("ident: read product_sku: %w", err)
+	}
+	raw.SKU = strings.TrimSpace(string(sku))
 	raw.Serial = strings.TrimSpace(string(serial))
 	raw.UUID = readOptional(filepath.Join(s.Dir, "product_uuid"))
 	raw.Family = readOptional(filepath.Join(s.Dir, "product_family"))

@@ -390,6 +390,29 @@ describe("PveInfraRegistry", () => {
 });
 
 describe("tunnel URL in smbios family (S5 section 14)", () => {
+	it("provisions a firmware CA pin while preserving machine identity", async () => {
+		const pin = "a".repeat(64),
+			url = "wss://tunnel.example.test/v1/connect";
+		const e = await setup({
+			env: { UMIAK_TUNNEL_URL: url, UMIAK_TUNNEL_CA_SHA256: pin },
+		});
+		const m = randomUUID(),
+			smbios = smbiosFor(m);
+		const vm = await e.infra.create({
+			machineId: m,
+			templateVmid: 599,
+			size: { vcpu: 2, memoryMb: 2048 },
+			smbios,
+		});
+		expect(e.api.vms.get(vm.vmid)?.config.smbios1).toBe(
+			formatSmbios1({
+				...smbios,
+				family: `umiakt1:${url}`,
+				sku: `umiakca1:${pin}`,
+			}),
+		);
+	});
+
 	it("create and fork write family=umiakt1:<UMIAK_TUNNEL_URL> into smbios1", async () => {
 		const url = "wss://tunnel.example.com/v1/connect";
 		const e = await setup({ env: { UMIAK_TUNNEL_URL: url } });
