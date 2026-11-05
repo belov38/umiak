@@ -3,7 +3,9 @@ import { verify } from "node:crypto";
 export const IMAGE_LIMITS = Object.freeze({
 	metadata: 1024 * 1024,
 	chunk: 512 * 1024 * 1024,
-	disk: 256 * 1024 ** 3,
+	archive: 32 * 1024 ** 3,
+	file: 4 * 1024 ** 3,
+	files: 4096,
 	chunks: 512,
 	inventory: 32 * 1024 * 1024,
 });
@@ -92,22 +94,24 @@ export function verifyImageManifest(options) {
 		"maxPlatform",
 		"minAgent",
 		"bootTrust",
-		"hardware",
-		"disks",
+		"archive",
+		"files",
 		"inventory",
 		"verification",
 	]);
-	check(m.format === "umiak-linux-image/v1" && m.arch === "amd64");
+	check(m.format === "umiak-linux-layer/v1" && m.arch === "amd64");
 	identity(m, options.channel);
 	check(["linux", "linux-desktop"].includes(m.slug) && m.slug === options.slug);
-	text(m.distro);
-	text(m.release);
+	check(m.distro === "ubuntu" && m.release === "26.04");
 	check(/^[a-f0-9]{40,64}$/.test(m.sourceCommit));
 	hash(m.recipeSha256);
 	object(m.base, ["url", "serial", "sha256"]);
-	const base = new URL(m.base.url);
-	check(base.protocol === "https:" && !base.username && !base.password);
-	text(m.base.serial);
+	check(/^\d{8}$/.test(m.base.serial));
+	check(
+		m.base.url ===
+			`https://cloud-images.ubuntu.com/minimal/releases/resolute/release-${m.base.serial}/ubuntu-26.04-minimal-cloudimg-amd64.img`,
+		"Base must be the unmodified official Canonical image",
+	);
 	hash(m.base.sha256);
 	check(/^\d{8}T\d{6}Z$/.test(m.aptSnapshot));
 	object(m.agent, ["version", "sha256"]);
@@ -120,52 +124,52 @@ export function verifyImageManifest(options) {
 			compare(options.agent, m.minAgent) >= 0,
 		"Image incompatible with platform or agent",
 	);
-	object(m.hardware, ["bios", "scsihw", "machine"]);
+	const d = m.archive;
+	object(d, ["sizeBytes", "compressedBytes", "sha256", "rawSha256", "chunks"]);
+	size(d.sizeBytes, IMAGE_LIMITS.archive);
+	size(d.compressedBytes, IMAGE_LIMITS.archive);
+	hash(d.sha256);
+	hash(d.rawSha256);
 	check(
-		["seabios", "ovmf"].includes(m.hardware.bios) &&
-			m.hardware.scsihw === "virtio-scsi-single" &&
-			m.hardware.machine === "q35",
+		Array.isArray(d.chunks) &&
+			d.chunks.length > 0 &&
+			d.chunks.length <= IMAGE_LIMITS.chunks,
 	);
-	check(Array.isArray(m.disks) && m.disks.length > 0 && m.disks.length <= 3);
-	const slots = new Set();
-	for (const d of m.disks) {
-		object(d, [
-			"slot",
-			"sizeBytes",
-			"compressedBytes",
-			"sha256",
-			"rawSha256",
-			"chunks",
-		]);
-		check(
-			["scsi0", "efidisk0", "tpmstate0"].includes(d.slot) && !slots.has(d.slot),
-		);
-		slots.add(d.slot);
-		size(d.sizeBytes, IMAGE_LIMITS.disk);
-		check(d.sizeBytes % 512 === 0);
-		size(d.compressedBytes, IMAGE_LIMITS.disk);
-		hash(d.sha256);
-		hash(d.rawSha256);
-		check(
-			Array.isArray(d.chunks) &&
-				d.chunks.length > 0 &&
-				d.chunks.length <= IMAGE_LIMITS.chunks,
-		);
-		let total = 0;
-		for (const c of d.chunks) {
-			object(c, ["sha256", "sizeBytes"]);
-			hash(c.sha256);
-			size(c.sizeBytes, IMAGE_LIMITS.chunk);
-			total += c.sizeBytes;
-		}
-		check(total === d.compressedBytes);
+	let total = 0;
+	for (const c of d.chunks) {
+		object(c, ["sha256", "sizeBytes"]);
+		hash(c.sha256);
+		size(c.sizeBytes, IMAGE_LIMITS.chunk);
+		total += c.sizeBytes;
 	}
-	check(slots.has("scsi0"));
+	check(total === d.compressedBytes);
+	check(
+		Array.isArray(m.files) &&
+			m.files.length > 0 &&
+			m.files.length <= IMAGE_LIMITS.files,
+	);
+	const paths = new Set();
+	let fileBytes = 0;
+	for (const file of m.files) {
+		object(file, ["path", "sizeBytes", "sha256", "mode"]);
+		check(validLayerPath(file.path) && !paths.has(file.path));
+		paths.add(file.path);
+		check(
+			Number.isSafeInteger(file.sizeBytes) &&
+				file.sizeBytes >= 0 &&
+				file.sizeBytes <= IMAGE_LIMITS.file,
+		);
+		hash(file.sha256);
+		check([0o644, 0o755].includes(file.mode));
+		fileBytes += file.sizeBytes;
+	}
+	check(fileBytes <= d.sizeBytes);
+
 	object(m.inventory, ["sha256", "sizeBytes"]);
 	hash(m.inventory.sha256);
 	size(m.inventory.sizeBytes, IMAGE_LIMITS.inventory);
-	object(m.verification, ["ok"]);
-	check(m.verification.ok === true);
+	object(m.verification, ["ok", "offlineReplay"]);
+	check(m.verification.ok === true && m.verification.offlineReplay === true);
 	return m;
 }
 export function verifyImagePointer(options) {
@@ -202,4 +206,15 @@ export function imageObjectUrl(base, key) {
 	);
 	u.pathname = `${u.pathname.replace(/\/$/, "")}/${key}`;
 	return u.toString();
+}
+
+/** Outer layer files are inert inputs; no disk images, links or path escapes. */
+export function validLayerPath(path) {
+	return (
+		typeof path === "string" &&
+		path.length <= 512 &&
+		/^(apt|inputs|build|licenses|recipes)\/[A-Za-z0-9_@+.,=/-]+$/.test(path) &&
+		path.split("/").every((p) => p !== "" && p !== "." && p !== "..") &&
+		!/\.(?:qcow2?|raw|img|vmdk|vdi|iso)$/i.test(path)
+	);
 }
