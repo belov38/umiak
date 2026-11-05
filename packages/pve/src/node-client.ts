@@ -1,6 +1,11 @@
 import { createHmac, randomUUID } from "node:crypto";
+import type { Duplex } from "node:stream";
 import ssh2, { type Client as SshClient } from "ssh2";
 
+export interface TransferSession {
+	stream: Duplex;
+	closed: Promise<void>;
+}
 /** Transport-independent umiak-node interface; tests use a fake. */
 export interface NodeOps {
 	call<T = unknown>(
@@ -12,6 +17,7 @@ export interface NodeOps {
 		args: object,
 		onProgress?: (progress: Record<string, number>) => Promise<void>,
 	): Promise<T>;
+	openTransfer?(args: object): Promise<TransferSession>;
 	close(): void;
 }
 
@@ -279,6 +285,33 @@ export class SshNodeOps implements NodeOps {
 			return resp.result as T;
 		} finally {
 			this.#release(slot);
+		}
+	}
+
+	async openTransfer(args: object): Promise<TransferSession> {
+		const slot = await this.#acquire();
+		try {
+			const stream = await this.#exec(await this.#connect(slot));
+			const timer = setTimeout(
+				() => stream.destroy(),
+				this.#opts.callTimeoutMs ?? 120000,
+			);
+			stream.on("readable", () => timer.refresh());
+			stream.on("error", () => {});
+			const closed = new Promise<void>((resolve) =>
+				stream.once("close", () => {
+					clearTimeout(timer);
+					this.#release(slot);
+					resolve();
+				}),
+			);
+			stream.write(
+				`${JSON.stringify({ op: "lv.deltaStream", args, requestId: randomUUID() })}\n`,
+			);
+			return { stream, closed };
+		} catch (error) {
+			this.#release(slot);
+			throw error;
 		}
 	}
 

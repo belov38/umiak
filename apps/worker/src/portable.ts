@@ -281,8 +281,10 @@ async function copyDisks(
 				(fence as Fenced).op.deadlineAt = deadline;
 			}
 		};
+		const started = performance.now();
+		let transferResult;
 		if (useFull)
-			await fullVolumeCopy({
+			transferResult = await fullVolumeCopy({
 				source: src.node,
 				sourceStorage: src.storage,
 				sourceName: name,
@@ -292,7 +294,7 @@ async function copyDisks(
 				onProgress,
 			});
 		else
-			await relayVolume({
+			transferResult = await relayVolume({
 				source: src.node,
 				target: dst.node,
 				sourceName: name,
@@ -302,6 +304,16 @@ async function copyDisks(
 				...(sourceBase && a ? { sourceBase, baseChecksum: a.sha256 } : {}),
 				onProgress,
 			});
+		j.progress[`${disk.slot}DurationMs`] = performance.now() - started;
+		j.progress[`${disk.slot}TransferredBytes`] =
+			"wireBytes" in transferResult
+				? transferResult.wireBytes
+				: transferResult.transferredBytes;
+		await ctx.pool.query(
+			"UPDATE runtime.volume_transfers SET progress=$2,updated_at=now() WHERE id=$1",
+			[j.id, JSON.stringify(j.progress)],
+		);
+
 		await fence.check();
 		const final = finalNames(disk);
 		await dst.node.call("lv.transferPublish", {

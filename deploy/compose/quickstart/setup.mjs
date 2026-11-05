@@ -873,11 +873,15 @@ export function createSetupHandler({
 		copyExisting: async (slug, input) => {
 			const source = (
 				await query(
-					"SELECT id FROM runtime.template_builds WHERE template_slug=$1 AND status='active' ORDER BY (source_build_id IS NOT NULL),created_at DESC LIMIT 1",
+					"SELECT id,node_id FROM runtime.template_builds WHERE template_slug=$1 AND status='active' ORDER BY (source_build_id IS NOT NULL),created_at DESC LIMIT 1",
 					[slug],
 				)
 			).rows[0];
 			if (!source) return false;
+			await jobs.update((s) => {
+				if (s.buildQueue?.nodes.includes(source.node_id))
+					s.buildQueue.states[source.node_id] = "Ready";
+			});
 			const current = await store.read();
 			await replicateActiveTemplates({
 				pool,

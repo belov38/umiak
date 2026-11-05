@@ -13,6 +13,7 @@ import (
 func TestVolumeSendRejectsForeignAndUntrustedDestinations(t *testing.T) {
 	h := newHarness(fstest.MapFS{"etc/pve/.members": {Data: []byte(`{"nodelist":{"pve":{"online":1,"ip":"192.168.1.1"},"pve2":{"online":1,"ip":"192.168.1.2"},"offline":{"online":0,"ip":"192.168.1.3"}}}`)}})
 	h.lvm.lvs[1].UUID = "source-uuid"
+	h.lvm.lvs[1].Attr = "Vri---tz-k"
 	for _, a := range []map[string]any{
 		{"volume": "local-lvm:vm-108-disk-0", "targetNode": "pve2", "targetName": "umiak-snap-" + strings.Repeat("a", 32) + "-scsi0", "targetVmid": 598},
 		{"volume": "local-lvm:base-599-disk-0", "targetNode": "offline", "targetName": "umiak-snap-" + strings.Repeat("a", 32) + "-scsi0", "targetVmid": 598},
@@ -69,5 +70,19 @@ func TestVerifiedImportReceiptIsBoundToSourceAndLVGeneration(t *testing.T) {
 	raw, _ = json.Marshal(a)
 	if _, err = h.srv.ReceiveVolume(t.Context(), raw, strings.NewReader("")); err == nil {
 		t.Fatal("allowed source generation collision")
+	}
+}
+
+func TestSnapshotExportsFreezeTheirSource(t *testing.T) {
+	h := newHarness(nil)
+	lv := lvm.LV{Name: "umiak-snap-" + strings.Repeat("a", 32) + "-scsi0", Attr: "Vwi-a-tz--"}
+	if err := h.srv.freezeTransferSource(t.Context(), lv); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.run.calls) != 1 || strings.Join(h.run.calls[0], " ") != "lvchange -pr pve/"+lv.Name {
+		t.Fatal(h.run.calls)
+	}
+	if err := h.srv.freezeTransferSource(t.Context(), lvm.LV{Name: "base-599-disk-0", Attr: "Vwi-a-tz--"}); err == nil {
+		t.Fatal("writable template accepted as immutable")
 	}
 }

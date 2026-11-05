@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { NodeOps } from "../node-client.ts";
+import { streamDelta } from "./delta-stream.ts";
 
 export interface TransferProgress {
 	verifiedBytes: number;
@@ -136,6 +137,12 @@ export async function relayVolume(
 	)
 		throw new Error("invalid transfer size, base or checkpoint");
 	const extents = await runs(input, blockBytes);
+	if (
+		input.sourceBase &&
+		input.source.openTransfer &&
+		input.target.openTransfer
+	)
+		return streamDelta(input, extents);
 	if (!input.sourceBase) {
 		const targetRuns = await runs(
 			{ ...input, source: target, sourceName: targetName },

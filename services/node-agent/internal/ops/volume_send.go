@@ -10,7 +10,9 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/belov38/umiak/services/node-agent/internal/lvm"
 	"io"
 	"io/fs"
 	"net"
@@ -33,7 +35,10 @@ type VolumeReceiveArgs struct {
 	SourceUUID string `json:"sourceUUID"`
 	SizeBytes  uint64 `json:"sizeBytes"`
 	Probe      bool   `json:"probe,omitempty"`
+	Restart    bool   `json:"restart,omitempty"`
 }
+
+// VolumeReceipt binds a complete import to immutable source and destination UUIDs.
 type VolumeReceipt struct {
 	Name           string  `json:"name"`
 	SourceUUID     string  `json:"sourceUUID"`
@@ -78,7 +83,7 @@ func (s *Server) validateReceive(a VolumeReceiveArgs) (string, string, error) {
 	if m == nil || !transferIDRe.MatchString(m[1]) || !regexp.MustCompile(`^[a-z0-9]{1,16}$`).MatchString(m[2]) {
 		return "", "", badReq("invalid Umiak staging name")
 	}
-	if !(s.Cfg.InRange(a.TargetVmid) || s.Cfg.IsTemplateSlot(a.TargetVmid)) || a.TargetVmid == 590 {
+	if (!s.Cfg.InRange(a.TargetVmid) && !s.Cfg.IsTemplateSlot(a.TargetVmid)) || a.TargetVmid == 590 {
 		return "", "", forbidden("target VMID outside Umiak ranges")
 	}
 	if !lvUUIDRe.MatchString(a.SourceUUID) || a.SizeBytes == 0 || a.SizeBytes > 1<<50 || a.SizeBytes%512 != 0 || !storageNameRe.MatchString(s.Cfg.Storage) {
@@ -119,7 +124,9 @@ type countWriter struct {
 
 func (w *countWriter) Write(p []byte) (int, error) {
 	n, e := w.w.Write(p)
-	w.n.Add(uint64(n))
+	if n > 0 {
+		w.n.Add(uint64(n))
+	}
 	return n, e
 }
 
@@ -142,6 +149,18 @@ func (p *progressWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
+// Freeze immutable snapshot exports before caching by LV UUID. A staging LV
+// subsequently offered as a source can no longer be modified by transferWrite.
+func (s *Server) freezeTransferSource(ctx context.Context, lv lvm.LV) error {
+	if baseRe.MatchString(lv.Name) {
+		if len(lv.Attr) < 2 || lv.Attr[1] != 'r' {
+			return forbidden("template export requires a read-only LV")
+		}
+		return nil
+	}
+	_, err := s.Host.Run(ctx, "lvchange", "-pr", s.Cfg.VG+"/"+lv.Name)
+	return err
+}
 func (s *Server) volumeSendTo(ctx context.Context, raw json.RawMessage) (any, error) {
 	var a struct {
 		Volume     string `json:"volume"`
@@ -170,7 +189,7 @@ func (s *Server) volumeSendTo(ctx context.Context, raw json.RawMessage) (any, er
 	if a.TargetNode == s.Cfg.Node {
 		return nil, badReq("same source and target")
 	}
-	receive := VolumeReceiveArgs{TargetName: a.TargetName, TargetVmid: a.TargetVmid, SourceNode: s.Cfg.Node, SourceUUID: lv.UUID, SizeBytes: lv.SizeBytes}
+	receive := VolumeReceiveArgs{TargetName: a.TargetName, TargetVmid: a.TargetVmid, SourceNode: s.Cfg.Node, SourceUUID: lv.UUID, SizeBytes: lv.SizeBytes, Restart: len(lv.Attr) < 2 || lv.Attr[1] != 'r'}
 	// Validate all destination syntax locally too; the destination validates its own ranges.
 	m := snapLVRe.FindStringSubmatch(a.TargetName)
 	if m == nil || !transferIDRe.MatchString(m[1]) || !regexp.MustCompile(`^[a-z0-9]{1,16}$`).MatchString(m[2]) {
@@ -197,6 +216,9 @@ func (s *Server) volumeSendTo(ctx context.Context, raw json.RawMessage) (any, er
 	}
 	if !prior.OK {
 		return nil, fmt.Errorf("target preflight refused: %v", prior.Error)
+	}
+	if err = s.freezeTransferSource(ctx, lv); err != nil {
+		return nil, err
 	}
 	if prior.Result.Verified && prior.Result.SourceUUID == lv.UUID && prior.Result.SizeBytes == lv.SizeBytes {
 		return prior.Result, nil
@@ -227,11 +249,11 @@ func (s *Server) volumeSendTo(ctx context.Context, raw json.RawMessage) (any, er
 	}
 	var exporter *exec.Cmd
 	if baseRe.MatchString(name) {
-		exporter = exec.CommandContext(ctx, "pvesm", "export", a.Volume, "raw+size", "-", "--with-snapshots", "0")
+		exporter = exec.CommandContext(ctx, "pvesm", "export", a.Volume, "raw+size", "-", "--with-snapshots", "0") //nolint:gosec // fixed executables; storage, owned LV and staging identifiers validated above
 	} else {
 		// PVE does not parse umiak-snap names. Emit its exact raw+size framing for
 		// validated immutable snapshots, using the same fixed device reader.
-		exporter = exec.CommandContext(ctx, "dd", "if="+filepath.Join("/dev", s.Cfg.VG, name), "bs=8M", "status=none")
+		exporter = exec.CommandContext(ctx, "dd", "if="+filepath.Join("/dev", s.Cfg.VG, name), "bs=8M", "status=none") //nolint:gosec // fixed executables; storage, owned LV and staging identifiers validated above
 	}
 	var exportLog boundedLog
 	exporter.Stderr = &exportLog
@@ -263,7 +285,7 @@ func (s *Server) volumeSendTo(ctx context.Context, raw json.RawMessage) (any, er
 	progress := &progressWriter{s: s, total: lv.SizeBytes, started: started}
 	n, copyErr := io.CopyBuffer(zin, io.TeeReader(reader, io.MultiWriter(hash, progress)), make([]byte, 8<<20))
 	_ = zin.Close()
-	if copyErr != nil || uint64(n) != lv.SizeBytes+8 {
+	if copyErr != nil || uint64(n) != lv.SizeBytes+8 { //nolint:gosec // io.Copy counts are nonnegative and volume sizes bounded by validation
 		cancel()
 	}
 	exportErr := exporter.Wait()
@@ -273,11 +295,11 @@ func (s *Server) volumeSendTo(ctx context.Context, raw json.RawMessage) (any, er
 	if copyErr != nil {
 		return nil, copyErr
 	}
-	if uint64(n) != lv.SizeBytes+8 {
+	if uint64(n) != lv.SizeBytes+8 { //nolint:gosec // io.Copy counts are nonnegative and volume sizes bounded by validation
 		return nil, fmt.Errorf("truncated source export")
 	}
 	if exportErr != nil || zipErr != nil || sshErr != nil {
-		return nil, fmt.Errorf("full volume stream failed: export=%v zstd=%v ssh=%v: %s %s %s", exportErr, zipErr, sshErr, exportLog.String(), compLog.String(), remoteLog.String())
+		return nil, fmt.Errorf("full volume stream failed: %w: %s %s %s", errors.Join(exportErr, zipErr, sshErr), exportLog.String(), compLog.String(), remoteLog.String())
 	}
 	var reply struct {
 		OK     bool          `json:"ok"`
@@ -316,7 +338,7 @@ func (s *Server) ReceiveVolume(ctx context.Context, raw []byte, compressed io.Re
 	if err = os.MkdirAll(dir, 0700); err != nil {
 		return empty, err
 	}
-	lock, err := os.OpenFile(filepath.Join(dir, id+"-"+slot+".lock"), os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := os.OpenFile(filepath.Join(dir, id+"-"+slot+".lock"), os.O_CREATE|os.O_RDWR, 0600) //nolint:gosec // root-owned state directory, validated hex transfer ID and slot
 	if err != nil {
 		return empty, err
 	}
@@ -327,7 +349,7 @@ func (s *Server) ReceiveVolume(ctx context.Context, raw []byte, compressed io.Re
 	marker := filepath.Join(dir, id+"-"+slot+".json")
 	interim := fmt.Sprintf("vm-%d-umiak-import-%s-%s", a.TargetVmid, id, slot)
 	var old importRecord
-	existing, readErr := os.ReadFile(marker)
+	existing, readErr := os.ReadFile(marker) //nolint:gosec // root-owned state directory, validated hex transfer ID and slot
 	if readErr == nil {
 		if err = json.Unmarshal(existing, &old); err != nil {
 			return empty, err
@@ -343,7 +365,7 @@ func (s *Server) ReceiveVolume(ctx context.Context, raw []byte, compressed io.Re
 		return empty, err
 	}
 	for _, lv := range all {
-		if lv.Name == a.TargetName && old.Receipt.Verified && lv.UUID == old.Receipt.UUID && slices.Contains(lv.Tags, "umiak-transfer-"+id) && lv.SizeBytes == a.SizeBytes {
+		if !a.Restart && lv.Name == a.TargetName && old.Receipt.Verified && ours(lv) && lv.PoolLV == s.Cfg.ThinPool && len(lv.Attr) >= 6 && lv.Attr[5] == '-' && slices.Contains(lv.Tags, "umiak-snap-"+id) && lv.UUID == old.Receipt.UUID && slices.Contains(lv.Tags, "umiak-transfer-"+id) && lv.SizeBytes == a.SizeBytes {
 			return old.Receipt, nil
 		}
 	}
@@ -380,7 +402,7 @@ func (s *Server) ReceiveVolume(ctx context.Context, raw []byte, compressed io.Re
 		if e = os.Rename(temp, marker); e != nil {
 			return e
 		}
-		f, e := os.OpenFile(marker, os.O_RDWR, 0)
+		f, e := os.OpenFile(marker, os.O_RDWR, 0) //nolint:gosec // root-owned state directory, validated hex transfer ID and slot
 		if e != nil {
 			return e
 		}
@@ -389,7 +411,7 @@ func (s *Server) ReceiveVolume(ctx context.Context, raw []byte, compressed io.Re
 		if e != nil {
 			return e
 		}
-		d, e := os.Open(dir)
+		d, e := os.Open(dir) //nolint:gosec // operator-configured root-owned state directory
 		if e != nil {
 			return e
 		}
@@ -423,7 +445,7 @@ func (s *Server) ReceiveVolume(ctx context.Context, raw []byte, compressed io.Re
 		_ = unzip.Wait()
 		return empty, badReq("raw+size header mismatch")
 	}
-	importer := exec.CommandContext(ctx, "pvesm", "import", s.Cfg.Storage+":"+interim, "raw+size", "-")
+	importer := exec.CommandContext(ctx, "pvesm", "import", s.Cfg.Storage+":"+interim, "raw+size", "-") //nolint:gosec // fixed executables; storage, owned LV and staging identifiers validated above
 	var importLog boundedLog
 	importer.Stdout = &importLog
 	importer.Stderr = &importLog
@@ -440,9 +462,9 @@ func (s *Server) ReceiveVolume(ctx context.Context, raw []byte, compressed io.Re
 	}
 	hash := sha256.New()
 	reader := io.TeeReader(io.MultiReader(bytes.NewReader(header), decoded), hash)
-	n, copyErr := io.CopyBuffer(input, io.LimitReader(reader, int64(a.SizeBytes)+9), make([]byte, 8<<20))
+	n, copyErr := io.CopyBuffer(input, io.LimitReader(reader, int64(a.SizeBytes)+9), make([]byte, 8<<20)) //nolint:gosec // validateReceive limits size to 1 PiB
 	_ = input.Close()
-	if copyErr != nil || uint64(n) != a.SizeBytes+8 {
+	if copyErr != nil || uint64(n) != a.SizeBytes+8 { //nolint:gosec // io.Copy counts are nonnegative and volume sizes bounded by validation
 		cancel()
 	}
 	importErr := importer.Wait()
@@ -450,10 +472,10 @@ func (s *Server) ReceiveVolume(ctx context.Context, raw []byte, compressed io.Re
 	if copyErr != nil {
 		return empty, copyErr
 	}
-	if uint64(n) != a.SizeBytes+8 || importErr != nil || unzipErr != nil {
-		return empty, fmt.Errorf("incomplete import: bytes=%d import=%v decompress=%v: %s %s", n, importErr, unzipErr, importLog.String(), unzipLog.String())
+	if uint64(n) != a.SizeBytes+8 || importErr != nil || unzipErr != nil { //nolint:gosec // io.Copy counts are nonnegative and volume sizes bounded by validation
+		return empty, fmt.Errorf("incomplete import: bytes=%d: %w: %s %s", n, errors.Join(importErr, unzipErr, io.ErrUnexpectedEOF), importLog.String(), unzipLog.String())
 	}
-	f, err := os.OpenFile(filepath.Join("/dev", s.Cfg.VG, interim), os.O_RDWR, 0)
+	f, err := os.OpenFile(filepath.Join("/dev", s.Cfg.VG, interim), os.O_RDWR, 0) //nolint:gosec // configured VG and strictly validated import name
 	if err != nil {
 		return empty, err
 	}
@@ -499,7 +521,7 @@ func (s *Server) volumeCleanupImport(ctx context.Context, raw json.RawMessage) (
 	}
 	dir := filepath.Join(s.Cfg.StateDir, "volume-imports")
 	marker := filepath.Join(dir, m[1]+"-"+m[2]+".json")
-	rawMarker, err := os.ReadFile(marker)
+	rawMarker, err := os.ReadFile(marker) //nolint:gosec // root-owned state directory, validated hex transfer ID and slot
 	if os.IsNotExist(err) {
 		return map[string]any{"missing": true}, nil
 	}
@@ -513,7 +535,7 @@ func (s *Server) volumeCleanupImport(ctx context.Context, raw json.RawMessage) (
 	if record.Args.TargetName != a.Name {
 		return nil, forbidden("import marker mismatch")
 	}
-	lock, err := os.OpenFile(filepath.Join(dir, m[1]+"-"+m[2]+".lock"), os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := os.OpenFile(filepath.Join(dir, m[1]+"-"+m[2]+".lock"), os.O_CREATE|os.O_RDWR, 0600) //nolint:gosec // root-owned directory and validated hex transfer identity
 	if err != nil {
 		return nil, err
 	}

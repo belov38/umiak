@@ -45,6 +45,7 @@ function bridge(
 	target: FakeInfra,
 	opts: {
 		corrupt?: boolean;
+		standardFull?: boolean;
 		onWrite?: () => Promise<void>;
 		crashOp?: string;
 		crashNode?: string;
@@ -83,6 +84,8 @@ function bridge(
 			async call<T>(op: string, raw?: object): Promise<T> {
 				const a = raw as {
 					name: string;
+					volume: string;
+					targetName: string;
 					target: string;
 					id: string;
 					slot: string;
@@ -99,6 +102,44 @@ function bridge(
 							uuid: randomUUID(),
 							data: Buffer.from(original),
 						});
+				if (op === "volume.sendTo") {
+					events.push("standardFull");
+					await opts.onWrite?.();
+					const origin = store.get(a.volume.split(":").at(-1) as string);
+					if (!origin) throw Error("source missing");
+					if (opts.corrupt) throw Error("in-stream checksum mismatch");
+					const destination = nodeName === "source" ? target : w.infra;
+					const destinationStore = stores.get(destination) as Map<
+						string,
+						{ uuid: string; data: Buffer }
+					>;
+					const uuid = randomUUID(),
+						id = a.targetName.split("-")[2];
+					destinationStore.set(a.targetName, {
+						uuid,
+						data: Buffer.from(origin.data),
+					});
+					destination.lvs.set(a.targetName, {
+						name: a.targetName,
+						tags: ["umiak", `umiak-snap-${id}`, `umiak-transfer-${id}`],
+					});
+					const header = Buffer.alloc(8);
+					header.writeBigUInt64LE(512n);
+					return {
+						name: a.targetName,
+						uuid,
+						sourceUUID: origin.uuid,
+						sizeBytes: 512,
+						verified: true,
+						sha256: createHash("sha256")
+							.update(header)
+							.update(origin.data)
+							.digest("hex"),
+						algorithm: "sha256-pvesm-raw+size-v1",
+						wireBytes: 512,
+						elapsedSeconds: 1,
+					} as T;
+				}
 				if (op === "lv.list")
 					return {
 						lvs: [...infra.lvs].map(([name, lv]) => ({
@@ -193,6 +234,10 @@ function bridge(
 				throw Error(op);
 			},
 		};
+		if (opts.standardFull)
+			node.sendVolume = <T>(args: object) =>
+				node.call<T>("volume.sendTo", args);
+
 		const invoke = node.call.bind(node);
 		node.call = async <T>(op: string, args?: object): Promise<T> => {
 			const value = await invoke<T>(op, args);
@@ -425,3 +470,22 @@ for (const boundary of [
 			).rows[0]?.phase,
 		).toBe("done");
 	});
+
+it("uses the standard full stream when no identical base is available", async () => {
+	const w = await createWorld(db);
+	const e = opsEnv(w);
+	const source = await stoppedSandbox(w, e);
+	const target = await destination(w);
+	const data = bridge(w, target.infra, { standardFull: true });
+	await w.pool.query("UPDATE runtime.nodes SET state='cordoned' WHERE id=$1", [
+		w.topo.nodeId,
+	]);
+	const op = await e.svc.resume(e.p, source.sandboxId);
+	expect(await handleSandboxOp(w.ctx, { operationId: op.id })).toBe(
+		"succeeded",
+	);
+	expect(data.events).toContain("standardFull");
+	expect((await row(w, "machines", source.machineId)).node_id).toBe(
+		target.nodeId,
+	);
+});

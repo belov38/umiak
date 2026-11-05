@@ -4,9 +4,12 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -57,12 +60,25 @@ func run(cfgPath string) int {
 		defer func() { _ = w.Close() }()
 		logf = func(s string) { _ = w.Info(s) }
 	}
-	raw, err := io.ReadAll(io.LimitReader(os.Stdin, maxRequestBytes+1))
+	reader := bufio.NewReaderSize(os.Stdin, 64<<10)
+	line, err := readRequestLine(reader, maxRequestBytes)
 	if err != nil {
 		return fail("bad_request", err.Error())
 	}
-	if len(raw) > maxRequestBytes {
-		return fail("bad_request", "request too large")
+	var initial ops.Request
+	_ = json.Unmarshal(line, &initial)
+	var raw []byte
+	if initial.Op == "lv.deltaStream" {
+		raw = line
+	} else {
+		rest, e := io.ReadAll(io.LimitReader(reader, maxRequestBytes+1))
+		if e != nil {
+			return fail("bad_request", e.Error())
+		}
+		raw = append(line, rest...)
+		if len(raw) > maxRequestBytes {
+			return fail("bad_request", "request too large")
+		}
 	}
 	// The SSH channel closing (SIGHUP, broken stdout) must not kill lvcreate/lvremove half-way:
 	// finish the operation and let the caller verify the result.
@@ -75,6 +91,12 @@ func run(cfgPath string) int {
 		Host:    ops.Host{FS: os.DirFS("/"), Run: lvm.RunCommand, Now: time.Now, Replace: hostfs.ReplaceLocked},
 		Log:     logf,
 		Version: version,
+	}
+	if initial.Op == "lv.deltaStream" {
+		if err := srv.DeltaStream(ctx, initial.Args, reader, os.Stdout); err != nil {
+			return fail("delta_failed", err.Error())
+		}
+		return 0
 	}
 	srv.Progress = func(p map[string]any) error {
 		err := enc.Encode(map[string]any{"event": "progress", "progress": p})
@@ -116,4 +138,21 @@ func receiveVolume(cfgPath, encoded string) int {
 		return 1
 	}
 	return 0
+}
+
+func readRequestLine(r *bufio.Reader, limit int) ([]byte, error) {
+	var b bytes.Buffer
+	for {
+		part, err := r.ReadSlice('\n')
+		if b.Len()+len(part) > limit {
+			return nil, fmt.Errorf("request too large")
+		}
+		_, _ = b.Write(part)
+		if err == nil || err == io.EOF {
+			return b.Bytes(), nil
+		}
+		if !errors.Is(err, bufio.ErrBufferFull) {
+			return nil, err
+		}
+	}
 }
