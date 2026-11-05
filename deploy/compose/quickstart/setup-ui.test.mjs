@@ -463,3 +463,21 @@ test("installation test requires a Linux template on the selected node", () => {
 	assert.match(html, /href="#step-templates"/);
 	assert.match(html, /id="build-details" hidden/);
 });
+
+test("a failed build shows one line of error, not the whole tool output", () => {
+	const noise = Array.from({ length: 300 }, (_, i) => `Get:${i} https://example/pkg ${i}`).join("\n");
+	const html = renderSetup({
+		steps: { limits: { status: "ready" }, network: { status: "ready" } },
+		sandboxNodes: [{ nodeId: "node_1", name: "pve", state: "active", templates: [] }],
+		buildJob: {
+			id: "a".repeat(24),
+			status: "error",
+			startedAt: "2026-11-05T00:00:00Z",
+			error: `${noise}\nError: UMIAK_GUEST_SUBNET must be an IPv4 network\n${noise}`,
+			log: noise,
+		},
+	});
+	const error = html.match(/<p id="build-error"[^>]*>([^<]*)<\/p>/)[1];
+	assert.match(error, /^Error: UMIAK_GUEST_SUBNET must be an IPv4 network See the build log/);
+	assert.ok(error.length < 400);
+});

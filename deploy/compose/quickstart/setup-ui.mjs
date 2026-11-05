@@ -77,6 +77,21 @@ const field = (name, label, value = "", type = "text") =>
 	`<label>${label}<input name="${name}" type="${type}" value="${escapeHtml(value)}"></label>`;
 // Serialized into the page so the server's CSP hashes cover the exact script.
 function setupInteractions() {
+	// A failed build's error can carry the whole tool output: show one line, keep the rest in the log.
+	const briefError = (text) => {
+		const lines = String(text || "")
+			.split("\n")
+			.map((line) => line.trim())
+			.filter(Boolean);
+		if (!lines.length) return "";
+		const line =
+			[...lines].reverse().find((l) => /error|failed|must/i.test(l)) ||
+			lines[0];
+		return (
+			(line.length > 300 ? `${line.slice(0, 300)}…` : line) +
+			(lines.length > 1 ? " See the build log for details." : "")
+		);
+	};
 	const $ = (selector) => document.querySelector(selector);
 	let building = false;
 	let polling = false;
@@ -112,9 +127,8 @@ function setupInteractions() {
 			$("#build-details").open = true;
 			if ($("#build-details").dataset) $("#build-details").dataset.seen = "1";
 		}
-		if (job.status === "running") $("#step-templates").open = true;
 		syncTest();
-		$("#build-error").textContent = job.error || "";
+		$("#build-error").textContent = briefError(job.error);
 		const elapsed = Math.max(
 			0,
 			Math.floor(
@@ -418,6 +432,20 @@ function setupInteractions() {
 	}
 }
 
+function briefBuildError(text) {
+	const lines = String(text || "")
+		.split("\n")
+		.map((line) => line.trim())
+		.filter(Boolean);
+	if (!lines.length) return "";
+	const line =
+		[...lines].reverse().find((l) => /error|failed|must/i.test(l)) || lines[0];
+	return (
+		(line.length > 300 ? `${line.slice(0, 300)}…` : line) +
+		(lines.length > 1 ? " See the build log for details." : "")
+	);
+}
+
 export function renderSetup(state) {
 	const steps = state.steps || {};
 	const limits = { ...templateRange(state), ...steps.limits?.data };
@@ -458,7 +486,7 @@ export function renderSetup(state) {
 	const hasTemplates =
 		(steps.templates?.data?.builds || []).length > 0 ||
 		nodes.some((n) => n.templates?.length);
-	const buildProgress = `<p id="build-progress" role="status" aria-live="polite"></p><p id="build-error" class="error" role="alert">${escapeHtml(state.buildJob?.error || "")}</p><details id="build-details"${state.buildJob?.log ? "" : " hidden"}${state.buildJob?.status === "running" ? " open" : ""}><summary>Build log</summary><pre id="build-log" class="log" tabindex="0" aria-label="Build log, newest lines at the bottom">${escapeHtml(state.buildJob?.log || "")}</pre><p><a href="/quickstart/setup/build/log" target="_blank" rel="noopener">Open the full log in a new tab</a></p></details>`;
+	const buildProgress = `<p id="build-progress" role="status" aria-live="polite"></p><p id="build-error" class="error" role="alert">${escapeHtml(briefBuildError(state.buildJob?.error))}</p><details id="build-details"${state.buildJob?.log ? "" : " hidden"}${state.buildJob?.status === "running" ? " open" : ""}><summary>Build log</summary><pre id="build-log" class="log" tabindex="0" aria-label="Build log, newest lines at the bottom">${escapeHtml(state.buildJob?.log || "")}</pre><p><a href="/quickstart/setup/build/log" target="_blank" rel="noopener">Open the full log in a new tab</a></p></details>`;
 	const continueLink =
 		'<p><a href="#step-smoke" id="continue-test">Continue to installation test</a></p>';
 	return page(
