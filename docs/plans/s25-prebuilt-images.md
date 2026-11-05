@@ -1,73 +1,67 @@
-# S25 Prebuilt Linux Images Implementation Plan
+# S25 Official Base and Signed Offline Layers Implementation Plan
 
-> **For agentic workers:** Use superpowers:executing-plans to implement this plan task-by-task. Do the work in this scoped thread; no further delegation is authorized.
+> **For agentic workers:** Use superpowers:executing-plans task-by-task in this scoped thread. No further delegation is authorized.
 
-**Goal:** Download, authenticate, import and autonomously roll out generic Linux
-images while preserving local recipe builds and Windows behavior.
+**Goal:** Prepare Ubuntu Linux templates locally without archive access using a
+Canonical-authenticated official base and our signed offline input layer.
 
-**Architecture:** Manual QEMU/KVM CI emits zstd-compressed raw+size disk streams
-and Ed25519-signed metadata to public-read R2. Quickstart extends the existing
-S22 lifecycle and delegates bounded streaming downloads/import to node-agent;
-S21 replicates the imported build. Boot firmware pins each install's tunnel CA.
+**Architecture:** Manual QEMU/KVM CI captures exact recipe inputs and proves fresh
+network-disabled replay. Installs download the official base directly and our
+chunked tar+zstd layer from R2, replay through the existing PVE builder, then use
+existing registration, S21 copy and S22 promotion/retirement.
 
-**Tech stack:** Existing TypeScript/Node, Go, QEMU/QGA/QMP, zstd, PVE pvesm,
-Ed25519 and S3-compatible R2. Reuse current dependencies first; check latest stable
-versions before adding any dependency, and pin it. All commands use `mise exec --`.
-
-**Spec:** `docs/specs/s25-prebuilt-images.md` (read in full before implementation).
+**Tech stack:** Existing TS/Node, Go, QEMU/QGA/QMP, apt/GPG, zstd, Ed25519 and R2.
+**Spec:** `docs/specs/s25-prebuilt-images.md` (latest two-layer decision is binding).
 
 ## Global constraints
 
-- Branch `s25-prebuilt-images`; push, do not merge. Rebase on main at task boundaries.
-- No `apps/web` changes. Coordinate provisioning ownership with S24 / `apps/api`.
-- No Proxmox/live stand access, no self-hosted runner setup, no cloud resource creation.
-- Every CI workflow is `workflow_dispatch` only.
-- Names: Umiak Linux / Umiak Linux Desktop. Slugs: linux / linux-desktop.
-- Distro remains unconfirmed. No image publication before master's distro decision,
-  license clearance and explicit publish go-ahead; R2 is already publicly readable.
-- R2 account `ccd46cd070d0adbdacd7defca520f867`, bucket `umiak-images`; configurable
-  public base defaults to `https://pub-bdc85570347b44df991bfcee2718c4a1.r2.dev`.
-- No install storage credentials. CI credentials and signing key only as files;
-  never env vars, argv, logs or git. Signing key remains in existing GH secret.
-- Code comments in English; no session trailers/links in commits or PRs.
-- No `rm` in compound shell commands; use a plain single `rm`, `mktemp -d` per step.
-- Keep Windows local licensed-ISO builds and legacy Linux baked trust working.
+- Keep Ubuntu 26.04; no Debian revival, no modified-disk distribution, no base rehosting.
+- Branch s25-prebuilt-images, push commits but do not merge. Rebase main regularly.
+- Do not touch apps/web or live PVE/CT590; coordinate API ownership with S24.
+- All workflows workflow_dispatch only. publish=false by default. No uploads now.
+- R2 account ccd46cd070d0adbdacd7defca520f867, bucket umiak-images, public configurable
+  base https://pub-bdc85570347b44df991bfcee2718c4a1.r2.dev. No install credentials.
+- Key/CI credentials only in files, never env/argv/log/git. Existing recipe key only.
+- No compound rm shell commands; mktemp -d per step. English code comments.
+- Proprietary/unresolved inputs excluded. Chromium without snap; ask master if no
+  clean redistributable pinned binary/package works. First-boot optional tools
+  are separate from offline replay/readiness and degrade offline.
+- Keep Windows local ISO behavior, old Linux baked trust and advanced recipe build.
 
 ## Review focus
 
-1. Valid signature but malicious sizes/URLs: bounded parsing, explicit origin and
-   no host mutation until policy checks pass (Tasks 1/4).
-2. Present invalid pin or wrong CA: no legacy/system trust downgrade, no bootstrap
-   bytes before full certificate validation (Task 2).
-3. Crash after import but before registration: UUID-bound recovery cannot publish
-   partial data or delete another job's volume (Tasks 4/5).
-4. Stable/edge switch during download: stale selection cannot promote; old builds
-   and running sandboxes remain usable (Task 6).
-5. Rate-limited R2 / full cache / interrupted connection: bounded retry, reuse
-   verified chunks, explicit failure with old active build retained (Tasks 4/6).
+1. Incomplete closure or vendor postinstall: fresh offline replay fails explicitly,
+   never secretly accesses apt/npm/Rust/vendor servers (Tasks 3/7).
+2. Wrong/tampered base or layer: Canonical GPG plus pinned base hash, publisher
+   signature and bounded full chunk/archive verification before use (Tasks 1/4/5).
+3. Unsafe archive: no symlinks, special files, traversal, overwrite or unbounded
+   decompression; layer scripts execute in guest only (Task 4).
+4. Channel/maintenance switch or crash mid-customization: no stale promotion or
+   foreign-VM cleanup; recover reservation and preserve old active build (Tasks 5/6).
+5. Wrong/malformed CA pin: no system/baked trust downgrade, no bootstrap bytes
+   before full x509 validation (Task 2, implemented; retain regression coverage).
 
-## Task 1: Shared artifact contract and fixtures
+## Task 1: Evolve metadata and chunk transport for input layers
 
-**Files:** Create `infra/templates/image-manifest.mjs`,
-`infra/templates/image-manifest.test.mjs`, and small signed fixtures under
-`infra/templates/testdata/images/`; create Go fixture tests in
-`services/node-agent/internal/ops/image_manifest_test.go`.
+**Files:** infra/templates/image-manifest.mjs and tests; add
+infra/templates/layer-pack.mjs and tests; signed fixture files under testdata.
 
-**Interfaces:** `verifyImageManifest({bytes, signature, keys, platform, channel,
-slug}) -> ImageManifest`; `verifyImagePointer({bytes, signature, keys, channel,
-minimumSequence}) -> ImagePointer`. Schemas and limits are identical in Go and JS.
-No fetches or host operations in these functions. Export raw+size framing/digest
-fixtures compatible with S21, including its eight-byte little-endian size header.
+**Interfaces:** Keep verifyImageManifest/verifyImagePointer entry points, switch
+artifact discriminator to umiak-linux-layer/v1. Replace disks/hardware with
+base, archive, chunks and signed inventory linkage. Existing raw-disk verifier
+0fbd4c1c is not wired; reject its old format on the new installation path.
+`packLayer({archivePath, outputDir})` returns ordered chunk sizes/digests,
+compressed size/hash and tar size/hash. S21 raw+size framing stays unchanged.
 
-- [ ] Write failing fixtures for valid metadata, tampered signature/chunks/order,
-  unknown key, wrong channel/slug, incompatible platform, replay sequence,
-  path traversal, unsafe integers, duplicate/unknown fields and oversized input.
-- [ ] Run `mise exec -- node --test infra/templates/image-manifest.test.mjs` and
-  focused Go tests to demonstrate missing implementation failures.
-- [ ] Implement strict verifier, detached signatures and bounded schema. Persist
-  sequence separately per channel; signed metadata contains no absolute URLs.
-- [ ] Verify identical Go/JS fixture outcomes and framing hash against S21 tests.
-- [ ] Commit `feat(images): define signed Linux image artifacts`.
+- [ ] Add RED tests for layer schema, channel/compatibility/replay, base URL fixed
+  to official Ubuntu release, duplicate fields, malicious sizes/paths and hashes.
+- [ ] Implement bounded strict schema and compact exact signed bytes; preserve
+  tested pinned-key and safe-origin behavior. No downloaded trust keys.
+- [ ] Add RED local tar+zstd round-trip tests with forced tiny chunk size,
+  corruption, cancellation, collision and invalid source/limits.
+- [ ] Implement streaming compression/chunking with bounded memory and durable
+  content-addressed files; no disk-image export or pvesm operation here.
+- [ ] Run node tests/Biome; commit feat(layers): authenticate chunked offline inputs.
 
 ## Task 2: Firmware CA pin and compatibility
 
@@ -97,157 +91,147 @@ without changing the semantics of ordinary `RootCAs` callers.
 - [ ] Run focused Vitest, Go tests and golangci-lint in all changed Go modules.
 - [ ] Commit `feat(agent): pin install tunnel CA from boot firmware`.
 
-## Task 3: Generic recipes and direct QEMU build
+## Task 3: Generic offline capture/replay and QEMU adapter
 
-**Files:** Create `apps/template-builder/src/qemu.ts`, `qemu-build.ts` and
-corresponding Vitest tests; extend `main.ts`, `seed.ts`, `seal.ts`,
-`agent-package.ts` only as needed. Modify Linux cleanup/verification recipes.
-If Debian is selected, selectively port `19fb361b` and relevant `5ae76ad0`
-changes; do not cherry-pick web/Payload/catalog edits wholesale.
+**Files:** apps/template-builder/src/qemu.ts, qemu-build.ts, offline-layer.ts and
+Vitest tests; seed.ts, runner.ts, seal.ts, main.ts; infra/templates/linux lib,
+seed, steps, verify; desktop inherited steps/files as needed.
 
-**Interfaces:** QEMU implementation of existing `GuestIo.exec`/file access,
-QMP start/stop/reboot and production `buildImage({slug, version, outputDir})`.
-Return cold disk path plus facts, package/license inventories and measurements;
-never return install-bound PVE identities or publish directly.
+**Interfaces:** QEMU GuestIo implementation (QGA local Unix socket, QMP lifecycle),
+`captureLayer({slug, version, outputDir})` and
+`replayLayer({base, layerDirectory, guest, recipe}) -> facts`. Neither publishes.
+PVE builder consumes the same replay helper. Generic seed excludes install CA,
+URLs/SSH trust. Agent bootstrap installs production binary/units/global update
+keys directly under outer signature trust; never relax signed update verification.
 
-- [ ] Add failing adapter tests for KVM/disk probe failure, guest/QGA timeout,
-  reboot/reconnect, failed recipe step, cancellation and cleanup.
-- [ ] Add generic-seed tests rejecting tunnel CA/URL/API URL/SSH CA input, while
-  local builder defaults and legacy signed agent package tests remain intact.
-- [ ] Implement Linux-only generic build using existing recipe step/fact/seal
-  helpers, user-mode networking and isolated QGA/QMP Unix sockets. No TCG fallback.
-- [ ] Replace Chrome with distro Chromium; update browser executable discovery,
-  CDP/computer-use tests, desktop defaults/policies and verification. Exclude
-  Claude Code/unresolved tools; implement optional first-boot official vendor
-  installer with exact version/checksum where available, bounded retries, visible
-  status and nonfatal offline behavior. Test Chromium CDP and tool-install failure
-  independently of sandbox readiness. Resolve Ubuntu snap packaging if selected.
-- [ ] Keep exact snapshot pins and bound network/step timeouts. Audit all non-apt
-  downloads; retain integrity/provenance and record exact installed versions.
-- [ ] Eliminate CI zero-fill peak allocation via cold sparse export/compaction;
-  inspect final filesystem for cloud-init/DHCP/identity/SSH/log/desktop state.
-- [ ] If Debian confirmed, port source schema/downloader/dual hashes, snapshot
-  helpers, kernel/Java/Docker differences; establish desktop dependency-compatible
-  assets and fresh hashes. Never silently change base or product slugs.
-- [ ] Boot two disposable local QEMU clones with different identities/CAs; run
-  baseline/desktop checks and cold scans. Run only if this environment supports
-  KVM; otherwise report unmeasured integration and leave CI acceptance pending.
-- [ ] Commit `feat(builder): build generic Linux images with QEMU`.
+- [ ] Add RED tests for KVM/RAM/disk probe, QGA/reboot timeout, failure/cancellation,
+  production-agent/no-install-trust seed, and legacy build unchanged.
+- [ ] Implement direct QEMU/KVM lifecycle and existing recipe/GuestIo execution;
+  actual KVM start probe, no TCG or paid/PVE fallback. Record peak resources.
+- [ ] Add RED capture tests for bootstrap QGA dependency closure, original signed
+  apt Release/Packages/deb chain, Docker authority and missing/transitive input.
+- [ ] Capture original apt mirror layout/keyrings plus all exact debs and source/
+  license metadata. Record precise non-deb inputs, hashes and upstream URLs,
+  npm native/cache closure, Rust components, toolchains and Sigstore bundles.
+- [ ] Add RED offline tests: apt signature failure, network source rejected,
+  npm/Rust missing payload, vendor postinstall egress, wrong base/recipe pair.
+- [ ] Implement file-only apt sources with upstream signature/hash verification,
+  snapshot validity policy, local tool resolvers and explicit offline modes.
+  Disable cloud-init online package_update; supply QGA bootstrap offline.
+- [ ] Implement generic cleanup/seal, leases/identity/SSH/dbus/log/random/desktop
+  state checks and sparse/trim behavior. No seed/trust/install identity remains.
+- [ ] Replace Chrome with pinned clean Chromium distribution and keep CDP/desktop
+  policies/discovery verified; no snap. Optional first-boot proprietary tools
+  have pinned official installers and nonfatal offline status, never bundled payloads.
+- [ ] Replay from fresh official base with guest network egress disabled. Compare
+  final exact packages/tools to capture, cold-scan and verify two identities/CAs.
+  Local Mac lacks KVM: unit fixtures can pass here, actual runner replay remains
+  an explicitly unmeasured CI acceptance gate until master authorizes a run.
+- [ ] Run Vitest, shell checks and relevant agent tests; commit builder changes
+  in reviewable capture/adapter/replay/cleanup units.
 
-## Task 4: Restricted node-agent download/import
+## Task 4: Node-agent guarded layer staging
 
-**Files:** Create `services/node-agent/internal/ops/image_manifest.go`,
-`image_download.go`, `image_import.go` and matching Go tests; modify dispatch,
-node-agent config/install provisioning for trusted publisher key and image origin,
-plus `packages/pve/src/node-client.ts` and its tests.
+**Files:** services/node-agent/internal/ops/layer_manifest.go, layer_download.go,
+layer_extract.go and tests; dispatch/config; packages/pve node-client and tests.
 
-**Interfaces:** `image.prepare` verifies metadata and returns missing digest keys;
-`image.import` accepts job/VMID/metadata identity, downloads from configured origin,
-then returns a UUID-bound receipt. Neither operation accepts shell commands or
-arbitrary local paths. Progress records contain digest keys, never credentials.
+**Interfaces:** `layer.prepare` validates bounded signed metadata and reports
+missing digest keys; `layer.stage` downloads only from configured origin and
+returns an owned immutable media reference, metadata digest and staging receipt.
+Receipts bind job/VMID/layer digest. No arbitrary path/URL/command/executable.
+No layer-to-pvesm raw disk import. Existing PVE base import remains in builder.
 
-- [ ] Write failing HTTP fixture tests: dropped chunk, 429/Retry-After, timeout,
-  truncated/oversized/hash-mismatched response, outside-origin redirect, symlink,
-  corrupt cache after restart, cache quota/full disk and cancellation.
-- [ ] Implement at-most-five attempts per <=512 MiB chunk, streaming SHA-256,
-  bounded buffers, atomic durable verified cache, cache quota and restart rehash.
-- [ ] Write failing import fixtures: wrong header/decoded length/raw hash, zstd
-  failure/trailing data, pvesm exit failure, changed storage/UUID, occupied VMID,
-  wrong ownership, concurrent job, crash before/after receipt.
-- [ ] Implement size-limited raw+size pipeline and source digest through guarded
-  pvesm staging, process cleanup and durable UUID receipt using S21 guards.
-- [ ] Demonstrate failure leaves no publishable template and never removes
-  unrelated data. Verify a completed job can recover without re-downloading.
-- [ ] Run Go tests/race/lint and focused node-client Vitest.
-- [ ] Commit `feat(node): verify and import chunked Linux images`.
+- [ ] Add RED cross-language signed metadata fixtures matching Task 1, including
+  signature/channel/base/inventory/size policy failures before host mutation.
+- [ ] Add RED HTTP/cache tests: drop/429/timeout/truncate/hash mismatch, redirects,
+  symlink cache, disk quota, restart rehash, cancellation and corrupt completed file.
+- [ ] Implement streaming SHA-256, <=512 MiB chunk retries (max five), bounded
+  backoff/Retry-After, fsync/atomic cache and reuse after restart.
+- [ ] Add RED archive fixtures: traversal/absolute/duplicate path, symlink/hardlink,
+  devices, oversized member/count/total, malformed zstd, hash mismatch and staging
+  ownership collision. No script can execute on node host.
+- [ ] Implement extraction into owned restricted staging, verifying compressed,
+  archive and every file digest. Only regular files/directories; immutable final
+  receipt only after complete success. Stage attachable read-only media using
+  existing media/storage guards, with bounded free-space budget and durable job.
+- [ ] Recover/reuse completed staging only with matching identity; remove only
+  proven owned partials. Keep verified chunks for retry.
+- [ ] Run Go tests/race/golangci-lint, node-client Vitest; commit guarded staging.
 
-## Task 5: Wizard default download and existing lifecycle
+## Task 5: Setup offline template default and existing PVE builder
 
-**Files:** Create `deploy/compose/quickstart/setup-images.mjs` and
-`setup-images.test.mjs`; modify `setup-build.mjs`, `setup.mjs`, `setup-ui.mjs`
-and associated tests. Extend builder registry/manifest adapters if required.
+**Files:** quickstart setup-images.mjs/tests, setup-build.mjs, setup.mjs,
+setup-ui.mjs/tests; template-builder build/stages/seed/manifest/registry and tests.
 
-**Interfaces:** `runImageImport(invocation, hooks) -> ready Manifest`, injected
-beside `runTemplateBuild` in existing `BuildJobs`; records image release identity
-and raw+size disk proofs while using existing reserve/register/finish/replicate.
+**Interfaces:** `runLayerBuild(invocation, hooks) -> ready Manifest` under existing
+TemplateBuildJobs. Input includes verified layer/base identity. Uses Task 3 replay
+and Task 4 staged media. Existing reserve/register/finish/replicate hooks remain.
 
-- [ ] Write failing tests for Linux default download, advanced local selection,
-  Windows unchanged, no enabled node, occupied template range, cancellation,
-  clone verification failure and restart before/after registration.
-- [ ] Implement durable download/import/clone-check progress under existing job
-  fence, use node-agent receipt, create allowlisted template VM and verify clone.
-- [ ] Register/promote only verified results; use S21 replication once for every
-  other eligible node. A failed replica retains old active build and can retry.
-- [ ] Prepare workspace with `mise exec -- pnpm install` and required dependency
-  builds; run quickstart tests from root and relevant builder/PVE Vitest. Resolve
-  baseline build/assets prerequisites before reporting implementation green.
-- [ ] Commit `feat(setup): download Linux templates by default`.
+- [ ] Add RED tests for default download action/explanatory text, advanced recipe
+  choice, Windows unchanged and no silent fallback on missing layer/network.
+- [ ] Verify official base with current Canonical GPG/hashed sums plus layer pin;
+  download only from cloud-images.ubuntu.com. Test substituted sums/key/base,
+  mismatched metadata, cache corruption, cancellation and bounded retries.
+- [ ] Boot base+layer read-only through existing PVE path; deny guest egress for
+  customization, retain QGA access, reuse steps and verification. Test zero
+  archive requests, missing offline input, final facts mismatch and failed clone.
+- [ ] Keep durable template reservation/recovery and record layer/base identity.
+  Register/promote only verified result, then existing S21 replicate once. Failed
+  replica leaves prior active build; no per-target upstream download/build.
+- [ ] Build workspace deps/CLI, run root quickstart suite and relevant Vitest;
+  commit feat(setup): prepare Linux templates from signed offline layers.
 
-## Task 6: S22 autonomous image rollout
+## Task 6: S22 channel rollout of offline layers
 
-**Files:** Modify `recipe-channel.mjs`, `recipe-rollout.mjs`, recipe bundle/channel
-and rollout tests, `docs/specs/s22-template-channel.md`.
+**Files:** recipe-channel.mjs, recipe-rollout.mjs and tests;
+docs/specs/s22-template-channel.md.
 
-**Interfaces:** Independent verified image availability within the existing
-recipe-channel owner/settings, using shared platform stable/edge selector;
-Linux jobs receive verified image identity, Windows receives recipe directory.
-Do not create a second promotion/retirement engine or an independent selector.
+**Interfaces:** Existing owner/settings/lifecycle receives verified layer release
+for Linux and recipe bundles for Windows, using the shared stable/edge selector.
 
-- [ ] Write failing tests for public pointer discovery without GitHub auth,
-  invalid signature/compatibility, monotonic per-channel sequence, stale metadata,
-  edge/stable switch mid-job, maintenance start mid-job and restart recovery.
-- [ ] Implement image checking independently of Windows recipe fetch failures,
-  enabled/auto settings and existing serial idle-node rollout. Recheck selected
-  channel/fence before promotion; retain staged chunks for safe retry.
-- [ ] Test rollback to retained verified builds, reference-aware retirement and
-  S21 replication failure recovery; no running sandbox stops.
-- [ ] Run `mise exec -- node --test deploy/compose/quickstart/` from repo root.
-- [ ] Commit `feat(channel): roll out signed Linux images through S22`.
+- [ ] Add RED tests for anonymous layer discovery without private GitHub auth,
+  invalid signature/base/compatibility, pointer sequence, mid-build channel switch,
+  maintenance, restart, S21 copy failure, rollback and reference-aware retirement.
+- [ ] Implement layer checking independently of Windows recipe fetch failures;
+  serial idle-node replay through normal jobs, promotion fence/channel recheck,
+  durable identity/history and no running sandbox interruption.
+- [ ] Run root quickstart suite; commit feat(channel): roll out offline Linux layers.
 
-## Task 7: Manual publisher, inventories and measured acceptance
+## Task 7: Manual gated CI publisher and acceptance
 
-**Files:** Create `.github/workflows/linux-images.yml`,
-`infra/templates/release-images.mjs`, tests, license inventory helper and
-`docs/operations-s25-images.md`; update builder README and this spec's evidence.
+**Files:** .github/workflows/linux-layers.yml, infra/templates/release-layers.mjs,
+license inventory helper/tests, docs/operations-s25-images.md, builder README.
 
-**Interfaces:** `release-images` consumes closed, verified local artifacts,
-file-based signing/S3 credentials and non-secret bucket configuration. Produces
-signed release metadata, content-addressed uploads and channel pointer last.
-`publish=false` builds/verifies without uploading; any upload to current bucket
-requires master approval and confirmed distro/licenses.
+**Interfaces:** Publisher accepts only verified input-layer artifacts/inventories,
+file signing/S3 credentials, capture+closed-network replay evidence and explicit
+publish gate. It must never accept a disk image or rehost Canonical base bytes.
 
-- [ ] Write failing tests for non-main publish, version replacement, absent
-  signing file, mismatched key, malformed artifact paths, unknown/proprietary
-  license gate, failed upload/readback, and pointer never advancing on partial run.
-- [ ] Implement zstd chunking, exact byte/raw hashes, package/source/license
-  manifests with notice files, production binary/tool hashes and measurements.
-- [ ] Implement file-only secret materialization/loading, host-only signing after
-  guest checks, read-back verification and final pointer update under workflow
-  concurrency. Verify no secret enters process env/argv/logs or artifacts.
-- [ ] Use manual workflow, pinned stable tools/actions, KVM/RAM/free-disk probes,
-  sequential slugs and explicit timeouts. On failure report runner alternatives;
-  never choose a paid or Proxmox runner automatically.
-- [ ] Ask master for bucket-scoped Object Read & Write credential pair in
-  `R2_IMAGES_ACCESS_KEY_ID` / `R2_IMAGES_SECRET_ACCESS_KEY` only when implementing
-  upload; reuse `RECIPE_SIGNING_KEY`. Do not request bucket admin or read tokens.
-- [ ] Run publisher tests, Biome for TS, relevant Vitest, Go tests and golangci-lint,
-  and root quickstart suite. Review final diff against spec and no-web constraint.
-- [ ] Report actual compressed size/chunks/peak disk/CI duration if CI is authorized.
-  Ask master to perform PVE import and two-CA/S21-copy acceptance; record actual
-  download/import/ready timings separately from planning estimates.
-- [ ] Commit `feat(ci): publish signed Linux images manually`; push branch only.
-  Send master head SHA, test evidence, unresolved gates and measured/unmeasured
-  size/time fields. Do not claim S25 complete before integration acceptance.
+- [ ] Add RED tests for non-main publish/version conflict, absent/mismatched keys,
+  unresolved/proprietary payload, omitted source/licenses, incomplete replay,
+  disk/base artifact inclusion and failed readback/pointer partial publication.
+- [ ] Implement exact signed input/package/license inventory, including GPLv3
+  texts/source offer/links and upstream input provenance. No unresolved payloads.
+- [ ] Implement gated upload, protected manual approval, immutable write/readback,
+  channel pointer last and cleanup of file-only secrets on every failure.
+- [ ] Ask master for bucket-only S3 Object Read & Write pair when uploader is ready:
+  R2_IMAGES_ACCESS_KEY_ID / R2_IMAGES_SECRET_ACCESS_KEY. Existing RECIPE_SIGNING_KEY
+  signs metadata. No credentials needed for fixture tests, no uploads now.
+- [ ] Workflow workflow_dispatch only, publish default false, KVM/free-space probes,
+  exact committed pins, bounded retry/timeouts and sequential slug jobs.
+- [ ] Run Biome/Vitest, Go/race/golangci-lint and root quickstart tests. Inspect
+  final diff against spec and no-web/no-host/no-upload constraints.
+- [ ] Report measured layer/base sizes and network-disabled replay duration only
+  after authorized CI run. Master performs PVE offline replay/clone/S21 acceptance.
+  Distinguish unmeasured size/time targets from evidence; push branch, no merge.
 
-## Design-stage evidence
+## Progress at pivot
 
-At drafting, HEAD matched fetched main (`git rev-list --left-right --count
-HEAD...origin/main`: 0 / 0). Node via mise: v26.13.0. No dependencies added,
-product code changed, image built, cloud resource modified or publish workflow run.
-S25 size/import metrics remain unmeasured; estimates are labeled in the spec.
-
-Design-stage validation: `git diff --check` passed. The requested root quickstart
-suite was run and exited 1 in this checkout: missing `@umiak/db` workspace
-resolution, absent compiled CLI artifacts, and font asset availability failures
-prevent a passing baseline. No product code was modified to mask these failures.
-Runtime tests/lints and actual image measurements remain implementation gates.
+- 0fbd4c1c: initial disk metadata verifier, 11 tests/Biome green; replace schema
+  in Task 1, do not expose a disk publishing path.
+- 7a94e861: CA pin path, gateway chain, 143-byte early validation and provisioning
+  refresh implemented. PVE 81, API 10, worker 45 and quickstart 244 tests pass;
+  scoped Go tests/golangci-lint and worker/PVE typechecks pass.
+- Workspace install/dependency/CLI builds now succeed. Tests run from repo root.
+- No cloud resource changes, uploads, image builds or live host operations.
+- Raw-disk packing test was uncommitted at pivot; replace with layer-tar packing
+  tests rather than building the superseded disk export feature.

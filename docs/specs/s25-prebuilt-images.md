@@ -1,61 +1,138 @@
-# S25: Signed prebuilt Linux images
+# S25: Official Ubuntu base and signed offline Linux layers
 
-Status: design for review, 2026-11-06. Product implementation has not started.
-Owner decisions: public-read R2, names **Umiak Linux** and **Umiak Linux Desktop**,
-per-boot CA pinning, direct QEMU/KVM CI, and no image publication before
-distro confirmation and redistribution clearance. This supersedes the initial GHCR proposal. Windows remains a local
-build from the owner's licensed ISO.
+Status: revised implementation design, 2026-11-06. Ilia's two-layer decision
+supersedes the prebuilt customized-disk design approved at 2caf12a6. Boot trust
+is implemented in 7a94e861; the initial image metadata verifier is not yet wired
+to install and will be replaced by a layer-specific contract. No uploads occurred.
 
-## Intent and integration
+## Decision and scope
 
-Publish `linux` and `linux-desktop` once from manual CI. Current recipes use
-Ubuntu 26.04; the base distro is pending master/Ilia confirmation (Debian 13 is
-under consideration). Mechanism and artifact contracts are distro-agnostic.
-An install downloads and verifies one image on one eligible PVE node, imports
-into a newly reserved template VMID, verifies a clone, then promotes. Other
-nodes use S21 `volume.sendTo`; they never download another upstream copy.
-Default wizard action: “Download the Linux template”; advanced action: “Build
-locally from recipe”. Expose download/verification/import/clone-check/copy
-progress and actionable retry errors. Do not silently fall back to a local build.
+Keep Ubuntu 26.04. Never publish or re-host an Ubuntu cloud disk, customized or
+unmodified. Each install fetches the official unmodified base directly from
+`cloud-images.ubuntu.com`, checks Canonical's signed SHA256SUMS with the committed
+GPG key/fingerprint and matches the base hash in our Ed25519-signed layer metadata.
+CI publishes only our offline input layer: unmodified upstream debs with signed
+repository verification data, redistributable tool archives, a CA-free Umiak agent,
+our files and scripts, license inventory and exact input/package manifests.
 
-Extend S22 `recipe-channel.mjs` and `recipe-rollout.mjs`, preserving their daily
-poll, shared stable/edge selection, maintenance fence, node reservation,
-registration, rollback and reference-aware 24-hour retirement. Linux image
-selection must not depend on the private repository Releases API. Windows
-continues using recipe bundles and recorded ISO inputs. A channel switch
-invalidates the previous selection; recheck channel and maintenance immediately
-before promotion. Running sandboxes retain their build.
+Products remain **Umiak Linux** / **Umiak Linux Desktop**, slugs `linux` /
+`linux-desktop`; each has its own layer. Windows keeps its local licensed-ISO
+path. No Debian recipe revival or catalog migration is in S25. Distro fields
+remain explicit in metadata and the transport is reusable, but this release
+accepts only the confirmed Ubuntu base/recipe pair.
 
-Relevant code: `apps/template-builder/src/{build,stages,seed,seal,verify}.ts`,
-`deploy/compose/quickstart/{setup-build,recipe-channel,recipe-rollout}.mjs`,
-`packages/pve/src/{machine,node-client}.ts`, `services/node-agent/internal/ops/`,
-`services/guest-agent/internal/{ident,agent,update}/`, `libs/tunnel/wstransport`.
-Do not change `apps/web`; coordinate runtime provisioning changes with S24's
-move into `apps/api` after rebasing. No host/stand access is authorized.
+Default setup action remains “Download the Linux template”, with text explaining
+that it downloads the official base plus prepared packages and finishes locally.
+“Build locally from recipe” remains advanced and explicit. No silent fallback
+when a layer fails. Target local customization is a few minutes, not a measured
+promise: kernel/initrd, package scripts, extraction and reboots still take time.
+No archive access occurs on the installation customization path.
 
-## Generic-image audit
+## Install and rollout lifecycle
 
-| Input/state | Current behavior | Published-image requirement |
-| --- | --- | --- |
-| Tunnel CA | Required in signed agent package; loaded from current version's trust directory | No installation CA on disk; boot fingerprint supplies trust |
-| Update keys | Source has global keys, but quickstart generates per-install signing keys | Global agent-update authority stays separate from recipe publisher; preserve legacy packages |
-| Tunnel endpoint | Optional seed `agent.toml`; SMBIOS family already overrides URL | No baked endpoint; boot family supplies it |
-| CLI API URL | Seed may install `/etc/umiak/config.json` | Omit; configure per-install endpoint at runtime/claim |
-| SSH user CA | Seed accepts install CA; claim/reset manage SSH trust | Empty generic files; claim provisions install CA |
-| Subnet/gateway/MAC | Build VM uses install network; template netplan is DHCP, matches `en*` | Keep DHCP; remove leases, MAC bindings and generated network state |
-| DNS | DHCP plus global fallback 1.1.1.1/9.9.9.9 | No install resolver baked; retain documented fallback policy |
-| Agent/CLI versions | Builder facts and exact tool pins | Global immutable versions and SHA-256 in signed metadata, no quickstart identity |
-| Machine identity | `umiak-agent seal` empties machine-id, removes state/host keys | Keep; verify dbus machine-id, initrd, hostname and every clone identity |
-| Cloud-init | `cloud-init clean --logs --seed`, disable file | Keep; no seed disk, seed state, authorized keys or build SMBIOS |
-| Logs/caches/random | Cleanup plus seal removes logs/random seed; initrd rebuilt | Also audit DHCP state, Docker identity, desktop pairing, histories, tokens and credentials |
+1. Existing S22 owner polls signed stable/edge pointers from the configured public
+   layer origin, independently of private GitHub recipe discovery. Verify pinned
+   publisher signature, monotonic sequence, channel and compatibility.
+2. Reserve one idle node and a fresh VMID in the configured template range with
+   existing durable build jobs/maintenance fencing. Never touch stand hosts here.
+3. Download official base plus Canonical sums/signature directly from the pinned
+   upstream release path. Verify GPG and SHA-256 before PVE import. Existing
+   `apps/template-builder/src/image.ts` supplies the base-verification authority.
+4. Node-agent stages ordered <=512 MiB layer chunks in its root-owned digest
+   cache, streams SHA-256, validates complete compressed/archive hashes and
+   extracts only safe regular files/directories under its owned staging directory.
+5. Existing PVE builder boots the base with the prepared layer attached read-only.
+   Cloud-init's normal online package stage is replaced with offline QGA bootstrap
+   from captured dependencies; it must not run package_update against the network.
+6. Reuse recipe step/GuestIo execution with offline adapters. Only `file:` apt
+   repositories and verified local tool inputs are available. Block guest egress
+   during customization (QGA is host-mediated). No fallback download on a cache
+   miss; report the exact missing pinned input and keep the old active build.
+7. Collect exact installed facts, clean/seal/shutdown and verify a disposable
+   clone. Clone networking may be enabled for readiness/tunnel tests after the
+   offline customization proof, with separate accounting for optional tools.
+8. Register/promote through existing services, copy the same build to other nodes
+   through S21 `volume.sendTo`, and retire old unreferenced builds after S22's
+   existing 24-hour interval. Running sandboxes retain their build. Failed copies
+   keep their previous active template and retry from the source; no second layer
+   download or independent build on each node.
 
-Desktop loopback listeners and service configs are generic; runtime pairing,
-certificates and user/session state must be absent. Scan the final disk offline,
-not just the running filesystem, for known build identity/endpoint markers and
-secrets. Export only after shutdown; never publish a verification clone. Existing
-zero-fill during seal can temporarily allocate most of the 64 GiB disk, despite
-only ~7.4 GB used; CI must replace it with offline sparse compaction or budget
-for it. Retain trim and cold inspection after cleanup.
+Extend `recipe-channel.mjs`, `recipe-rollout.mjs`, `setup-build.mjs` and the
+existing register/replicate/retire paths; do not create another rollout engine.
+Recheck stable/edge and maintenance at promotion, persist layer/base identity in
+ordinary build manifests and recover jobs after restart. Windows recipe rollout
+continues independently. Changes stay out of `apps/web`; coordinate configuration
+ownership with S24's move to `apps/api`. Rebase on main at task boundaries.
+
+## Offline layer closure and apt authenticity
+
+CI resolves inputs against the exact official base and snapshot-pinned recipes,
+including bootstrap QGA dependencies, kernel/initrd packages, desktop dependencies
+and all apt recommends selected by the recipe. Capture byte-identical debs, original
+InRelease or Release+Release.gpg, matching Packages indexes, repository keyrings,
+suite/component/architecture and pool paths. Preserve each package's checksum
+link from signed Release to Packages to deb; retain Ubuntu and Docker as distinct
+repositories/authorities. Do not regenerate upstream indexes and present them
+as upstream-signed or use trusted=yes/allow-unauthenticated.
+
+Build an offline mirror with original dists/pool structure and the exact upstream
+verification bytes. Point apt sources to `file:///mnt/layer/apt/<repository>`;
+retain Signed-By and disable network sources in offline mode. Fixed historic
+snapshots may need explicit Check-Valid-Until=false, documented in signed capture
+metadata; never disable signature or hash checks. Capture no unnecessary packages
+or credentials. Every final package has name/version/architecture, source package,
+repository, exact deb SHA-256 and index provenance in the signed inventory.
+
+The closure also includes Docker key/debs, Node/Go/Bun/uv/gh tarballs, Python inputs
+if used, every Rust component/rustup artifact, npm package tarballs/native optional
+dependencies and registry integrity metadata, Sunshine/moonlight/Cua archives and
+Sigstore verification bundles. npm, rustup and helper scripts run in explicit
+offline mode or install captured verified payloads; a successful download cache
+alone is not a proof of an offline closure. No vendor postinstall may fetch.
+
+The critical CI check is a **fresh replay** from the official base with all guest
+network egress disabled, using only the finished layer. Compare exact installed
+package/tool manifests against the capture run, then clean/seal and run baseline,
+CDP/computer-use and desktop verification. Failure blocks release. Publish only
+inputs and our files, never this replay's customized disk. Reject a layer whose
+base/recipe digest does not match the replayed pair.
+
+## Layer artifact and signature contract
+
+Use an uncompressed POSIX tar archive, streamed through zstd, split into ordered
+content-addressed chunks of at most 512 MiB. The disk-oriented raw+size framing
+is **not** used for layer payloads; it remains unchanged in S21 disk copies.
+Signed `archiveBytes` and archive SHA-256 bound tar decompression/extraction.
+Never pass a downloaded layer archive to pvesm or execute its scripts on the PVE
+host; scripts run only in the disposable build guest.
+
+`umiak-linux-layer/v1` binds version/channel/slug/amd64, distro/release, source
+commit, recipe digest, Canonical base URL/serial/hash/sums/signature locations,
+builder API, half-open platform compatibility range, minimum agent capability,
+firmware trust requirement, ordered chunk sizes/hashes, compressed size/hash,
+archive size/hash, exact file inventory and package/source/license provenance,
+capture/replay results and measurements. An attached content-addressed inventory
+is acceptable only with size/hash bound by the signed metadata. All inputs,
+including executable scripts, must be inventoried. Strict type/field/size/path
+validation and duplicate-field rejection precede extraction or host mutation.
+
+Ed25519 raw detached 64-byte signatures cover exact compact JSON bytes using
+existing GH `RECIPE_SIGNING_KEY`. Authority comes from baked
+`infra/templates/keys/recipe-publisher.pub` or the existing explicit owner override,
+never a downloaded key. The generic agent's initial integrity comes from the
+outer signed layer; later agent updates use separate global update authority.
+
+Object layout (stable/edge pointer names stay shared with the original design):
+
+- `blobs/sha256/<hex>`: immutable chunks, layer manifests and attached inventories.
+- `releases/<version>/<slug>/manifest.json` and `.sig`: immutable layer metadata.
+- `channels/stable.json` / `channels/edge.json` and `.sig`: signed pointers binding
+  channel, version, monotonically increasing sequence and both slug manifests.
+
+Upload pointer last after both layers and every dependency object are readable.
+Never replace an immutable version with different bytes. Persist accepted
+sequence per channel; explicit S22 rollback remains a separate retained-build
+operation. Corrupt/stale metadata fails closed and never promotes another channel.
 
 ## Boot trust (approved model)
 
@@ -98,234 +175,42 @@ updates stay under the existing distinct global agent-update authority. Legacy
 signed package verification remains unchanged; no new signing secret and no
 recipe key reuse for agent updates.
 
-## Artifact and signature contract
+## Generic result and cleanup audit
 
-Choose **raw+size, compressed with zstd**, matching S21/PVE import. Uncompressed
-stream is eight-byte little-endian logical disk size followed by exactly that
-many raw disk bytes. Current Linux logical size is 68,719,476,736 bytes. Publish
-one independent zstd stream per disk, divided into ordered chunks of at most
-512 MiB; chunks are transport boundaries, not separate decompression streams.
-Linux currently has only `scsi0`; signed disk lists must explicitly allow future
-firmware disks rather than guessing filenames.
+The layer has no installation CA, tunnel/gateway/API URL, subnet, resolver binding,
+MAC, SSH user CA or credentials. Final template network is DHCP on `en*`; the
+existing global DNS fallback policy remains. Boot firmware supplies tunnel URL,
+CA pin and identity; claim supplies SSH trust/config. Global agent/tool versions
+and hashes are intentional immutable release identity, not per-install state.
 
-Object layout under bucket `umiak-images`:
+Keep cloud-init clean --logs --seed and disable cloud-init after customization;
+remove seed disks/build SMBIOS, generated network configuration, DHCP leases,
+authorized keys, all SSH host keys, machine-id/dbus copy, agent state, Docker
+machine identity, desktop pairing/certs, random seeds, histories/caches and logs.
+Rebuild initrd after identity seal. Inspect final cold disk and two independent
+clone identities. Avoid the current zero-fill peak allocation of most of 64 GiB;
+use discard/sparse cleanup where supported without making sealing optional.
+Keep existing local templates and signed agent-package verification working.
 
-- `blobs/sha256/<hex>`: immutable chunks and manifest/license/provenance objects.
-- `releases/<version>/<slug>/manifest.json` and `manifest.sig`: immutable metadata.
-- `channels/stable.json`, `channels/edge.json` and matching `.sig`: mutable signed
-  pointers with monotonically increasing sequence, channel, version and exact
-  manifest digest for each Linux slug. Publish pointer last, only after both
-  images and all referenced objects are readable and verified.
+## Browser and optional proprietary tools
 
-`umiak-linux-image/v1` metadata binds version, slug, channel, amd64, source commit,
-recipe tree digest, distro/release/base URL/base serial/SHA-256 (and upstream
-SHA-512/signature provenance where available), apt snapshot, agent version/binary digest,
-builder API, minimum agent capability, half-open platform range, hardware allowlist,
-boot-trust requirement, logical disk size, ordered chunk sizes/digests, compressed
-stream size/digest and `sha256-pvesm-raw+size-v1` digest. Include exact installed
-package name/version/architecture and source-package/version inventory, tool
-versions, source/license inventory digest, build/verify results and measurements.
-A content-addressed attached package manifest is acceptable if its size and hash
-are inside the signed metadata; it must travel with the release.
+Do not distribute Chrome or Claude Code payloads in a layer. Proprietary or
+unresolved tools use optional first-boot vendor installation, exact version plus
+vendor checksum where published, bounded retries and visible status. Missing
+network is nonfatal to sandbox/agent/desktop readiness. No automatic login or
+license acceptance. This optional phase occurs after offline customization and
+is tested/accounted separately, so it cannot hide archive access during replay.
 
-Ed25519 detached raw 64-byte signatures cover exact metadata bytes using
-`RECIPE_SIGNING_KEY`; verify against baked
-`infra/templates/keys/recipe-publisher.pub` or S22's explicit owner override.
-Never fetch authority keys from R2. Strict schema, bounded bytes/counts/sizes,
-channel/slug/version compatibility and digest checks precede any host mutation.
-The configurable download origin is transport configuration, never a source of trust keys.
-Persist highest accepted pointer sequence per channel; ordinary polling cannot
-roll back. Explicit S22 rollback to a retained verified build is separate.
-
-## Public R2 access and provisioning request
-
-Master reports bucket `umiak-images` already exists on account
-`ccd46cd070d0adbdacd7defca520f867`, with public read at
-`https://pub-bdc85570347b44df991bfcee2718c4a1.r2.dev`. The probe object was removed;
-this branch does not create resources or upload anything. Treat every upload
-to this bucket as public distribution. **No image upload until master confirms
-the distro and the artifact's license gate is satisfied.**
-
-Installs use anonymous HTTPS GET, with no read token or presigned URL. Configure
-`UMIAK_IMAGE_BASE_URL` (default the above URL) and a matching host-side allowlist.
-Only relative, validated object keys come from metadata; reject arbitrary URLs,
-path traversal and redirects outside the configured origin. HTTPS protects
-transport; authenticity comes from baked Ed25519 keys and signed hashes.
-[Cloudflare documents r2.dev](https://developers.cloudflare.com/r2/buckets/public-buckets/)
-as a rate-limited development endpoint. Handle 429 with bounded retries and
-Retry-After, show a clear retry message and retain verified chunks. Production
-migration changes the base URL/allowlist to a custom domain; object paths,
-signatures, format and installer code remain identical. Do not promise an r2.dev
-throughput/SLA or configure cloud resources in this task.
-
-CI S3 endpoint is
-`https://ccd46cd070d0adbdacd7defca520f867.r2.cloudflarestorage.com`, region `auto`.
-Request one S3 credential pair scoped to **umiak-images only**, R2 **Object Read &
-Write**: PUT for chunks/manifests/pointers, GET/HEAD for remote verification,
-list as permitted by the preset. No Admin permission, bucket create/delete,
-other account or `belov38-releases` access. Cloudflare's supported preset includes
-read and list as well as writes; a pure write-only token is not required.
-
-GH secret names: `R2_IMAGES_ACCESS_KEY_ID`, `R2_IMAGES_SECRET_ACCESS_KEY`, plus
-existing `RECIPE_SIGNING_KEY`. Ask master to provision these when implementing
-the upload workflow, not for design/testing. Endpoint/account/bucket are non-secret
-configuration. Materialize credentials/signing key as restricted temporary files,
-never env/argv/log/git; no tracing. Existing recipe workflow uses an env secret;
-do not copy that pattern. Test file-only loading and cleanup on failure.
-
-Mirror plan: retain content-addressed objects and identical signed metadata so
-an authorized second origin can serve the same bytes. No GHCR mirror or other
-public copy is created automatically; fallback origins must be explicitly
-configured and use the same verification and hostname guards.
-
-## Restricted download/import
-
-Add node-agent operations `image.prepare` and `image.import`, with local durable
-job identity. Prepare accepts bounded signed metadata/signature and verifies
-publisher trust locally as well as in quickstart. It yields missing digest keys;
-control plane resolves only those against the configured public base. Node-agent accepts no
-commands, arbitrary paths, arbitrary storage names or caller-selected executable.
-Restrict destinations to configured template ranges, excluding CT 590, using the
-existing durable build reservation and owned empty VM/staging guards.
-
-Download into a root-owned digest cache with no symlinks. Stream SHA-256 with
-bounded buffers; enforce exact chunk length and metadata totals. Atomic rename
-and fsync mark verified chunks. Retry each chunk at most five times with bounded
-backoff, Retry-After handling and cancellation; rehash cached chunks after restart.
-Retrying only a failed <=512 MiB chunk is the initial resume strategy, independent
-of server Range support. Enforce free-space budget and cache quota before fetch.
-Allow only the configured public base origin; redirects may
-not escape the allowlist. Redact query strings and credential fields in all errors.
-
-Concatenate verified chunks into zstd decoder, enforce decompressed byte limit,
-check size header and stream SHA-256 through `pvesm import ... raw+size -` to
-owned staging. Check zstd EOF, no trailing/extra frames beyond declared data,
-expected digest, importer exit and destination UUID before durable receipt.
-Cancellation or failure never publishes staging. Partial PVE imports restart;
-verified download chunks survive. A receipt binds metadata digest/job/destination
-UUID, size and raw+size hash. Crash recovery validates UUID and ownership before
-reuse/removal; never delete unrelated LVs. Storage validation reuses S21 guards.
-
-Create template VM through the existing restricted PVE path with allowlisted
-hardware. Clone verification checks agent boot/trust, identity reset, baseline
-and desktop readiness, then registration/promotion use existing services. Attach
-image identity to the ordinary build manifest. Replicate that same verified
-build via S21. Failed replicas keep their previous active build. A failed or unavailable channel reports an actionable error and offers advanced
-local build explicitly.
-
-## CI build and publication
-
-New workflow is **workflow_dispatch only**, with version, stable/edge and publish
-(default false) inputs. Build exact committed pins, never floating dependencies.
-Probe `/dev/kvm` by starting a KVM VM, RAM and actual free disk before any build;
-standard runners may fail. Do not silently use TCG or any Proxmox host. GitHub
-calls [nested virtualization experimental/unsupported](https://docs.github.com/en/actions/concepts/runners/github-hosted-runners). [GitHub standard private Linux
-runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners) advertise 2 CPU, 8 GB RAM and 14 GB disk: spare disk is not assured.
-Build slugs sequentially, release intermediate images between slugs, stream
-compression/chunk upload, and report peak disk. The sparse 64 GiB disk does not
-justify a 64 GiB initial allocation. On probe failure report larger-runner or
-paid ephemeral-builder options to master; no automatic paid fallback.
-
-A QEMU adapter reuses recipe/seed/GuestIo step execution, fact collection, cleanup
-and cold verification. Use QGA over a local Unix socket with QMP for lifecycle;
-user-mode network during build, no install network. Guest agent package contains
-no test aids. Snapshot apt retries remain bounded; add connect/read/overall
-step timeouts so an archive outage fails CI rather than hanging. Never switch
-to unpinned mirrors to make a release pass. Capture npm integrity and all other
-non-apt input hashes as provenance; snapshot apt alone is not bit reproducibility.
-
-Keep signer isolated from build execution: untrusted guest has neither R2 writer
-nor signing key. After cold checks pass, a host signing step validates artifact
-paths/schema and signs metadata, uploads immutable objects with conflict checks,
-verifies remote reads and publishes the signed channel pointer last. Re-running
-a version with different bytes fails. Retention never deletes an artifact still
-referenced by a channel or retained release. A dedicated protected approval step
-must prevent publication pending distro confirmation and legal clearance. All
-image publishing runs require master's go-ahead in this phase.
-
-## Alternative: official base plus signed offline layer
-
-| Dimension | Prebuilt customized image | Official unmodified base + offline layer |
-| --- | --- | --- |
-| Legal posture | Modified Ubuntu aggregate; public clearance blocked for Ubuntu | Official image fetched directly from Canonical, customization local; avoids our distribution of customized disk, but package/CLI redistribution obligations remain |
-| Install work | Download, hash, import, clone-check | Download pinned official image plus signed layer, import, boot, install/configure/reboot/seal/verify locally |
-| Time | Network + import; no package installation | Network plus dpkg scripts, initrd/kernel, Rust/tool/npm extraction and reboot; couple of minutes is a target, not evidence |
-| Size | Compression of installed root disk | Base image + compressed exact deb dependency closure + tool archives/npm/Rust components; may be smaller or larger; measure both |
-| Reliability | No guest archive dependency; retry chunks | No archives if dependency closure complete; still depends on official base availability and successful local package scripts |
-| Complexity | QEMU build once, guarded raw import | Separate offline resolver/replay engine, versioned base/delta closure and per-node local build |
-
-Recommendation: implement **prebuilt images once distro and license gates clear**.
-For Ubuntu without redistribution clearance, prefer the official-base/offline-layer
-route for a future public offering; for a cleared Debian derivative, prebuilt
-images best satisfy the original install-speed/reliability goal. Keep the offline-layer route documented for a future distribution decision;
-implementing it requires a separate approved scope. It
-cannot be just debs: current recipes also fetch Docker keys, npm native optional
-packages, Rust components, browser packages, toolchain archives, Sigstore bundles and desktop
-assets. A viable layer must capture and hash all transitive inputs, retain apt
-Release/Packages signatures, stage an offline local apt repository, and replay
-with network disabled. Check full final package manifests against CI. Fetch the
-unmodified official base from `cloud-images.ubuntu.com` with both pinned SHA-256
-and Canonical-signed sums. Public-source/licensing review is still required;
-private hosting alone does not turn third-party conveyance into internal use.
-
-## Debian 13 revival (conditional, not a distro decision)
-
-Inspect and selectively port `19fb361b` (shared Linux/debian build and dual pins)
-and `5ae76ad0` (catalog/setup integration), reverted by `ac5e7996` and `39766e0a`.
-Do not blindly revert the reverts: `5ae76ad0` touches `apps/web` and Payload
-migrations which overlap S24. The old `debian` slug used VMID 594; S25 keeps
-public product slugs `linux` / `linux-desktop` and allocates from each install's
-configured range. No stand VMID is authorized for use.
-
-Port the Debian base downloader/pin resolver, genericcloud source schema,
-SHA-512 plus SHA-256 checks, Debian apt snapshot/deb822 helpers, distro seed
-environment, kernel checks, Java package selection and Docker Debian repository.
-The old implementation used HTTPS-reviewed cloud checksum pins rather than a
-Canonical signing key; verify current Debian cloud provenance support before
-settling that trust path, and never call two hashes a signature. Snapshot slowness
-is a bounded CI problem, not an installer archive dependency.
-
-The reverted recipe is headless. Desktop needs Debian-specific Sunshine package
-compatibility and dependency resolution, kernel/input/video/desktop smoke tests,
-and fresh immutable pins; do not install an Ubuntu-specific deb blindly. Check
-Chromium's supported dependencies and every binary's glibc baseline. Avoid adding
-a new catalog slug/migration unless master chooses that behavior. Record distro
-in signed metadata and manifests, show it in template details, and keep existing
-Ubuntu builds usable until unreferenced retirement. A distro change affects new
-sandboxes only and remains a master decision.
-
-[Debian's DFSG](https://www.debian.org/social_contract) supports redistribution and
-derived works; [Debian trademarks](https://www.debian.org/trademark) still require
-accurate naming/no implied endorsement. Use Umiak product names and factual
-base attribution. This does not waive individual package/non-free licensing.
-
-## Approved bundled-tool policy
-
-Replace Google Chrome with the selected distro's Chromium package, retaining
-browser automation/CDP and computer-use behavior. Update executable discovery,
-Chrome-named desktop defaults/policies and verification to test Chromium. Debian
-package and dependencies need fresh snapshot pins. Ubuntu's Chromium packaging
-may depend on snap, which the current recipe removes; do not silently restore
-snap or download a third-party browser binary. If Ubuntu is selected, resolve
-this packaging constraint with master before implementation.
-
-Exclude Claude Code and every other proprietary/unresolved-redistribution CLI
-from the published disk. A first-boot optional installer uses the vendor's
-official source, exact version and checksum where published, with bounded retries
-and visible status. If no vendor checksum exists, record that fact and the exact
-HTTPS source; do not fabricate an integrity guarantee. Do not bundle the
-proprietary payload inside the installer. Offline failure is nonfatal to agent,
-sandbox and desktop readiness; explain that the tool is unavailable and permit
-an explicit retry. No user credentials, license acceptance or login is automated.
-This optional internet access is separate from template import: import itself
-needs no snapshot archive and must not wait for a proprietary tool install.
-
-Apache/MIT tools may stay with required notices. Sunshine/moonlight remain with
-GPLv3 license texts and source links/offer in the image and signed manifest;
-retain exact corresponding source/build instructions and meet the applicable
-source-delivery obligations, not merely an unversioned upstream homepage.
-The signed inventory distinguishes bundled packages from optional external tools
-and includes each version, license, notices, source correspondence and hashes.
+Chromium must run without snap and preserve CDP/computer-use. Evaluate a pinned
+upstream Chromium build first, keeping its exact revision, SHA-256, license and
+third-party credits/source material. Chromium's [binary redistribution license](https://chromium.googlesource.com/chromium/src/+/HEAD/LICENSE)
+permits redistribution subject to notices/no endorsement; this is not a blanket
+license for every binary dependency or codec. [Upstream downloadable snapshots](https://www.chromium.org/getting-involved/download-chromium/)
+are best-effort arbitrary revisions, not guaranteed stable releases. Do not
+silently label a snapshot “stable”. A native xtradeb/debian deb is an alternative
+only after exact packaging, repository signatures, licenses and Ubuntu dependency
+compatibility are verified. If neither offers a clean pinned redistributable
+choice, ask master; never silently re-enable snap or substitute proprietary Chrome.
 
 ## License inventory and publication gate
 
@@ -340,7 +225,7 @@ by themselves clear the modified aggregate. See [Canonical policy §2–4](https
 | Shipped component | Finding / obligation / unresolved evidence |
 | --- | --- |
 | Ubuntu packages, kernel, desktop fonts/Xorg/LightDM/Openbox/PipeWire | Mixed licenses; collect each `/usr/share/doc/*/copyright`, source package/version, notices and corresponding-source material as required. Kernel/GPL obligations remain for binary conveyance; apply the same inventory to Debian if selected |
-| Google Chrome `.deb` | Exclude from images; replace with distro Chromium. Proprietary product; [Chrome terms](https://www.google.com/chrome/terms/) incorporate Google's general terms. Do not infer redistribution rights from downloadable debs. Verify exact package EULA/permission; do not bundle pending any future permission |
+| Google Chrome `.deb` | Exclude from images; replace with a verified snap-free Chromium distribution. Proprietary product; [Chrome terms](https://www.google.com/chrome/terms/) incorporate Google's general terms. Do not infer redistribution rights from downloadable debs. Verify exact package EULA/permission; do not bundle pending any future permission |
 | Claude Code npm package | Exclude from images; optional first-boot vendor install. [Anthropic legal docs](https://code.claude.com/docs/en/legal-and-compliance) govern product use; not an assumption of permissive source licensing. Record the external installer/version policy; do not redistribute unresolved payloads |
 | Codex / Gemini CLI | Upstream [Codex](https://github.com/openai/codex/blob/main/docs/license.md) and [Gemini](https://github.com/google-gemini/gemini-cli/blob/main/docs/resources/tos-privacy.md) identify Apache-2.0; retain licenses/notices and audit bundled native dependencies. Service credentials/terms remain per user |
 | OpenCode | [Pinned 1.19.5 license](https://github.com/anomalyco/opencode/blob/v1.19.5/LICENSE) is MIT; retain copyright/license and inspect native bundles |
@@ -356,44 +241,68 @@ get labeled MIT. Local internal testing remains separate from public R2 uploads.
 does not provide license permission; Debian selection would not clear Chrome or
 Claude Code redistribution by itself.
 
-## Hosting research (checked 2026-11-06)
+## Hosting, access and upload gate
 
-R2 is the owner's selection. [R2 pricing](https://developers.cloudflare.com/r2/pricing/)
-currently gives Standard storage $0.015/GB-month, 10 GB-month free, 1 million
-Class A and 10 million Class B requests free, with no egress fees. Use Standard,
-not Infrequent Access. [Limits](https://developers.cloudflare.com/r2/platform/limits/)
-allow 5 TiB objects, 5 GiB single uploads; 512 MiB chunks fit. Account/token scopes
-follow [R2 authentication](https://developers.cloudflare.com/r2/api/tokens/).
-[Presigned GETs](https://developers.cloudflare.com/r2/api/s3/presigned-urls/) expire
-within 1 second–7 days and use the S3 endpoint, not custom domains.
+R2 bucket `umiak-images` already exists on account
+`ccd46cd070d0adbdacd7defca520f867`. Public base defaults to
+`https://pub-bdc85570347b44df991bfcee2718c4a1.r2.dev`; make it configurable with
+`UMIAK_IMAGE_BASE_URL` and a host-side origin allowlist. Anonymous HTTPS only,
+no install tokens/presigned URLs. Restrict redirects to the configured origin;
+Canonical base downloads have a separate fixed official allowlist and GPG trust.
+A future custom-domain or GitHub public mirror changes origin configuration and
+object paths only, with the same signatures/digests. Never mirror the base disk.
 
-For comparison, [GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
-supports OCI/public anonymous pulls, 10 GB per layer and a 10-minute upload
-limit. Its official documentation does not publish a numeric anonymous-pull
-quota; do not promise unlimited service. [Container storage/bandwidth is currently
-free](https://docs.github.com/en/billing/concepts/product-billing/github-packages).
-[GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
-require each asset under 2 GiB and repository read access, so the private repo
-cannot serve anonymous installs. No GHCR mirror is enabled before distro/legal clearance. Future authorized mirror uses identical digests/signed bytes and a
-configured allowlist, never an unsigned alternate image.
+[R2 public r2.dev](https://developers.cloudflare.com/r2/buckets/public-buckets/)
+is development-only/rate-limited; retain verified chunks across bounded retries
+and honor Retry-After. No production throughput guarantee. [R2 pricing](https://developers.cloudflare.com/r2/pricing/)
+currently has no egress fees, Standard storage $0.015/GB-month and 10 GB-month
+free. [Limits](https://developers.cloudflare.com/r2/platform/limits/) permit
+5 TiB objects / 5 GiB single upload, so 512 MiB chunks fit.
 
-## Measurements and acceptance
+CI uploads use S3 endpoint
+`https://ccd46cd070d0adbdacd7defca520f867.r2.cloudflarestorage.com`, region auto.
+Request bucket-only **Object Read & Write** credentials (PUT, GET/HEAD readback,
+list allowed by preset), no bucket/admin rights. Proposed GH secrets:
+`R2_IMAGES_ACCESS_KEY_ID`, `R2_IMAGES_SECRET_ACCESS_KEY`; reuse `RECIPE_SIGNING_KEY`.
+Request only when uploader is ready. Secret values live only in restricted files,
+never env/argv/logs/git. No cloud resources created by this task.
 
-Historical S21 evidence: ~7.4 GB allocated, 64 GiB logical; 44–76 seconds per
-copy on 1 GbE (`docs/specs/s21-portable-sandboxes.md`). These are **not** measured
-S25 compressed size or import times. No build/download/live import has run here.
+Uploader stays behind explicit publish=false default and protected manual approval;
+no uploads are authorized during implementation. CI is workflow_dispatch only.
+Never upload an Ubuntu disk, even when publish is approved. Sign only after
+inventory/legal policy and network-disabled replay pass.
 
-Planning estimate only: if compressed size is 3–5 GiB, ideal download is 4.3–7.2
-minutes at 100 Mbit/s, 21.5–35.8 minutes at 20 Mbit/s, or 26–43 seconds at 1 Gbit/s.
-Import, hashing 64 GiB, decompression, fsync and clone verification are additional;
-provisionally allow 1–5 minutes for import and measure it. Do not promise those
-ranges as benchmarks. Formula: download seconds = compressed bytes * 8 / bit rate.
+For comparison: [GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
+supports OCI and public anonymous pulls, but documents 10 GB/layer and a ten-minute
+upload timeout, without a numeric anonymous pull quota guarantee. [GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
+need repository access and files under 2 GiB; the private repo cannot serve these
+anonymous installs. R2 remains selected, with a configuration-only public mirror
+possible later. No mirror is provisioned now.
 
-Required evidence per slug: raw/logical/allocated/compressed bytes, chunk count,
-peak runner disk/RAM, CI duration, download rate/retries, import/decode/hash elapsed,
-PVE thin allocation, clone readiness time, package/license manifests, two different
-install CA tests and S21 copy receipt equality. Master performs live PVE runs.
-Unit/fixture tests cover malicious metadata/URLs, signature failures, compatibility,
-channel switches, rollback sequence, quota/full disk, interrupted chunks/import,
-crash receipt ownership, malformed pins and legacy trust. Run Biome, Vitest, Go
-and golangci-lint for changed modules, plus quickstart node tests from repo root.
+## CI runner and measurements
+
+Direct QEMU/KVM adapter reuses recipe/seed/GuestIo execution and fact/verify logic.
+Probe KVM by actually starting a VM plus RAM/free disk before capture. Sequential
+headless/desktop jobs limit peak disk. [Nested virtualization is experimentally
+possible but unsupported](https://docs.github.com/en/actions/concepts/runners/github-hosted-runners).
+Standard private Linux runners advertise 2 CPU/8 GB RAM/14 GB disk; if the probe
+fails, report larger-runner or paid ephemeral-builder options to master. Never
+silently use TCG, a paid resource or Ilia's Proxmox. No live PVE/CT590 access.
+Keep snapshot apt and all tool pins; bounded connect/read/step retries fail CI
+rather than switching to unpinned archives. Separate signer from guest execution.
+
+Actual layer size, fresh offline customization time and import time are not yet
+measured. Historical 7.4 GB allocated / 64 GiB logical and S21 copy 44–76 seconds
+on 1 GbE describe the resulting Linux disk, **not layer download size**. Raw-disk
+compression estimates from the superseded design must not be reused as layer
+benchmarks. Download time = compressed layer bytes * 8 / link bit rate, plus
+separate official base transfer, local package/reboot/seal/verify work and S21 copy.
+Measure per slug: layer/base bytes, chunk count, capture/closed-network replay time,
+peak RAM/disk, input/package completeness, apt signature evidence, PVE customization
+and clone-ready time, archive network attempts (must be zero), and replica receipts.
+Master performs live acceptance; this thread uses fixtures only until authorized.
+
+Run Biome/Vitest for changed TS, Go tests/golangci-lint for changed Go and
+`mise exec -- node --test deploy/compose/quickstart/` from root after workspace
+install/dependency builds. Trust-stage evidence: 244 quickstart, 81 PVE, 45 worker,
+10 API tests and scoped Go/lint checks passed. No upload or live image test ran.
