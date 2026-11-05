@@ -60,11 +60,6 @@ export interface WorkerOptions {
 	migrateOnStart?: boolean;
 	migrationsDir?: string;
 	migrationWaitPollMs?: number;
-	/**
-	 * Throws while the Payload schema is not ready (main: assertPayloadMigrated
-	 * over the config reader's instance); /readyz reports `payload_migrations`.
-	 */
-
 	/** HTTP port; null = no server; 0 = any free port (tests). */
 	httpPort?: number | null;
 	httpHost?: string;

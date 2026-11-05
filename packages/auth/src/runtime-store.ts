@@ -229,7 +229,7 @@ export class RuntimeIdentityStore implements IdentityStore {
 			}
 		}
 		await c.query(
-			"UPDATE runtime.users SET is_operator = $2 WHERE id = $1 AND is_operator <> $2",
+			"UPDATE runtime.users SET is_operator = $2 WHERE id = $1 AND is_operator IS DISTINCT FROM $2",
 			[userId, isOperator],
 		);
 		await c.query(

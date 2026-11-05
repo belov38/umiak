@@ -36,12 +36,11 @@ test("native transport preserves canonical Host over a real socket and forwards 
 	);
 });
 
-test("quickstart and metadata bridge default transports preserve canonical Host on the wire", async (t) => {
+test("quickstart default transport preserves canonical Host on the wire", async (t) => {
 	const { createQuickstartServer } = await import("./quickstart/server.mjs");
 	const { MemoryOwnerRepository, OwnerStore } = await import(
 		"./quickstart/owner.mjs"
 	);
-	const { createMetaProxy } = await import("./meta-proxy.mjs");
 	let calls = 0;
 	const api = http.createServer((req, res) => {
 		calls++;
@@ -65,13 +64,7 @@ test("quickstart and metadata bridge default transports preserve canonical Host 
 			UMIAK_QUICKSTART_API_PORT: String(api.address().port),
 		},
 	});
-	const bridge = createMetaProxy(
-		undefined,
-		{ UMIAK_API_URL: "http://localhost:4180" },
-		undefined,
-		`http://127.0.0.1:${api.address().port}`,
-	);
-	for (const server of [quickstart, bridge]) {
+	for (const server of [quickstart]) {
 		await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 		t.after(() => new Promise((resolve) => server.close(resolve)));
 		const response = await fetch(
@@ -80,5 +73,5 @@ test("quickstart and metadata bridge default transports preserve canonical Host 
 		assert.equal(response.status, 200);
 		assert.equal((await response.json()).tenancy, "single");
 	}
-	assert.equal(calls, 2);
+	assert.equal(calls, 1);
 });

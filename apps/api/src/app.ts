@@ -161,7 +161,7 @@ async function passes(check: () => Promise<void>): Promise<boolean> {
 
 /**
  * `/healthz` (liveness), `/readyz` (not shutting down, Postgres, the
- * LISTEN umiak_identity connection and the Payload migrations), `/metrics`
+ * LISTEN umiak_identity connection and the configuration migrations), `/metrics`
  * (Prometheus).
  */
 export function createOpsApp(deps: ApiDeps): ApiApp {

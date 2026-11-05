@@ -22,11 +22,13 @@ const stack = JSON.parse(
 	),
 );
 const cp = "ghcr.io/belov38/umiak-quickstart:dev";
-test("product stack uses two published images and one offline bootstrap", () => {
+test("product stack uses one published image and one offline bootstrap", () => {
 	assert.deepEqual(
 		[...new Set(Object.values(stack.services).map((s) => s.image))].sort(),
-		[cp, "ghcr.io/belov38/umiak-web:dev", "postgres:18.6-alpine"].sort(),
+		[cp, "postgres:18.6-alpine"].sort(),
 	);
+	for (const removed of ["web", "web-meta", "web-migrate"])
+		assert.equal(stack.services[removed], undefined, removed);
 	assert.equal(stack.services["gateway-secrets"], undefined);
 	const init = stack.services["secrets-init"];
 	assert.equal(init.network_mode, "none");
@@ -41,13 +43,12 @@ test("product stack uses two published images and one offline bootstrap", () => 
 	);
 });
 test("secretless roles bypass credential wrapper and keep isolated mounts", () => {
-	for (const role of ["mcp", "web-meta"]) {
+	for (const role of ["mcp"]) {
 		const s = stack.services[role];
 		assert.equal(s.image, cp);
 		assert.deepEqual(s.entrypoint, ["node"]);
 		assert.equal((s.volumes ?? []).length, 0);
 	}
-	assert.deepEqual(Object.keys(stack.services.web.networks), ["web-internal"]);
 	assert.deepEqual(Object.keys(stack.services.worker.networks), ["control"]);
 	assert.equal(stack.services["gateway-renewal"].network_mode, "none");
 	assert.equal(stack.services.gateway.user, "0:0");

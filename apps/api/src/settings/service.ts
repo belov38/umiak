@@ -289,6 +289,18 @@ export async function mutateCatalog(
 			const allowed = merged.allowedSizes as string[];
 			if (!allowed.includes(String(merged.defaultSize)))
 				throw invalid("Default size must be allowed");
+			if (new Set(allowed).size !== allowed.length)
+				throw invalid("Duplicate allowed size");
+			if (
+				merged.enabled === false &&
+				(
+					await c.query(
+						"SELECT 1 FROM runtime.platform_defaults WHERE default_template=$1",
+						[slug],
+					)
+				).rowCount
+			)
+				throw conflict("The default template cannot be disabled");
 			const known = (
 				await c.query(
 					"SELECT slug FROM runtime.sizes WHERE slug=ANY($1::text[])",
@@ -314,12 +326,13 @@ export async function setDefaults(pool: pg.Pool, input: Doc) {
 		);
 		if (
 			!(
-				await c.query("SELECT 1 FROM runtime.templates WHERE slug=$1", [
-					input.defaultTemplate,
-				])
+				await c.query(
+					"SELECT 1 FROM runtime.templates WHERE slug=$1 AND enabled",
+					[input.defaultTemplate],
+				)
 			).rowCount
 		)
-			throw invalid("Unknown default template");
+			throw invalid("Unknown or disabled default template");
 		if (
 			input.ttlSeconds != null &&
 			Number(input.ttlSeconds) > Number(input.maxTtlSeconds)

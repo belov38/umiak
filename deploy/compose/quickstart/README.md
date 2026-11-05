@@ -341,10 +341,9 @@ invalidate each outstanding code after 20 wrong guesses across all sources.
 
 ## Shared control-plane image (S20)
 
-The release publishes `umiak-quickstart` and `umiak-web`. API, worker, MCP,
-owner ingress, gateway and web-meta use the same CP image with different commands.
-MCP remains a separate secretless process; web-meta remains the GET-only private
-metadata bridge. The single offline `secrets-init` initializes the gateway before
+The release publishes `umiak-quickstart`. API (which also serves the web SPA), worker,
+MCP, owner ingress and gateway use the same CP image with different commands.
+MCP remains a separate secretless process. The single offline `secrets-init` initializes the gateway before
 copying service secrets; renewal keeps its separate offline service. Existing
 volumes and the node-agent extraction path are preserved. Image sharing does not
 

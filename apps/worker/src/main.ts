@@ -2,9 +2,9 @@
 // the worker itself).
 // Reads the environment (src/env.ts), builds the real adapters and runs the
 // worker until SIGTERM/SIGINT: stop taking jobs, give active ones 60 s
-// (S6 §15.2), close the PVE clients, the S2 registry, Payload and the pool,
-// exit 0. Templates, sizes, quotas and defaults come from Payload
-// (src/payload.ts); its migrations are applied by the web-migrate job.
+// (S6 §15.2), close the PVE clients, the S2 registry and the pool, exit 0.
+// Templates, sizes, quotas and defaults come from the runtime configuration
+// tables (S24), created by the SQL migrations of the `migrate` job.
 // `@umiak/agent-client` and `@umiak/proto` are loaded from their `dist`: run
 // `pnpm build` once before `node src/main.ts` (the image does it).
 import { readFileSync } from "node:fs";

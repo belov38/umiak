@@ -1,6 +1,6 @@
 "use client";
 // xterm.js 6 with fit, web-links and search (S8 §9.6). Only ever loaded on
-// the client through `xterm-lazy.tsx` (next/dynamic, ssr: false); the CSS
+// the client through `xterm-lazy.tsx` (React.lazy); the CSS
 // comes from the package, not a CDN.
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
