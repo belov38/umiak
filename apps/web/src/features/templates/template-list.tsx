@@ -1,8 +1,6 @@
 "use client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
 import { useState } from "react";
-import { setTemplateEnabled } from "@/actions/templates";
 import { QueryError } from "@/components/app/query-error";
 import { useAppSession } from "@/components/app/session-context";
 import { Badge } from "@/components/ui/badge";
@@ -11,9 +9,11 @@ import { Checkbox } from "@/components/ui/choice";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { CodeBlock, LoadingState } from "@/components/ui/feedback";
 import { Input } from "@/components/ui/input";
+import Link from "@/components/ui/link";
 import { NativeSelect } from "@/components/ui/native-select";
 import { ActionBar, PageHeader, Panel } from "@/components/ui/panel";
 import { useUmiak } from "@/lib/api";
+import { setTemplateEnabled } from "@/lib/settings";
 import { teamPath } from "@/lib/team-path";
 import { RecipeChannelPanel } from "./recipe-channel";
 

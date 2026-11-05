@@ -7,7 +7,9 @@ import { SessionProvider } from "../src/components/app/session-context";
 import { CreateSandboxForm } from "../src/features/create/create-form";
 import { makeQueryClient, UmiakProvider } from "../src/lib/api";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("@/lib/navigation", () => ({
+	useAppNavigation: () => ({ go: vi.fn() }),
+}));
 vi.mock("@/features/sandboxes/sandbox-list", () => ({
 	SandboxList: () => null,
 }));

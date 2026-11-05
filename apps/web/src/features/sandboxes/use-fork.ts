@@ -7,13 +7,13 @@
 // and restart (S9 §24.8): asked up front when the catalog says Windows,
 // otherwise on the API's 409 `snapshot_requires_stop`. Render `dialog`.
 import type { SandboxData } from "@umiak/sdk";
-import { useRouter } from "next/navigation";
 import { type ReactNode, useRef } from "react";
 import { toast } from "sonner";
 import { useUmiak } from "@/lib/api";
 import { useAttempt } from "@/lib/client-call";
 import { isSnapshotRequiresStop } from "@/lib/errors";
 import { type IdempotencySlot, slotAfter, slotFor } from "@/lib/idempotency";
+import { useAppNavigation } from "@/lib/navigation";
 import { useDescribeError } from "@/lib/use-error";
 import { useForceStopConfirm, useNeedsForceStop } from "./force-stop";
 import { sandboxHref } from "./links";
@@ -26,7 +26,7 @@ export function useFork(
 	const attempt = useAttempt();
 	const describeError = useDescribeError();
 	const umiak = useUmiak(teamId);
-	const router = useRouter();
+	const router = useAppNavigation();
 	const forkKey = useRef<IdempotencySlot | null>(null);
 	const windows = useNeedsForceStop(teamId, sandbox);
 	const confirm = useForceStopConfirm(`Fork ${sandbox.slug}?`, "Stop and fork");
@@ -64,7 +64,7 @@ export function useFork(
 		}
 		if (slug === undefined || slug === "requires_stop") return;
 		toast.success(`Forking ${sandbox.slug} into ${slug}`);
-		router.push(sandboxHref(teamId, slug));
+		router.go(sandboxHref(teamId, slug));
 	};
 	return { fork, dialog: confirm.dialog };
 }

@@ -23,8 +23,6 @@ import {
 	TerminalIcon,
 	TrashIcon,
 } from "lucide-react";
-import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmButton } from "@/components/app/confirm-button";
@@ -33,6 +31,7 @@ import { Field, FormDialog } from "@/components/app/form-dialog";
 import { useSingleOwner } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import Link from "@/components/ui/link";
 import { NativeSelect } from "@/components/ui/native-select";
 import { ActionBar, PageHeader } from "@/components/ui/panel";
 import { useUmiak } from "@/lib/api";
@@ -43,6 +42,7 @@ import { slugProblem } from "@/lib/create-form";
 import { isSnapshotRequiresStop } from "@/lib/errors";
 import { formatTime } from "@/lib/format";
 import { type IdempotencySlot, slotAfter, slotFor } from "@/lib/idempotency";
+import { useAppNavigation, useSearchParams } from "@/lib/navigation";
 import { teamPath } from "@/lib/team-path";
 import { useDescribeError } from "@/lib/use-error";
 import { DeleteSandboxDialog } from "../sandboxes/delete-dialog";
@@ -77,7 +77,7 @@ export function SandboxHeader({
 }) {
 	const attempt = useAttempt();
 	const umiak = useUmiak(teamId);
-	const router = useRouter();
+	const router = useAppNavigation();
 	const refreshAll = useRefreshSandboxes(teamId);
 	const [busy, setBusy] = useState(false);
 	const [capacityWait, setCapacityWait] = useState("0");
@@ -348,7 +348,7 @@ export function SandboxHeader({
 				onDeleted={async () => {
 					toast.success(`Deleting ${s.slug}`);
 					await attempt(refreshAll);
-					router.push(teamPath(teamId));
+					router.go(teamPath(teamId));
 				}}
 			/>
 		</header>
@@ -531,7 +531,7 @@ function RenameDialog({
 }) {
 	const attempt = useAttempt();
 	const umiak = useUmiak(teamId);
-	const router = useRouter();
+	const router = useAppNavigation();
 	const params = useSearchParams();
 	const queryClient = useQueryClient();
 	const [slug, setSlug] = useState(s.slug);

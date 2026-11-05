@@ -1,13 +1,11 @@
 "use client";
 // /app/account (S8 §9.9): profile (the internal owner identity), default team
-// (server action), SSH keys (GET/POST/DELETE /v1/ssh-keys through the SDK)
+// (settings API), SSH keys (GET/POST/DELETE /v1/ssh-keys through the SDK)
 // and sign-out.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { UmiakError } from "@umiak/sdk";
-import { useRouter } from "next/navigation";
 import { type FormEvent, type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { setDefaultTeam } from "@/actions/account";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import {
 	useAppSession,
@@ -37,6 +35,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useUmiak } from "@/lib/api";
 import { useAttempt } from "@/lib/client-call";
 import { formatTime } from "@/lib/format";
+import { useAppNavigation } from "@/lib/navigation";
+import { setDefaultTeam } from "@/lib/settings";
 
 function Section({
 	title,
@@ -75,13 +75,26 @@ export function AccountSettings({
 				<div className="flex items-center justify-between gap-3">
 					<h2>Account · {session.user.name}</h2>
 					{signOutHref !== null && (
-						<Button asChild variant="ghost">
-							<a
-								href={signOutHref}
-								title="Ends this browser session; paired CLIs stay signed in."
-							>
-								Sign out
-							</a>
+						<Button
+							variant="ghost"
+							title="Ends this browser session; paired CLIs stay signed in."
+							onClick={async () => {
+								try {
+									const response = await fetch(signOutHref, {
+										method: "POST",
+										headers: { "content-type": "application/json" },
+										body: "{}",
+									});
+									if (!response.ok) throw new Error("Sign out failed");
+									window.location.assign("/signin");
+								} catch (error) {
+									toast.error(
+										error instanceof Error ? error.message : "Sign out failed",
+									);
+								}
+							}}
+						>
+							Sign out
 						</Button>
 					)}
 				</div>
@@ -114,7 +127,7 @@ function Profile() {
 					<>
 						<dt className="text-muted-foreground">Role</dt>
 						<dd>
-							<Badge variant="secondary">platform operator</Badge>
+							<Badge variant="secondary">owner</Badge>
 						</dd>
 					</>
 				)}
@@ -126,7 +139,7 @@ function Profile() {
 function DefaultTeam() {
 	const attempt = useAttempt();
 	const s = useAppSession();
-	const router = useRouter();
+	const router = useAppNavigation();
 	const [pending, start] = useTransition();
 	if (s.teams.length === 0) return null;
 	return (

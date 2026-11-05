@@ -15,19 +15,10 @@
 		"declaration": false,
 		"sourceMap": false,
 		"types": ["node"],
-		"plugins": [{ "name": "next" }],
 		"paths": {
-			"@/*": ["./src/*"],
-			"@payload-config": ["./src/payload.config.ts"]
+			"@/*": ["./src/*"]
 		}
 	},
-	"include": [
-		"next-env.d.ts",
-		"src",
-		"test",
-		"dev",
-		"*.ts",
-		".next/types/**/*.ts"
-	],
-	"exclude": ["node_modules", ".next"]
+	"include": ["src", "test", "vite.config.ts", "vitest.config.ts"],
+	"exclude": ["node_modules", "dist"]
 }

@@ -10,7 +10,6 @@ import {
 // after an action.
 import type { SandboxData } from "@umiak/sdk";
 import { PlusIcon } from "lucide-react";
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CopyButton } from "@/components/app/copy-button";
 import { EmptyState as DashboardEmpty } from "@/components/app/empty-state";
@@ -22,6 +21,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { LoadingState } from "@/components/ui/feedback";
 import { Input } from "@/components/ui/input";
+import Link from "@/components/ui/link";
 import { PageHeader } from "@/components/ui/panel";
 import {
 	Select,

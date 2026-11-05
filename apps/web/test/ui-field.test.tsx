@@ -2,12 +2,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import { Field } from "@/components/app/form-dialog";
 import { Select, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { NoteInput } from "@/features/operator/block-dialog";
+import { Textarea } from "@/components/ui/textarea";
 
 test("Field associates an error with a nested custom textarea", () => {
 	const html = renderToStaticMarkup(
 		<Field label="Note" error="Too long">
-			<NoteInput value="note" onChange={() => {}} />
+			<Textarea value="note" onChange={() => {}} />
 		</Field>,
 	);
 	const control = html.match(/<textarea[^>]+>/)?.[0] ?? "";

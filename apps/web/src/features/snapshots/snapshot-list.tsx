@@ -5,7 +5,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 // snapshot chosen; Delete asks first. Saving happens on the sandbox page.
 import type { SnapshotData } from "@umiak/sdk";
 import { LoaderCircleIcon } from "lucide-react";
-import Link from "next/link";
 import { toast } from "sonner";
 import { ConfirmButton } from "@/components/app/confirm-button";
 import { EmptyState as DashboardEmpty } from "@/components/app/empty-state";
@@ -14,6 +13,7 @@ import { useSingleOwner } from "@/components/app/session-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LoadingState } from "@/components/ui/feedback";
+import Link from "@/components/ui/link";
 import { PageHeader, Panel } from "@/components/ui/panel";
 import {
 	Table,

@@ -58,7 +58,7 @@ import { UmiakProvider } from "../src/lib/api.ts";
 import type { AppSession } from "../src/lib/app-session.ts";
 import { describeError } from "../src/lib/errors.ts";
 
-vi.mock("next/navigation", () => ({ usePathname: () => "/app" }));
+vi.mock("@/lib/navigation", () => ({ usePathname: () => "/app" }));
 const session: AppSession = {
 	user: { id: "usr_local", name: "Local owner", email: "local@umiak.local" },
 	teams: [

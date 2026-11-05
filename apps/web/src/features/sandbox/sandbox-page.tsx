@@ -5,17 +5,14 @@
 // `?tab=`; only the open tab is mounted, so leaving it closes its streams
 // and sockets.
 import { UmiakError } from "@umiak/sdk";
-import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 import { QueryError } from "@/components/app/query-error";
-import {
-	useAppSession,
-	useSingleOwner,
-} from "@/components/app/session-context";
+import { useSingleOwner } from "@/components/app/session-context";
 import { LoadingState } from "@/components/ui/feedback";
+import Link from "@/components/ui/link";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SandboxManagement } from "@/features/operator/sandbox-management";
+import { useAppNavigation, useSearchParams } from "@/lib/navigation";
+
 import { teamPath } from "@/lib/team-path";
 import { type SandboxTab, sandboxHref } from "../sandboxes/links";
 import { CommandsTab } from "./commands";
@@ -53,8 +50,7 @@ export function SandboxPage({
 	sandboxRef: string;
 }) {
 	const singleOwner = useSingleOwner();
-	const session = useAppSession();
-	const router = useRouter();
+	const router = useAppNavigation();
 	const params = useSearchParams();
 	const live = useLiveSandbox(teamId, sandboxRef);
 	const s = live.data;
@@ -123,7 +119,7 @@ export function SandboxPage({
 				desktop={desktop}
 				track={live.track}
 			/>
-			{singleOwner && session.isOperator && <SandboxManagement sandbox={s} />}
+
 			{live.error !== null && (
 				<QueryError
 					error={live.error}

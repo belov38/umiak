@@ -4,10 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 // known_hosts lines with copy, and a link to the account's SSH keys when
 // the person has none (`hasKeys: false`).
 import type { Sandbox, SandboxData } from "@umiak/sdk";
-import Link from "next/link";
 import { CopyLine } from "@/components/app/copy-button";
 import { QueryError } from "@/components/app/query-error";
 import { LoadingState } from "@/components/ui/feedback";
+import Link from "@/components/ui/link";
 
 export function SshTab({
 	teamId,

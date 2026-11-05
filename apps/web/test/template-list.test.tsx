@@ -8,7 +8,7 @@ import { makeQueryClient, UmiakProvider } from "../src/lib/api";
 import type { AppSession } from "../src/lib/app-session";
 
 // Server actions require a request context; this read-only render never calls one.
-vi.mock("@/actions/templates", () => ({ setTemplateEnabled: vi.fn() }));
+vi.mock("@/lib/settings", () => ({ setTemplateEnabled: vi.fn() }));
 
 const session: AppSession = {
 	user: { id: "usr_test", name: "Test member", email: "member@example.com" },

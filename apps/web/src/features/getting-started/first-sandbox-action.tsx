@@ -1,8 +1,8 @@
 "use client";
 import { useQuery } from "@tanstack/react-query";
-import Link from "next/link";
 import { useOwnerMode } from "@/components/app/session-context";
 import { Button } from "@/components/ui/button";
+import Link from "@/components/ui/link";
 import { useUmiak } from "@/lib/api";
 import { teamPath } from "@/lib/team-path";
 

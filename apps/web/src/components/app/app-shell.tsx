@@ -17,8 +17,6 @@ import {
 	UserIcon,
 	WrenchIcon,
 } from "lucide-react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
 import type React from "react";
 import { useEffect, useState } from "react";
 import { PlatformUpdateBanner } from "@/components/app/platform-updates";
@@ -38,8 +36,10 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import Link from "@/components/ui/link";
 import { NavItem } from "@/components/ui/nav-item";
 import type { AppTeam } from "@/lib/app-session";
+import { usePathname } from "@/lib/navigation";
 import { switchTeamPath, teamPath } from "@/lib/team-path";
 import { cn } from "@/lib/utils";
 import { OwnerModeContext } from "./session-context";

@@ -6,8 +6,6 @@
 // form; out_of_capacity offers a retry. Secrets never leave React state
 // except in the request body: no URL, no storage, no logs.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
 	type FormEvent,
 	type ReactNode,
@@ -29,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { LoadingState } from "@/components/ui/feedback";
 import { Input } from "@/components/ui/input";
+import Link from "@/components/ui/link";
 import { NativeSelect } from "@/components/ui/native-select";
 import { PageHeader } from "@/components/ui/panel";
 import {
@@ -54,6 +53,7 @@ import {
 } from "@/lib/create-form";
 import type { ErrorView } from "@/lib/errors";
 import { type IdempotencySlot, slotAfter, slotFor } from "@/lib/idempotency";
+import { useAppNavigation } from "@/lib/navigation";
 import { teamPath } from "@/lib/team-path";
 import { useDescribeError } from "@/lib/use-error";
 import { cn } from "@/lib/utils";
@@ -135,7 +135,7 @@ export function CreateSandboxForm({
 	const singleOwner = useSingleOwner();
 	const describeError = useDescribeError();
 	const umiak = useUmiak(teamId);
-	const router = useRouter();
+	const router = useAppNavigation();
 	const queryClient = useQueryClient();
 	const [form, setForm] = useState<CreateFormState>(() => ({
 		...emptyCreateForm(),
@@ -264,7 +264,7 @@ export function CreateSandboxForm({
 				queryClient.invalidateQueries({ queryKey: ["limits", teamId] }),
 			]),
 		);
-		router.push(sandboxHref(teamId, slug));
+		router.go(sandboxHref(teamId, slug));
 	};
 
 	const slugHint =
@@ -278,7 +278,7 @@ export function CreateSandboxForm({
 			<Dialog
 				open
 				onOpenChange={(open) => {
-					if (!open) router.push(teamPath(teamId));
+					if (!open) router.go(teamPath(teamId));
 				}}
 			>
 				<DialogContent className="create-dialog">
@@ -697,7 +697,7 @@ export function CreateSandboxForm({
 									<Button
 										type="button"
 										variant="outline"
-										onClick={() => router.push(teamPath(teamId))}
+										onClick={() => router.go(teamPath(teamId))}
 									>
 										Cancel
 									</Button>

@@ -5,7 +5,6 @@ import { useQueryClient } from "@tanstack/react-query";
 // successful mutations refresh both the list and quota.
 import type { SandboxData } from "@umiak/sdk";
 import { ChevronRightIcon, EllipsisIcon } from "lucide-react";
-import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -16,6 +15,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import Link from "@/components/ui/link";
 import { useUmiak } from "@/lib/api";
 import { useAttempt } from "@/lib/client-call";
 import { canDelete, canFork, canResume, canStop } from "@/lib/sandboxes";
