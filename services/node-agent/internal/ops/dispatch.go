@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"strings"
 	"time"
 
@@ -55,6 +56,8 @@ type Server struct {
 	Version string
 	// ScanOpen opens LV devices for lv.scan; nil reads /dev/<vg>/<lv>.
 	ScanOpen ScanOpener
+	// TransferOpen opens a validated staging device; nil uses os.OpenFile.
+	TransferOpen func(string) (*os.File, error)
 	// OnHash is called each time media.sha256 reads a file instead of using its cache; tests count it.
 	OnHash func(name string)
 }
@@ -68,21 +71,25 @@ func badReq(format string, args ...any) error { return badRequest{fmt.Sprintf(fo
 type handler func(s *Server, ctx context.Context, args json.RawMessage) (any, error)
 
 var handlers = map[string]handler{
-	"version":        (*Server).version,
-	"lv.snapshot":    (*Server).lvSnapshot,
-	"lv.remove":      (*Server).lvRemove,
-	"lv.list":        (*Server).lvList,
-	"pool.usage":     (*Server).poolUsage,
-	"dhcp.leases":    (*Server).dhcpLeases,
-	"dhcp.release":   (*Server).dhcpRelease,
-	"inventory":      (*Server).inventory,
-	"media.list":     (*Server).mediaList,
-	"media.remove":   (*Server).mediaRemove,
-	"media.sha256":   (*Server).mediaSHA256,
-	"lv.scan":        (*Server).lvScan,
-	"lv.usage":       (*Server).lvUsage,
-	"lv.tagTemplate": (*Server).lvTagTemplate,
-	"lv.adopt":       (*Server).lvAdopt,
+	"version":            (*Server).version,
+	"lv.snapshot":        (*Server).lvSnapshot,
+	"lv.remove":          (*Server).lvRemove,
+	"lv.list":            (*Server).lvList,
+	"pool.usage":         (*Server).poolUsage,
+	"dhcp.leases":        (*Server).dhcpLeases,
+	"dhcp.release":       (*Server).dhcpRelease,
+	"inventory":          (*Server).inventory,
+	"media.list":         (*Server).mediaList,
+	"media.remove":       (*Server).mediaRemove,
+	"media.sha256":       (*Server).mediaSHA256,
+	"lv.scan":            (*Server).lvScan,
+	"lv.usage":           (*Server).lvUsage,
+	"lv.tagTemplate":     (*Server).lvTagTemplate,
+	"lv.transferDigest":  (*Server).lvTransferDigest,
+	"lv.transferRead":    (*Server).lvTransferRead,
+	"lv.transferPrepare": (*Server).lvTransferPrepare,
+	"lv.transferWrite":   (*Server).lvTransferWrite,
+	"lv.adopt":           (*Server).lvAdopt,
 }
 
 // decodeArgs decodes optional args strictly.
@@ -146,7 +153,7 @@ func redactArgs(op string, raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return "{}"
 	}
-	secret := map[string]string{"inventory": "search", "lv.scan": "patterns"}[op]
+	secret := map[string]string{"inventory": "search", "lv.scan": "patterns", "lv.transferWrite": "data"}[op]
 	if secret == "" {
 		return string(raw)
 	}
