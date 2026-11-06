@@ -25,19 +25,47 @@ fetch_verify "https://github.com/trycua/cua/releases/download/cua-driver-rs-v${c
 fetch_verify "https://github.com/sigstore/cosign/releases/download/v${cosign}/cosign-linux-amd64" \
  "$(toml_get desktop.cosign.sha256)" "$UMIAK_WORK_DIR/cosign"
 chmod 0755 "$UMIAK_WORK_DIR/cosign"
-cosign_args=()
 # Pin cosign's TUF cache: steps run through the guest agent without HOME, where
 # cosign 3 has no ~/.sigstore. Capture copies the authenticated trust root from here.
 export TUF_ROOT="$UMIAK_WORK_DIR/sigstore-tuf"
+cua_identity="https://github.com/trycua/cua/.github/workflows/cd-rust-cua-driver.yml@refs/tags/cua-driver-rs-v${cua}"
+cua_issuer=https://token.actions.githubusercontent.com
 if [ "${UMIAK_LAYER_MODE:-}" = replay ]; then
  cp "$UMIAK_LAYER_ROOT/inputs/desktop/cua-driver.sigstore.json" "$UMIAK_WORK_DIR/cua-driver.sigstore.json"
- cosign_args+=(--offline --trusted-root "$UMIAK_LAYER_ROOT/inputs/desktop/trusted_root.json")
+ # The upstream bundle uses cosign's legacy format, for which --trusted-root is
+ # rejected. Verify offline with the keys of the trust root that TUF
+ # authenticated during capture: Fulcio roots plus one Rekor and one CT key
+ # per file (cosign reads only the first key of a file). Never skip on failure.
+ keys="$UMIAK_WORK_DIR/sigstore-offline"
+ install -d -m 0700 "$keys"
+ python3 -I - "$UMIAK_LAYER_ROOT/inputs/desktop/trusted_root.json" "$keys" <<'PY'
+import json, sys, textwrap
+root, out = json.load(open(sys.argv[1])), sys.argv[2]
+def pem(kind, raw):
+    return f"-----BEGIN {kind}-----\n" + textwrap.fill(raw, 64) + f"\n-----END {kind}-----\n"
+certs = [c["rawBytes"] for ca in root["certificateAuthorities"] for c in ca["certChain"]["certificates"]]
+open(f"{out}/fulcio.pem", "w").write("".join(pem("CERTIFICATE", c) for c in certs))
+for name in ("tlogs", "ctlogs"):
+    for i, log in enumerate(root[name]):
+        open(f"{out}/{name}-{i}.pub", "w").write(pem("PUBLIC KEY", log["publicKey"]["rawBytes"]))
+PY
+ verified=
+ for rekor_key in "$keys"/tlogs-*.pub; do
+  for ct_key in "$keys"/ctlogs-*.pub; do
+   if SIGSTORE_ROOT_FILE="$keys/fulcio.pem" SIGSTORE_REKOR_PUBLIC_KEY="$rekor_key" SIGSTORE_CT_LOG_PUBLIC_KEY_FILE="$ct_key" \
+    "$UMIAK_WORK_DIR/cosign" verify-blob --offline --bundle "$UMIAK_WORK_DIR/cua-driver.sigstore.json" \
+    --certificate-identity "$cua_identity" --certificate-oidc-issuer "$cua_issuer" "$UMIAK_WORK_DIR/cua-driver.tar.gz"; then
+    verified=1
+    break 2
+   fi
+  done
+ done
+ [ -n "$verified" ] || die "Cua Driver signature failed offline verification against the captured Sigstore trust root"
 else
  curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 --max-time 300 "https://github.com/trycua/cua/releases/download/cua-driver-rs-v${cua}/cua-driver-rs-${cua}-linux-x86_64-binary.tar.gz.sigstore.json" -o "$UMIAK_WORK_DIR/cua-driver.sigstore.json"
+ "$UMIAK_WORK_DIR/cosign" verify-blob --bundle "$UMIAK_WORK_DIR/cua-driver.sigstore.json" \
+  --certificate-identity "$cua_identity" --certificate-oidc-issuer "$cua_issuer" "$UMIAK_WORK_DIR/cua-driver.tar.gz"
 fi
-"$UMIAK_WORK_DIR/cosign" verify-blob "${cosign_args[@]}" --bundle "$UMIAK_WORK_DIR/cua-driver.sigstore.json" \
- --certificate-identity "https://github.com/trycua/cua/.github/workflows/cd-rust-cua-driver.yml@refs/tags/cua-driver-rs-v${cua}" \
- --certificate-oidc-issuer https://token.actions.githubusercontent.com "$UMIAK_WORK_DIR/cua-driver.tar.gz"
 if [ "${UMIAK_LAYER_MODE:-}" = capture ]; then
  mkdir -p "$UMIAK_CAPTURE_DIR/inputs/desktop"
  cp "$UMIAK_WORK_DIR/cua-driver.sigstore.json" "$UMIAK_CAPTURE_DIR/inputs/desktop/"
