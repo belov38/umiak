@@ -26,6 +26,9 @@ fetch_verify "https://github.com/sigstore/cosign/releases/download/v${cosign}/co
  "$(toml_get desktop.cosign.sha256)" "$UMIAK_WORK_DIR/cosign"
 chmod 0755 "$UMIAK_WORK_DIR/cosign"
 cosign_args=()
+# Pin cosign's TUF cache: steps run through the guest agent without HOME, where
+# cosign 3 has no ~/.sigstore. Capture copies the authenticated trust root from here.
+export TUF_ROOT="$UMIAK_WORK_DIR/sigstore-tuf"
 if [ "${UMIAK_LAYER_MODE:-}" = replay ]; then
  cp "$UMIAK_LAYER_ROOT/inputs/desktop/cua-driver.sigstore.json" "$UMIAK_WORK_DIR/cua-driver.sigstore.json"
  cosign_args+=(--offline --trusted-root "$UMIAK_LAYER_ROOT/inputs/desktop/trusted_root.json")
@@ -39,7 +42,9 @@ if [ "${UMIAK_LAYER_MODE:-}" = capture ]; then
  mkdir -p "$UMIAK_CAPTURE_DIR/inputs/desktop"
  cp "$UMIAK_WORK_DIR/cua-driver.sigstore.json" "$UMIAK_CAPTURE_DIR/inputs/desktop/"
  # This trust root was just authenticated by cosign's TUF client, not downloaded unauthenticated.
- cp /root/.sigstore/root/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json "$UMIAK_CAPTURE_DIR/inputs/desktop/"
+ trusted_root="$TUF_ROOT/tuf-repo-cdn.sigstore.dev/targets/trusted_root.json"
+ [ -s "$trusted_root" ] || die "cosign TUF trust root missing at $trusted_root"
+ cp "$trusted_root" "$UMIAK_CAPTURE_DIR/inputs/desktop/"
 fi
 
 install -d -o user -g user -m 0700 /home/user/.local/state
