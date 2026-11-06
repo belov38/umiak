@@ -544,3 +544,44 @@ it("desktopReady maps the real Status contract and transient errors", async () =
 		AgentUnavailable,
 	);
 });
+
+it("delivers the install API URL at claim and env refresh without baking it into a Linux layer", async () => {
+	const received: Record<string, string>[] = [];
+	const port = portFor(
+		{
+			claim: async (req) => {
+				received.push(req.env);
+				return { ready: true };
+			},
+			updateEnv: async (req) => {
+				received.push(req.env);
+				return {};
+			},
+		},
+		{ publicApiUrl: "https://api.install.invalid" },
+	);
+	await port.claim(
+		machineId,
+		{
+			reason: "claim",
+			sandboxId: "umiak-1",
+			hostname: "box",
+			env: { A: "1" },
+			secretEnv: {},
+			secretFiles: [],
+			authorizedKeys: [],
+		},
+		"claim-api",
+	);
+	await port.updateEnv(machineId, { A: "2" }, "refresh-api");
+	await port.updateEnv(
+		machineId,
+		{ UMIAK_API_URL: "https://owner-override.invalid" },
+		"override-api",
+	);
+	expect(received).toEqual([
+		{ UMIAK_API_URL: "https://api.install.invalid", A: "1" },
+		{ UMIAK_API_URL: "https://api.install.invalid", A: "2" },
+		{ UMIAK_API_URL: "https://owner-override.invalid" },
+	]);
+});

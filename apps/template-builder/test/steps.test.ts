@@ -227,8 +227,8 @@ describe("recipe scripts: spec items", () => {
 		])
 			expect(s, url).toContain(url);
 		const fetches = s.match(/fetch_verify /g) ?? [];
-		// node, go, bun, uv, gh, rustup-init, chrome
-		expect(fetches.length).toBe(7);
+		// node, go, bun, uv, gh, rustup-init, the generic standalone Rust archive, legacy chrome
+		expect(fetches.length).toBe(8);
 		expect(code("lib.sh")).toMatch(/sha256sum -c/);
 	});
 });

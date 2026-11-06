@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"strings"
 	"time"
 
@@ -54,6 +55,8 @@ type Server struct {
 	Log      func(string)
 	Progress func(map[string]any) error
 	Version  string
+	// LayerHTTP is injectable for local TLS fixtures; production uses a bounded client.
+	LayerHTTP *http.Client
 	// ScanOpen opens LV devices for lv.scan; nil reads /dev/<vg>/<lv>.
 	ScanOpen ScanOpener
 	// OnHash is called each time media.sha256 reads a file instead of using its cache; tests count it.
@@ -69,6 +72,10 @@ func badReq(format string, args ...any) error { return badRequest{fmt.Sprintf(fo
 type handler func(s *Server, ctx context.Context, args json.RawMessage) (any, error)
 
 var handlers = map[string]handler{
+	"layer.prepare":        (*Server).layerPrepare,
+	"layer.release":        (*Server).layerRelease,
+	"layer.base":           (*Server).layerBase,
+	"layer.stage":          (*Server).layerStage,
 	"volume.cleanupImport": (*Server).volumeCleanupImport,
 	"volume.sendTo":        (*Server).volumeSendTo,
 	"version":              (*Server).version,
@@ -150,6 +157,9 @@ func errorCode(err error) string {
 func redactArgs(op string, raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return "{}"
+	}
+	if strings.HasPrefix(op, "layer.") {
+		return "<signed offline layer request>"
 	}
 	secret := map[string]string{"inventory": "search", "lv.scan": "patterns"}[op]
 	if secret == "" {

@@ -13,6 +13,7 @@ echo umiak >/etc/hostname
 sed -i -E '/(^|[[:space:]])umiak-build([[:space:]]|$)/d' /etc/hosts
 
 # apt: back to the plain archive, no package lists (spec 6.2).
+offline_restore_apt
 apt_snapshot ""
 # The Docker pins hold only during the build: users update Docker with apt like the rest.
 apt-mark unhold docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin >/dev/null
@@ -27,6 +28,11 @@ rm -f /etc/netplan/50-cloud-init.yaml /etc/ssh/sshd_config.d/50-cloud-init.conf
 # GRUB: no recordfail wait after a hard stop (spec 8.5).
 if [ -f /boot/grub/grubenv ]; then grub-editenv /boot/grub/grubenv unset recordfail; fi
 
+# Generic clones must never inherit DHCP leases, Docker identity or desktop pairing.
+rm -rf /var/lib/dhcp/* /var/lib/dhcpcd/* /var/lib/systemd/network/*
+rm -f /var/lib/docker/engine-id
+rm -rf /var/lib/umiak-stream/* /home/user/.config/sunshine/* /home/user/.local/state/cua-driver/*
+
 # Machine state and caches.
 rm -f /var/lib/systemd/random-seed /var/lib/systemd/credential.secret
 for home in /root /home/user; do
@@ -39,6 +45,7 @@ rm -rf /home/user/.rustup/downloads/* /home/user/.rustup/tmp/* /root/go
 # sandbox), Go telemetry counters, opencode's data; then the empty directories left behind.
 for home in /root /home/user; do
 	rm -rf "$home/.local/state/gh" "$home/.config/go/telemetry" \
+		"$home/.claude" "$home/.claude.json" "$home/.claude.json.backup" \
 		"$home/.config/opencode" "$home/.local/share/opencode" "$home/.local/state/opencode"
 	for d in "$home/.config" "$home/.local"; do
 		if [ -d "$d" ]; then find "$d" -mindepth 1 -type d -empty -delete; fi

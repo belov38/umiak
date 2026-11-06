@@ -14,11 +14,17 @@ import {
 	type Allocator,
 	configureVmFirewall,
 	type NodeOps,
+	type OfflineLayerReceipt,
 	type PveClient,
 	type UploadFile,
 } from "@umiak/pve";
 import { pveImageName } from "./image.ts";
+import {
+	layerNodeRequest,
+	type VerifiedOfflineLayer,
+} from "./layer-release.ts";
 import type { Manifest, VerifyResult } from "./manifest.ts";
+import { renderOfflineSeed } from "./offline-seed.ts";
 import {
 	REBOOT_STEP,
 	type Recipe,
@@ -119,6 +125,8 @@ export interface BuildDeps {
 }
 
 export interface BuildOptions {
+	offlineLayer?: VerifiedOfflineLayer;
+	tunnelCAPin?: string;
 	/** Internal production job scope; never a public placement option. */
 	nodeBuildJobId?: string;
 	/** Explicit fresh build slot, still checked against allocator range and occupied VMs. */
@@ -169,6 +177,8 @@ export type Stage =
 	| "steps"
 	| "offline"
 	| "verify-offline"
+	| "platform-tools"
+	| "vendor-tools"
 	| "seal"
 	| "template"
 	| "verify"
@@ -182,6 +192,7 @@ export type Save = (
 
 /** What the build created so far: the rollback removes exactly this. */
 export interface State {
+	layerMedia?: OfflineLayerReceipt;
 	m: Manifest;
 	stage: Stage;
 	step?: string;
@@ -279,8 +290,45 @@ export async function stageImage(
 	versions: Versions,
 ): Promise<string> {
 	const img = await deps.fetchImage(versions.base);
+	if (o.offlineLayer && img.sha256 !== versions.base.sha256)
+		throw Error("Official base differs from signed layer pin");
 	const name = pveImageName(versions.base.serial);
+	if (o.offlineLayer) {
+		const args = layerNodeRequest(o.offlineLayer, {
+			jobId: o.nodeBuildJobId as string,
+			vmid: o.templateVmid as number,
+			mediaStorage: MEDIA_STORAGE,
+		});
+		const cached = await deps.node.call<{ verified: boolean; sha256?: string }>(
+			"layer.base",
+			args,
+		);
+		if (!cached.verified) {
+			const volid = `${MEDIA_STORAGE}:import/${name}`;
+			const content = await deps.api.get<{ volid: string }[]>(
+				`/nodes/${o.node}/storage/${MEDIA_STORAGE}/content`,
+				{ content: "import" },
+			);
+			if (content.some((f) => f.volid === volid))
+				await deps.node.call("media.remove", { names: [name] });
+		}
+	}
 	await ensureMedia(deps, o.node, "import", name, img);
+	if (o.offlineLayer) {
+		const args = layerNodeRequest(o.offlineLayer, {
+			jobId: o.nodeBuildJobId as string,
+			vmid: o.templateVmid as number,
+			mediaStorage: MEDIA_STORAGE,
+		});
+		const result = await deps.node.call<{ verified: boolean; sha256?: string }>(
+			"layer.base",
+			args,
+		);
+		if (!result.verified || result.sha256 !== versions.base.sha256)
+			throw Error(
+				"Official base hash verification failed on PVE before import",
+			);
+	}
 	return name;
 }
 
@@ -311,7 +359,9 @@ export async function stageSeed(
 		version: st.m.version,
 		agentPackage: o.agentPackage,
 		agentVersion: st.m.agentVersion,
-		updateKeys: readFileSync(o.updateKeysFile),
+		updateKeys: o.offlineLayer
+			? Buffer.alloc(0)
+			: readFileSync(o.updateKeysFile),
 		manifestBase: guestManifest(st.m),
 		...opt("umiakCli"),
 		...opt("apiUrl"),
@@ -322,12 +372,15 @@ export async function stageSeed(
 	try {
 		const name = seedName(st.m);
 		const path = join(dir, "seed.iso");
-		const files = renderSeed(input);
+		const files = o.offlineLayer
+			? renderOfflineSeed(o.nodeBuildJobId as string)
+			: renderSeed(input);
 		// The seed must carry the bytes prepare verified, not a later version of the file.
 		const pkg = files.get(SEED_AGENT_PACKAGE);
 		if (
-			pkg === undefined ||
-			createHash("sha256").update(pkg).digest("hex") !== p.agentSha256
+			!o.offlineLayer &&
+			(pkg === undefined ||
+				createHash("sha256").update(pkg).digest("hex") !== p.agentSha256)
 		)
 			throw new Error(
 				`${o.agentPackage} changed after its signature was verified`,
@@ -374,8 +427,8 @@ export async function stageVm(
 ): Promise<void> {
 	const { api } = deps;
 	const { vmid, mac } = await deps.allocator.allocateTemplate(recipe.vmids);
-	if (isProtectedVmid(vmid))
-		throw new Error(`allocator returned protected VMID ${vmid}`);
+	if (isProtectedVmid(vmid) || (o.offlineLayer && vmid !== o.templateVmid))
+		throw new Error(`allocator returned unexpected/protected VMID ${vmid}`);
 	st.vmid = vmid;
 	st.mac = mac;
 	save({ pveVmid: vmid });
@@ -398,7 +451,12 @@ export async function stageVm(
 		[recipe.disk.slot]:
 			`${o.storage}:0,import-from=${MEDIA_STORAGE}:import/${image},${opts}`,
 		[SEED_SLOT]: `${o.storage}:0,import-from=${MEDIA_STORAGE}:import/${seedName(st.m)}`,
-		net0: `virtio=${mac},bridge=${o.vnet},firewall=1`,
+		...(st.layerMedia
+			? {
+					scsi2: `${o.storage}:0,import-from=${MEDIA_STORAGE}:import/${st.layerMedia.mediaName},ro=1`,
+				}
+			: {}),
+		net0: `virtio=${mac},bridge=${o.vnet},firewall=1${o.offlineLayer ? ",link_down=1" : ""}`,
 		boot: `order=${recipe.disk.slot}`,
 		description: `umiak-tpl build ${st.m.buildId}\ngit ${o.gitCommit}`,
 	});
@@ -442,7 +500,7 @@ export async function stageBoot(
 			);
 		await sleep(pollMs);
 	}
-	await mountSeed(io);
+	await mountSeed(io, o.offlineLayer ? "umiak-layer" : "cidata");
 }
 
 export function stepLog(
@@ -473,9 +531,19 @@ export async function stageSteps(
 	const pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
 	for (const step of recipe.steps) {
 		st.step = step;
+		if (o.offlineLayer && step === "90-cleanup")
+			await runStep(io, {
+				name: "offline-browser",
+				script: "/mnt/seed/build/offline-cdp.sh",
+				log: stepLog(deps, o, st.m.buildId, "offline-browser"),
+				pollMs,
+			});
 		deps.log(`-- ${step}`);
 		if (step === REBOOT_STEP) {
-			await rebootGuest(io, { pollMs });
+			await rebootGuest(io, {
+				pollMs,
+				...(o.offlineLayer ? { seedLabel: "umiak-layer" as const } : {}),
+			});
 			continue;
 		}
 		let script = `${STEP_DIR}/${step}.sh`;
@@ -561,7 +629,14 @@ export async function stageTemplate(
 	const vmPath = `/nodes/${o.node}/qemu/${vmid}`;
 	await dropBuildFirewall(deps.api, vmPath);
 	// force=1 destroys the seed disk instead of leaving it as unused0.
-	await deps.api.put(`${vmPath}/unlink`, { idlist: SEED_SLOT, force: 1 });
+	await deps.api.put(`${vmPath}/unlink`, {
+		idlist: st.layerMedia ? `${SEED_SLOT},scsi2` : SEED_SLOT,
+		force: 1,
+	});
+	if (o.offlineLayer)
+		await deps.api.put(`${vmPath}/config`, {
+			net0: `virtio=${st.mac},bridge=${o.vnet},firewall=1`,
+		});
 	await deps.api.put(`${vmPath}/config`, { delete: "smbios1" });
 	const r = await deps.api.post(`${vmPath}/template`);
 	if (isUpid(r))

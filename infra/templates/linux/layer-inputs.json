@@ -1,0 +1,35 @@
+{
+	"format": "umiak-layer-input-pins/v1",
+	"rust": {
+		"version": "1.99.1",
+		"sha256": "231fcae47ee950621374725b5fc3b5441d2fbda2955ac45dd7dc816d8876cfe7"
+	},
+	"chromium": {
+		"repository": "https://ppa.launchpadcontent.net/xtradeb/apps/ubuntu/",
+		"suite": "resolute",
+		"keyFingerprint": "5301FA4FD93244FBC6F6149982BB6851C64F6880",
+		"version": "156.0.8078.73-1xtradeb1.2604.1",
+		"packages": {
+			"chromium": "2709ddc363facefcde93be2970d99ba95749af9f6b40bbd8c61463a63488333d",
+			"chromium-common": "2937ef3346f2e701d8588d453d725c0b40defbf1af1a89840574b4af3d7b7876",
+			"chromium-sandbox": "d519bab5d24506d5d12009f60c41ce8d82e43a6c8c55ff6938bd304ddb42669f"
+		},
+		"source": "https://launchpad.net/~xtradeb/+archive/ubuntu/apps/+sourcepub/18904289",
+		"licenseNotices": "/usr/share/doc/chromium/copyright"
+	},
+	"dockerPackaging": {
+		"label": "packaging recipe snapshot",
+		"snapshotDate": "2026-10-30T00:00:00Z",
+		"attestedBuildCheckout": false,
+		"repositories": [
+			{
+				"repository": "docker/docker-ce-packaging",
+				"commit": "dd77ca7b8fddcbee52507a178cda0743108d7654"
+			},
+			{
+				"repository": "docker/containerd-packaging",
+				"commit": "4179daadda73869df656240bf5446a72f15d1a21"
+			}
+		]
+	}
+}

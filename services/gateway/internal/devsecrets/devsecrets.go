@@ -499,7 +499,7 @@ func (g *gen) leaf(certName, keyName string, names []string) error {
 	if err := g.write(keyName, keyPEM, modeSecret); err != nil {
 		return err
 	}
-	return g.write(certName, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), modePublic)
+	return g.write(certName, g.leafChain(certName, der), modePublic)
 }
 
 // renewLeaf preserves the private key, so one atomic certificate rename publishes
@@ -512,6 +512,9 @@ func (g *gen) renewLeaf(certName, keyName string, names []string) error {
 	leaf := pair.Leaf
 	now := g.o.Now()
 	if leaf.NotAfter.After(now.Add(g.o.RenewBefore)) && slices.Equal(leaf.DNSNames, names) {
+		if certName == FileTunnelCert && len(pair.Certificate) == 1 {
+			return g.write(certName, g.leafChain(certName, leaf.Raw), modePublic)
+		}
 		return nil
 	}
 	if err := leaf.CheckSignatureFrom(g.ca); err != nil {
@@ -545,7 +548,7 @@ func (g *gen) renewLeaf(certName, keyName string, names []string) error {
 	if _, err := cert.Verify(x509.VerifyOptions{Roots: roots, CurrentTime: now}); err != nil {
 		return fmt.Errorf("%s: renewed certificate violates CA constraints: %w", certName, err)
 	}
-	return g.write(certName, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), modePublic)
+	return g.write(certName, g.leafChain(certName, der), modePublic)
 }
 
 func serial() *big.Int {
@@ -721,4 +724,13 @@ func (g *gen) workerToken() ([]byte, error) {
 		return nil, fmt.Errorf("%s has no worker token", FileServiceTokens)
 	}
 	return []byte(set["worker"][0] + "\n"), nil
+}
+
+// leafChain includes the install root for guests authenticating its firmware hash.
+func (g *gen) leafChain(name string, der []byte) []byte {
+	chain := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	if name == FileTunnelCert {
+		chain = append(chain, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: g.ca.Raw})...)
+	}
+	return chain
 }

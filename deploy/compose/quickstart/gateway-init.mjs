@@ -1,3 +1,4 @@
+import { X509Certificate } from "node:crypto";
 // Guest trust initialization and daily same-CA leaf renewal.
 
 import { spawnSync } from "node:child_process";
@@ -91,6 +92,17 @@ function initialize() {
 		"-owner=65532:65532",
 		"-worker-owner=1000:1000",
 	]);
+	if (existsSync(network)) {
+		const config = JSON.parse(readFileSync(network, "utf8"));
+		const pin = new X509Certificate(readFileSync(ca)).fingerprint256
+			.replaceAll(":", "")
+			.toLowerCase();
+		if (config.tunnelCAPin !== pin) {
+			config.tunnelCAPin = pin;
+			writeFileSync(`${network}.new`, JSON.stringify(config), { mode: 0o644 });
+			renameSync(`${network}.new`, network);
+		}
+	}
 }
 initialize();
 if (process.argv.includes("--watch")) {

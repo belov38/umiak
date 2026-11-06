@@ -58,6 +58,15 @@ export function recipeRollout({
 				)
 			).rows;
 			for (const slug of [...new Set(builds.map((b) => b.template_slug))]) {
+				// Signed Linux layers are rolled manually in the first S25 release; recipe
+				// updates must never rebuild them repeatedly or replace them with local builds.
+				if (
+					slug.startsWith("linux") &&
+					builds.some(
+						(b) => b.template_slug === slug && b.manifest?.offlineLayer,
+					)
+				)
+					continue;
 				if (
 					builds
 						.filter((b) => b.template_slug === slug)
@@ -79,7 +88,11 @@ export function recipeRollout({
 						)
 					)
 						continue;
-					const input = { nodeId: node.nodeId, confirmRebuild: slug };
+					const input = {
+						nodeId: node.nodeId,
+						confirmRebuild: slug,
+						...(slug.startsWith("linux") ? { buildMode: "local" } : {}),
+					};
 					if (slug === "windows") {
 						const previous = builds.find(
 							(b) => b.template_slug === slug,

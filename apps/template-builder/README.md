@@ -4,6 +4,21 @@ Builds Proxmox VM templates from the recipes in `infra/templates/` (spec: `docs/
 plan: `docs/plans/s5-linux-template.md`). The build VM is driven only through the QEMU guest agent
 (no SSH to the guest, no root SSH to the host).
 
+## Signed offline Linux inputs (S25)
+
+Setup defaults to **Download the Linux template**: official Canonical-verified
+base plus signed GHCR offline inputs, customized once on PVE, then S21-copied.
+See [S25 operations](../../docs/operations-s25-images.md) for the manual KVM
+workflow, four public packages (layers + corresponding sources), upload gates,
+measurements and live acceptance. CI never redistributes a customized Ubuntu disk.
+
+Offline builds require `--offline-layer <verified-control-file> --umiak-cli
+<installed-platform-release-asset> --template-vmid <reserved-id>` plus the setup
+job identity and public CA pin. The platform CLI transfers after parity with no
+network; missing assets fail. Optional Claude Code/Bun/OpenCode install once on
+the node in a separate online phase and tolerate failure. Sandbox boots do not
+run vendor installers. The local recipe build below remains the advanced path.
+
 ## Prerequisites (operator's Mac or a Linux CI runner)
 
 - Tools through mise (`mise exec -- node ...`); `xorriso` in `PATH` (macOS: `brew install xorriso`).

@@ -6,7 +6,7 @@ set -euo pipefail
 . "$(dirname "$0")/../lib.sh"
 
 pkg=$UMIAK_BUILD_DIR/umiak-agent.tar
-[ -f "$pkg" ] || die "$pkg not found"
+
 keys=$UMIAK_BUILD_DIR/update-keys.pub
 [ -s "$keys" ] || die "$keys not found"
 
@@ -20,11 +20,17 @@ install -D -m 0644 "$UMIAK_BUILD_DIR/agent.toml" /etc/umiak-agent/agent.toml
 # of the keys embedded in the binary: a homelab install signs its packages
 # with its own key, which no released binary embeds. The installed version's
 # trust/update-keys.pub verifies later updates.
-installer=$(mktemp /root/umiak-agent-installer.XXXXXX)
-tar -xOf "$pkg" umiak-agent >"$installer"
-chmod 0700 "$installer"
-"$installer" install-package --write-config --trust-keys "$keys" "$pkg"
-rm -f "$installer"
+if [ "${UMIAK_GENERIC_IMAGE:-0}" = 1 ]; then
+ # No install CA or private signing key is ever present in this path.
+ . "$UMIAK_BUILD_DIR/generic-agent.sh"
+else
+ [ -f "$pkg" ] || die "$pkg not found"
+ installer=$(mktemp /root/umiak-agent-installer.XXXXXX)
+ tar -xOf "$pkg" umiak-agent >"$installer"
+ chmod 0700 "$installer"
+ "$installer" install-package --write-config --trust-keys "$keys" "$pkg"
+ rm -f "$installer"
+fi
 
 systemctl enable umiak-identity.service umiak-agent.service
 systemctl enable qemu-guest-agent.service 2>/dev/null || true

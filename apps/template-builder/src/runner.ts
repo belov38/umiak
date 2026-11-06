@@ -492,11 +492,16 @@ async function unitStarted(
 }
 
 /** Mounts the seed ISO read-only at /mnt/seed (idempotent). */
-export async function mountSeed(io: GuestIo): Promise<void> {
+export async function mountSeed(
+	io: GuestIo,
+	label: "cidata" | "umiak-layer" = "cidata",
+): Promise<void> {
+	if (!["cidata", "umiak-layer"].includes(label))
+		throw Error("Invalid build media label");
 	const r = await io.exec([
 		"bash",
 		"-c",
-		`mkdir -p ${SEED_DIR} && (mountpoint -q ${SEED_DIR} || mount -o ro LABEL=cidata ${SEED_DIR})`,
+		`mkdir -p ${SEED_DIR} && (mountpoint -q ${SEED_DIR} || mount -o ro LABEL=${label} ${SEED_DIR})`,
 	]);
 	if (r.exitCode !== 0)
 		throw new Error(
@@ -514,7 +519,11 @@ async function readBootId(io: GuestIo): Promise<string> {
 /** Reboots the guest, waits for the agent under a new boot id and remounts the seed ISO. */
 export async function rebootGuest(
 	io: GuestIo,
-	o: { timeoutMs?: number; pollMs?: number } = {},
+	o: {
+		timeoutMs?: number;
+		pollMs?: number;
+		seedLabel?: "cidata" | "umiak-layer";
+	} = {},
 ): Promise<void> {
 	const timeoutMs = o.timeoutMs ?? DEFAULT_REBOOT_TIMEOUT_MS;
 	const pollMs = o.pollMs ?? DEFAULT_POLL_MS;
@@ -549,5 +558,5 @@ export async function rebootGuest(
 			last = errorText(err);
 		}
 	}
-	await mountSeed(io);
+	await mountSeed(io, o.seedLabel);
 }

@@ -34,6 +34,8 @@ type Identity struct {
 	BootID string
 	// TunnelURL is the tunnel URL override from product_family, or "".
 	TunnelURL string
+	// TunnelCAPin is SHA-256 DER CA trust supplied by boot firmware, never disk state.
+	TunnelCAPin string
 	// Warnings are non-fatal problems found while parsing, for the log.
 	Warnings []string
 }
@@ -61,6 +63,14 @@ func Parse(raw Raw) (Identity, error) {
 		} else {
 			id.Warnings = append(id.Warnings, "ignoring invalid tunnel url in product_family")
 		}
+	}
+	if raw.SKU != "" {
+		pin, ok := strings.CutPrefix(raw.SKU, "umiakca1:")
+		b, err := hex.DecodeString(pin)
+		if !ok || err != nil || len(b) != 32 || strings.ToLower(pin) != pin {
+			return Identity{}, errors.New("ident: invalid firmware CA pin")
+		}
+		id.TunnelCAPin = pin
 	}
 	return id, nil
 }

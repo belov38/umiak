@@ -96,6 +96,7 @@ async function main(): Promise<void> {
 			agentClient = new AgentClient({ registry, serviceToken });
 			agent = new ConnectAgentPort(agentClient, {
 				log,
+				...(env.publicApiUrl ? { publicApiUrl: env.publicApiUrl } : {}),
 				...(env.portDomain === undefined ? {} : { portDomain: env.portDomain }),
 				...(env.sshUserCaKeysFile === undefined
 					? {}

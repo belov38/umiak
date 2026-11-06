@@ -123,7 +123,10 @@ describe.skipIf(skipPg())("env routes", () => {
 			secretKeys: ["KEEP"],
 		});
 		const m = w.agent.machine(s.machineId as string);
-		expect(m.env).toEqual({ NEW: "2" });
+		expect(m.env).toEqual({
+			UMIAK_API_URL: "https://api.umiak.test",
+			NEW: "2",
+		});
 		expect(Buffer.from(m.secretFiles[0]?.content ?? []).toString()).toBe(
 			FILE_SECRET,
 		);
@@ -177,7 +180,11 @@ describe.skipIf(skipPg())("env routes", () => {
 			],
 		});
 		const m = w.agent.machine(s.machineId as string);
-		expect(m.env).toEqual({ A: "1", C: "3" });
+		expect(m.env).toEqual({
+			UMIAK_API_URL: "https://api.umiak.test",
+			A: "1",
+			C: "3",
+		});
 		expect(m.secretEnv).toEqual({ S2: "y" });
 		expect(m.secretFiles.map((f) => f.name)).toEqual(["f2"]);
 		const g = await h.request("GET", `/v1/sandboxes/${s.slug}/env`);

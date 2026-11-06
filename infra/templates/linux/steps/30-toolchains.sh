@@ -14,7 +14,8 @@ chmod 0755 "$UMIAK_WORK_DIR" "$dl"
 v=$(toml_get tools.node.version)
 f=$dl/node-v$v-linux-x64.tar.xz
 fetch_verify "https://nodejs.org/dist/v$v/node-v$v-linux-x64.tar.xz" "$(toml_get tools.node.sha256)" "$f"
-rm -rf "$dl/node" && mkdir "$dl/node"
+rm -rf "$dl/node"
+mkdir "$dl/node"
 tar -xJf "$f" -C "$dl/node" --no-same-owner
 cp -a "$dl/node/node-v$v-linux-x64/"{bin,include,lib,share} /usr/local/
 
@@ -27,20 +28,26 @@ tar -xzf "$f" -C /usr/local --no-same-owner
 ln -sfn /usr/local/go/bin/go /usr/local/bin/go
 ln -sfn /usr/local/go/bin/gofmt /usr/local/bin/gofmt
 
+# Bun is vendor-installed on the node after offline parity, never in a generic layer.
+if [ "${UMIAK_GENERIC_IMAGE:-}" != 1 ]; then
 # Bun (+ bunx).
 v=$(toml_get tools.bun.version)
 f=$dl/bun-v$v-linux-x64.zip
 fetch_verify "https://github.com/oven-sh/bun/releases/download/bun-v$v/bun-linux-x64.zip" "$(toml_get tools.bun.sha256)" "$f"
-rm -rf "$dl/bun" && mkdir "$dl/bun"
+rm -rf "$dl/bun"
+mkdir "$dl/bun"
 unzip -q -o "$f" -d "$dl/bun"
 install -m 0755 "$dl/bun/bun-linux-x64/bun" /usr/local/bin/bun
 ln -sfn bun /usr/local/bin/bunx
+
+fi
 
 # uv, uvx.
 v=$(toml_get tools.uv.version)
 f=$dl/uv-$v-x86_64-unknown-linux-gnu.tar.gz
 fetch_verify "https://github.com/astral-sh/uv/releases/download/$v/uv-x86_64-unknown-linux-gnu.tar.gz" "$(toml_get tools.uv.sha256)" "$f"
-rm -rf "$dl/uv" && mkdir "$dl/uv"
+rm -rf "$dl/uv"
+mkdir "$dl/uv"
 tar -xzf "$f" -C "$dl/uv" --no-same-owner
 install -m 0755 "$dl/uv/uv-x86_64-unknown-linux-gnu/uv" "$dl/uv/uv-x86_64-unknown-linux-gnu/uvx" /usr/local/bin/
 
@@ -48,7 +55,8 @@ install -m 0755 "$dl/uv/uv-x86_64-unknown-linux-gnu/uv" "$dl/uv/uv-x86_64-unknow
 v=$(toml_get tools.gh.version)
 f=$dl/gh_${v}_linux_amd64.tar.gz
 fetch_verify "https://github.com/cli/cli/releases/download/v$v/gh_${v}_linux_amd64.tar.gz" "$(toml_get tools.gh.sha256)" "$f"
-rm -rf "$dl/gh" && mkdir "$dl/gh"
+rm -rf "$dl/gh"
+mkdir "$dl/gh"
 tar -xzf "$f" -C "$dl/gh" --no-same-owner
 install -m 0755 "$dl/gh/gh_${v}_linux_amd64/bin/gh" /usr/local/bin/gh
 
@@ -60,24 +68,53 @@ rv=$(toml_get tools.rust.rustup_version)
 f=$dl/rustup-init
 fetch_verify "https://static.rust-lang.org/rustup/archive/$rv/x86_64-unknown-linux-gnu/rustup-init" "$(toml_get tools.rust.rustup_init_sha256)" "$f"
 chmod 0755 "$f"
-as_user "$f" -y --no-modify-path --default-toolchain "$v" --profile minimal -c rustfmt -c clippy
+if [ "${UMIAK_GENERIC_IMAGE:-}" = 1 ]; then
+ # Standalone distribution contains the exact compiler/std/cargo/rustfmt/clippy;
+ # rustup never resolves a channel or downloads a component during replay.
+ sha=$(python3 -I - "$UMIAK_BUILD_DIR/layer-inputs.json" "$v" <<'PYRUST'
+import json,sys
+r=json.load(open(sys.argv[1]))['rust']
+if r['version'] != sys.argv[2]: sys.exit('offline Rust pins do not match recipe')
+print(r['sha256'])
+PYRUST
+ )
+ archive=$dl/rust-$v-x86_64-unknown-linux-gnu.tar.xz
+ fetch_verify "https://static.rust-lang.org/dist/rust-$v-x86_64-unknown-linux-gnu.tar.xz" "$sha" "$archive"
+ mkdir -p "$dl/rust"
+ tar -xJf "$archive" -C "$dl/rust" --no-same-owner
+ bash "$dl/rust/rust-$v-x86_64-unknown-linux-gnu/install.sh" \
+  --prefix="/opt/umiak-rust/$v" --disable-ldconfig \
+  --components=rustc,cargo,rust-std-x86_64-unknown-linux-gnu,rustfmt-preview,clippy-preview
+ as_user "$f" -y --no-modify-path --default-toolchain none
+ as_user /home/user/.cargo/bin/rustup toolchain link umiak-pinned "/opt/umiak-rust/$v"
+ as_user /home/user/.cargo/bin/rustup default umiak-pinned
+else
+ as_user "$f" -y --no-modify-path --default-toolchain "$v" --profile minimal -c rustfmt -c clippy
+fi
 for t in cargo rustc rustup rustfmt cargo-clippy clippy-driver; do
 	[ -x "/home/user/.cargo/bin/$t" ] || die "rustup did not install $t"
 	ln -sfn "/home/user/.cargo/bin/$t" "/usr/local/bin/$t"
 done
 
-# Google Chrome .deb by exact version; the package adds Google's apt source,
-# which stays so the user can update Chrome.
-v=$(toml_get chrome.google_chrome_stable.version)
-f=$dl/google-chrome-stable_${v}_amd64.deb
-fetch_verify "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${v}_amd64.deb" "$(toml_get chrome.google_chrome_stable.sha256)" "$f"
-chmod 0644 "$f"
-apt_install "$f"
+if [ "${UMIAK_GENERIC_IMAGE:-}" = 1 ]; then
+ bash "$UMIAK_BUILD_DIR/generic-chromium.sh"
+else
+ # Legacy local recipe builds retain their existing vendor download path.
+ v=$(toml_get chrome.google_chrome_stable.version)
+ f=$dl/google-chrome-stable_${v}_amd64.deb
+ fetch_verify "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${v}_amd64.deb" "$(toml_get chrome.google_chrome_stable.sha256)" "$f"
+ chmod 0644 "$f"
+ apt_install "$f"
+fi
 
-for t in node npm npx bun bunx go gofmt uv uvx gh cargo rustc rustup rustfmt cargo-clippy clippy-driver; do
+if [ "${UMIAK_GENERIC_IMAGE:-}" != 1 ]; then
+ [ -x /usr/local/bin/bun ] && [ -x /usr/local/bin/bunx ] || die "Bun is missing"
+fi
+
+for t in node npm npx go gofmt uv uvx gh cargo rustc rustup rustfmt cargo-clippy clippy-driver; do
 	[ -x "/usr/local/bin/$t" ] || die "/usr/local/bin/$t is missing"
 done
-for t in node bun uv gh rustc cargo; do
+for t in node uv gh rustc cargo; do
 	log "$t: $(as_user "$t" --version </dev/null | head -n1)"
 done
 log "go: $(as_user go version)"

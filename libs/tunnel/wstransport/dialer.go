@@ -46,6 +46,9 @@ type DialerConfig struct {
 	// RootCAs is the tunnel CA bundle. System roots are never used: a nil pool
 	// trusts nothing.
 	RootCAs *x509.CertPool
+	// CAPin is an optional SHA-256 DER fingerprint supplied by trusted boot firmware.
+	// When present it replaces RootCAs with exclusive pinned-CA verification.
+	CAPin string
 	// PingInterval is the time between WebSocket pings (default 5s).
 	PingInterval time.Duration
 	// PingTimeout is how long the connection may go without a pong (counted
@@ -100,6 +103,16 @@ func NewDialer(cfg DialerConfig) transport.Dialer {
 		// An empty pool, not nil: nil would make crypto/tls fall back to system roots.
 		roots = x509.NewCertPool()
 	}
+	tlsConfig := &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS13}
+	if cfg.CAPin != "" {
+		verifier, err := PinnedCAVerifier(cfg.CAPin)
+		if err != nil {
+			verifier = func(tls.ConnectionState) error { return err }
+		}
+		//nolint:gosec // firmware pin plus full x509 chain/hostname checks in VerifyConnection
+		tlsConfig.InsecureSkipVerify = true
+		tlsConfig.VerifyConnection = verifier
+	}
 	var protocols http.Protocols
 	protocols.SetHTTP1(true) // WebSocket upgrade is HTTP/1.1 only
 	tr := &http.Transport{
@@ -109,7 +122,7 @@ func NewDialer(cfg DialerConfig) transport.Dialer {
 			KeepAliveConfig: keepAliveConfig(cfg.KeepAlive),
 			Control:         userTimeoutControl(cfg.UserTimeout),
 		}).DialContext,
-		TLSClientConfig:     &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS13},
+		TLSClientConfig:     tlsConfig,
 		TLSHandshakeTimeout: 10 * time.Second,
 		Protocols:           &protocols,
 		DisableKeepAlives:   true, // every Dial is a one-shot upgrade

@@ -36,7 +36,7 @@ test("build invocation binds exact recipe slot, existing credentials and isolate
 		"https://stack:8443",
 		"/assets",
 		"build",
-		{ templateVmid: 702 },
+		{ templateVmid: 702, buildMode: "local" },
 	);
 	assert.equal(invocation.env.UMIAK_TEMPLATE_VMID_RANGE, "702-702");
 	assert.equal(invocation.env.UMIAK_VMID_RANGE, "500-589");
@@ -394,4 +394,39 @@ test("setup hides a failed build of a template that is no longer offered", async
 	assert.equal(visibleBuildJob(linux), linux);
 	const running = { slug: "debian", status: "running" };
 	assert.equal(visibleBuildJob(running), running);
+});
+
+test("Linux defaults to a signed offline layer while local recipes remain explicit", () => {
+	const download = buildInvocation(
+		"linux",
+		state,
+		"/secrets",
+		"https://stack",
+		"/assets",
+		"a".repeat(24),
+		{
+			templateVmid: 702,
+			layerFile: "/secrets/layer.json",
+			layerChannel: "edge",
+			tunnelCAPin: "b".repeat(64),
+		},
+	);
+	assert.equal(download.offline, true);
+	assert.ok(download.args.includes("--offline-layer"));
+	assert.ok(download.args.includes("--umiak-cli"));
+	assert.ok(download.args.includes("/assets/umiak-linux-x64"));
+	assert.ok(!download.args.includes("--agent-package"));
+	assert.ok(!download.args.includes("--api-url"));
+	assert.equal(download.env.UMIAK_TUNNEL_CA_PIN, "b".repeat(64));
+	assert.equal(download.env.UMIAK_TEMPLATE_LAYER_CHANNEL, "edge");
+	const local = buildInvocation(
+		"linux",
+		state,
+		"/secrets",
+		"https://stack",
+		"/assets",
+		"a".repeat(24),
+		{ templateVmid: 702, buildMode: "local" },
+	);
+	assert.ok(local.args.includes("--agent-package"));
 });

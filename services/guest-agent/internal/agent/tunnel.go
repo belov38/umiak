@@ -32,14 +32,18 @@ func (a *agent) startTunnel(ctx context.Context) {
 			a.tunnel.setError("no tunnel url configured")
 			return
 		}
-		pool, err := a.tunnelCAs()
-		if err != nil {
-			// A nil pool trusts nothing: every dial fails with a TLS error
-			// that status.json and doctor show.
-			a.log.Error("agent: tunnel CA bundle", "err", err)
-			a.tunnel.setError(err.Error())
+		pin := a.identity.tunnelCAPin()
+		var pool *x509.CertPool
+		if pin == "" {
+			var err error
+			pool, err = a.tunnelCAs()
+			if err != nil {
+				a.log.Error("agent: tunnel CA bundle", "err", err)
+				a.tunnel.setError(err.Error())
+				return
+			}
 		}
-		dialer = wstransport.NewDialer(wstransport.DialerConfig{URL: url, RootCAs: pool})
+		dialer = wstransport.NewDialer(wstransport.DialerConfig{URL: url, RootCAs: pool, CAPin: pin})
 	}
 	c, err := tunnelagent.New(tunnelagent.Config{
 		Dialer:      dialer,

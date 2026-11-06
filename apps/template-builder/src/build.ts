@@ -1,8 +1,23 @@
 import { existsSync } from "node:fs";
-import { familyForTunnelUrl, PveApiError, type PveClient } from "@umiak/pve";
+import {
+	familyForTunnelUrl,
+	PveApiError,
+	type PveClient,
+	stageOfflineLayer,
+} from "@umiak/pve";
 import { stringify as stringifyYaml } from "yaml";
 import { verifyAgentPackage } from "./agent-package.ts";
+import {
+	assertVerifiedLayer,
+	layerNodeRequest,
+	offlineRecipe,
+} from "./layer-release.ts";
 import type { BuildError, Manifest } from "./manifest.ts";
+import {
+	assertPlatformCliAsset,
+	installPlatformCli,
+} from "./platform-tools.ts";
+import { assertOfflineReplayFacts } from "./qemu-build.ts";
 import {
 	type LinuxRecipe,
 	loadRecipe,
@@ -14,7 +29,7 @@ import {
 } from "./recipe.ts";
 import { newBuildId } from "./registry.ts";
 import type { GuestIo } from "./runner.ts";
-import { StepFailedError, StepTimeoutError } from "./runner.ts";
+import { runStep, StepFailedError, StepTimeoutError } from "./runner.ts";
 import { collectFacts, sealGuest, writeGuestFile } from "./seal.ts";
 import {
 	BUILD_TAG,
@@ -39,6 +54,7 @@ import {
 	TASK_TIMEOUT_MS,
 	vmStatus,
 } from "./stages.ts";
+import { installGuestVendorTool, installVendorTools } from "./vendor-tools.ts";
 import { isProtectedVmid } from "./vmid-guard.ts";
 import {
 	buildIsoName,
@@ -90,7 +106,27 @@ function prepare(
 			throw new Error(
 				`${flag} is only for iso-install recipes; "${o.slug}" is a cloud image`,
 			);
-	const versions = loadVersions(recipe);
+	const layer = o.offlineLayer;
+	if (layer) {
+		assertVerifiedLayer(layer);
+		assertPlatformCliAsset(o.umiakCli);
+		if (
+			o.noVerify ||
+			!o.nodeBuildJobId ||
+			!/^[a-f0-9]{24}$/.test(o.nodeBuildJobId) ||
+			!o.templateVmid ||
+			!o.tunnelCAPin ||
+			!/^[a-f0-9]{64}$/.test(o.tunnelCAPin)
+		)
+			throw Error(
+				"Offline builds require verification, a job/VMID reservation and the install CA fingerprint",
+			);
+		if (o.apiUrl || o.tunnelUrl || o.sshUserCa || o.agentPackage)
+			throw Error(
+				"Offline templates cannot bake installation configuration or a legacy agent package",
+			);
+	}
+	const versions = layer?.versions ?? loadVersions(recipe);
 	const scriptSteps = recipe.steps.filter((s) => s !== REBOOT_STEP);
 	if (o.failStep !== undefined && !scriptSteps.includes(o.failStep))
 		throw new Error(
@@ -106,12 +142,15 @@ function prepare(
 	] as const)
 		if (file !== undefined && !existsSync(file))
 			throw new Error(`${flag}: ${file} not found`);
-	const verifyScript = loadVerifyScript(
-		o.templatesDir,
-		recipe.verify,
-		recipe.os,
-	);
-	const agent = verifyAgentPackage(o.agentPackage, o.updateKeysFile);
+	const verifyScript =
+		layer?.verifyScript ??
+		loadVerifyScript(o.templatesDir, recipe.verify, recipe.os);
+	const agent = layer
+		? {
+				version: layer.manifest.agent.version,
+				sha256: layer.manifest.agent.sha256,
+			}
+		: verifyAgentPackage(o.agentPackage, o.updateKeysFile);
 
 	const now = deps.now();
 	const version = deps.registry.claimVersion(o.slug, now);
@@ -126,7 +165,19 @@ function prepare(
 		pveVmid: null,
 		vmName: `umiak-tpl-${o.slug}-${version.replace(".", "-")}`,
 		gitCommit: o.gitCommit,
-		recipeDigest: recipeDigest(recipe),
+		recipeDigest: layer?.manifest.recipeSha256 ?? recipeDigest(recipe),
+		...(layer
+			? {
+					offlineLayer: {
+						version: layer.manifest.version,
+						channel: layer.manifest.channel,
+						manifestSha256: layer.manifestSha256,
+						inventorySha256: layer.manifest.inventory.sha256,
+						sourceCommit: layer.manifest.sourceCommit,
+						verifyScript: layer.verifyScript,
+					},
+				}
+			: {}),
 		base: {
 			distro: recipe.source.distro,
 			release: recipe.source.release,
@@ -238,6 +289,17 @@ function linuxJob(deps: BuildDeps, o: BuildOptions, recipe: LinuxRecipe): Job {
 		async stages(run, st, save, enter) {
 			enter("image");
 			const image = await stageImage(run, o, p.versions);
+			if (o.offlineLayer) {
+				enter("media");
+				const request = layerNodeRequest(o.offlineLayer, {
+					jobId: o.nodeBuildJobId as string,
+					vmid: o.templateVmid as number,
+					mediaStorage: process.env.UMIAK_PVE_MEDIA_STORAGE || "local",
+				});
+				st.layerMedia = await stageOfflineLayer(run.node, request, async () => {
+					run.signal?.throwIfAborted();
+				});
+			}
 			enter("seed");
 			await stageSeed(run, o, p, st);
 			enter("vm");
@@ -248,14 +310,57 @@ function linuxJob(deps: BuildDeps, o: BuildOptions, recipe: LinuxRecipe): Job {
 			await stageBoot(run, o, p.recipe, io, st);
 			enter("steps");
 			await stageSteps(run, o, p.recipe, io, st);
+			let facts = await collectFacts(io, p.verifyScript);
+			if (o.offlineLayer) {
+				assertOfflineReplayFacts(o.offlineLayer.descriptor.facts, facts);
+				run.log(
+					"-- offline parity checks passed; vendor phase starts separately",
+				);
+				enter("platform-tools");
+				const platformTool = await installPlatformCli(io, o.umiakCli as string);
+				save({ platformTools: [platformTool] });
+				run.log(
+					`-- platform-tools: Umiak CLI ${platformTool.version} (${platformTool.durationS.toFixed(1)}s, installed release asset)`,
+				);
+				enter("vendor-tools");
+				const configPath = `/nodes/${o.node}/qemu/${vmid}/config`;
+				const network = async (online: boolean) => {
+					const config = await run.api.get<Record<string, string>>(configPath);
+					if (!config.net0)
+						throw new Error("vendor phase: build NIC is missing");
+					const nic = config.net0.replace(/,link_down=[01]/g, "");
+					await run.api.put(configPath, {
+						net0: `${nic},link_down=${online ? 0 : 1}`,
+					});
+					const updated = await run.api.get<Record<string, string>>(configPath);
+					if (!updated.net0?.includes(`link_down=${online ? 0 : 1}`))
+						throw new Error(
+							"vendor phase: could not confirm NIC isolation state",
+						);
+				};
+				const vendorTools = await installVendorTools({
+					network,
+					install: (tool) =>
+						installGuestVendorTool(io, tool, run.log, run.pollMs),
+					log: run.log,
+				});
+				save({ vendorTools });
+				await runStep(io, {
+					name: "vendor-cleanup",
+					script: "/mnt/seed/build/steps/90-cleanup.sh",
+					log: run.log,
+					pollMs: run.pollMs ?? 2000,
+				});
+				facts = await collectFacts(io, p.verifyScript);
+			}
 			enter("seal");
-			save(await collectFacts(io, p.verifyScript));
+			save(facts);
 			await writeGuestFile(
 				io,
 				GUEST_MANIFEST,
 				`${JSON.stringify(guestManifest(st.m), null, 2)}\n`,
 			);
-			await sealGuest(io);
+			await sealGuest(io, o.offlineLayer ? { sparse: true } : {});
 			await shutdown(run, o, vmid);
 			run.ramGuard.release(vmid);
 			st.ramReserved = false;
@@ -285,7 +390,9 @@ export async function buildTemplate(
 	deps: BuildDeps,
 	o: BuildOptions,
 ): Promise<Manifest> {
-	const recipe = loadRecipe(o.templatesDir, o.slug);
+	const recipe = o.offlineLayer
+		? offlineRecipe(o.offlineLayer, o.templateVmid as number)
+		: loadRecipe(o.templatesDir, o.slug);
 	// Persist the canonical recipe slug even when invoked through a legacy alias.
 	o = { ...o, slug: recipe.slug };
 	if (o.templateVmid !== undefined) {
@@ -372,6 +479,23 @@ export async function buildTemplate(
 				deps.ramGuard.release(st.vmid);
 		}
 		throw new BuildFailedError(st.m, err);
+	} finally {
+		if (o.offlineLayer && o.nodeBuildJobId && o.templateVmid) {
+			try {
+				await deps.node.call(
+					"layer.release",
+					layerNodeRequest(o.offlineLayer, {
+						jobId: o.nodeBuildJobId,
+						vmid: o.templateVmid,
+						mediaStorage: process.env.UMIAK_PVE_MEDIA_STORAGE || "local",
+					}),
+				);
+			} catch (error) {
+				deps.log(
+					`layer staging cleanup pending for job ${o.nodeBuildJobId}: ${errorText(error)}`,
+				);
+			}
+		}
 	}
 }
 

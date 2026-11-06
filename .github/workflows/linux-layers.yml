@@ -132,7 +132,7 @@ jobs:
         run: |
           mise exec -- pnpm exec biome check infra/templates/staged-layers.mjs infra/templates/local-layers.mjs infra/templates/linux-source-subset.mjs infra/templates/build-layers.mjs infra/templates/build-sources.mjs infra/templates/source-artifact.mjs infra/templates/layer-inventory.mjs infra/templates/layer-notices.mjs infra/templates/release-layers.mjs infra/templates/oci.mjs
           mise exec -- pnpm exec biome lint --only=correctness/noUndeclaredVariables infra/templates/staged-layers.mjs infra/templates/local-layers.mjs infra/templates/linux-source-subset.mjs infra/templates/build-layers.mjs infra/templates/build-sources.mjs infra/templates/release-layers.mjs infra/templates/layer-notices.mjs
-          mise exec -- node --test infra/templates/image-manifest.test.mjs infra/templates/layer-recipe.test.mjs infra/templates/oci.test.mjs infra/templates/layer-inventory.test.mjs infra/templates/release-layers.test.mjs infra/templates/oci-layout.test.mjs infra/templates/source-artifact.test.mjs infra/templates/linux-source-subset.test.mjs infra/templates/staged-layers.test.mjs
+          mise exec -- node --test infra/templates/image-manifest.test.mjs infra/templates/layer-recipe.test.mjs infra/templates/oci.test.mjs infra/templates/layer-inventory.test.mjs infra/templates/layer-notices.test.mjs infra/templates/release-layers.test.mjs infra/templates/oci-layout.test.mjs infra/templates/source-artifact.test.mjs infra/templates/linux-source-subset.test.mjs infra/templates/staged-layers.test.mjs
           mise exec -- pnpm --filter @umiak/template-builder typecheck
           mise exec -- pnpm --filter @umiak/template-builder test
       - name: Build the generic agent (outer image authority only; no update signing key)

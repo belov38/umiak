@@ -137,7 +137,8 @@ test("setup displays current gateway CA and leaf certificate expiry status", asy
 test("setup offers nonredundant recipes and one Windows desktop with ISO URL inputs", () => {
 	const html = renderSetup({ steps: {} }, "http://localhost");
 	const select = html.match(/<select id="build-slug">(.*?)<\/select>/)[1];
-	assert.equal((select.match(/<option /g) || []).length, 2);
+	assert.equal((select.match(/<option /g) || []).length, 3);
+	assert.match(select, /value="linux">Umiak Linux/);
 	assert.match(select, /value="windows">Windows 11 \(with desktop\)/);
 	assert.doesNotMatch(select, /windows-desktop/);
 	assert.match(html, /id="build-iso-url"/);
@@ -358,8 +359,8 @@ test("several nodes: one Linux action builds on every node that lacks it", () =>
 		],
 	});
 	assert.match(html, /data-nodes="node_1,node_2"/);
-	assert.match(html, /Build Linux template on all nodes \(pve, pve2\)/);
-	assert.match(html, /Build once on pve, then copy to pve2, pve3/);
+	assert.match(html, /Download Linux template for all nodes \(pve, pve2\)/);
+	assert.match(html, /Prepare once on pve, then copy to pve2, pve3/);
 	// The node selector belongs to the optional single-template build only.
 	assert.ok(
 		html.indexOf('<select id="build-node"') >
@@ -541,4 +542,47 @@ test("partial copy failure keeps step 3 open even on a completed installation", 
 	assert.match(html, /id="step-templates" open/);
 	assert.match(html, />Copy failed<\/span>/);
 	assert.match(html, /Clean up and retry/);
+});
+
+test("Linux downloads are the default and local recipe compilation is an advanced choice", () => {
+	const html = renderSetup({ steps: {} }, "https://install.invalid");
+	assert.match(html, /Download the Linux template/);
+	assert.match(html, /id="build-mode"/);
+	assert.match(html, /<option value="download">Download signed offline layer/);
+	assert.match(html, /<option value="local">Build locally \(advanced\)/);
+	assert.match(html, /official Ubuntu base/);
+});
+
+test("missing vendor tool offers a new-template rebuild with an explicit unaffected-sandboxes hint", () => {
+	const html = renderSetup({
+		steps: {
+			templates: {
+				status: "ready",
+				data: {
+					builds: [
+						{
+							templateSlug: "linux",
+							nodeId: "node1",
+							offlineLayer: { manifestSha256: "a".repeat(64) },
+							vendorTools: [
+								{
+									id: "claude-code",
+									status: "failed",
+									warning: "Claude Code not installed: vendor down <offline>",
+								},
+							],
+						},
+					],
+				},
+			},
+		},
+	});
+	assert.match(html, /Install Claude Code \(rebuilds the template\)/);
+	assert.match(
+		html,
+		/reuses the downloaded layer, takes a few minutes, and existing sandboxes are not affected/,
+	);
+	assert.match(html, /Claude Code not installed: vendor down &lt;offline&gt;/);
+	assert.match(html, /data-vendor-rebuild="linux"/);
+	assert.match(html, /vendorRetry: true/);
 });

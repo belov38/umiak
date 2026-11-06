@@ -27,8 +27,10 @@ import {
 	type SnapshotRef,
 	type SnapshotStore,
 	SshNodeOps,
+	skuForTunnelCA,
 	ThawFailedError,
 	VM_LOCK_TIMEOUT_RE,
+	validatePinnedTunnelUrl,
 } from "@umiak/pve";
 import type pg from "pg";
 import { QuiesceFailed } from "../ops/snapshot-step.ts";
@@ -257,6 +259,8 @@ export interface PveNodeInfraOptions {
 	 * agent's tunnel URL; templates carry no default. Unset: no family.
 	 */
 	family?: string;
+	/** Reads public installation trust on each prepare/start, including after rotation. */
+	caPin?: () => string | undefined;
 }
 
 /** NodeInfra over S1 `Machines` for one node. */
@@ -302,7 +306,9 @@ export class PveNodeInfra implements NodeInfra {
 	}
 
 	#smbios(s: InfraSmbios): Smbios {
+		const pin = this.#o.caPin?.();
 		return {
+			...(pin ? { sku: skuForTunnelCA(pin) } : {}),
 			uuid: s.uuid,
 			serial: s.serial,
 			...(this.#o.family !== undefined ? { family: this.#o.family } : {}),
@@ -460,7 +466,11 @@ export class PveNodeInfra implements NodeInfra {
 			this.#run("start", () =>
 				this.#powerSerialized(async () => {
 					await g.before();
-					await this.#base.start(vmid, { expectedOwner: o.expectedOwner });
+					const pin = this.#o.caPin?.();
+					await this.#base.start(vmid, {
+						expectedOwner: o.expectedOwner,
+						...(pin !== undefined ? { tunnelCAPin: pin } : {}),
+					});
 				}),
 			),
 		);
@@ -950,7 +960,7 @@ export class PveInfraRegistry implements InfraRegistry {
 		const url = this.#env.UMIAK_TUNNEL_URL;
 		if (url !== undefined && url !== "") {
 			try {
-				this.#family = familyForTunnelUrl(url);
+				this.#family = familyForTunnelUrl(validatePinnedTunnelUrl(url));
 			} catch (err) {
 				throw new Error(
 					`UMIAK_TUNNEL_URL: ${err instanceof Error ? err.message : String(err)}`,
@@ -980,6 +990,19 @@ export class PveInfraRegistry implements InfraRegistry {
 			vnet: this.#env.UMIAK_PVE_VNET ?? "umiak0",
 			pool: this.#env.UMIAK_PVE_POOL ?? "umiak",
 			...(this.#o.pollMs !== undefined ? { pollMs: this.#o.pollMs } : {}),
+			...("UMIAK_QUICKSTART_NETWORK_FILE" in this.#env ||
+			this.#env.UMIAK_TUNNEL_CA_SHA256
+				? {
+						caPin: () => {
+							const file = this.#env.UMIAK_QUICKSTART_NETWORK_FILE;
+							const pin = file
+								? JSON.parse(readFileSync(file, "utf8")).tunnelCAPin
+								: this.#env.UMIAK_TUNNEL_CA_SHA256;
+							if (pin !== undefined) skuForTunnelCA(pin);
+							return pin;
+						},
+					}
+				: {}),
 			...(this.#family !== undefined ? { family: this.#family } : {}),
 		});
 		try {

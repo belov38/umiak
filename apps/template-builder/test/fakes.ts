@@ -312,6 +312,8 @@ export class FakeGuest implements GuestIo {
 			return ok("systemd 259 (259.1-1ubuntu1)\n+PAM +AUDIT\n");
 		if (c0 === "cat" && c1 === "/proc/sys/kernel/random/boot_id")
 			return ok(`boot-${this.#bootId}\n`);
+		if (c0 === "/usr/local/bin/umiak" && c1 === "--version")
+			return ok("umiak 0.4.0\n");
 		if (c0 === "uname") return ok("7.0.0-10-generic\n");
 		if (c0 === "dpkg-query") {
 			this.log.push("guest:dpkg-query");
@@ -344,6 +346,8 @@ export class FakeGuest implements GuestIo {
 			this.log.push(`guest:mv ${to}`);
 			return ok();
 		}
+		if (c0 === "rm" && c1 === "-rf" && cmd[2] === "/var/log/umiak-build")
+			this.log.push("guest:rm-build-logs");
 		if (c0 === "bash" && c1 === "-c") {
 			const s = String(cmd[2]);
 			if (s.includes("rm -rf /var/log/umiak-build"))

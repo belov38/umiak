@@ -393,3 +393,68 @@ describe("makeIso", () => {
 		},
 	);
 });
+
+describe("generic layer agent seed", () => {
+	function generic() {
+		return {
+			binary: input().agentPackage,
+			unitsDirectory: resolve(
+				import.meta.dirname,
+				"../../../services/guest-agent/packaging/systemd",
+			),
+		};
+	}
+	it("carries production binary and units with no CA, endpoint or legacy package", () => {
+		const files = renderSeed(
+			input("linux-fixture", { genericAgent: generic() }),
+		);
+		expect(files.has("build/umiak-agent.tar")).toBe(false);
+		expect(files.get("build/generic-agent/umiak-agent")).toEqual(AGENT_BYTES);
+		expect(files.has("build/generic-agent/umiak-agent.service")).toBe(true);
+		expect(text(files, "build/env")).toContain("UMIAK_GENERIC_IMAGE='1'");
+		expect(text(files, "build/agent.toml")).not.toContain("url =");
+		expect(files.has("build/umiak-config.json")).toBe(false);
+	});
+	it("rejects install-bound inputs and unsafe agent versions", () => {
+		for (const extra of [
+			{ tunnelUrl: "wss://install.test/v1/connect" },
+			{ apiUrl: "https://install.test" },
+			{ sshUserCa: "/any" },
+			{ agentVersion: "../bad" },
+		])
+			expect(() =>
+				renderSeed(
+					input("linux-fixture", { genericAgent: generic(), ...extra }),
+				),
+			).toThrow();
+	});
+});
+
+it("generic seed carries stable browser/tool pins and offline bootstrap without vendor payloads", () => {
+	const root = tmp();
+	const binary = join(root, "agent");
+	writeFileSync(binary, AGENT_BYTES);
+	const unitsDirectory = join(root, "units");
+	mkdirSync(unitsDirectory);
+	for (const unit of [
+		"umiak-agent.service",
+		"umiak-identity.service",
+		"umiak-agent-rollback.service",
+		"umiak-cmd.slice",
+	])
+		writeFileSync(join(unitsDirectory, unit), "[Unit]\n");
+	const files = renderSeed(
+		input("linux-fixture", {
+			genericAgent: { binary, unitsDirectory },
+			layerCapture: true,
+		}),
+	);
+	expect(text(files, "build/env")).toContain("UMIAK_LAYER_MODE='capture'");
+	expect(files.has("build/offline-bootstrap.sh")).toBe(true);
+	expect(files.has("build/build-apt-proxy.py")).toBe(true);
+	expect(files.has("build/generic-chromium.sh")).toBe(true);
+	expect(files.has("build/xtradeb-apps.asc")).toBe(true);
+	const pins = JSON.parse(text(files, "build/layer-inputs.json"));
+	expect(pins.chromium.version).toContain("xtradeb");
+	expect(pins.chromium.packages.chromium).toMatch(/^[a-f0-9]{64}$/);
+});

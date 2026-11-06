@@ -16,12 +16,13 @@ func TestSysfsSource(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, "product_uuid"), testMachineID+"\n")
 	mustWrite(t, filepath.Join(dir, "product_family"), "umiakt1:wss://h/v1/connect\n")
 	mustWrite(t, boot, "boot-1\n")
+	mustWrite(t, filepath.Join(dir, "product_sku"), "umiakca1:"+strings.Repeat("a", 64)+"\n")
 
 	raw, err := SysfsSource{Dir: dir, BootIDPath: boot}.Read(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Raw{Serial: serial, UUID: testMachineID, Family: "umiakt1:wss://h/v1/connect", BootID: "boot-1"}
+	want := Raw{Serial: serial, UUID: testMachineID, Family: "umiakt1:wss://h/v1/connect", BootID: "boot-1", SKU: "umiakca1:" + strings.Repeat("a", 64)}
 	if raw != want {
 		t.Errorf("raw = %+v, want %+v", raw, want)
 	}

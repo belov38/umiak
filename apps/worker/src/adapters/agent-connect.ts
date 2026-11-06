@@ -28,6 +28,8 @@ import {
 } from "../ports.ts";
 
 export interface ConnectAgentPortOptions {
+	/** Public API endpoint delivered through the authenticated claim/env channel. */
+	publicApiUrl?: string;
 	/** Receives one debug line per failed call (machine, method, code); never bodies. */
 	log?: { debug(obj: object, msg: string): void };
 	/**
@@ -124,6 +126,7 @@ export class ConnectAgentPort implements AgentPort {
 	readonly #log: ConnectAgentPortOptions["log"];
 	readonly #timeoutMs: number;
 	readonly #portDomain: string;
+	readonly #publicApiUrl: string | undefined;
 	readonly #sshUserCaKeys: string[];
 
 	constructor(client: AgentClient, opts: ConnectAgentPortOptions = {}) {
@@ -131,6 +134,7 @@ export class ConnectAgentPort implements AgentPort {
 		this.#log = opts.log;
 		this.#timeoutMs = opts.timeoutMs ?? 45_000;
 		this.#portDomain = opts.portDomain ?? "";
+		this.#publicApiUrl = opts.publicApiUrl;
 		this.#sshUserCaKeys = [...(opts.sshUserCaKeys ?? [])];
 	}
 
@@ -183,7 +187,9 @@ export class ConnectAgentPort implements AgentPort {
 					hostname: req.hostname,
 					portDomain: this.#portDomain,
 					sshUserCaKeys: this.#sshUserCaKeys,
-					env: req.env,
+					env: this.#publicApiUrl
+						? { UMIAK_API_URL: this.#publicApiUrl, ...req.env }
+						: req.env,
 					secretEnv: req.secretEnv,
 					secretFiles: req.secretFiles.map(toProtoFile),
 					authorizedKeys: req.authorizedKeys,
@@ -199,7 +205,14 @@ export class ConnectAgentPort implements AgentPort {
 		requestId: string,
 	): Promise<void> {
 		await this.#call(machineId, "updateEnv", requestId, (c, o) =>
-			c.updateEnv({ env }, o),
+			c.updateEnv(
+				{
+					env: this.#publicApiUrl
+						? { UMIAK_API_URL: this.#publicApiUrl, ...env }
+						: env,
+				},
+				o,
+			),
 		);
 	}
 

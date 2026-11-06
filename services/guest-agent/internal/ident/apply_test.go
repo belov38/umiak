@@ -424,6 +424,7 @@ func TestSealWipes(t *testing.T) {
 	mustWrite(t, l.SSHUserCA, "ssh-ed25519 OLD\n")
 	mustWrite(t, l.TemplateSSHCA, "ssh-ed25519 TEMPLATE\n")
 	mustWrite(t, l.MachineIDFile, testHex+"\n")
+	mustWrite(t, l.DbusMachineID, "inherited\n")
 	mustWrite(t, filepath.Join(l.SSHDir, "ssh_host_ed25519_key"), "priv")
 	mustWrite(t, filepath.Join(l.SSHDir, "ssh_host_ed25519_key.pub"), "pub")
 	mustWrite(t, filepath.Join(l.SSHDir, "sshd_config"), "keep")
@@ -447,6 +448,10 @@ func TestSealWipes(t *testing.T) {
 	if fi, err := os.Stat(l.MachineIDFile); err != nil || fi.Size() != 0 {
 		t.Errorf("machine-id: err = %v, want an empty file", err)
 	}
+	if got := mustRead(t, l.DbusMachineID); got != "" {
+		t.Errorf("dbus machine-id survived seal: %q", got)
+	}
+
 	if got := mustRead(t, l.UmiakEnvFile); got != "" {
 		t.Errorf("env = %q", got)
 	}

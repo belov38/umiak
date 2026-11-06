@@ -14,6 +14,11 @@ set -a
 . "$UMIAK_BUILD_DIR/env"
 set +a
 
+# The replay marker is created by the offline seed, outside captured build/env.
+if [ -f /etc/umiak-offline-replay ]; then UMIAK_LAYER_MODE=replay; fi
+UMIAK_CAPTURE_DIR=${UMIAK_CAPTURE_DIR:-/var/lib/umiak-layer-capture}
+UMIAK_LAYER_ROOT=${UMIAK_LAYER_ROOT:-/mnt/layer}
+
 export DEBIAN_FRONTEND=noninteractive
 export UCF_FORCE_CONFFOLD=1
 export NEEDRESTART_MODE=a
@@ -79,8 +84,13 @@ installed_packages() {
 # Sets `Snapshot: <ts>` in every stanza of a deb822 sources file (spec S5
 # section 6.2); an empty ts removes the Snapshot lines.
 apt_snapshot() {
+ if [ "${UMIAK_LAYER_MODE:-}" = replay ]; then return 0; fi
 	local ts=$1 f=${2:-/etc/apt/sources.list.d/ubuntu.sources}
 	[ -f "$f" ] || die "$f not found"
+ if [ "${UMIAK_LAYER_MODE:-}" = capture ] && [ -f /etc/apt/apt.conf.d/98umiak-build-proxy ] && [ -n "$ts" ]; then
+  python3 -I "$UMIAK_BUILD_DIR/build-apt-proxy.py" sources "$ts" "$f"
+  return 0
+ fi
 	awk -v ts="$ts" '
 function flush() {
   for (i = 1; i <= n; i++) print buf[i]
@@ -97,22 +107,49 @@ END { flush() }
 	rm -f "$f.new"
 }
 
+# Only the disposable capture VM rewrites these apt remap URLs; replay has no proxy.
+apt_capture_uri() {
+ local uri=$1
+ if [ "${UMIAK_LAYER_MODE:-}" = capture ] && [ -f /etc/apt/apt.conf.d/98umiak-build-proxy ]; then
+  case "$uri" in
+   https://download.docker.com/linux/ubuntu*|https://ppa.launchpadcontent.net/xtradeb/apps/ubuntu*) uri="http://${uri#https://}" ;;
+  esac
+ fi
+ printf '%s\n' "$uri"
+}
+
 # fetch_verify <url> <sha256> <out>: downloads url to out unless out already
 # has the sha256; a mismatch fails the step.
 fetch_verify() {
-	local url=$1 sha=$2 out=$3
-	[[ $sha =~ ^[0-9a-f]{64}$ ]] || die "bad sha256 for $url: $sha"
-	if [ -f "$out" ] && echo "$sha  $out" | sha256sum -c --status; then
-		return 0
-	fi
-	log "download $url"
-	mkdir -p "$(dirname "$out")"
-	curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 -o "$out.part" "$url"
-	if ! echo "$sha  $out.part" | sha256sum -c --status; then
-		rm -f "$out.part"
-		die "sha256 mismatch for $url (want $sha)"
-	fi
-	mv "$out.part" "$out"
+ local url=$1 sha=$2 out=$3 cached
+ [[ $sha =~ ^[0-9a-f]{64}$ ]] || die "bad sha256 for $url: $sha"
+ mkdir -p "$(dirname "$out")"
+ if [ "${UMIAK_LAYER_MODE:-}" = replay ]; then
+  cached=$UMIAK_LAYER_ROOT/inputs/$sha
+  if ! [ -f "$cached" ] || ! echo "$sha  $cached" | sha256sum -c --status; then
+   die "missing/corrupt offline input: $sha ($url)"
+  fi
+  cp "$cached" "$out.part"
+ elif ! { [ -f "$out" ] && echo "$sha  $out" | sha256sum -c --status; }; then
+  log "download $url"
+  curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 --max-time 1800 -o "$out.part" "$url"
+ else
+  cp "$out" "$out.part"
+ fi
+ if ! echo "$sha  $out.part" | sha256sum -c --status; then
+  rm -f "$out.part"
+  die "sha256 mismatch for $url (want $sha)"
+ fi
+ mv "$out.part" "$out"
+ if [ "${UMIAK_LAYER_MODE:-}" = capture ]; then
+  mkdir -p "$UMIAK_CAPTURE_DIR/inputs"
+  cp "$out" "$UMIAK_CAPTURE_DIR/inputs/$sha"
+  python3 -I - "$UMIAK_CAPTURE_DIR/inputs.jsonl" "$url" "$sha" "$out" <<'PYINPUT'
+import json, os, sys
+with open(sys.argv[1], 'a') as f:
+    f.write(json.dumps(dict(url=sys.argv[2], sha256=sys.argv[3], sizeBytes=os.stat(sys.argv[4]).st_size)) + '\n')
+PYINPUT
+ fi
 }
 
 # toml_get <dotted.key>: a scalar from build/versions.toml; fails when absent.
@@ -168,4 +205,24 @@ install_file() {
 as_user() {
 	runuser -u user -- env -i HOME=/home/user USER=user LOGNAME=user \
 		SHELL=/bin/bash LANG=C.UTF-8 PATH="$UMIAK_STD_PATH" "$@"
+}
+
+# Restore ordinary update sources only after all offline customization transactions finish.
+offline_restore_apt() {
+ [ "${UMIAK_LAYER_MODE:-}" = replay ] || return 0
+ rm -f /etc/apt/sources.list.d/umiak-offline.sources /etc/apt/apt.conf.d/99umiak-offline
+ python3 -I - "$UMIAK_LAYER_ROOT/build/apt-after" <<'PYRESTORE'
+from pathlib import Path
+import shutil,sys
+for p in Path('/var/lib/umiak-offline-sources').iterdir():
+    target=Path('/etc/apt/sources.list') if p.name=='sources.list' else Path('/etc/apt/sources.list.d')/p.name
+    p.rename(target)
+for p in Path(sys.argv[1]).glob('*.sources'):
+    if p.name!='ubuntu.sources': shutil.copyfile(p,Path('/etc/apt/sources.list.d')/p.name)
+for p in Path(sys.argv[1]).glob('*.pref'):
+    shutil.copyfile(p,Path('/etc/apt/preferences.d')/p.name.removesuffix('.pref'))
+PYRESTORE
+ rm -rf /var/lib/umiak-offline-sources
+ rm -f /etc/umiak-offline-replay
+ UMIAK_LAYER_MODE=complete
 }

@@ -135,18 +135,29 @@ export async function collectFacts(
  * `umiak-agent seal`, rebuilds the initrd, then zero-fills and trims the free space. Nothing may
  * write to the disk afterwards but shutdown.
  */
-export async function sealGuest(io: GuestIo): Promise<void> {
+export async function sealGuest(
+	io: GuestIo,
+	options: { sparse?: boolean } = {},
+): Promise<void> {
 	await must(io, [
 		"bash",
 		"-c",
-		`umount ${SEED_DIR} 2>/dev/null || true; rmdir ${SEED_DIR} 2>/dev/null || true; rm -rf ${BUILD_LOG_DIR}`,
+		`umount ${SEED_DIR} 2>/dev/null || true; rmdir ${SEED_DIR} 2>/dev/null || true`,
 	]);
+	await must(io, ["rm", "-rf", BUILD_LOG_DIR]);
+	await must(io, ["rm", "-rf", "/var/lib/umiak-build"]);
 	// No two clones may share these. Stopping systemd-random-seed runs its ExecStop, which saves
 	// a seed, so the files go after the stop; an inactive unit saves nothing at poweroff.
 	await must(io, [
 		"bash",
 		"-c",
-		"systemctl stop systemd-random-seed.service && ! systemctl is-active -q systemd-random-seed.service && rm -f /var/lib/systemd/random-seed /var/lib/systemd/credential.secret && sync",
+		"systemctl stop systemd-random-seed.service && ! systemctl is-active -q systemd-random-seed.service",
+	]);
+	await must(io, [
+		"rm",
+		"-f",
+		"/var/lib/systemd/random-seed",
+		"/var/lib/systemd/credential.secret",
 	]);
 	// After seal only the initrd and the zero file are written; fstrim then covers the freed blocks.
 	await must(io, ["umiak-agent", "seal"], { timeoutMs: 2 * MIN });
@@ -158,24 +169,25 @@ export async function sealGuest(io: GuestIo): Promise<void> {
 	});
 	// The persistent journal holds the build's last entries (tools run, seal) under the build
 	// VM's machine-id; journald goes on in /run until poweroff, clones start an empty one.
-	await must(io, [
-		"bash",
-		"-c",
-		"journalctl --relinquish-var && rm -rf /var/log/journal/* && sync",
-	]);
+	await must(io, ["bash", "-c", "journalctl --relinquish-var"]);
+	await must(io, ["bash", "-c", "rm -rf /var/log/journal/*"]);
 	// dd ends with "no space left", so its status does not count. Minutes on a 64 GiB disk.
 	// The sync after rm commits the ext4 journal: fstrim skips blocks freed in a transaction
 	// that is still open, and the template would keep the zero file's thin blocks (95% of 64 GiB
 	// on a real build).
-	await must(
-		io,
-		[
-			"bash",
-			"-c",
-			"dd if=/dev/zero of=/var/tmp/umiak-zero bs=4M status=none || true; rm -f /var/tmp/umiak-zero; sync",
-		],
-		{ timeoutMs: 30 * MIN },
-	);
+	if (!options.sparse) {
+		await must(
+			io,
+			[
+				"bash",
+				"-c",
+				"dd if=/dev/zero of=/var/tmp/umiak-zero bs=4M status=none || true",
+			],
+			{ timeoutMs: 30 * MIN },
+		);
+		await must(io, ["rm", "-f", "/var/tmp/umiak-zero"]);
+	}
+	await must(io, ["sync"]);
 	await must(io, ["fstrim", "-av"], { timeoutMs: 10 * MIN });
 	await must(io, ["sync"], { timeoutMs: 5 * MIN });
 }

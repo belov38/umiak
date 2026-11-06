@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import ssh2, { type Client as SshClient } from "ssh2";
 
 /** Transport-independent umiak-node interface; tests use a fake. */
@@ -198,11 +198,15 @@ export class SshNodeOps implements NodeOps {
 			let timedOut = false;
 			let grace: NodeJS.Timeout | undefined;
 			const fail = () => reject(new Error(`umiak-node ${op}: timed out`));
-			const timer = setTimeout(() => {
-				timedOut = true;
-				stream.close();
-				grace = setTimeout(fail, CLOSE_GRACE_MS);
-			}, this.#opts.callTimeoutMs ?? 120_000);
+			const timer = setTimeout(
+				() => {
+					timedOut = true;
+					stream.close();
+					grace = setTimeout(fail, CLOSE_GRACE_MS);
+				},
+				this.#opts.callTimeoutMs ??
+					(op === "layer.stage" ? 4 * 60 * 60_000 : 120_000),
+			);
 			stream.on("data", (d: Buffer) => {
 				partial += d.toString("utf8");
 				if (partial.length > 24 * 1024 * 1024) {
@@ -295,4 +299,61 @@ export class SshNodeOps implements NodeOps {
 			this.#conns[i] = undefined;
 		}
 	}
+}
+
+export interface OfflineLayerRequest {
+	jobId: string;
+	vmid: number;
+	manifest: object;
+	mediaStorage?: string;
+	signature: string;
+	platform: string;
+	agent: string;
+	channel: "stable" | "edge";
+	slug: "linux" | "linux-desktop";
+}
+export interface OfflineLayerReceipt {
+	jobId: string;
+	vmid: number;
+	manifestSha256: string;
+	mediaName: string;
+	mediaIdentity: string;
+	mediaSha256: string;
+	mediaBytes: number;
+	verified: boolean;
+}
+/** Only an authenticated exact-job receipt can become a read-only build input. */
+export async function stageOfflineLayer(
+	node: NodeOps,
+	request: OfflineLayerRequest,
+	onProgress?: (progress: Record<string, number>) => Promise<void>,
+): Promise<OfflineLayerReceipt> {
+	const digest = createHash("sha256")
+		.update(JSON.stringify(request.manifest))
+		.digest("hex");
+	const prepared = await node.call<{
+		manifestSha256: string;
+		missing: string[];
+	}>("layer.prepare", request);
+	if (prepared.manifestSha256 !== digest)
+		throw new Error("Node prepared a different offline layer");
+	const receipt = await node.call<OfflineLayerReceipt>(
+		"layer.stage",
+		request,
+		onProgress,
+	);
+	if (
+		!receipt.verified ||
+		receipt.jobId !== request.jobId ||
+		receipt.vmid !== request.vmid ||
+		receipt.manifestSha256 !== digest ||
+		receipt.mediaName !== `umiak-layer-${request.jobId}.raw` ||
+		!/^\d+:\d+$/.test(receipt.mediaIdentity) ||
+		!/^[a-f0-9]{64}$/.test(receipt.mediaSha256) ||
+		!Number.isSafeInteger(receipt.mediaBytes) ||
+		receipt.mediaBytes <= 0 ||
+		receipt.mediaBytes > 64 * 1024 ** 3
+	)
+		throw new Error("Node offline layer receipt identity mismatch");
+	return receipt;
 }

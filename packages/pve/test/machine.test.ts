@@ -12,7 +12,9 @@ import {
 	SnapshotModeRequiredError,
 	s2SerialPayload,
 	sendKey,
+	skuForTunnelCA,
 	TracesRemainError,
+	validatePinnedTunnelUrl,
 } from "../src/machine.ts";
 import { NodeOpsError } from "../src/node-client.ts";
 import { PveApiError, QgaTimeoutError } from "../src/pve-api.ts";
@@ -1394,4 +1396,49 @@ describe("sendKey", () => {
 			params: { key: "ret" },
 		});
 	});
+});
+
+describe("firmware CA pin configuration", () => {
+	it("validates the full descriptor before accepting a hostname", () => {
+		const name = (n: number) =>
+			Array.from({ length: Math.ceil(n / 40) }, (_, i) =>
+				"a".repeat(Math.min(39, n - i * 40)),
+			)
+				.join(".")
+				.slice(0, n);
+		const url = (n: number) => `wss://${name(n)}/v1/connect`;
+		expect(validatePinnedTunnelUrl(url(143))).toBe(url(143));
+		expect(() => validatePinnedTunnelUrl(url(144))).toThrow(
+			/tunnel hostname too long.*max 143 chars/,
+		);
+		const pin = skuForTunnelCA("a".repeat(64));
+		expect(
+			formatSmbios1({
+				uuid: "0".repeat(36),
+				serial: s2SerialPayload("0".repeat(36), new Uint8Array(32)),
+				family: familyForTunnelUrl(url(143)),
+				sku: pin,
+			}),
+		).toHaveLength(511);
+		expect(() => skuForTunnelCA("bad")).toThrow();
+		expect(() =>
+			validatePinnedTunnelUrl(`wss://${name(143)}:8443/v1/connect`),
+		).toThrow(/max 138 chars/);
+	});
+});
+
+it("refreshes the CA SKU on start after checking ownership without changing the serial", async () => {
+	const { machines, api } = setup();
+	const vm = await machines.create({
+		size: { cores: 2, memoryMb: 2048 },
+		smbios: { uuid: "u", serial: "umiak1:x" },
+	});
+	await machines.start(vm.vmid, { tunnelCAPin: "a".repeat(64) });
+	expect(api.vms.get(vm.vmid)?.config.smbios1).toBe(
+		formatSmbios1({
+			uuid: "u",
+			serial: "umiak1:x",
+			sku: `umiakca1:${"a".repeat(64)}`,
+		}),
+	);
 });

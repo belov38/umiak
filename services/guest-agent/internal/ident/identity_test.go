@@ -153,3 +153,20 @@ func TestDefaultHostname(t *testing.T) {
 		t.Error("default hostname is not valid")
 	}
 }
+
+func TestFirmwareCAPin(t *testing.T) {
+	for _, sku := range []string{"umiakca2:" + strings.Repeat("a", 64), "umiakca1:broken", "unexpected"} {
+		if _, err := Parse(Raw{Serial: testSerial(testMachineID), SKU: sku}); err == nil {
+			t.Fatal("invalid pin accepted")
+		}
+	}
+	pin := strings.Repeat("a", 64)
+	id, err := Parse(Raw{Serial: testSerial(testMachineID), SKU: "umiakca1:" + pin})
+	if err != nil || id.TunnelCAPin != pin {
+		t.Fatal("pin not read", err)
+	}
+	id, err = Parse(Raw{Serial: testSerial(testMachineID)})
+	if err != nil || id.TunnelCAPin != "" {
+		t.Fatal("legacy identity rejected", err)
+	}
+}
