@@ -114,9 +114,21 @@ export function unixCommand(
 				try {
 					response = JSON.parse(line.toString());
 				} catch {
+					// Before the sync reply the channel may still hold fragments of
+					// earlier, abandoned connections; only the sync id counts.
+					if (protocol === "qga" && phase === "handshake") continue;
 					finish(Error("Invalid QEMU JSON response"));
 					return;
 				}
+				// virtio-serial keeps QGA replies to requests that earlier connections
+				// sent before the guest agent ran (often parse errors). guest-sync
+				// semantics: discard everything until our own sync id comes back.
+				if (
+					protocol === "qga" &&
+					phase === "handshake" &&
+					response.return !== sync
+				)
+					continue;
 				if (response.error) {
 					const message = (response.error as { desc?: string }).desc || "";
 					finish(

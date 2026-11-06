@@ -127,6 +127,41 @@ it("synchronizes a local QGA connection before accepting its command response", 
 		await rm(dir, { recursive: true, force: true });
 	}
 });
+it("discards stale QGA replies and errors queued before its own sync id", async () => {
+	const { createServer } = await import("node:net");
+	const { mkdtemp, rm } = await import("node:fs/promises");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const { unixCommand } = await import("../src/qemu.ts");
+	const dir = await mkdtemp(join(tmpdir(), "qga-"));
+	const socket = join(dir, "rpc");
+	const server = createServer((conn) => {
+		// Replies to requests that earlier connections sent before the agent ran.
+		conn.write(
+			'{"error":{"class":"GenericError","desc":"JSON parse error"}}\n{"return":{}}\n{"return":12345}\n{"partial\n',
+		);
+		let pending = "";
+		conn.on("data", (data) => {
+			pending += data.toString().replace(/^\ufffd/, "");
+			for (let i = pending.indexOf("\n"); i >= 0; i = pending.indexOf("\n")) {
+				const request = JSON.parse(pending.slice(0, i));
+				pending = pending.slice(i + 1);
+				const reply =
+					request.execute === "guest-sync-delimited"
+						? request.arguments.id
+						: {};
+				conn.write(`${JSON.stringify({ return: reply })}\n`);
+			}
+		});
+	});
+	try {
+		await new Promise<void>((resolve) => server.listen(socket, resolve));
+		expect(await unixCommand(socket, "guest-ping", {}, 5000)).toEqual({});
+	} finally {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+		await rm(dir, { recursive: true, force: true });
+	}
+});
 it("closes QGA file handles even when reads fail", async () => {
 	const calls: string[] = [];
 	const io = new QemuGuestIo(async (command) => {
