@@ -80,16 +80,22 @@ UMIAK_APT_CHECK
 	if (online)
 		seed.set(
 			"network-config",
-			stringify({
-				version: 2,
-				ethernets: {
-					capture: {
-						match: { macaddress: CAPTURE_MAC },
-						"set-name": "capture0",
-						dhcp4: true,
+			// cloud-init parses with PyYAML (YAML 1.1): an unquoted MAC such as
+			// 52:54:00:25:00:01 is a base-60 integer there, so the match never
+			// finds the NIC and the capture VM stays offline. Quote every string.
+			stringify(
+				{
+					version: 2,
+					ethernets: {
+						capture: {
+							match: { macaddress: CAPTURE_MAC },
+							"set-name": "capture0",
+							dhcp4: true,
+						},
 					},
 				},
-			}),
+				{ defaultStringType: "QUOTE_DOUBLE", defaultKeyType: "PLAIN" },
+			),
 		);
 }
 async function saveBootSeed(

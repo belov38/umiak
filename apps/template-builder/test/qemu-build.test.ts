@@ -83,16 +83,19 @@ it("dry-runs capture cloud-init without interface-name assumptions and preserves
 		"systemctl enable --now qemu-guest-agent",
 	);
 	expect(config.output.all).toContain("/dev/ttyS0");
-	expect(parse(String(seed.get("network-config")))).toEqual({
-		version: 2,
-		ethernets: {
-			capture: {
-				match: { macaddress: CAPTURE_MAC },
-				"set-name": "capture0",
-				dhcp4: true,
+	// Read it the way cloud-init does (PyYAML, YAML 1.1): the MAC must stay a string.
+	expect(parse(String(seed.get("network-config")), { version: "1.1" })).toEqual(
+		{
+			version: 2,
+			ethernets: {
+				capture: {
+					match: { macaddress: CAPTURE_MAC },
+					"set-name": "capture0",
+					dhcp4: true,
+				},
 			},
 		},
-	});
+	);
 	const offline = new Map<string, string | Buffer>([
 		["user-data", "#cloud-config\nusers: []\n"],
 		["network-config", "version: 2\nethernets: {}\n"],
