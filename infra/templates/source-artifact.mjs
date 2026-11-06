@@ -166,7 +166,10 @@ export async function captureSourceFile({
 			"Insufficient disk for corresponding sources; use a runner with more disk",
 		);
 	let last;
-	for (let attempt = 0; attempt < 5; attempt++) {
+	// snapshot.ubuntu.com has multi-minute 502/503 episodes; a long source
+	// collection should outlast them (about 6.5 minutes per file at most).
+	const attempts = 8;
+	for (let attempt = 0; attempt < attempts; attempt++) {
 		let part,
 			file,
 			partHash,
@@ -226,7 +229,8 @@ export async function captureSourceFile({
 		} catch (error) {
 			last = error;
 			if (/checksum|size exceeds/.test(error.message)) throw error;
-			if (attempt < 4) await wait(Math.min(60000, 2000 * 2 ** attempt));
+			if (attempt < attempts - 1)
+				await wait(Math.min(120000, 5000 * 2 ** attempt));
 		} finally {
 			await file?.close();
 			if (part) await rm(part, { force: true });
