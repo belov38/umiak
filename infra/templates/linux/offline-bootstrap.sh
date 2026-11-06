@@ -43,7 +43,10 @@ PYPREF
 touch /etc/umiak-offline-replay
 apt-get -q -y update --error-on=any
 apt-get -q -y --no-install-recommends install qemu-guest-agent
-systemctl enable --now qemu-guest-agent
+# This runs from cloud-init bootcmd (init-local). qemu-guest-agent is ordered
+# after early boot, which waits for this very script: a synchronous start
+# deadlocks. Queue the start; the host waits for QGA to answer.
+systemctl start --no-block qemu-guest-agent
 if [ -s "$layer/licenses/inventory.json" ]; then
  install -d -m 0755 /usr/share/doc/umiak-template
  cp -a "$layer/licenses/." /usr/share/doc/umiak-template/

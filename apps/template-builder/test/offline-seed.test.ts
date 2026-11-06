@@ -19,3 +19,24 @@ it("boots only the authenticated local layer and installs QGA without online clo
 	expect(files.size).toBe(3);
 	expect(() => renderOfflineSeed("bad\nidentity")).toThrow();
 });
+
+it("never starts services synchronously from the init-local bootstrap", async () => {
+	const { readFile } = await import("node:fs/promises");
+	const script = await readFile(
+		new URL(
+			"../../../infra/templates/linux/offline-bootstrap.sh",
+			import.meta.url,
+		),
+		"utf8",
+	);
+	// bootcmd runs inside cloud-init-local; qemu-guest-agent is ordered after
+	// early boot, so `enable --now`/`start` without --no-block deadlocks the VM.
+	const code = script
+		.split("\n")
+		.filter((line) => !line.trimStart().startsWith("#"))
+		.join("\n");
+	expect(code).not.toMatch(
+		/systemctl\s+(?:enable\s+--now|start(?![^\n]*--no-block))/,
+	);
+	expect(code).toMatch(/systemctl start --no-block qemu-guest-agent/);
+});
