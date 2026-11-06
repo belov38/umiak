@@ -6,6 +6,7 @@ it("boots only the authenticated local layer and installs QGA without online clo
 	const files = renderOfflineSeed("a".repeat(24));
 	const user = parse(String(files.get("user-data")));
 	expect(user.package_update).toBe(false);
+	expect(user.apt).toEqual({ preserve_sources_list: true });
 	expect(user.packages).toEqual([]);
 	expect(user.bootcmd[0]).toEqual([
 		"bash",
