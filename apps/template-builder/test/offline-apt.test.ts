@@ -98,3 +98,56 @@ it("preserves Docker's original dists/suite/pool package layout", () => {
 		"dists/resolute/pool/stable/amd64/fixture_1.2.3_amd64.deb",
 	);
 });
+
+it("binds dsc/orig/debian source files to the original signed Sources index", async () => {
+	const { verifyAptSources } = await import("../src/offline-apt.ts");
+	const key = await openpgp.generateKey({
+		type: "ecc",
+		curve: "ed25519Legacy",
+		userIDs: [{ name: "fixture source archive" }],
+		format: "armored",
+	});
+	const pub = await openpgp.readKey({ armoredKey: key.publicKey });
+	const index = Buffer.from(
+		`Package: fixture\nVersion: 1.2.3\nDirectory: pool/main/f/fixture\nChecksums-Sha256:\n ${sha} 11 fixture_1.2.3.dsc\n ${sha} 11 fixture_1.2.3.orig.tar.xz\n\n`,
+	);
+	const indexHash = createHash("sha256").update(index).digest("hex");
+	const signed = await openpgp.sign({
+		message: await openpgp.createCleartextMessage({
+			text: `Suite: resolute\nSHA256:\n ${indexHash} ${index.length} main/source/Sources\n`,
+		}),
+		signingKeys: await openpgp.readPrivateKey({ armoredKey: key.privateKey }),
+	});
+	const opts = {
+		inRelease: String(signed),
+		publicKey: key.publicKey,
+		keyFingerprint: pub.getFingerprint(),
+		indexPath: "main/source/Sources",
+		index,
+		expectedSuite: "resolute",
+	};
+	expect((await verifyAptSources(opts))[0]).toMatchObject({
+		name: "fixture",
+		version: "1.2.3",
+		files: [
+			{
+				filename: "pool/main/f/fixture/fixture_1.2.3.dsc",
+				sha256: sha,
+				sizeBytes: 11,
+			},
+			{
+				filename: "pool/main/f/fixture/fixture_1.2.3.orig.tar.xz",
+				sha256: sha,
+				sizeBytes: 11,
+			},
+		],
+	});
+	await expect(
+		verifyAptSources({
+			...opts,
+			index: Buffer.from(
+				index.toString().replace("pool/main/f/fixture", "../escape"),
+			),
+		}),
+	).rejects.toThrow();
+});

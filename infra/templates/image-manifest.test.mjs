@@ -111,3 +111,8 @@ test("allows versioned unmodified deb paths and requires the signed license inve
 	m.files = m.files.filter((f) => f.path !== "licenses/inventory.json");
 	assert.throws(() => verified(m));
 });
+test("every published layer requires an immutable corresponding-source OCI digest", () => {
+	const m = layerFixture();
+	delete m.sources;
+	assert.throws(() => verified(m));
+});

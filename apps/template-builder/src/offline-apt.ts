@@ -77,14 +77,15 @@ export function parseAptPackages(text: string): AptPackage[] {
 	});
 }
 /** Authenticate original, unmodified upstream metadata; no regenerated indexes/trusted=yes. */
-export async function verifyAptIndex(o: {
+export interface AptIndexInput {
 	inRelease: string;
 	publicKey: string;
 	keyFingerprint: string;
 	indexPath: string;
 	index: Buffer;
 	expectedSuite?: string;
-}): Promise<AptPackage[]> {
+}
+export async function verifyAptMetadata(o: AptIndexInput): Promise<void> {
 	if (
 		(o.publicKey.match(/-----BEGIN PGP PUBLIC KEY BLOCK-----/g) ?? [])
 			.length !== 1
@@ -107,7 +108,7 @@ export async function verifyAptIndex(o: {
 	if (
 		release.length !== 1 ||
 		!safeRelative(o.indexPath) ||
-		!o.indexPath.endsWith("/Packages")
+		!/\/(binary-amd64\/Packages|source\/Sources)(\.xz|\.gz)?$/.test(o.indexPath)
 	)
 		throw Error("Invalid offline apt index path");
 	if (
@@ -135,7 +136,58 @@ export async function verifyAptIndex(o: {
 		}
 	}
 	if (!match) throw Error("Packages index absent from signed Release");
+}
+export async function verifyAptIndex(o: AptIndexInput): Promise<AptPackage[]> {
+	if (!o.indexPath.endsWith("/binary-amd64/Packages"))
+		throw Error("Unexpected binary package index");
+	await verifyAptMetadata(o);
 	return parseAptPackages(o.index.toString("utf8"));
+}
+export interface AptSource {
+	name: string;
+	version: string;
+	files: { filename: string; sha256: string; sizeBytes: number }[];
+}
+export async function verifyAptSources(o: AptIndexInput): Promise<AptSource[]> {
+	if (!o.indexPath.endsWith("/source/Sources"))
+		throw Error("Unexpected source package index");
+	await verifyAptMetadata(o);
+	return records(o.index.toString("utf8")).map((r) => {
+		const name = r.get("package") ?? "",
+			version = r.get("version") ?? "",
+			directory = r.get("directory") ?? "";
+		if (
+			!/^[a-z0-9][a-z0-9+.-]+$/.test(name) ||
+			!version ||
+			!directory.startsWith("pool/") ||
+			!safeRelative(directory)
+		)
+			throw Error("Invalid source package identity");
+		const seen = new Set<string>();
+		const files = (r.get("checksums-sha256") || "")
+			.split("\n")
+			.filter(Boolean)
+			.map((line) => {
+				const match = /^([a-f0-9]{64})\s+(\d+)\s+([^/\s]+)$/.exec(line.trim());
+				if (!match?.[1] || !match[2] || !match[3])
+					throw Error("Invalid source file checksum");
+				const filename = `${directory}/${match[3]}`,
+					sizeBytes = Number(match[2]);
+				if (
+					!safeRelative(filename) ||
+					seen.has(filename) ||
+					!Number.isSafeInteger(sizeBytes) ||
+					sizeBytes <= 0 ||
+					sizeBytes > 8 * 1024 ** 3
+				)
+					throw Error("Unsafe source package file");
+				seen.add(filename);
+				return { filename, sha256: match[1], sizeBytes };
+			});
+		if (!files.some((f) => f.filename.endsWith(".dsc")))
+			throw Error("Source package omits its dsc");
+		return { name, version, files };
+	});
 }
 export interface OfflineRepository {
 	name: string;

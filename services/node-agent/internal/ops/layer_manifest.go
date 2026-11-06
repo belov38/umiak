@@ -67,8 +67,12 @@ type layerManifest struct {
 		RawSHA256       string      `json:"rawSha256"`
 		Chunks          []layerBlob `json:"chunks"`
 	} `json:"archive"`
-	Files        []layerFile `json:"files"`
-	Inventory    layerBlob   `json:"inventory"`
+	Files     []layerFile `json:"files"`
+	Inventory layerBlob   `json:"inventory"`
+	Sources   struct {
+		Repository string `json:"repository"`
+		Digest     string `json:"digest"`
+	} `json:"sources"`
 	Verification struct {
 		OK            bool `json:"ok"`
 		OfflineReplay bool `json:"offlineReplay"`
@@ -195,6 +199,9 @@ func verifyLayerManifest(data, sig []byte, keys []string, platform, agent, chann
 		return fail()
 	}
 	if channel != "stable" && channel != "edge" || m.Channel != channel || m.Slug != slug || slug != "linux" && slug != "linux-desktop" || !layerVersionRE.MatchString(m.Version) || (channel == "edge") != strings.Contains(m.Version, "-edge.") {
+		return fail()
+	}
+	if !layerRepoRE.MatchString(m.Sources.Repository) || len(m.Sources.Repository) > 255 || !strings.HasPrefix(m.Sources.Digest, "sha256:") || !layerDigestRE.MatchString(strings.TrimPrefix(m.Sources.Digest, "sha256:")) {
 		return fail()
 	}
 	if !regexp.MustCompile(`^[a-f0-9]{40,64}$`).MatchString(m.SourceCommit) || !layerDigestRE.MatchString(m.RecipeSHA256) || !regexp.MustCompile(`^\d{8}T\d{6}Z$`).MatchString(m.AptSnapshot) {

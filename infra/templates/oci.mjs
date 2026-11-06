@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 export const OCI_REGISTRY = "https://ghcr.io";
 export const LAYER_ARTIFACT_TYPE = "application/vnd.umiak.linux-layer.v1";
+export const OCI_SOURCE_REPOSITORIES = Object.freeze({
+	linux: "belov38/umiak-linux-layer-sources",
+	"linux-desktop": "belov38/umiak-linux-desktop-layer-sources",
+});
 export const OCI_REPOSITORIES = Object.freeze({
 	linux: "belov38/umiak-linux-layer",
 	"linux-desktop": "belov38/umiak-linux-desktop-layer",
@@ -36,6 +40,9 @@ export class AnonymousOCI {
 		registry = OCI_REGISTRY,
 		repository,
 		fetcher = fetch,
+		artifactType = LAYER_ARTIFACT_TYPE,
+		maxLayers = 520,
+		maxManifestBytes = 1024 ** 2,
 		wait = (ms) => new Promise((r) => setTimeout(r, ms)),
 	}) {
 		const url = new URL(registry);
@@ -53,6 +60,9 @@ export class AnonymousOCI {
 			)
 		)
 			throw Error("Invalid OCI registry/repository configuration");
+		this.artifactType = artifactType;
+		this.maxLayers = maxLayers;
+		this.maxManifestBytes = maxManifestBytes;
 		this.origin = url.origin;
 		this.repository = repository;
 		this.fetcher = fetcher;
@@ -220,9 +230,15 @@ export class AnonymousOCI {
 		return bytes;
 	}
 	async manifest(tag) {
-		if (!/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(tag))
+		if (
+			!/^(?:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}|sha256:[a-f0-9]{64})$/.test(tag)
+		)
 			throw Error("Invalid OCI artifact tag");
-		const bytes = await this.request(`manifests/${tag}`, 1024 ** 2);
+		const bytes = await this.request(
+			`manifests/${tag}`,
+			this.maxManifestBytes,
+			tag.startsWith("sha256:") ? tag.slice(7) : undefined,
+		);
 		let manifest;
 		try {
 			manifest = JSON.parse(bytes.toString());
@@ -232,9 +248,9 @@ export class AnonymousOCI {
 		if (
 			manifest.schemaVersion !== 2 ||
 			manifest.mediaType !== "application/vnd.oci.image.manifest.v1+json" ||
-			manifest.artifactType !== LAYER_ARTIFACT_TYPE ||
+			manifest.artifactType !== this.artifactType ||
 			!Array.isArray(manifest.layers) ||
-			manifest.layers.length > 520
+			manifest.layers.length > this.maxLayers
 		)
 			throw Error("Not a Umiak Linux layer OCI artifact");
 		const titles = new Set();

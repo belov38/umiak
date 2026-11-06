@@ -97,6 +97,7 @@ export function verifyImageManifest(options) {
 		"archive",
 		"files",
 		"inventory",
+		"sources",
 		"verification",
 	]);
 	check(m.format === "umiak-linux-layer/v1" && m.arch === "amd64");
@@ -165,6 +166,19 @@ export function verifyImageManifest(options) {
 	}
 	check(fileBytes <= d.sizeBytes);
 
+	object(m.sources, ["repository", "digest"]);
+	check(
+		typeof m.sources.repository === "string" &&
+			m.sources.repository.length <= 255 &&
+			/^[a-z0-9]+(?:[._-]+[a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-]+[a-z0-9]+)*)*$/.test(
+				m.sources.repository,
+			),
+		"Invalid source companion repository",
+	);
+	check(
+		/^sha256:[a-f0-9]{64}$/.test(m.sources.digest),
+		"Source companion requires an immutable OCI digest",
+	);
 	object(m.inventory, ["sha256", "sizeBytes"]);
 	hash(m.inventory.sha256);
 	size(m.inventory.sizeBytes, IMAGE_LIMITS.inventory);

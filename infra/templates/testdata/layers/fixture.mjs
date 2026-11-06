@@ -40,6 +40,10 @@ export function layerFixture() {
 				mode: 420,
 			},
 		],
+		sources: {
+			repository: "belov38/umiak-linux-layer-sources",
+			digest: `sha256:${sha}`,
+		},
 		inventory: { sha256: sha, sizeBytes: 12 },
 		verification: { ok: true, offlineReplay: true },
 	};

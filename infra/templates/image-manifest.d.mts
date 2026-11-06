@@ -31,6 +31,7 @@ export interface ImageManifest {
 	};
 	files: ImageFile[];
 	inventory: ImageBlob;
+	sources: { repository: string; digest: string };
 	verification: { ok: true; offlineReplay: true };
 }
 export interface ImagePointer {
