@@ -265,23 +265,19 @@ export async function buildSourceCompanion({
 				debs.map((d) => d.path.slice(`apt/${name}/pool/`.length).split("/")[0]),
 			),
 		];
-		for (const component of components) {
-			if (!/^[a-z][a-z0-9-]*$/.test(component))
-				throw Error("Unsafe source component");
-			const packages = await verifyAptIndex({
-				inRelease,
-				publicKey,
-				keyFingerprint,
-				expectedSuite: suite,
-				indexPath: `${component}/binary-amd64/Packages`,
-				index: await readFile(
-					join(root, "dists", suite, component, "binary-amd64/Packages"),
-				),
-			});
-			const needed = packages.filter((p) =>
-				debs.some((d) => d.sha256 === p.sha256),
-			);
-			if (!needed.length) continue;
+		const sourceComponents = [...release.keys()]
+			.map((path) => /^([a-z][a-z0-9-]*)\/source\/Sources\.xz$/.exec(path)?.[1])
+			.filter(Boolean);
+		const sourceIndexes = new Map();
+		// A source package belongs to one component, but its binaries may be
+		// published in another (e.g. a universe binary of a main source), so
+		// look up the source across every signed Sources index of the suite.
+		const sourcesFor = (component) => {
+			if (!sourceIndexes.has(component))
+				sourceIndexes.set(component, loadSources(component));
+			return sourceIndexes.get(component);
+		};
+		const loadSources = async (component) => {
 			const compressedPath = `${component}/source/Sources.xz`,
 				pin = release.get(compressedPath);
 			if (!pin)
@@ -327,17 +323,36 @@ export async function buildSourceCompanion({
 				)),
 				path: `verification/${name}/${component}/source/Sources`,
 			});
-			const sourceMap = new Map(
-				sources.map((s) => [`${s.name}:${s.version}`, s]),
+			return new Map(sources.map((s) => [`${s.name}:${s.version}`, s]));
+		};
+		for (const component of components) {
+			if (!/^[a-z][a-z0-9-]*$/.test(component))
+				throw Error("Unsafe source component");
+			const packages = await verifyAptIndex({
+				inRelease,
+				publicKey,
+				keyFingerprint,
+				expectedSuite: suite,
+				indexPath: `${component}/binary-amd64/Packages`,
+				index: await readFile(
+					join(root, "dists", suite, component, "binary-amd64/Packages"),
+				),
+			});
+			const needed = packages.filter((p) =>
+				debs.some((d) => d.sha256 === p.sha256),
 			);
+			if (!needed.length) continue;
 			for (const binary of needed) {
 				const match = /^([a-z0-9][a-z0-9+.-]*)(?: \(([^)]+)\))?$/.exec(
 					binary.source,
 				);
 				if (!match) throw Error("Invalid binary-to-source package identity");
-				const source = sourceMap.get(
-					`${match[1]}:${match[2] || binary.version}`,
-				);
+				const key = `${match[1]}:${match[2] || binary.version}`;
+				let source = (await sourcesFor(component)).get(key);
+				for (const other of sourceComponents) {
+					if (source) break;
+					if (other !== component) source = (await sourcesFor(other)).get(key);
+				}
 				if (!source)
 					throw Error(
 						`Exact source package missing from pinned index: ${binary.source} ${binary.version}`,
