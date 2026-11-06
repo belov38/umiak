@@ -15,6 +15,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { parse, stringify } from "yaml";
 import { layerRecipeDescriptor } from "../../../infra/templates/layer-recipe.mjs";
 import { defaultDownloadFetch, fetchBaseImage } from "./image.ts";
 import {
@@ -24,7 +25,7 @@ import {
 } from "./layer-files.ts";
 import { materializeCapturedApt } from "./offline-layer.ts";
 import { renderOfflineSeed } from "./offline-seed.ts";
-import { probeQemu, QemuVM } from "./qemu.ts";
+import { CAPTURE_MAC, probeQemu, QemuVM } from "./qemu.ts";
 import {
 	type LinuxRecipe,
 	loadRecipe,
@@ -38,6 +39,44 @@ import { collectFacts, type ImageFacts, sealGuest } from "./seal.ts";
 import { makeIso, renderSeed } from "./seed.ts";
 
 const exec = promisify(execFile);
+
+/** QEMU-only boot config: independent of cloud-image interface naming. No install secrets. */
+export function qemuBootSeed(
+	seed: Map<string, string | Buffer>,
+	online: boolean,
+): void {
+	const config = parse(String(seed.get("user-data")));
+	config.output = { all: "| tee -a /var/log/cloud-init-output.log /dev/ttyS0" };
+	config.bootcmd ??= [];
+	config.bootcmd.unshift([
+		"bash",
+		"-c",
+		"echo UMIak-boot-diagnostics; cat /proc/cmdline; ip -br address; ip route; cat /etc/resolv.conf; lsblk -f; true",
+	]);
+	seed.set("user-data", `#cloud-config\n${stringify(config)}`);
+	if (online)
+		seed.set(
+			"network-config",
+			stringify({
+				version: 2,
+				ethernets: {
+					capture: { match: { macaddress: CAPTURE_MAC }, dhcp4: true },
+				},
+			}),
+		);
+}
+async function saveBootSeed(
+	seed: Map<string, string | Buffer>,
+	directory: string,
+): Promise<void> {
+	await mkdir(directory, { recursive: true, mode: 0o700 });
+	for (const name of ["user-data", "meta-data", "network-config"]) {
+		const value = seed.get(name);
+		if (value === undefined) throw Error(`Boot seed omits ${name}`);
+		await writeFile(join(directory, name), value);
+	}
+}
+
 const captureRoot = "/var/lib/umiak-layer-capture";
 export function assertOfflineReplayFacts(
 	captured: ImageFacts,
@@ -141,6 +180,7 @@ export interface LayerCaptureOptions {
 	unitsDirectory: string;
 	updateKeysFile: string;
 	umiakCli?: string;
+	diagnosticsDirectory?: string;
 	afterCapture?: (capture: LayerCapture, guest: GuestIo) => Promise<void>;
 	signal?: AbortSignal;
 	log: (text: string) => void;
@@ -231,6 +271,11 @@ export async function captureLayer(
 			...(o.umiakCli ? { umiakCli: o.umiakCli } : {}),
 		});
 		seed.set("build/verify.sh", verify);
+		qemuBootSeed(seed, true);
+		const diagnosticsDirectory =
+			o.diagnosticsDirectory ??
+			join(dirname(destination), "diagnostics", o.slug, "capture");
+		await saveBootSeed(seed, diagnosticsDirectory);
 		const disk = join(job, "capture.qcow2"),
 			seedPath = join(job, "seed.raw");
 		makeIso(seed, seedPath);
@@ -241,6 +286,7 @@ export async function captureLayer(
 			qga: join(job, "qga"),
 			qmp: join(job, "qmp"),
 			network: true,
+			diagnosticsDirectory,
 		});
 		const stop = () => {
 			void vm?.close();
@@ -330,6 +376,11 @@ export async function captureLayer(
 		if (outputOwned) await rm(destination, { recursive: true, force: true });
 		throw error;
 	} finally {
+		try {
+			await vm?.collectDiagnostics();
+		} catch {
+			/* Diagnostics never replace the build error. */
+		}
 		await vm?.close();
 		await rm(job, { recursive: true, force: true });
 	}
@@ -370,6 +421,7 @@ export async function replayLayer(o: {
 	capture: LayerCapture;
 	basePath: string;
 	workDirectory: string;
+	diagnosticsDirectory?: string;
 	log: (text: string) => void;
 	signal?: AbortSignal;
 }): Promise<{
@@ -401,7 +453,18 @@ export async function replayLayer(o: {
 			files,
 			o.signal,
 		);
-		makeIso(renderOfflineSeed(randomBytes(12).toString("hex")), seed);
+		const bootSeed = renderOfflineSeed(randomBytes(12).toString("hex"));
+		qemuBootSeed(bootSeed, false);
+		const diagnosticsDirectory =
+			o.diagnosticsDirectory ??
+			join(
+				resolve(o.workDirectory),
+				"diagnostics",
+				o.capture.recipe.slug,
+				"replay",
+			);
+		await saveBootSeed(bootSeed, diagnosticsDirectory);
+		makeIso(bootSeed, seed);
 		await overlay(o.basePath, disk, o.capture.recipe.disk.sizeGb, o.signal);
 		vm = new QemuVM({
 			disk,
@@ -410,6 +473,7 @@ export async function replayLayer(o: {
 			qga: join(job, "qga"),
 			qmp: join(job, "qmp"),
 			network: false,
+			diagnosticsDirectory,
 		});
 		const stop = () => {
 			void vm?.close();
@@ -450,6 +514,11 @@ export async function replayLayer(o: {
 			o.signal?.removeEventListener("abort", stop);
 		}
 	} finally {
+		try {
+			await vm?.collectDiagnostics();
+		} catch {
+			/* Diagnostics never replace the build error. */
+		}
 		await vm?.close();
 		await rm(job, { recursive: true, force: true });
 	}

@@ -1,11 +1,38 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomInt } from "node:crypto";
-import { constants } from "node:fs";
+import {
+	appendFileSync,
+	closeSync,
+	constants,
+	mkdirSync,
+	openSync,
+	readSync,
+	statSync,
+} from "node:fs";
 import { access, statfs } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { platform, totalmem } from "node:os";
+import { join } from "node:path";
 import type { ExecResult } from "@umiak/pve";
 import type { GuestIo } from "./runner.ts";
+
+export const CAPTURE_MAC = "52:54:00:25:00:01";
+
+export function serialTail(path: string): string {
+	try {
+		const size = statSync(path).size,
+			fd = openSync(path, "r"),
+			bytes = Buffer.alloc(Math.min(size, 64 * 1024));
+		try {
+			readSync(fd, bytes, 0, bytes.length, Math.max(0, size - bytes.length));
+			return bytes.toString().split("\n").slice(-60).join("\n");
+		} finally {
+			closeSync(fd);
+		}
+	} catch {
+		return "(serial log unavailable)";
+	}
+}
 
 type Rpc = (
 	command: string,
@@ -121,6 +148,7 @@ export function unixCommand(
 	});
 }
 export class QemuGuestIo implements GuestIo {
+	lastPingError = "no QGA response";
 	private readonly rpc: Rpc;
 	private readonly pollMs: number;
 	constructor(rpc: Rpc, pollMs = 250) {
@@ -131,7 +159,9 @@ export class QemuGuestIo implements GuestIo {
 		try {
 			await this.rpc("guest-ping", {}, 5000);
 			return true;
-		} catch {
+		} catch (error) {
+			this.lastPingError =
+				error instanceof Error ? error.message : String(error);
 			return false;
 		}
 	}
@@ -211,6 +241,8 @@ export function qemuArguments(o: {
 	qga: string;
 	qmp: string;
 	network: boolean;
+	serial?: string;
+	diagnosticsDirectory?: string;
 }): string[] {
 	for (const value of [
 		o.disk,
@@ -218,6 +250,7 @@ export function qemuArguments(o: {
 		o.qga,
 		o.qmp,
 		...(o.layer ? [o.layer] : []),
+		...(o.serial ? [o.serial] : []),
 	])
 		if (
 			!value.startsWith("/") ||
@@ -240,7 +273,7 @@ export function qemuArguments(o: {
 		"-display",
 		"none",
 		"-serial",
-		"none",
+		`file:${o.serial ?? `${o.qga}.serial.log`}`,
 		"-device",
 		"virtio-serial-pci",
 		"-chardev",
@@ -249,6 +282,8 @@ export function qemuArguments(o: {
 		"virtserialport,chardev=qga,name=org.qemu.guest_agent.0",
 		"-qmp",
 		`unix:${o.qmp},server=on,wait=off`,
+		"-qmp",
+		`unix:${o.qmp}.events,server=on,wait=off`,
 		"-drive",
 		`file=${o.disk},format=qcow2,if=virtio,discard=unmap`,
 		"-drive",
@@ -257,41 +292,144 @@ export function qemuArguments(o: {
 			? ["-drive", `file=${o.layer},format=raw,if=virtio,readonly=on`]
 			: []),
 		"-smbios",
-		"type=1,serial=ds=nocloud",
-		...(o.network ? ["-nic", "user,model=virtio-net-pci"] : ["-nic", "none"]),
+		`type=1,serial=ds=nocloud;dsmode=${o.network ? "net" : "local"}`,
+		...(o.network
+			? ["-nic", `user,model=virtio-net-pci,mac=${CAPTURE_MAC}`]
+			: ["-nic", "none"]),
 	];
 }
 export class QemuVM {
 	private diagnostic = "";
+	private closed = false;
+	private monitor?: ReturnType<typeof createConnection>;
+	private monitorTimer?: ReturnType<typeof setTimeout>;
+	readonly diagnosticsDirectory: string;
 	readonly guest: QemuGuestIo;
 	readonly process: ChildProcess;
 	private readonly options: Parameters<typeof qemuArguments>[0];
 	constructor(options: Parameters<typeof qemuArguments>[0]) {
+		this.diagnosticsDirectory =
+			options.diagnosticsDirectory ?? `${options.qga}.diagnostics`;
+		mkdirSync(this.diagnosticsDirectory, { recursive: true, mode: 0o700 });
+		options = {
+			...options,
+			serial: join(this.diagnosticsDirectory, "serial.log"),
+		};
 		this.options = options;
+		for (const name of ["serial.log", "qemu-stderr.log", "qmp-events.jsonl"])
+			appendFileSync(join(this.diagnosticsDirectory, name), "");
+		appendFileSync(
+			join(this.diagnosticsDirectory, "qemu-arguments.json"),
+			JSON.stringify(qemuArguments(options)),
+		);
 		this.process = spawn("qemu-system-x86_64", qemuArguments(options), {
 			stdio: ["ignore", "ignore", "pipe"],
 		});
 		this.process.on("error", (err) => {
 			this.diagnostic = err.message;
+			appendFileSync(
+				join(this.diagnosticsDirectory, "qemu-stderr.log"),
+				`${err.message}\n`,
+			);
 		});
 		this.process.stderr?.on("data", (data) => {
 			this.diagnostic = (this.diagnostic + String(data)).slice(-4096);
+			appendFileSync(join(this.diagnosticsDirectory, "qemu-stderr.log"), data);
 		});
+		this.recordQmp();
 		this.guest = new QemuGuestIo((command, args, timeout) =>
 			unixCommand(options.qga, command, args, timeout),
 		);
+	}
+	private recordQmp(): void {
+		if (
+			this.closed ||
+			this.process.exitCode !== null ||
+			this.process.signalCode !== null
+		)
+			return;
+		const socket = createConnection(`${this.options.qmp}.events`);
+		this.monitor = socket;
+		let pending = "";
+		let queried = false;
+		socket.on("data", (data) => {
+			pending += data.toString();
+			if (pending.length > 4 * 1024 ** 2) {
+				socket.destroy();
+				return;
+			}
+			for (
+				let end = pending.indexOf("\n");
+				end >= 0;
+				end = pending.indexOf("\n")
+			) {
+				const line = pending.slice(0, end);
+				pending = pending.slice(end + 1);
+				appendFileSync(
+					join(this.diagnosticsDirectory, "qmp-events.jsonl"),
+					`${line}\n`,
+				);
+				try {
+					const response = JSON.parse(line);
+					if (response.return && !queried) {
+						queried = true;
+						socket.write(`${JSON.stringify({ execute: "query-status" })}\n`);
+					}
+					if (response.QMP)
+						socket.write(
+							`${JSON.stringify({ execute: "qmp_capabilities" })}\n`,
+						);
+				} catch {
+					socket.destroy();
+				}
+			}
+		});
+		socket.on("error", () => {});
+		socket.on("close", () => {
+			if (!this.closed) {
+				this.monitorTimer = setTimeout(() => this.recordQmp(), 500);
+				this.monitorTimer.unref();
+			}
+		});
+	}
+	async collectDiagnostics(): Promise<void> {
+		if (!(await this.guest.ping())) return;
+		for (const path of [
+			"/var/log/cloud-init.log",
+			"/var/log/cloud-init-output.log",
+		]) {
+			try {
+				const bytes = await this.guest.readFile(path, 0, 1024 ** 2);
+				appendFileSync(
+					join(
+						this.diagnosticsDirectory,
+						path.slice(path.lastIndexOf("/") + 1),
+					),
+					bytes,
+				);
+			} catch {
+				/* Serial output remains available when QGA cannot read guest logs. */
+			}
+		}
 	}
 	async ready(timeoutMs = 300_000): Promise<void> {
 		const end = Date.now() + timeoutMs;
 		while (Date.now() < end) {
 			if (this.process.exitCode !== null || this.process.signalCode !== null)
-				throw Error(`QEMU exited: ${this.diagnostic}`);
+				throw Error(
+					`QEMU exited: ${this.diagnostic}\nSerial tail:\n${serialTail(join(this.diagnosticsDirectory, "serial.log"))}`,
+				);
 			if (await this.guest.ping()) return;
 			await sleep(500);
 		}
-		throw Error(`QEMU guest agent did not become ready: ${this.diagnostic}`);
+		throw Error(
+			`QEMU guest agent did not become ready: ${this.guest.lastPingError}; QEMU stderr: ${this.diagnostic || "(empty)"}\nDiagnostics: ${this.diagnosticsDirectory}\nSerial tail:\n${serialTail(join(this.diagnosticsDirectory, "serial.log"))}`,
+		);
 	}
 	async close(): Promise<void> {
+		this.closed = true;
+		clearTimeout(this.monitorTimer);
+		this.monitor?.destroy();
 		if (this.process.exitCode !== null || this.process.signalCode !== null)
 			return;
 		try {

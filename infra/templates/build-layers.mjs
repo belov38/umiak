@@ -73,6 +73,7 @@ export async function buildLayerRelease(o) {
 			version: o.version,
 			templatesDir: resolve("infra/templates"),
 			outputDir: directory,
+			diagnosticsDirectory: join(output, "diagnostics", slug, "capture"),
 			cacheDir: cache,
 			agentBinary: resolve(
 				process.env.LAYER_AGENT_BINARY || "dist/layer-agent/umiak-agent",
@@ -150,6 +151,7 @@ export async function buildLayerRelease(o) {
 			capture,
 			basePath: base.path,
 			workDirectory: work,
+			diagnosticsDirectory: join(output, "diagnostics", slug, "replay"),
 			log: (line) => console.log(`[${slug} offline] ${line}`),
 		});
 		// The replay must not change any exported byte; sealing affects only its private overlay.

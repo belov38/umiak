@@ -130,7 +130,20 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 mise exec -- go -C services/guest-agent build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=$LAYER_AGENT_VERSION" -o "$LAYER_AGENT_BINARY" ./cmd/umiak-agent
       - name: Capture inputs and prove fresh replay with no NIC (both products, sequentially)
         if: inputs.action == 'build'
-        run: mise exec -- node infra/templates/release-layers.mjs build
+        run: |
+          # Host reachability is diagnostic only; guest apt still verifies pinned repositories.
+          mise exec -- node --input-type=module <<'JS'
+          import {readFileSync,writeFileSync} from 'node:fs';
+          const snapshot=readFileSync('infra/templates/linux/versions.toml','utf8').match(/\[apt\][\s\S]*?snapshot = "([^"]+)"/)[1];
+          const results=await Promise.all(['http','https'].map(async protocol=>{
+            const url=`${protocol}://snapshot.ubuntu.com/ubuntu/${snapshot}/dists/resolute/InRelease`;
+            try {const response=await fetch(url,{redirect:'manual',signal:AbortSignal.timeout(15000)});await response.body?.cancel();return {url,status:response.status};}
+            catch(error){return {url,error:error.message,cause:error.cause?.message};}
+          }));
+          writeFileSync(`${process.env.LAYER_OUTPUT}-host-apt-probe.json`,JSON.stringify(results,null,2));
+          console.log('Runner snapshot reachability:',JSON.stringify(results));
+          JS
+          mise exec -- node infra/templates/release-layers.mjs build
       - name: Materialize recipe key only after replay and policy gates pass
         if: inputs.action == 'build'
         run: |
@@ -177,6 +190,16 @@ jobs:
             ${{ env.LAYER_OUTPUT }}/linux-desktop/*.json
             ${{ env.LAYER_OUTPUT }}/linux-desktop/*.sig
             ${{ env.LAYER_OUTPUT }}/linux-desktop/verify.sh
+      - name: Retain failed guest boot diagnostics (no credentials or disks)
+        if: failure() && inputs.action == 'build'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: linux-layer-boot-diagnostics-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ env.LAYER_OUTPUT }}/diagnostics/
+            ${{ env.LAYER_OUTPUT }}-host-apt-probe.json
       - name: Remove file-only credentials
         if: always()
         run: |

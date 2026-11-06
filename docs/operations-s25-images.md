@@ -64,6 +64,29 @@ without registry writes. The built-in token still authenticates read-only public
 GitHub source metadata to avoid anonymous API throttling. Both modes use the
 same explicit gate; there are no push or pull_request triggers.
 
+## Local workflow checks
+
+Run actionlint on every edited workflow before reporting it ready; YAML parsing
+and shell/Node syntax checks do not validate GitHub expression context placement.
+For this workflow:
+
+```sh
+mise exec actionlint@1.7.12 -- actionlint .github/workflows/linux-layers.yml
+```
+
+Runner-local paths are written to `$GITHUB_ENV` by the first step; the `runner`
+context is unavailable in job-level `env`.
+
+On capture/replay failure, download `linux-layer-boot-diagnostics-<run-id>`.
+It retains each VM's serial console, QEMU stderr/arguments, QMP events/status,
+cloud-init logs when QGA can read them, and only the three public NoCloud seed
+files. No seed payload disk, credentials or guest disk is included. Serial output
+includes cloud-init output and early kernel-command-line/NIC/route/DNS/label facts.
+A separate JSON probe records runner HTTP/HTTPS snapshot reachability. QGA timeout
+errors include the last serial lines. Online capture matches its fixed NIC MAC
+and explicitly selects NoCloud network mode; offline replay has no NIC and uses
+local mode. First-run cause remains unconfirmed until guest logs are available.
+
 ## CI proof, sources and measurements
 
 The standard Ubuntu runner must pass an actual KVM startup/QMP probe, at least

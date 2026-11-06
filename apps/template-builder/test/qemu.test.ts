@@ -138,3 +138,45 @@ it("closes QGA file handles even when reads fail", async () => {
 	await expect(io.readFile("/tmp/x", 0, 5)).rejects.toThrow("read failed");
 	expect(calls.at(-1)).toBe("guest-file-close");
 });
+
+it("records a serial console and pairs capture DHCP identity with network-stage NoCloud", async () => {
+	const { CAPTURE_MAC } = await import("../src/qemu.ts");
+	const options = {
+		disk: "/tmp/disk",
+		seed: "/tmp/seed",
+		qga: "/tmp/qga",
+		qmp: "/tmp/qmp",
+		network: true,
+		serial: "/tmp/serial.log",
+	};
+	const args = qemuArguments(options);
+	expect(args).toContain("file:/tmp/serial.log");
+	expect(args).toContain(`user,model=virtio-net-pci,mac=${CAPTURE_MAC}`);
+	expect(args).toContain("type=1,serial=ds=nocloud;dsmode=net");
+	expect(qemuArguments({ ...options, network: false })).toContain(
+		"type=1,serial=ds=nocloud;dsmode=local",
+	);
+	expect(() =>
+		qemuArguments({ ...options, serial: "/tmp/evil,option" }),
+	).toThrow();
+});
+it("prints bounded last serial lines even when QGA never responds", async () => {
+	const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const { serialTail } = await import("../src/qemu.ts");
+	const root = await mkdtemp(join(tmpdir(), "serial-tail-"));
+	try {
+		const path = join(root, "serial.log");
+		await writeFile(
+			path,
+			`${"old line\n".repeat(20000)}apt failed: no route\n`,
+		);
+		const tail = serialTail(path);
+		expect(tail).toContain("apt failed: no route");
+		expect(tail.length).toBeLessThan(64 * 1024);
+		expect(serialTail(join(root, "absent"))).toContain("unavailable");
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
