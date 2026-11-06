@@ -366,3 +366,44 @@ the first testable release. S22 automatic new-layer discovery/promotion follows
 immediately after its first live acceptance; existing S21 copy and normal
 registration/retirement already apply. Legacy recipe rollout skips active generic
 Linux templates during this interval, avoiding accidental local archive rebuilds.
+
+## Corresponding-source companions (approved first-release requirement)
+
+Each product has a public GHCR `*-layer-sources` companion. Its immutable OCI
+digest is required in the signed layer manifest's `sources` field and the signed
+license inventory. Installs never download it. The layer signature authenticates
+the companion OCI manifest, its source manifest and all source blobs transitively.
+No new signing authority is introduced.
+
+For every Ubuntu/xtradeb deb actually redistributed in the layer, collect the
+original dsc, orig and Debian source files authenticated by the original signed
+Release -> Sources -> source-file SHA-256 chain. Retain the verification data.
+Sunshine and moonlight-web include exact pinned-tag source archives, packaging
+build scripts and resolved gitlink archives. Inventory maps each binary hash to
+its exact source inputs. Docker's Apache exception retains license/NOTICE texts
+and best-effort release references plus dated commit-pinned packaging recipe
+snapshots, labelled as such; no build-checkout attestation gate. Exclude Docker
+sources unless a bundled copyleft component is identified and reviewed.
+
+Source files are individually content-addressed and split at stable 512 MiB
+offsets, without global tar recompression, so unchanged Chromium/source packages
+reuse destination blobs across releases. A single gated workflow publishes both
+companions and both layers; all four pass anonymous byte/digest readback before
+either layer channel advances. The first long CI run is accepted and reports
+real source sizes and CI time. Pinned Chromium metadata totals about 782 MiB plus
+dsc; full totals are not yet measured. Operations and exact dispatch inputs:
+[operations-s25-images.md](../operations-s25-images.md).
+
+The guest Umiak CLI is required but excluded from the generic layer because its
+compiled release asset embeds Bun. After offline parity, the PVE builder transfers
+the installed platform release's existing trusted CLI asset via QGA, verifies its
+SHA and records exact version/SHA as a node-installed platform tool outside the
+signed layer. Missing/invalid local assets fail the build clearly. There is no
+network requirement or vendor-style failure tolerance for this first-party asset.
+
+
+### libvirtualhid Linux source subset (approved exception)
+
+Sunshine's pinned Linux CMake target links libvirtualhid. Its repository also contains Windows SAL sources that we do not redistribute. CI preserves the Sunshine and moonlight root source archives byte-for-byte, excludes the Windows-only NVAPI/ViGEm gitlinks, and derives a libvirtualhid MIT subset inside the isolated Linux capture guest after the layer export/facts are frozen. The audit configures the actual upstream library subproject as Sunshine does, builds its Linux target, reads CMake File API target/configuration inputs, the exported API header tree and GCC dependency files, and checks every selected path against the pinned upstream license map. No handwritten source allowlist is used. Any SAL input stops publication.
+
+The subset retains original selected file bytes, the MIT license, repository license summary and path-to-license map. CI reconstructs the subset in a fresh directory and compiles it again, requiring the same source/header/configuration closure and hashes. The signed inventory and digest-bound source companion record the original commit/archive SHA-256, derived archive SHA-256, excluded SAL paths, exact audit script, CMake wrapper/options, compiler versions and reconstruction result. Full mixed-license libvirtualhid archives remain private CI scratch data and are not OCI source files. Audit-only dev packages are installed after export and never enter the layer.

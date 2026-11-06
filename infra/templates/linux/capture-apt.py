@@ -113,8 +113,22 @@ for line in run('dpkg-query', '-W', '-f', '${db:Status-Status}\t${binary:Package
     destination = root / notice
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(doc, destination)
-    packages.append(dict(name=name, version=version, arch=arch, source=source, sourceVersion=source_version, notice=notice))
+    notices=[notice]
+    for extra in sorted(doc.parent.iterdir()):
+        if extra.is_file() and extra.name.lower().startswith(('license','licence','copying','notice')):
+            relative=f'licenses/deb-notices/{name.replace(":", "_")}/{extra.name}'
+            target=root/relative; target.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copyfile(extra,target); notices.append(relative)
+    packages.append(dict(name=name, version=version, arch=arch, source=source, sourceVersion=source_version, notice=notice, notices=notices))
 (root / 'licenses/packages.json').write_text(json.dumps(packages))
+# Record the versions of the Apache Docker runtime components for source references.
+components={}
+for tool in ('runc','containerd','dockerd'):
+    executable=shutil.which(tool)
+    if executable:
+        components[tool]=subprocess.check_output([executable,'--version'],text=True,timeout=30).strip()
+(root / 'licenses/docker-components.json').write_text(json.dumps(components))
+
 
 # Preserve normal post-customization update sources without using them during replay.
 after = root / 'build/apt-after'

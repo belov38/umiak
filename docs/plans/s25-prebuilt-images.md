@@ -241,3 +241,27 @@ publish gate. It must never accept a disk image or rehost Canonical base bytes.
 Finish Tasks 5 and 7 first (PVE/setup + manual GHCR publisher), including once-per-template
 vendor installation, nonfatal warning and safe rebuild retry. Task 6 S22 autonomous
 new-layer rollout follows first live acceptance and is explicitly pending then.
+
+## Approved source/CLI extension for the first testable release
+
+- Required source companion per product, referenced by OCI digest from layer
+  metadata/inventory; independently verified Sources chains for Ubuntu/xtradeb,
+  pinned upstream/gitlink sources for GPL Sunshine/moonlight.
+- Docker is Apache: retain copyright/license/NOTICE, best-effort tags and dated
+  packaging recipe snapshots. No Docker source/attestation gate unless actual
+  bundled copyleft is found.
+- Stable per-source-file chunks reuse unchanged blobs; one gated run uploads and
+  verifies all four artifacts before advancing any channel. First long CI is OK.
+- Required installed-platform guest CLI transfers via QGA after offline parity,
+  with exact hash/version record; missing asset is fatal, no network. Bun/Claude/
+  OpenCode remain separate tolerant online vendor tools, absent from CI layer.
+- Master bootstraps only linux-layers.yml onto main, initializes four packages
+  against our reviewed SHA, Ilia sets Public once, then master runs the full build.
+  Report head, exact workflow path and inputs; implementation never triggers CI.
+
+
+### libvirtualhid Linux source subset (approved exception)
+
+Sunshine's pinned Linux CMake target links libvirtualhid. Its repository also contains Windows SAL sources that we do not redistribute. CI preserves the Sunshine and moonlight root source archives byte-for-byte, excludes the Windows-only NVAPI/ViGEm gitlinks, and derives a libvirtualhid MIT subset inside the isolated Linux capture guest after the layer export/facts are frozen. The audit configures the actual upstream library subproject as Sunshine does, builds its Linux target, reads CMake File API target/configuration inputs, the exported API header tree and GCC dependency files, and checks every selected path against the pinned upstream license map. No handwritten source allowlist is used. Any SAL input stops publication.
+
+The subset retains original selected file bytes, the MIT license, repository license summary and path-to-license map. CI reconstructs the subset in a fresh directory and compiles it again, requiring the same source/header/configuration closure and hashes. The signed inventory and digest-bound source companion record the original commit/archive SHA-256, derived archive SHA-256, excluded SAL paths, exact audit script, CMake wrapper/options, compiler versions and reconstruction result. Full mixed-license libvirtualhid archives remain private CI scratch data and are not OCI source files. Audit-only dev packages are installed after export and never enter the layer.

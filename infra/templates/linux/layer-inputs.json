@@ -16,5 +16,20 @@
 		},
 		"source": "https://launchpad.net/~xtradeb/+archive/ubuntu/apps/+sourcepub/18904289",
 		"licenseNotices": "/usr/share/doc/chromium/copyright"
+	},
+	"dockerPackaging": {
+		"label": "packaging recipe snapshot",
+		"snapshotDate": "2026-10-30T00:00:00Z",
+		"attestedBuildCheckout": false,
+		"repositories": [
+			{
+				"repository": "docker/docker-ce-packaging",
+				"commit": "dd77ca7b8fddcbee52507a178cda0743108d7654"
+			},
+			{
+				"repository": "docker/containerd-packaging",
+				"commit": "4179daadda73869df656240bf5446a72f15d1a21"
+			}
+		]
 	}
 }
