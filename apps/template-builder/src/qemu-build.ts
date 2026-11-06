@@ -366,23 +366,19 @@ grep -h '^ADDRESS=10.0.2.' /run/systemd/netif/leases/*
 				await mkdir(dirname(full), { recursive: true });
 				await writeFile(full, bytes, { flag: "wx" });
 			}
+			// Merge entry by entry: build/ already holds the host-written seed
+			// descriptors, and cp(errorOnExist) rejects an existing directory even
+			// when no file collides. A colliding file still fails the build.
 			for (const name of ["inputs", "licenses", "build"]) {
-				if (name === "inputs") {
-					await mkdir(join(destination, name), { recursive: true });
-					for (const entry of await readdir(join(raw, name))) {
-						if (entry === "apt-capture") continue;
-						await cp(join(raw, name, entry), join(destination, name, entry), {
-							recursive: true,
-							errorOnExist: true,
-							force: false,
-						});
-					}
-				} else
-					await cp(join(raw, name), join(destination, name), {
+				await mkdir(join(destination, name), { recursive: true });
+				for (const entry of await readdir(join(raw, name))) {
+					if (name === "inputs" && entry === "apt-capture") continue;
+					await cp(join(raw, name, entry), join(destination, name, entry), {
 						recursive: true,
 						errorOnExist: true,
 						force: false,
 					});
+				}
 			}
 			const fetches = (await readFile(join(raw, "inputs/fetch.jsonl"), "utf8"))
 				.trim()
