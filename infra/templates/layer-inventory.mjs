@@ -108,6 +108,14 @@ export function layerInventory({
 		if (["claude", "bun", "bunx", "opencode"].includes(tool) && value !== null)
 			throw Error(`Vendor-only tool in layer: ${tool}`);
 	const installed = new Map();
+	// The upstream tag is captured with the deb; its packaging version can differ.
+	const sunshineTag = fetches
+		.find((input) =>
+			input.url.startsWith(
+				"https://github.com/LizardByte/Sunshine/releases/download/",
+			),
+		)
+		?.url.split("/")[7];
 	const packageInventory = packages.map((p) => {
 		if (forbidden.test(p.name) || !p.source || !p.sourceVersion)
 			throw Error(`Unresolved package input: ${p.name}`);
@@ -116,9 +124,12 @@ export function layerInventory({
 			...p,
 			license: "LicenseRef-Distribution-Copyright",
 			noticeFile: notice(p.notice),
-			sourceURL: Object.hasOwn(dockerSources, p.name.split(":")[0])
-				? `https://github.com/${dockerSources[p.name.split(":")[0]]}`
-				: `https://launchpad.net/ubuntu/+source/${encodeURIComponent(p.source)}/${encodeURIComponent(p.sourceVersion)}`,
+			sourceURL:
+				p.name.split(":")[0] === "sunshine" && sunshineTag
+					? `https://github.com/LizardByte/Sunshine/releases/tag/${sunshineTag}`
+					: Object.hasOwn(dockerSources, p.name.split(":")[0])
+						? `https://github.com/${dockerSources[p.name.split(":")[0]]}`
+						: `https://launchpad.net/ubuntu/+source/${encodeURIComponent(p.source)}/${encodeURIComponent(p.sourceVersion)}`,
 		};
 	});
 	const actual = Object.entries(facts.packages).sort();

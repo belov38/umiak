@@ -26,7 +26,7 @@ First dispatch, with these input names:
 
 ```text
 action=initialize-packages
-version=20261106.1-edge.20261106.1
+version=20261106.2-edge.20261106.2
 channel=edge
 agent_version=0.4.0-edge.20261106.1
 publish=true
@@ -51,7 +51,7 @@ Then dispatch the same reviewed ref with:
 
 ```text
 action=build
-version=20261106.1-edge.20261106.1
+version=20261106.2-edge.20261106.2
 channel=edge
 agent_version=0.4.0-edge.20261106.1
 publish=true
@@ -146,8 +146,21 @@ source sizes, source capture and offline replay times, plus upload/readback time
 Download estimates at 20/100 Mbit/s include only the base and layer, exclude retry
 cost and are estimates. PVE replay/import, platform CLI transfer, online vendor
 installation and S21 timings must come from the live stand run. The known pinned
-Chromium source entry is about 782 MiB plus dsc; full companion size remains
-unmeasured until the first CI run. Unchanged Chromium source blobs are reused.
+Chromium source entry is about 782 MiB plus dsc. Unchanged source blobs are reused.
+
+Master's successful local KVM build at `1fd10e9e` measured both products:
+
+- Linux: compressed layer 1.45 GB in 3 chunks; replay 476 s; total build 32 min;
+  source companion 2.58 GB.
+- Linux Desktop: compressed layer 1.71 GB in 4 chunks; replay 502 s; total build
+  40 min; source companion 4.6 GB across 1,141 files.
+
+Both fresh replays had no NIC and passed parity. The official base measured
+about 420 MB in the earlier run. These are local build measurements, not GitHub
+runner or live PVE install timings; vendor tools and S21 copying are additional.
+The `.1` staging tag was consumed before signing failed at the stale source-test
+mocks. Rebuild the new reviewed SHA using `20261106.2-edge.20261106.2`; staging
+and sign-staged must use that same SHA and version. No published channel advanced.
 
 ## Install and safe retry
 
@@ -212,7 +225,7 @@ The bootstrap script operates only inside that VM; it does not configure Proxmox
 
 ```sh
 bash infra/templates/bootstrap-build-host.sh
-mise exec oras@1.3.6 -- node infra/templates/local-layers.mjs build 20261106.1-edge.20261106.1 0.4.0-edge.20261106.1 /var/tmp/umiak-layers
+mise exec oras@1.3.6 -- node infra/templates/local-layers.mjs build 20261106.2-edge.20261106.2 0.4.0-edge.20261106.1 /var/tmp/umiak-layers
 ```
 
 This builds the generic agent from that checkout, runs the same two capture and
@@ -222,12 +235,26 @@ provides authenticated public GitHub source-metadata reads to avoid API throttli
 Otherwise these reads are anonymous. The base is downloaded directly from Canonical
 and is never staged. Proprietary vendor tools are not run or included.
 
+Set `UMIAK_LAYER_SOURCE_CACHE=/var/cache/umiak-layer-sources` for local builds to
+reuse corresponding-source downloads across runs. Keep this persistent directory
+outside the build output, which must be fresh for every build. For example:
+
+```sh
+UMIAK_LAYER_SOURCE_CACHE=/var/cache/umiak-layer-sources mise exec oras@1.3.6 -- node infra/templates/local-layers.mjs build 20261106.2-edge.20261106.2 0.4.0-edge.20261106.1 /var/tmp/umiak-layers-next
+```
+
+Every reused file and chunk is re-verified against its SHA-256 and size; a corrupt
+entry is downloaded again. This caches only corresponding sources, independently
+of the optional capture-only apt proxy. Without this variable, the cache lives
+inside the build output. OCI layouts hard-link cache blobs, so keep the cache and
+output on the same filesystem. The cache path is not signed provenance or a secret.
+
 To stage, create a 0600 token file outside the checkout with write access to the
 four public GHCR packages. Never put the token value in environment variables,
 arguments or logs. `ORAS_USERNAME` is the non-secret GitHub account name.
 
 ```sh
-ORAS_USERNAME=belov38 ORAS_TOKEN_FILE=/run/credentials/ghcr-token mise exec oras@1.3.6 -- node infra/templates/local-layers.mjs stage 20261106.1-edge.20261106.1 /var/tmp/umiak-layers
+ORAS_USERNAME=belov38 ORAS_TOKEN_FILE=/run/credentials/ghcr-token mise exec oras@1.3.6 -- node infra/templates/local-layers.mjs stage 20261106.2-edge.20261106.2 /var/tmp/umiak-layers
 ```
 
 Staging uses immutable `staging-<version>` tags in all four existing public packages.
@@ -240,7 +267,7 @@ expose its new choice. Dispatch the same reviewed implementation ref with:
 
 ```text
 action=sign-staged
-version=20261106.1-edge.20261106.1
+version=20261106.2-edge.20261106.2
 channel=edge
 agent_version=0.4.0-edge.20261106.1
 publish=true

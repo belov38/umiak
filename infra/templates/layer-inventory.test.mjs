@@ -102,3 +102,30 @@ test("Ubuntu source references still retain their exact package/version URL", ()
 		"https://launchpad.net/ubuntu/+source/bash/1",
 	);
 });
+
+test("Sunshine source reference uses the captured release tag rather than the deb packaging version", () => {
+	const input = fixture();
+	const version = "2026.914.233613-1+ubuntu26.04";
+	input.facts.packages = { sunshine: version };
+	Object.assign(input.packages[0], {
+		name: "sunshine",
+		version,
+		source: "sunshine",
+		sourceVersion: version,
+	});
+	input.fetches = [
+		{
+			url: "https://github.com/LizardByte/Sunshine/releases/download/v2026.914.233613/sunshine_2026.914.233613-1%2Bubuntu26.04_amd64.deb",
+			sha256: hash,
+		},
+	];
+	input.upstream = [
+		{ name: "Sunshine", path: "licenses/deb/bash.copyright", sha256: hash },
+	];
+	const inventory = layerInventory(input);
+	assert.equal(
+		inventory.packages[0].sourceURL,
+		"https://github.com/LizardByte/Sunshine/releases/tag/v2026.914.233613",
+	);
+	assert.equal(inventory.packages[0].version, version);
+});

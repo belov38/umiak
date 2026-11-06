@@ -82,12 +82,23 @@ metadata; never disable signature or hash checks. Capture no unnecessary package
 or credentials. Every final package has name/version/architecture, source package,
 repository, exact deb SHA-256 and index provenance in the signed inventory.
 
-The closure also includes Docker key/debs, Node/Go/Bun/uv/gh tarballs, Python inputs
+The closure also includes Docker key/debs, Node/Go/uv/gh tarballs, Python inputs
 if used, every Rust component/rustup artifact, npm package tarballs/native optional
 dependencies and registry integrity metadata, Sunshine/moonlight/Cua archives and
 Sigstore verification bundles. npm, rustup and helper scripts run in explicit
 offline mode or install captured verified payloads; a successful download cache
 alone is not a proof of an offline closure. No vendor postinstall may fetch.
+
+The pinned Cua Driver release ships a **legacy cosign bundle** containing
+`base64Signature`, `cert` and `rekorBundle`. Cosign 3.1.4 rejects `--trusted-root`
+for this format. Capture verifies online and retains the TUF-authenticated
+`trusted_root.json` under an explicit `TUF_ROOT`, independent of HOME. Replay
+exports all Fulcio CA certificates plus one Rekor/CT public key per file from
+that captured root, then tries key pairs with `verify-blob --offline` and the
+pinned certificate identity and OIDC issuer. At least one pair must verify;
+failure is fatal. No transparency-log or certificate check is skipped. If Cua
+migrates to Sigstore v0.3/new-format bundles, prefer `--offline --trusted-root`
+directly instead of the legacy key-file adapter.
 
 The critical CI check is a **fresh replay** from the official base with all guest
 network egress disabled, using only the finished layer. Compare exact installed
@@ -391,7 +402,10 @@ reuse destination blobs across releases. A single gated workflow publishes both
 companions and both layers; all four pass anonymous byte/digest readback before
 either layer channel advances. The first long CI run is accepted and reports
 real source sizes and CI time. Pinned Chromium metadata totals about 782 MiB plus
-dsc; full totals are not yet measured. Operations and exact dispatch inputs:
+dsc. The successful local build at `1fd10e9e` measured source companions of
+2.58 GB (Linux) and 4.6 GB / 1,141 files (Linux Desktop). NIC-less parity replays
+took 476 s and 502 s respectively. These are local KVM results; live PVE install,
+vendor-tool and S21 timings remain to be measured. Operations and exact dispatch inputs:
 [operations-s25-images.md](../operations-s25-images.md).
 
 The guest Umiak CLI is required but excluded from the generic layer because its

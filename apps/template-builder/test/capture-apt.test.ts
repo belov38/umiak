@@ -76,3 +76,7 @@ for (const scenario of ["docker-no-doc", "docker-doc-notices"])
 	it(`records the narrow Docker notice exception: ${scenario}`, () => {
 		expect(() => capture(scenario)).not.toThrow();
 	});
+
+it("records the narrow upstream GPL Sunshine notice exception without a doc directory", () => {
+	expect(() => capture("sunshine-no-doc")).not.toThrow();
+});

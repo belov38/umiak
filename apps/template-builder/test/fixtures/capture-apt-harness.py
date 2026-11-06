@@ -107,6 +107,8 @@ with tempfile.TemporaryDirectory(prefix='capture-apt-fixture-') as tmp:
             text = 'installed\tfixture\t1.0\tamd64\tfixture-source\t1.0\n'
             if case in ('docker-no-doc', 'docker-doc-notices'):
                 text += 'installed\tdocker-buildx-plugin\t0.38.1-1~ubuntu.26.04~resolute\tamd64\tdocker-buildx-plugin\t0.38.1-1~ubuntu.26.04~resolute\n'
+            if case == 'sunshine-no-doc':
+                text += 'installed\tsunshine\t2026.914.233613\tamd64\tsunshine\t2026.914.233613\n'
             return text
         raise AssertionError(f'unexpected host command: {args}')
 
@@ -140,6 +142,15 @@ with tempfile.TemporaryDirectory(prefix='capture-apt-fixture-') as tmp:
     assert path('/var/lib/umiak-layer-capture/' + deb['path']).read_bytes() == b'original deb bytes'
     notices = json.loads(path('/var/lib/umiak-layer-capture/licenses/packages.json').read_text())
     assert notices[0]['source'] == 'fixture-source'
+    if case == 'sunshine-no-doc':
+        sunshine = next(p for p in notices if p['name'] == 'sunshine')
+        assert sunshine['version'] == '2026.914.233613'
+        content = path('/var/lib/umiak-layer-capture/' + sunshine['notice']).read_text()
+        assert 'ships no /usr/share/doc copyright file' in content
+        assert 'GPL-3.0' in content and 'pinned upstream' in content
+        assert 'source companion' in content
+        assert not path('/usr/share/doc/sunshine').exists()
+        assert sunshine['notices'] == [sunshine['notice']]
     if case in ('docker-no-doc', 'docker-doc-notices'):
         docker = next(p for p in notices if p['name'] == 'docker-buildx-plugin')
         content = path('/var/lib/umiak-layer-capture/' + docker['notice']).read_text()
