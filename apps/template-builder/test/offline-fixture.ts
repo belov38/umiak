@@ -6,7 +6,7 @@ import { layerFixture } from "../../../infra/templates/testdata/layers/fixture.m
 import { verifyOfflineLayer } from "../src/layer-release.ts";
 import { loadRecipe, loadVersions, stepFile } from "../src/recipe.ts";
 import type { ImageFacts } from "../src/seal.ts";
-export function offlineFixture(baseSHA256: string, facts: ImageFacts) {
+export function offlineFixtureInput(baseSHA256: string, facts: ImageFacts) {
 	const recipe = loadRecipe(
 		resolve(import.meta.dirname, "../../../infra/templates"),
 		"linux",
@@ -51,7 +51,7 @@ export function offlineFixture(baseSHA256: string, facts: ImageFacts) {
 		manifest.files.reduce((n, f) => n + f.sizeBytes + 1024, 0) + 1024;
 	const bytes = Buffer.from(JSON.stringify(manifest));
 	const key = generateKeyPairSync("ed25519");
-	return verifyOfflineLayer({
+	return {
 		bytes,
 		signature: sign(null, bytes, key.privateKey),
 		descriptor,
@@ -61,5 +61,9 @@ export function offlineFixture(baseSHA256: string, facts: ImageFacts) {
 		agent: "0.1.0",
 		channel: "stable",
 		slug: "linux",
-	});
+	};
+}
+
+export function offlineFixture(baseSHA256: string, facts: ImageFacts) {
+	return verifyOfflineLayer(offlineFixtureInput(baseSHA256, facts));
 }

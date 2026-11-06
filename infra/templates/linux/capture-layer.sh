@@ -9,6 +9,10 @@ root=Path('/var/lib/umiak-layer-capture')
 (root/'licenses/umiak').mkdir(parents=True,exist_ok=True)
 shutil.copyfile('/mnt/seed/build/umiak-LICENSE',root/'licenses/umiak/LICENSE')
 if (root/'inputs.jsonl').exists(): shutil.copyfile(root/'inputs.jsonl',root/'inputs/fetch.jsonl')
+for entry in (root/'inputs/fetch.jsonl').read_text().splitlines():
+    url=json.loads(entry)['url']
+    if any(x in url for x in ('github.com/oven-sh/bun/', 'github.com/anomalyco/opencode/', 'claude-code-releases')):
+        raise ValueError('node-only vendor input in capture')
 # npm's package-lock preserves exact tarball URLs, integrity and all transitive versions.
 prefix=Path('/opt/umiak-npm')
 lock=json.loads((prefix/'package-lock.json').read_text())
@@ -23,7 +27,7 @@ for path,entry in lock['packages'].items():
         raise ValueError(f'npm input missing: {path}')
     package=json.loads((p/'package.json').read_text())
     name=package['name']; version=package['version']
-    if name=='@anthropic-ai/claude-code': raise ValueError('proprietary CLI in capture')
+    if name in {'@anthropic-ai/claude-code','opencode-ai','bun','@oven/bun'} or name.startswith(('opencode-linux-', '@anthropic-ai/claude-code-')): raise ValueError('proprietary CLI in capture')
     notices=[]
     for notice in p.iterdir():
         if notice.is_file() and notice.name.lower().startswith(('license','licence','copying','notice')):

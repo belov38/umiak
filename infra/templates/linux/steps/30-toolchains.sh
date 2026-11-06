@@ -28,6 +28,8 @@ tar -xzf "$f" -C /usr/local --no-same-owner
 ln -sfn /usr/local/go/bin/go /usr/local/bin/go
 ln -sfn /usr/local/go/bin/gofmt /usr/local/bin/gofmt
 
+# Bun is vendor-installed on the node after offline parity, never in a generic layer.
+if [ "${UMIAK_GENERIC_IMAGE:-}" != 1 ]; then
 # Bun (+ bunx).
 v=$(toml_get tools.bun.version)
 f=$dl/bun-v$v-linux-x64.zip
@@ -37,6 +39,8 @@ mkdir "$dl/bun"
 unzip -q -o "$f" -d "$dl/bun"
 install -m 0755 "$dl/bun/bun-linux-x64/bun" /usr/local/bin/bun
 ln -sfn bun /usr/local/bin/bunx
+
+fi
 
 # uv, uvx.
 v=$(toml_get tools.uv.version)
@@ -103,10 +107,14 @@ else
  apt_install "$f"
 fi
 
-for t in node npm npx bun bunx go gofmt uv uvx gh cargo rustc rustup rustfmt cargo-clippy clippy-driver; do
+if [ "${UMIAK_GENERIC_IMAGE:-}" != 1 ]; then
+ [ -x /usr/local/bin/bun ] && [ -x /usr/local/bin/bunx ] || die "Bun is missing"
+fi
+
+for t in node npm npx go gofmt uv uvx gh cargo rustc rustup rustfmt cargo-clippy clippy-driver; do
 	[ -x "/usr/local/bin/$t" ] || die "/usr/local/bin/$t is missing"
 done
-for t in node bun uv gh rustc cargo; do
+for t in node uv gh rustc cargo; do
 	log "$t: $(as_user "$t" --version </dev/null | head -n1)"
 done
 log "go: $(as_user go version)"

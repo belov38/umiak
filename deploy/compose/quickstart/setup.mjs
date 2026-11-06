@@ -2,6 +2,12 @@ import { validatePinnedTunnelUrl } from "../../../packages/pve/src/boot-trust.ts
 import { canonicalFetch } from "../canonical-fetch.mjs";
 import { platformReleaseChannel } from "../release-channel.mjs";
 import { gatewayCertificates } from "./certificates.mjs";
+import {
+	cachedLinuxLayer,
+	cacheLinuxLayer,
+	fetchLinuxLayer,
+} from "./linux-layers.mjs";
+import { publisherKeys } from "./recipe-channel.mjs";
 import { rollbackRecipe } from "./recipe-rollback.mjs";
 import { recipeRollout } from "./recipe-rollout.mjs";
 import { cleanupBuild } from "./setup-build-cleanup.mjs";
@@ -378,6 +384,7 @@ export function createSetupHandler({
 	makePve = pinnedPve,
 	nodeCheck = checkNode,
 	fetcher = publicApiFetch(),
+	layerFetcher = fetch,
 	nodes = nodeService(pool),
 } = {}) {
 	const connectionOf = (state) => state.steps.connection.data;
@@ -641,6 +648,8 @@ export function createSetupHandler({
 					mediaVerification: build.mediaVerification,
 					isoSha256: build.isoSha256,
 					virtioSha256: build.virtioSha256,
+					offlineLayer: build.offlineLayer,
+					vendorTools: build.vendorTools,
 					id: row.id,
 				});
 			}
@@ -803,6 +812,81 @@ export function createSetupHandler({
 					: null;
 			input.recipeDirectory = available?.directory;
 			input.recipeVersion = available?.version;
+			delete input.layerFile;
+			delete input.layerChannel;
+			delete input.layerManifestSha256;
+			if (
+				!slug.startsWith("windows") &&
+				input.buildMode !== "local" &&
+				!input.dryRun
+			) {
+				const selected = platformReleaseChannel(state);
+				const prior = state.linuxLayerChannels?.[selected] || {};
+				input.tunnelCAPin = state.steps.network?.data?.tunnelCAPin;
+				if (!input.tunnelCAPin) {
+					try {
+						input.tunnelCAPin = JSON.parse(
+							await readFile(networkFile, "utf8"),
+						).tunnelCAPin;
+					} catch (error) {
+						if (error.code !== "ENOENT") throw error;
+					}
+				}
+				requireValue(
+					/^[a-f0-9]{64}$/.test(input.tunnelCAPin || ""),
+					"Refresh sandbox networking to record the gateway CA fingerprint before downloading a generic Linux template",
+				);
+				if (input.vendorRetry) {
+					const previous = state.steps.templates?.data?.builds?.find(
+						(b) =>
+							b.templateSlug === slug &&
+							b.nodeId === (input.nodeId || state.steps.limits.data.nodeId),
+					);
+					requireValue(
+						previous?.offlineLayer?.channel === selected &&
+							previous?.vendorTools?.some((t) => t.status === "failed"),
+						"Select an active Linux template with a failed vendor installation on the current channel",
+					);
+					const cached = cachedLinuxLayer({
+						secretsDir,
+						manifestSha256: previous.offlineLayer.manifestSha256,
+						keys: await publisherKeys(secretsDir),
+						slug,
+						channel: selected,
+					});
+					input.layerFile = cached.file;
+					input.layerChannel = selected;
+					input.layerManifestSha256 = cached.layer.manifestSha256;
+				} else {
+					const release = await fetchLinuxLayer({
+						keys: await publisherKeys(secretsDir),
+						channel: selected,
+						slug,
+						fetcher: layerFetcher,
+						minimumSequence: prior.sequence || 0,
+						previousPointerSha256: prior.pointerSha256,
+					});
+					input.layerFile = await cacheLinuxLayer(release, secretsDir);
+					input.layerChannel = selected;
+					input.layerManifestSha256 = release.layer.manifestSha256;
+					input.recipeDirectory = undefined;
+					input.recipeVersion = undefined;
+					await jobs.update((current) => {
+						requireValue(
+							platformReleaseChannel(current) === selected &&
+								!current.platformMaintenance,
+							"Release channel changed during download; retry template preparation",
+						);
+						current.linuxLayerChannels ||= {};
+						current.linuxLayerChannels[selected] = {
+							sequence: release.sequence,
+							pointerSha256: release.pointerSha256,
+						};
+					});
+				}
+				input.recipeDirectory = undefined;
+				input.recipeVersion = undefined;
+			}
 			state = await nodes.select(state, input.nodeId);
 			input.nodeId = state.steps.limits.data.nodeId;
 			if (input.mediaStorage && input.mediaStorage !== state.mediaStorage)
@@ -873,7 +957,7 @@ export function createSetupHandler({
 				)
 				.reduce((sum, vm) => sum + Number(vm.maxmem || 0) / 1048576, 0);
 			requireValue(
-				used === 0,
+				Boolean(input.layerFile) || used === 0,
 				"Stop running sandbox VMs before a sequential template build",
 			);
 		},
@@ -995,6 +1079,14 @@ export function createSetupHandler({
 			};
 		},
 		register: async (manifest, context) => {
+			if (manifest.offlineLayer) {
+				const current = await store.read();
+				requireValue(
+					!current.platformMaintenance &&
+						platformReleaseChannel(current) === manifest.offlineLayer.channel,
+					"Release channel changed while customizing the Linux template; existing active templates are kept",
+				);
+			}
 			await wizard.run(
 				"templates",
 				{ builds: [{ ...manifest, nodeId: context.job.nodeId }] },

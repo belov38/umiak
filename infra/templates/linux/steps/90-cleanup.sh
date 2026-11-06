@@ -45,6 +45,7 @@ rm -rf /home/user/.rustup/downloads/* /home/user/.rustup/tmp/* /root/go
 # sandbox), Go telemetry counters, opencode's data; then the empty directories left behind.
 for home in /root /home/user; do
 	rm -rf "$home/.local/state/gh" "$home/.config/go/telemetry" \
+		"$home/.claude" "$home/.claude.json" "$home/.claude.json.backup" \
 		"$home/.config/opencode" "$home/.local/share/opencode" "$home/.local/state/opencode"
 	for d in "$home/.config" "$home/.local"; do
 		if [ -d "$d" ]; then find "$d" -mindepth 1 -type d -empty -delete; fi

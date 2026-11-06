@@ -40,6 +40,12 @@ export function buildInvocation(
 	if (slug === "windows-desktop") slug = "windows";
 	if (!BUILDABLE_SLUGS.includes(slug))
 		throw new Error("Unknown operating system");
+	if (
+		input.buildMode !== undefined &&
+		!["download", "local"].includes(input.buildMode)
+	)
+		throw Error("Unknown Linux template preparation mode");
+	const offline = !slug.startsWith("windows") && input.buildMode !== "local";
 	const slot = input.templateVmid;
 	const range = templateRange(state);
 	validateTemplateRange({ ...state.steps.limits.data, ...range });
@@ -61,7 +67,17 @@ export function buildInvocation(
 	);
 	const env = {
 		...process.env,
-		UMIAK_RECIPE_DIR: input.recipeDirectory || "",
+		UMIAK_RECIPE_DIR: offline ? "" : input.recipeDirectory || "",
+		UMIAK_TUNNEL_CA_PIN: input.tunnelCAPin || network.tunnelCAPin || "",
+		UMIAK_TEMPLATE_LAYER_CHANNEL:
+			input.layerChannel ||
+			state.platform?.channel ||
+			process.env.UMIAK_RELEASE_CHANNEL ||
+			"stable",
+		UMIAK_RECIPE_PUBLISHER_KEYS_FILE: join(
+			secretsDir,
+			"recipe-publisher-keys.json",
+		),
 		UMIAK_PVE_URL: connection.apiUrl,
 		UMIAK_PVE_TOKEN_ID: connection.tokenId,
 		UMIAK_PVE_TOKEN_SECRET_FILE: join(secretsDir, "pve-token"),
@@ -107,15 +123,24 @@ export function buildInvocation(
 		connection.node,
 		"--template-vmid",
 		String(slot),
-		"--agent-package",
-		agentPackage,
-		"--umiak-cli",
-		join(assetsDir, "umiak-linux-x64"),
-		"--api-url",
-		origin,
-		"--tunnel-url",
-		network.tunnelUrl,
 	];
+	if (offline)
+		args.push(
+			"--offline-layer",
+			input.layerFile || join(directory, "layer.json"),
+		);
+	else
+		args.push(
+			"--agent-package",
+			agentPackage,
+			"--umiak-cli",
+			join(assetsDir, "umiak-linux-x64"),
+			"--api-url",
+			origin,
+			"--tunnel-url",
+			network.tunnelUrl,
+		);
+
 	if (slug.startsWith("windows")) {
 		if (
 			!validateUploadedIso(input.iso) ||
@@ -138,6 +163,7 @@ export function buildInvocation(
 		if (input.edition) args.push("--edition", String(input.edition));
 	}
 	return {
+		offline,
 		command: process.execPath,
 		args,
 		env,
@@ -225,7 +251,8 @@ export async function runTemplateBuild(
 			);
 		}
 	}
-	await packageAgent(invocation, secretsDir, assetsDir);
+	if (!invocation.offline)
+		await packageAgent(invocation, secretsDir, assetsDir);
 	const token = (await readFile(join(secretsDir, "pve-token"), "utf8")).trim();
 	await new Promise((resolvePromise, reject) => {
 		const child = launch(invocation.command, invocation.args, {

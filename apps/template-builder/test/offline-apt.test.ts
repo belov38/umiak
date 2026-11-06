@@ -89,3 +89,12 @@ it("offline source definitions preserve key authorities and forbid network repos
 		]),
 	).toThrow();
 });
+it("preserves Docker's original dists/suite/pool package layout", () => {
+	const docker = packages.replace(
+		"pool/main/f/fixture/fixture_1.2.3_amd64.deb",
+		"dists/resolute/pool/stable/amd64/fixture_1.2.3_amd64.deb",
+	);
+	expect(parseAptPackages(docker)[0]?.filename).toBe(
+		"dists/resolute/pool/stable/amd64/fixture_1.2.3_amd64.deb",
+	);
+});

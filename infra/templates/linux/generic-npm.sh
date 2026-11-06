@@ -15,7 +15,7 @@ else
  python3 -I - "$UMIAK_BUILD_DIR/versions.toml" "$prefix/package.json" <<'PY'
 import json,sys,tomllib
 pins=tomllib.load(open(sys.argv[1],'rb'))['npm']
-allowed={'@openai/codex','@google/gemini-cli','opencode-ai','pnpm'}
+allowed={'@openai/codex','@google/gemini-cli','pnpm'}
 if not allowed.issubset(pins): sys.exit('generic npm pins are incomplete')
 # Never capture proprietary/unknown root CLI packages into a public layer.
 json.dump(dict(name='umiak-offline-tools',version='1.0.0',private=True,dependencies={k:pins[k] for k in sorted(allowed)}),open(sys.argv[2],'w'))
@@ -27,7 +27,7 @@ PY
   tar -cf "$UMIAK_CAPTURE_DIR/inputs/npm/cache.tar" -C "$cache" .
  fi
 fi
-for tool in codex opencode gemini pnpm; do
+for tool in codex gemini pnpm; do
  [ -x "$prefix/node_modules/.bin/$tool" ] || die "npm did not install $tool"
  ln -sfn "$prefix/node_modules/.bin/$tool" "/usr/local/bin/$tool"
 done

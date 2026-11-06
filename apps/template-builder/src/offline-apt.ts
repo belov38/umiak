@@ -53,7 +53,8 @@ export function parseAptPackages(text: string): AptPackage[] {
 			version = r.get("version") ?? "",
 			arch = r.get("architecture") ?? "";
 		if (
-			!filename.startsWith("pool/") ||
+			!/^((pool\/)|(dists\/[a-z0-9-]+\/pool\/))/.test(filename) ||
+			!filename.endsWith(".deb") ||
 			!safeRelative(filename) ||
 			!Number.isSafeInteger(size) ||
 			size <= 0 ||

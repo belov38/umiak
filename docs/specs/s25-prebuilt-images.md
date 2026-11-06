@@ -1,9 +1,8 @@
 # S25: Official Ubuntu base and signed offline Linux layers
 
 Status: revised implementation design, 2026-11-06. Ilia's two-layer decision
-supersedes the prebuilt customized-disk design approved at 2caf12a6. Boot trust
-is implemented in 7a94e861; the initial image metadata verifier is not yet wired
-to install and will be replaced by a layer-specific contract. No uploads occurred.
+supersedes the prebuilt customized-disk design approved at 2caf12a6. Boot trust and signed layer metadata/import are implemented; setup/CI wiring is
+being completed for the first live test. No uploads occurred.
 
 ## Decision and scope
 
@@ -194,29 +193,42 @@ Keep existing local templates and signed agent-package verification working.
 
 ## Browser and optional proprietary tools
 
-Do not distribute Chrome or Claude Code payloads in a layer. Proprietary or
-unresolved tools use optional first-boot vendor installation, exact version plus
-vendor checksum where published, bounded retries and visible status. Missing
-network is nonfatal to sandbox/agent/desktop readiness. No automatic login or
-license acceptance. This optional phase occurs after offline customization and
-is tested/accounted separately, so it cannot hide archive access during replay.
+Do not distribute Chrome, Claude Code, Bun or OpenCode payloads in a layer. After offline replay
+and all parity checks pass, the install's PVE builder runs a separate online
+vendor-tools phase once per template build: enable the build NIC, run the official
+Anthropic installer for a pinned Claude Code version, verify the published binary
+checksum, record version/hash/provenance and separate timing/logs in the local
+manifest as vendor-installed and outside the signed layer, then disable the NIC.
+CI never runs this phase. The generic tool list contains Claude Code, Bun and OpenCode. Bun uses the official pinned
+GitHub release archive, with the published SHASUMS256.txt entry matched to our
+committed hash. Bun and its embedded LGPL runtime are never redistributed by us. OpenCode also
+uses a Bun-compiled executable, so its pinned official release is installed only
+on the node and verified against GitHub's published asset SHA-256.
+Failure completes the template without the failed tool and shows “<tool> not
+installed: <reason>”. Agent/sandbox readiness never depends on it. Failure to
+restore network isolation aborts sealing. Cleanup runs again before cold checks
+and template conversion. No per-VM installer or automatic download is added.
 
-Chromium must run without snap and preserve CDP/computer-use. Evaluate a pinned
-upstream Chromium build first, keeping its exact revision, SHA-256, license and
-third-party credits/source material. Chromium's [binary redistribution license](https://chromium.googlesource.com/chromium/src/+/HEAD/LICENSE)
-permits redistribution subject to notices/no endorsement; this is not a blanket
-license for every binary dependency or codec. [Upstream downloadable snapshots](https://www.chromium.org/getting-involved/download-chromium/)
-are best-effort arbitrary revisions, not guaranteed stable releases. Do not
-silently label a snapshot “stable”. A native xtradeb/debian deb is an alternative
-only after exact packaging, repository signatures, licenses and Ubuntu dependency
-compatibility are verified. If neither offers a clean pinned redistributable
-choice, ask master; never silently re-enable snap or substitute proprietary Chrome.
+The retry action is **Install Claude Code (rebuilds the template)**, with the hint
+“The rebuild reuses the downloaded layer, takes a few minutes, and existing
+sandboxes are not affected.” It re-verifies the original cached signed inputs,
+allocates a new VMID, retries the vendor phase and uses normal registration, S21
+copy and promotion. Never modify an active template. Existing sandboxes retain
+their old build, which retires only through the normal reference-aware path.
+No automatic login or license acceptance.
+
+Chromium must run without snap and preserve CDP/computer-use. Use the pinned
+stable native xtradeb PPA deb candidate reviewed below; capture its original debs,
+signed InRelease/Packages and notices. No upstream snapshots or snap. Debian
+trixie Chromium is the fallback only if its captured dependencies install cleanly
+on Ubuntu. Ask master if neither passes. Chromium's component and third-party
+licenses still need their exact notices and corresponding source references.
 
 ## License inventory and publication gate
 
 This is a source-level inventory; exact pinned archive/deb license texts and
 transitive notices must be extracted by CI before any clearance claim. No
-public redistribution is authorized. Canonical's current policy permits internal
+modified Ubuntu disk redistribution is authorized. Canonical's current policy permits internal
 modification, preserves component-license rights, and requires approval for
 modified redistribution associated with its marks; its alternative describes
 removing marks and recompiling. Umiak names avoid implied endorsement but do not
@@ -226,58 +238,67 @@ by themselves clear the modified aggregate. See [Canonical policy §2–4](https
 | --- | --- |
 | Ubuntu packages, kernel, desktop fonts/Xorg/LightDM/Openbox/PipeWire | Mixed licenses; collect each `/usr/share/doc/*/copyright`, source package/version, notices and corresponding-source material as required. Kernel/GPL obligations remain for binary conveyance; apply the same inventory to Debian if selected |
 | Google Chrome `.deb` | Exclude from images; replace with a verified snap-free Chromium distribution. Proprietary product; [Chrome terms](https://www.google.com/chrome/terms/) incorporate Google's general terms. Do not infer redistribution rights from downloadable debs. Verify exact package EULA/permission; do not bundle pending any future permission |
-| Claude Code npm package | Exclude from images; optional first-boot vendor install. [Anthropic legal docs](https://code.claude.com/docs/en/legal-and-compliance) govern product use; not an assumption of permissive source licensing. Record the external installer/version policy; do not redistribute unresolved payloads |
+| Claude Code npm package | Exclude from images; optional node-side vendor install after offline parity. [Anthropic legal docs](https://code.claude.com/docs/en/legal-and-compliance) govern product use; not an assumption of permissive source licensing. Record the external installer/version policy; do not redistribute unresolved payloads |
 | Codex / Gemini CLI | Upstream [Codex](https://github.com/openai/codex/blob/main/docs/license.md) and [Gemini](https://github.com/google-gemini/gemini-cli/blob/main/docs/resources/tos-privacy.md) identify Apache-2.0; retain licenses/notices and audit bundled native dependencies. Service credentials/terms remain per user |
 | OpenCode | [Pinned 1.19.5 license](https://github.com/anomalyco/opencode/blob/v1.19.5/LICENSE) is MIT; retain copyright/license and inspect native bundles |
 | Sunshine / moonlight-web | Pinned [Sunshine](https://github.com/LizardByte/Sunshine/blob/v2026.914.233613/LICENSE) and [moonlight-web](https://github.com/MrCreativ3001/moonlight-web-stream/blob/v3.0.1/LICENSE) carry GPLv3 texts; retain exact corresponding source/build material and notices; audit linked codecs/dependencies |
 | Cua Driver | [Upstream inventory](https://github.com/trycua/cua/blob/main/legal/LICENSING.md) identifies Driver releases as MIT, while other Cua products differ. Inspect 0.38.0 archive specifically; retain notices; do not apply a repository-wide assumption |
-| Docker/containerd/Compose/Buildx, Node/npm, Go, Bun, uv, gh, Rust/rustup, pnpm, cosign | Record exact installed artifact and dependency licenses, copyright and required source/NOTICE. Package version pins are not a license inventory |
+| Docker/containerd/Compose/Buildx, Node/npm, Go, uv, gh, Rust/rustup, pnpm, cosign | Record exact installed artifact and dependency licenses, copyright and required source/NOTICE. Package version pins are not a license inventory |
+| Bun / OpenCode | Excluded from layer/capture: node-side vendor installation only. Upstream binary embeds LGPL WebKit/JavaScriptCore requiring relinking material; do not treat it as MIT-only |
 | Umiak agent, CLI and files | Include repository license plus Go/JS embedded third-party notices; no credentials, signing keys or install CA |
 
 CI produces machine-readable inventory entries with name/version/hash/source URL,
 license expression or `NOASSERTION`, notice paths, source correspondence and
 review status. Unknown/proprietary entries block public release, not silently
-get labeled MIT. Local internal testing remains separate from public R2 uploads. Bucket visibility
+get labeled MIT. Local internal testing remains separate from public OCI uploads. Package visibility
 does not provide license permission; Debian selection would not clear Chrome or
 Claude Code redistribution by itself.
 
 ## Hosting, access and upload gate
 
-R2 bucket `umiak-images` already exists on account
-`ccd46cd070d0adbdacd7defca520f867`. Public base defaults to
-`https://pub-bdc85570347b44df991bfcee2718c4a1.r2.dev`; make it configurable with
-`UMIAK_IMAGE_BASE_URL` and a host-side origin allowlist. Anonymous HTTPS only,
-no install tokens/presigned URLs. Restrict redirects to the configured origin;
-Canonical base downloads have a separate fixed official allowlist and GPG trust.
-A future custom-domain or GitHub public mirror changes origin configuration and
-object paths only, with the same signatures/digests. Never mirror the base disk.
+Publish public OCI artifacts at `ghcr.io/belov38/umiak-linux-layer` and
+`ghcr.io/belov38/umiak-linux-desktop-layer`. Each artifact contains the signed
+channel pointer, manifest/signature, bound recipe/verify files, inventory and
+content-addressed compressed tar chunks, each at most 512 MiB. An immutable
+version tag identifies a release; stable/edge aliases advance last after both
+products pass readback. Never upload the official base disk.
 
-[R2 public r2.dev](https://developers.cloudflare.com/r2/buckets/public-buckets/)
-is development-only/rate-limited; retain verified chunks across bounded retries
-and honor Retry-After. No production throughput guarantee. [R2 pricing](https://developers.cloudflare.com/r2/pricing/)
-currently has no egress fees, Standard storage $0.015/GB-month and 10 GB-month
-free. [Limits](https://developers.cloudflare.com/r2/platform/limits/) permit
-5 TiB objects / 5 GiB single upload, so 512 MiB chunks fit.
+`UMIAK_LAYER_REGISTRY` (default `https://ghcr.io`) and
+`UMIAK_LAYER_LINUX_REPOSITORY` / `UMIAK_LAYER_LINUX_DESKTOP_REPOSITORY` configure
+control downloads. Node-agent uses matching root-owned `layerRegistryURL` and
+`layerRepositories` configuration. There is one OCI transport, with no S3 path.
+Installs anonymously acquire an ephemeral pull-only registry token via the
+same-origin Bearer challenge (`ghcr.io/token?service=ghcr.io&scope=repository:...:pull`).
+Tokens live only in memory HTTP headers and are stripped on redirects. Blob
+redirects allow the configured registry origin and, for ghcr.io only, the exact
+HTTPS host `pkg-containers.githubusercontent.com`, with no credentials, userinfo
+or nonstandard ports. Every blob is accepted only after streaming digest/size
+verification, regardless of origin. Canonical base downloads keep their separate
+fixed official allowlist and GPG trust.
 
-CI uploads use S3 endpoint
-`https://ccd46cd070d0adbdacd7defca520f867.r2.cloudflarestorage.com`, region auto.
-Request bucket-only **Object Read & Write** credentials (PUT, GET/HEAD readback,
-list allowed by preset), no bucket/admin rights. Proposed GH secrets:
-`R2_IMAGES_ACCESS_KEY_ID`, `R2_IMAGES_SECRET_ACCESS_KEY`; reuse `RECIPE_SIGNING_KEY`.
-Request only when uploader is ready. Secret values live only in restricted files,
-never env/argv/logs/git. No cloud resources created by this task.
+[GHCR documentation](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
+permits public anonymous pulls and documents a 10 GB layer limit and ten-minute
+upload timeout; 512 MiB chunks fit. No numeric anonymous pull quota is promised.
+Retain verified chunks across bounded retry/backoff and honor Retry-After.
+Changing the OCI registry/repositories is configuration; any mirror must preserve
+signed bytes and digest-addressed blobs. No mirror is provisioned now.
 
-Uploader stays behind explicit publish=false default and protected manual approval;
-no uploads are authorized during implementation. CI is workflow_dispatch only.
-Never upload an Ubuntu disk, even when publish is approved. Sign only after
-inventory/legal policy and network-disabled replay pass.
+CI uses the repository's built-in `GITHUB_TOKEN` with `packages: write`, plus the
+existing `RECIPE_SIGNING_KEY`. No new credentials. Both secrets are file-only,
+never environment variables, command arguments or logs. ORAS login reads token
+stdin. Recipe signing remains distinct from the global agent-update authority.
+First-time GHCR packages default private: the owner must set each package to
+**Public** once in package settings. Existing release.yml links packages to the
+repository and publishes with GITHUB_TOKEN but does not change visibility.
+Anonymous readback must succeed before channel publication; fail clearly with
+package settings links when visibility is still private.
 
-For comparison: [GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
-supports OCI and public anonymous pulls, but documents 10 GB/layer and a ten-minute
-upload timeout, without a numeric anonymous pull quota guarantee. [GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
-need repository access and files under 2 GiB; the private repo cannot serve these
-anonymous installs. R2 remains selected, with a configuration-only public mirror
-possible later. No mirror is provisioned now.
+All workflows remain workflow_dispatch only; upload requires explicit
+publish=true (default false). Public layer publishing is authorized once ready;
+master runs the first workflow on the reported reviewed head. Stable publishing
+requires main; an explicitly requested edge build may use the reviewed branch.
+Sign only after license inventory and network-disabled replay pass. Never upload
+a customized Ubuntu disk or proprietary vendor payload.
 
 ## CI runner and measurements
 
@@ -337,3 +358,11 @@ is required before this candidate can be released. The manual publication review
 also checks the current stable security baseline and refreshes pins as needed;
 we do not silently switch to snapshots, snap, or an unreviewed third source.
 Debian trixie remains the approved fallback only if native xtradeb replay fails.
+
+## First live release ordering
+
+PVE replay/verification, setup default and manual gated GHCR CI publication form
+the first testable release. S22 automatic new-layer discovery/promotion follows
+immediately after its first live acceptance; existing S21 copy and normal
+registration/retirement already apply. Legacy recipe rollout skips active generic
+Linux templates during this interval, avoiding accidental local archive rebuilds.

@@ -41,8 +41,8 @@ if [ -f "$UMIAK_BUILD_DIR/umiak-config.json" ]; then
 	install -D -m 0644 "$UMIAK_BUILD_DIR/umiak-config.json" /etc/umiak/config.json
 fi
 
-tools=(codex opencode gemini pnpm)
-if [ "${UMIAK_GENERIC_IMAGE:-}" != 1 ]; then tools+=(claude); fi
+tools=(codex gemini pnpm)
+if [ "${UMIAK_GENERIC_IMAGE:-}" != 1 ]; then tools+=(claude opencode); fi
 for t in "${tools[@]}"; do
 	[ -x "/usr/local/bin/$t" ] || die "/usr/local/bin/$t is missing"
 done

@@ -7,10 +7,10 @@ Canonical-authenticated official base and our signed offline input layer.
 
 **Architecture:** Manual QEMU/KVM CI captures exact recipe inputs and proves fresh
 network-disabled replay. Installs download the official base directly and our
-chunked tar+zstd layer from R2, replay through the existing PVE builder, then use
+chunked tar+zstd layer from GHCR, replay through the existing PVE builder, then use
 existing registration, S21 copy and S22 promotion/retirement.
 
-**Tech stack:** Existing TS/Node, Go, QEMU/QGA/QMP, apt/GPG, zstd, Ed25519 and R2.
+**Tech stack:** Existing TS/Node, Go, QEMU/QGA/QMP, apt/GPG, zstd, Ed25519 and OCI/ORAS.
 **Spec:** `docs/specs/s25-prebuilt-images.md` (latest two-layer decision is binding).
 
 ## Global constraints
@@ -19,13 +19,13 @@ existing registration, S21 copy and S22 promotion/retirement.
 - Branch s25-prebuilt-images, push commits but do not merge. Rebase main regularly.
 - Do not touch apps/web or live PVE/CT590; coordinate API ownership with S24.
 - All workflows workflow_dispatch only. publish=false by default. No uploads now.
-- R2 account ccd46cd070d0adbdacd7defca520f867, bucket umiak-images, public configurable
-  base https://pub-bdc85570347b44df991bfcee2718c4a1.r2.dev. No install credentials.
+- GHCR public OCI repositories umiak-linux-layer / umiak-linux-desktop-layer,
+  configurable registry/repositories. Anonymous pull tokens only; no install credentials.
 - Key/CI credentials only in files, never env/argv/log/git. Existing recipe key only.
 - No compound rm shell commands; mktemp -d per step. English code comments.
 - Proprietary/unresolved inputs excluded. Chromium without snap; ask master if no
-  clean redistributable pinned binary/package works. First-boot optional tools
-  are separate from offline replay/readiness and degrade offline.
+  clean redistributable pinned binary/package works. Node-side optional vendor tools run once after offline parity, before sealing;
+  their failure is tolerated. Retry builds a new template from re-verified cached inputs.
 - Keep Windows local ISO behavior, old Linux baked trust and advanced recipe build.
 
 ## Review focus
@@ -121,7 +121,7 @@ keys directly under outer signature trust; never relax signed update verificatio
 - [ ] Implement generic cleanup/seal, leases/identity/SSH/dbus/log/random/desktop
   state checks and sparse/trim behavior. No seed/trust/install identity remains.
 - [ ] Replace Chrome with pinned clean Chromium distribution and keep CDP/desktop
-  policies/discovery verified; no snap. Optional first-boot proprietary tools
+  policies/discovery verified; no snap. Optional node-side proprietary tools
   have pinned official installers and nonfatal offline status, never bundled payloads.
 - [ ] Replay from fresh official base with guest network egress disabled. Compare
   final exact packages/tools to capture, cold-scan and verify two identities/CAs.
@@ -203,7 +203,7 @@ for Linux and recipe bundles for Windows, using the shared stable/edge selector.
 license inventory helper/tests, docs/operations-s25-images.md, builder README.
 
 **Interfaces:** Publisher accepts only verified input-layer artifacts/inventories,
-file signing/S3 credentials, capture+closed-network replay evidence and explicit
+file signing/registry credentials, capture+closed-network replay evidence and explicit
 publish gate. It must never accept a disk image or rehost Canonical base bytes.
 
 - [ ] Add RED tests for non-main publish/version conflict, absent/mismatched keys,
@@ -213,9 +213,9 @@ publish gate. It must never accept a disk image or rehost Canonical base bytes.
   texts/source offer/links and upstream input provenance. No unresolved payloads.
 - [ ] Implement gated upload, protected manual approval, immutable write/readback,
   channel pointer last and cleanup of file-only secrets on every failure.
-- [ ] Ask master for bucket-only S3 Object Read & Write pair when uploader is ready:
-  R2_IMAGES_ACCESS_KEY_ID / R2_IMAGES_SECRET_ACCESS_KEY. Existing RECIPE_SIGNING_KEY
-  signs metadata. No credentials needed for fixture tests, no uploads now.
+- [ ] Use built-in GITHUB_TOKEN packages:write, file-only token/recipe key. ORAS
+  stdin authentication; no new secrets. Document one-time Public visibility and
+  require anonymous readback. No uploads during local fixture work.
 - [ ] Workflow workflow_dispatch only, publish default false, KVM/free-space probes,
   exact committed pins, bounded retry/timeouts and sequential slug jobs.
 - [ ] Run Biome/Vitest, Go/race/golangci-lint and root quickstart tests. Inspect
@@ -235,3 +235,9 @@ publish gate. It must never accept a disk image or rehost Canonical base bytes.
 - No cloud resource changes, uploads, image builds or live host operations.
 - Raw-disk packing test was uncommitted at pivot; replace with layer-tar packing
   tests rather than building the superseded disk export feature.
+
+## Latest implementation ordering
+
+Finish Tasks 5 and 7 first (PVE/setup + manual GHCR publisher), including once-per-template
+vendor installation, nonfatal warning and safe rebuild retry. Task 6 S22 autonomous
+new-layer rollout follows first live acceptance and is explicitly pending then.

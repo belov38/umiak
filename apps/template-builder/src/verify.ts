@@ -247,7 +247,8 @@ export function checkTools(
 	offlineLayer = false,
 ): CheckResult[] {
 	const optional = (key: string) =>
-		OPTIONAL_TOOLS.has(key) || (offlineLayer && key === "claude");
+		OPTIONAL_TOOLS.has(key) ||
+		(offlineLayer && ["claude", "bun", "bunx", "opencode"].includes(key));
 	const out: CheckResult[] = [];
 	for (const [key, built] of Object.entries(manifestTools)) {
 		const id = `tool_${key}`;

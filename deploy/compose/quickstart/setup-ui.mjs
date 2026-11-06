@@ -119,6 +119,8 @@ function setupInteractions() {
 		building = disabled;
 		$("#build-linux").disabled = disabled;
 		$("#build-template").disabled = disabled;
+		for (const button of document.querySelectorAll("[data-vendor-rebuild]"))
+			button.disabled = disabled;
 	};
 	const showJob = (job) => {
 		if (!job) return;
@@ -287,6 +289,8 @@ function setupInteractions() {
 				slug,
 				nodeId: nodeId || value("#build-node"),
 				confirmRebuild: value("#build-confirm"),
+				buildMode:
+					slug === "windows" ? "local" : value("#build-mode") || "download",
 			};
 			if (slug === "windows") Object.assign(input, media());
 			const job = await post("build", input);
@@ -305,6 +309,7 @@ function setupInteractions() {
 		try {
 			plan = await post("build", {
 				slug: "linux",
+				buildMode: "download",
 				nodes: ($("#build-linux").dataset.nodes || "")
 					.split(",")
 					.filter(Boolean),
@@ -359,6 +364,27 @@ function setupInteractions() {
 			button.disabled = false;
 		}
 	});
+	for (const button of document.querySelectorAll("[data-vendor-rebuild]")) {
+		button.addEventListener("click", async () => {
+			if (building || plan?.active) return;
+			disableBuilds(true);
+			try {
+				const slug = button.dataset.vendorRebuild;
+				const job = await post("build", {
+					slug,
+					nodeId: button.dataset.nodeId,
+					confirmRebuild: slug,
+					buildMode: "download",
+					vendorRetry: true,
+				});
+				showJob(job);
+				await pollBuild();
+			} catch (error) {
+				$("#build-error").textContent = error.message;
+				disableBuilds(false);
+			}
+		});
+	}
 	$("#smoke-node")?.addEventListener("change", syncTest);
 	const media = () => ({
 		iso: value("#build-iso"),
@@ -375,6 +401,7 @@ function setupInteractions() {
 	);
 	$("#build-slug").addEventListener("change", () => {
 		$("#windows-media").hidden = value("#build-slug") !== "windows";
+		$("#linux-source").hidden = value("#build-slug") === "windows";
 	});
 	$("#validate-media").addEventListener("click", async () => {
 		const button = $("#validate-media");
@@ -510,6 +537,17 @@ export function renderSetup(state) {
 	const hasTemplates =
 		(steps.templates?.data?.builds || []).length > 0 ||
 		nodes.some((n) => n.templates?.length);
+	const vendorWarnings = (steps.templates?.data?.builds || [])
+		.filter((build) => build.offlineLayer)
+		.flatMap((build) =>
+			(build.vendorTools || [])
+				.filter((tool) => tool.status === "failed")
+				.map(
+					(tool) =>
+						`<aside role="status"><p>${escapeHtml(tool.warning)}</p><button type="button" data-vendor-rebuild="${escapeHtml(build.templateSlug)}" data-node-id="${escapeHtml(build.nodeId)}"${running ? " disabled" : ""}>Install ${escapeHtml(tool.name || "Claude Code")} (rebuilds the template)</button><p>The rebuild reuses the downloaded layer, takes a few minutes, and existing sandboxes are not affected.</p></aside>`,
+				),
+		)
+		.join("");
 	const buildProgress = `<p id="build-progress" role="status" aria-live="polite"></p><p id="build-error" class="error" role="alert">${escapeHtml(briefBuildError(state.buildJob?.error))}</p><details id="build-details"${state.buildJob?.log ? "" : " hidden"}${state.buildJob?.status === "running" ? " open" : ""}><summary>Build log</summary><pre id="build-log" class="log" tabindex="0" aria-label="Build log, newest lines at the bottom">${escapeHtml(state.buildJob?.log || "")}</pre><p><a href="/quickstart/setup/build/log" target="_blank" rel="noopener">Open the full log in a new tab</a></p></details>`;
 	const continueLink =
 		'<p><a href="#step-smoke" id="continue-test">Continue to installation test</a></p>';
@@ -529,9 +567,10 @@ ${section(
 	"3. Prepare your first sandbox image",
 	`
 <style>#step-templates p,#step-templates li,#step-templates code{overflow-wrap:anywhere}</style>${status("templates")}
-<p>A template is the reusable VM image your sandboxes start from. Build the Linux template to continue. Desktop and Windows templates can be added later.</p>
-<button type="button" id="build-linux" data-job-id="${escapeHtml(state.buildJob?.id || "")}" data-job-status="${escapeHtml(state.buildJob?.status || "")}" data-job-node="${escapeHtml(state.buildJob?.nodeId || "")}" data-nodes="${escapeHtml(needLinux.map((n) => n.nodeId).join(","))}"${running ? " disabled" : ""}>${needLinux.length > 1 ? `Build Linux template on all nodes (${escapeHtml(needLinux.map((n) => n.name).join(", "))})` : needLinux.length === 1 && nodes.length > 1 ? `Build Linux template on ${escapeHtml(needLinux[0].name)}` : "Build Linux template"}</button>
+<p>A template is the reusable VM image your sandboxes start from. Download the Linux template to continue. It uses the official Ubuntu base and a signed offline layer, customized locally without package archive access. Desktop and Windows templates can be added later.</p>
+<button type="button" id="build-linux" data-job-id="${escapeHtml(state.buildJob?.id || "")}" data-job-status="${escapeHtml(state.buildJob?.status || "")}" data-job-node="${escapeHtml(state.buildJob?.nodeId || "")}" data-nodes="${escapeHtml(needLinux.map((n) => n.nodeId).join(","))}"${running ? " disabled" : ""}>${needLinux.length > 1 ? `Download Linux template for all nodes (${escapeHtml(needLinux.map((n) => n.name).join(", "))})` : needLinux.length === 1 && nodes.length > 1 ? `Download the Linux template on ${escapeHtml(needLinux[0].name)}` : "Download the Linux template"}</button>
 <ul aria-label="Sandbox node template availability">${nodes.map((n) => `<li data-queue-node="${escapeHtml(n.nodeId)}" data-name="${escapeHtml(n.name)}">${escapeHtml(n.name)} · Node ${n.state === "active" || n.state === "ready" ? "online" : escapeHtml(n.state)} · Template ${(n.templates || []).some((t) => t.templateSlug === "linux") ? "ready" : "missing"} · <span data-node-build-state>${escapeHtml(state.buildQueue?.states?.[n.nodeId] || (state.buildJob?.nodeId === n.nodeId && running && !state.buildJob?.registered ? "Building" : (n.templates || []).some((t) => t.templateSlug === "linux") ? "Ready" : "Waiting"))}</span></li>`).join("")}</ul>
+${vendorWarnings}
 <div id="build-recoveries">${nodes
 		.filter((n) => n.buildJobId && !running)
 		.map((n) => {
@@ -547,22 +586,23 @@ ${section(
 <p id="queue-progress" role="status"></p><button type="button" id="stop-queue" class="outline" hidden>Stop queue after current build</button>
 <p>${
 		nodes.length > 1
-			? `Build once on ${escapeHtml(nodes[0].name)}, then copy to ${escapeHtml(
+			? `Prepare once on ${escapeHtml(nodes[0].name)}, then copy to ${escapeHtml(
 					nodes
 						.slice(1)
 						.map((n) => n.name)
 						.join(", "),
-				)}. Allow about 10 minutes for the build; copying adds time.`
-			: "Allow about 10 minutes; download speed and hardware affect the time."
+				)}. Download time depends on your connection; customization runs offline.`
+			: "Download time depends on your connection; customization then runs locally without package archive access."
 	}</p>
 ${buildProgress}
 ${nodes.some((n) => n.templates?.length || n.buildJobId) ? `<details><summary>Node details</summary>${nodes.map((n) => `<p>${escapeHtml(n.name)} · ${escapeHtml((n.templates || []).map((t) => `${t.templateSlug} · ${t.version} · VM ${t.pveVmid}`).join(", "))}${n.buildJobId ? ` · Unfinished reservation: <code>${escapeHtml(n.buildJobId)}</code>` : ""}</p>`).join("")}</details>` : ""}
 
 <details><summary>Build another template</summary>
 ${nodeSelect("build-node")}
-<label>Operating system<select id="build-slug">${hasTemplates ? '<option value="linux">Linux</option>' : ""}<option value="linux-desktop">Linux desktop</option><option value="windows">Windows 11 (with desktop)</option></select></label>
+<label>Operating system<select id="build-slug"><option value="linux">Umiak Linux</option><option value="linux-desktop">Umiak Linux Desktop</option><option value="windows">Windows 11 (with desktop)</option></select></label>
+<label id="linux-source">Linux preparation<select id="build-mode"><option value="download">Download signed offline layer</option><option value="local">Build locally (advanced)</option></select><span>Local builds use the pinned online recipes and may take 10 minutes or longer.</span></label>
 <div id="windows-media" hidden><label>Uploaded Windows ISO file name<input id="build-iso" placeholder="Windows.iso"></label><label>Or Windows ISO HTTPS URL<input id="build-iso-url" type="url" placeholder="https://…/Windows.iso"></label><label>Windows ISO SHA256 (optional)<input id="build-iso-sha" pattern="[a-fA-F0-9]{64}"></label><label>ISO storage (blank selects first with iso content)<input id="build-media-storage"></label><label>VirtIO ISO URL<input id="build-virtio-url" type="url" value="${VIRTIO_STABLE_URL}"></label><label>VirtIO SHA256 (optional; pinned archive checksum)<input id="build-virtio-sha" value="${VIRTIO_SHA256}" pattern="[a-fA-F0-9]{64}"></label><label><input id="build-internal-urls" type="checkbox">I explicitly allow internal or loopback ISO URLs</label><p>Not verified: the ISO will be used as downloaded when SHA256 is omitted.</p><p>Umiak never ships or hosts Windows media. Supply your own licensed Windows ISO URL. Obtain its SHA256 from your Microsoft download portal. For VirtIO, download the official ISO to your workstation and run <code>sha256sum virtio-win.iso</code>; the Fedora CHECKSUM currently lists RPM MD5s, not the ISO SHA256. Changing the versioned ISO requires a new confirmed SHA256.</p><button class="outline" type="button" id="validate-media">Validate ISO inputs only</button><p id="media-result" role="status"></p></div>
-<button type="button" id="build-template"${running ? " disabled" : ""}>Build selected template</button></details>
+<button type="button" id="build-template"${running ? " disabled" : ""}>Prepare selected template</button></details>
 ${hasTemplates ? '<details><summary>Rebuild a template</summary><p>Choose the operating system above. A new image will be built; existing templates are kept.</p><label>Confirm the operating system name<input id="build-confirm" placeholder="linux, linux-desktop or windows"></label></details>' : ""}
 <details><summary>Use an existing template</summary>${form("templates", `<fieldset><legend>Detected templates</legend>${state.templateDetectionError ? `<p class="error">${escapeHtml(state.templateDetectionError)}</p>` : ""}${(state.detectedTemplates || []).map((build) => `<label><input type="checkbox" name="template" value="${build.pveVmid}" data-node-id="${escapeHtml(build.nodeId || "")}" data-slug="${escapeHtml(build.templateSlug)}" ${(steps.templates?.data?.builds || []).some((saved) => saved.pveVmid === build.pveVmid) ? "checked" : ""}>${escapeHtml(build.name || build.templateSlug)} · ${escapeHtml(build.node || "")} · VM ${build.pveVmid} · ${escapeHtml(build.templateSlug)}</label>`).join("") || '<p class="pending">No existing templates detected. Build a Linux template above.</p>'}</fieldset>`)}</details>`,
 )}

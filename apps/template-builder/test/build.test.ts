@@ -987,59 +987,80 @@ it("builds a new version in an explicit free template slot instead of recipe dev
 	expect(s.pve.vms.has(597)).toBe(false);
 });
 
-it("imports a signed offline layer with guest egress down, then verifies and detaches all build media", async () => {
-	const { offlineFixture } = await import("./offline-fixture.ts");
-	const { collectFacts } = await import("../src/seal.ts");
-	const s = setup();
-	s.guest.tools =
-		'{"node":{"direct":"v24.11.0","login":"v24.11.0"},"claude":{"direct":"missing","login":"missing"},"umiak":{"direct":"missing","login":"missing"}}';
-	const layer = offlineFixture(
-		sha(readFileSync(s.image)),
-		await collectFacts(s.guest, "fixture"),
-	);
-	const jobId = "a".repeat(24);
-	s.node.handlers["layer.base"] = () => ({
-		verified: true,
-		name: IMAGE_NAME,
-		sha256: layer.manifest.base.sha256,
-	});
-	s.node.handlers["layer.prepare"] = () => ({
-		manifestSha256: layer.manifestSha256,
-		missing: [],
-	});
-	s.node.handlers["layer.stage"] = () => ({
-		jobId,
-		vmid: 597,
-		manifestSha256: layer.manifestSha256,
-		mediaName: `umiak-layer-${jobId}.raw`,
-		mediaIdentity: "1:2",
-		mediaSha256: "b".repeat(64),
-		mediaBytes: 64 * 1024 ** 2,
-		verified: true,
-	});
-	s.node.handlers["layer.release"] = () => ({ released: true });
-	const result = await buildTemplate(s.deps, {
-		...s.opts,
-		offlineLayer: layer,
-		nodeBuildJobId: jobId,
-		templateVmid: 597,
-		tunnelCAPin: "c".repeat(64),
-		agentPackage: "",
-	});
-	expect(result.status).toBe("ready");
-	expect(result.offlineLayer?.manifestSha256).toBe(layer.manifestSha256);
-	expect(result.defaultTunnelUrl).toBeNull();
-	const create = s.pve.calls.find(
-		(c) => c.method === "POST" && c.path === "/nodes/pve/qemu",
-	);
-	expect(create?.params?.net0).toContain("link_down=1");
-	expect(create?.params?.scsi2).toContain(`umiak-layer-${jobId}.raw`);
-	expect(s.isos[0]?.has("build/umiak-agent.tar")).toBe(false);
-	expect(String(s.isos[0]?.get("user-data"))).toContain(
-		"package_update: false",
-	);
-	expect(s.log).not.toContain("guest:zero-fill");
-	expect(s.pve.vms.get(597)?.config.scsi2).toBeUndefined();
-	expect(s.pve.vms.get(597)?.config.net0).not.toContain("link_down=1");
-	expect(s.verifyCalls).toHaveLength(1);
-});
+it.each([false, true])(
+	"imports a signed offline layer, tolerates vendor failure=%s, then seals and verifies",
+	async (vendorFails) => {
+		const { offlineFixture } = await import("./offline-fixture.ts");
+		const { collectFacts } = await import("../src/seal.ts");
+		const s = setup();
+		s.guest.tools =
+			'{"node":{"direct":"v24.11.0","login":"v24.11.0"},"claude":{"direct":"missing","login":"missing"},"umiak":{"direct":"missing","login":"missing"}}';
+		const layer = offlineFixture(
+			sha(readFileSync(s.image)),
+			await collectFacts(s.guest, "fixture"),
+		);
+		if (vendorFails) s.guest.failRc["vendor-claude-code"] = "1";
+		const jobId = "a".repeat(24);
+		s.node.handlers["layer.base"] = () => ({
+			verified: true,
+			name: IMAGE_NAME,
+			sha256: layer.manifest.base.sha256,
+		});
+		s.node.handlers["layer.prepare"] = () => ({
+			manifestSha256: layer.manifestSha256,
+			missing: [],
+		});
+		s.node.handlers["layer.stage"] = () => ({
+			jobId,
+			vmid: 597,
+			manifestSha256: layer.manifestSha256,
+			mediaName: `umiak-layer-${jobId}.raw`,
+			mediaIdentity: "1:2",
+			mediaSha256: "b".repeat(64),
+			mediaBytes: 64 * 1024 ** 2,
+			verified: true,
+		});
+		s.node.handlers["layer.release"] = () => ({ released: true });
+		const result = await buildTemplate(s.deps, {
+			...s.opts,
+			offlineLayer: layer,
+			nodeBuildJobId: jobId,
+			templateVmid: 597,
+			tunnelCAPin: "c".repeat(64),
+			agentPackage: "",
+		});
+		expect(result.status).toBe("ready");
+		expect(result.offlineLayer?.manifestSha256).toBe(layer.manifestSha256);
+		expect(result.vendorTools?.[0]).toMatchObject({
+			id: "claude-code",
+			status: vendorFails ? "failed" : "installed",
+			partOfSignedLayer: false,
+		});
+		expect(
+			s.log.indexOf(
+				"-- offline parity checks passed; vendor phase starts separately",
+			),
+		).toBeLessThan(s.log.indexOf("guest:step vendor-claude-code"));
+		expect(s.log.indexOf("guest:step vendor-cleanup")).toBeLessThan(
+			s.log.indexOf("guest:seal"),
+		);
+		if (vendorFails)
+			expect(result.vendorTools?.[0]?.warning).toMatch(
+				/^Claude Code not installed:/,
+			);
+		expect(result.defaultTunnelUrl).toBeNull();
+		const create = s.pve.calls.find(
+			(c) => c.method === "POST" && c.path === "/nodes/pve/qemu",
+		);
+		expect(create?.params?.net0).toContain("link_down=1");
+		expect(create?.params?.scsi2).toContain(`umiak-layer-${jobId}.raw`);
+		expect(s.isos[0]?.has("build/umiak-agent.tar")).toBe(false);
+		expect(String(s.isos[0]?.get("user-data"))).toContain(
+			"package_update: false",
+		);
+		expect(s.log).not.toContain("guest:zero-fill");
+		expect(s.pve.vms.get(597)?.config.scsi2).toBeUndefined();
+		expect(s.pve.vms.get(597)?.config.net0).not.toContain("link_down=1");
+		expect(s.verifyCalls).toHaveLength(1);
+	},
+);

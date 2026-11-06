@@ -25,7 +25,7 @@ import {
 } from "./recipe.ts";
 import { newBuildId } from "./registry.ts";
 import type { GuestIo } from "./runner.ts";
-import { StepFailedError, StepTimeoutError } from "./runner.ts";
+import { runStep, StepFailedError, StepTimeoutError } from "./runner.ts";
 import { collectFacts, sealGuest, writeGuestFile } from "./seal.ts";
 import {
 	BUILD_TAG,
@@ -50,6 +50,7 @@ import {
 	TASK_TIMEOUT_MS,
 	vmStatus,
 } from "./stages.ts";
+import { installGuestVendorTool, installVendorTools } from "./vendor-tools.ts";
 import { isProtectedVmid } from "./vmid-guard.ts";
 import {
 	buildIsoName,
@@ -304,10 +305,44 @@ function linuxJob(deps: BuildDeps, o: BuildOptions, recipe: LinuxRecipe): Job {
 			await stageBoot(run, o, p.recipe, io, st);
 			enter("steps");
 			await stageSteps(run, o, p.recipe, io, st);
-			enter("seal");
-			const facts = await collectFacts(io, p.verifyScript);
-			if (o.offlineLayer)
+			let facts = await collectFacts(io, p.verifyScript);
+			if (o.offlineLayer) {
 				assertOfflineReplayFacts(o.offlineLayer.descriptor.facts, facts);
+				run.log(
+					"-- offline parity checks passed; vendor phase starts separately",
+				);
+				enter("vendor-tools");
+				const configPath = `/nodes/${o.node}/qemu/${vmid}/config`;
+				const network = async (online: boolean) => {
+					const config = await run.api.get<Record<string, string>>(configPath);
+					if (!config.net0)
+						throw new Error("vendor phase: build NIC is missing");
+					const nic = config.net0.replace(/,link_down=[01]/g, "");
+					await run.api.put(configPath, {
+						net0: `${nic},link_down=${online ? 0 : 1}`,
+					});
+					const updated = await run.api.get<Record<string, string>>(configPath);
+					if (!updated.net0?.includes(`link_down=${online ? 0 : 1}`))
+						throw new Error(
+							"vendor phase: could not confirm NIC isolation state",
+						);
+				};
+				const vendorTools = await installVendorTools({
+					network,
+					install: (tool) =>
+						installGuestVendorTool(io, tool, run.log, run.pollMs),
+					log: run.log,
+				});
+				save({ vendorTools });
+				await runStep(io, {
+					name: "vendor-cleanup",
+					script: "/mnt/seed/build/steps/90-cleanup.sh",
+					log: run.log,
+					pollMs: run.pollMs ?? 2000,
+				});
+				facts = await collectFacts(io, p.verifyScript);
+			}
+			enter("seal");
 			save(facts);
 			await writeGuestFile(
 				io,

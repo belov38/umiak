@@ -81,6 +81,14 @@ export function verifyOfflineLayer(o: {
 		throw Error("Offline layer agent/base input boundary mismatch");
 	if (descriptor.facts.tools.claude !== null)
 		throw Error("Offline layer must not bundle Claude Code");
+	if (
+		(descriptor.facts.tools.bun ?? null) !== null ||
+		(descriptor.facts.tools.bunx ?? null) !== null ||
+		m.files.some((f) => f.sha256 === versions.tools.bun.sha256)
+	)
+		throw Error("Offline layer must not bundle Bun");
+	if ((descriptor.facts.tools.opencode ?? null) !== null)
+		throw Error("Offline layer must not bundle OpenCode");
 	const layer: VerifiedOfflineLayer = {
 		manifest: m,
 		bytes: Buffer.from(o.bytes),
@@ -141,6 +149,7 @@ export function loadOfflineLayer(
 	file: string,
 	o: {
 		keysFile?: string;
+		keys?: string[];
 		platform: string;
 		agent: string;
 		channel: string;
@@ -176,7 +185,8 @@ export function loadOfflineLayer(
 				),
 				"utf8",
 			);
-	const keys = key.trimStart().startsWith("[") ? JSON.parse(key) : [key];
+	const keys =
+		o.keys ?? (key.trimStart().startsWith("[") ? JSON.parse(key) : [key]);
 	if (!Array.isArray(keys) || keys.some((k) => typeof k !== "string"))
 		throw Error("Invalid configured publisher keys");
 	return verifyOfflineLayer({
