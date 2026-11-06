@@ -10,7 +10,9 @@ import {
 	statfs,
 	writeFile,
 } from "node:fs/promises";
+import { request } from "node:https";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 export const SOURCES_ARTIFACT_TYPE = "application/vnd.umiak.linux-sources.v1";
 const sha = (b) => createHash("sha256").update(b).digest("hex");
 const chunkLimit = 512 * 1024 ** 2;
@@ -63,6 +65,38 @@ function allowedRedirect(origin, target) {
 				].includes(target.hostname)))
 	);
 }
+/**
+ * GET without transparent decompression. Archive mirrors serve `.diff.gz`
+ * files with `Content-Encoding: gzip` (whatever Accept-Encoding says), and
+ * fetch() would then hand back the decompressed bytes, which never match the
+ * signed size and hash. Corresponding sources must stay byte-for-byte.
+ */
+export function rawFetch(url, init = {}) {
+	return new Promise((resolve, reject) => {
+		const req = request(
+			url,
+			{
+				method: "GET",
+				headers: { "accept-encoding": "identity" },
+				...(init.signal ? { signal: init.signal } : {}),
+			},
+			(res) => {
+				const headers = new Headers();
+				for (const [key, value] of Object.entries(res.headers))
+					if (value !== undefined)
+						headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+				const status = res.statusCode || 0;
+				const empty = status === 204 || status === 304;
+				if (empty) res.resume();
+				resolve(
+					new Response(empty ? null : Readable.toWeb(res), { status, headers }),
+				);
+			},
+		);
+		req.on("error", reject);
+		req.end();
+	});
+}
 async function sourceResponse(url, fetcher) {
 	const origin = new URL(url);
 	let current = origin;
@@ -94,7 +128,7 @@ export async function captureSourceFile({
 	sizeBytes,
 	cache,
 	chunkBytes = chunkLimit,
-	fetcher = fetch,
+	fetcher = rawFetch,
 	wait = (ms) => new Promise((r) => setTimeout(r, ms)),
 }) {
 	if (
