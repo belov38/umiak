@@ -66,10 +66,36 @@ def release_of(target):
     return path
 
 
+# apt 3 resolves `Snapshot:` by fetching the live archive InRelease (for its
+# `Snapshots:` URL) and then the snapshot itself, so live archive targets stay
+# active beside the pinned snapshot ones. Packages come from the snapshot only:
+# capture exactly those Ubuntu targets and ignore the live discovery targets.
+snapshot_ids = {
+    line.split(':', 1)[1].strip()
+    for line in Path('/etc/apt/sources.list.d/ubuntu.sources').read_text().splitlines()
+    if line.startswith('Snapshot:')
+}
+if len(snapshot_ids) != 1:
+    raise ValueError('expected exactly one pinned Ubuntu apt snapshot')
+snapshot_base = f'https://snapshot.ubuntu.com/ubuntu/{snapshot_ids.pop()}/'
+
+
+def live_ubuntu_discovery(target):
+    return target.get('origin') == 'Ubuntu' and not target.get('base-uri', '').startswith(snapshot_base)
+
+
 releases = {}
 repos = {}
-for target in records(run('apt-get', 'indextargets', 'Identifier: Packages')):
-    if target.get('architecture') != 'amd64':
+targets = [
+    target for target in records(run('apt-get', 'indextargets', 'Identifier: Packages'))
+    if target.get('architecture') == 'amd64'
+]
+captured_ubuntu = {target.get('suite') for target in targets
+                   if target.get('origin') == 'Ubuntu' and not live_ubuntu_discovery(target)}
+if any(target.get('suite') not in captured_ubuntu for target in targets if live_ubuntu_discovery(target)):
+    raise ValueError('an Ubuntu suite has no pinned snapshot index')
+for target in targets:
+    if live_ubuntu_discovery(target):
         continue
     origin, suite = target.get('origin'), target.get('suite')
     if target.get('trusted') != 'yes' or origin not in authorities:
