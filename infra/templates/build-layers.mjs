@@ -50,6 +50,11 @@ export async function buildLayerRelease(o) {
 	await mkdir(output, { recursive: true, mode: 0o700 });
 	const work = join(output, "work");
 	const cache = join(work, "official-base-cache");
+	// Optional shared cache for repeated local builds. Every cached source file is
+	// re-verified by size and SHA-256 before use, so reuse cannot change bytes.
+	const sourceCache = o.sourceCache
+		? resolve(o.sourceCache)
+		: join(work, "source-cache");
 	await mkdir(cache, { recursive: true });
 	const measurements = [];
 	for (const slug of ["linux", "linux-desktop"]) {
@@ -62,7 +67,7 @@ export async function buildLayerRelease(o) {
 						afterCapture: async (captured, guest) => {
 							companion = await buildSourceCompanion({
 								capture: captured,
-								cache: join(work, "source-cache"),
+								cache: sourceCache,
 								directory: join(output, `${slug}-sources`),
 								version: o.version,
 								sourceCommit: o.sourceCommit,
@@ -107,7 +112,7 @@ export async function buildLayerRelease(o) {
 		const files = await describeLayerFiles(directory);
 		companion ||= await buildSourceCompanion({
 			capture,
-			cache: join(work, "source-cache"),
+			cache: sourceCache,
 			directory: join(output, `${slug}-sources`),
 			version: o.version,
 			sourceCommit: o.sourceCommit,

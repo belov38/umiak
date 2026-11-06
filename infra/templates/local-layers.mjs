@@ -67,6 +67,7 @@ try {
 			channel,
 			sourceCommit,
 			aptProxy,
+			sourceCache: process.env.UMIAK_LAYER_SOURCE_CACHE || undefined,
 		});
 		for (const slug of ["linux", "linux-desktop"])
 			await stagingLayout(join(output, slug), version);
