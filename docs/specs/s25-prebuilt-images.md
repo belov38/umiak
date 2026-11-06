@@ -407,3 +407,15 @@ network requirement or vendor-style failure tolerance for this first-party asset
 Sunshine's pinned Linux CMake target links libvirtualhid. Its repository also contains Windows SAL sources that we do not redistribute. CI preserves the Sunshine and moonlight root source archives byte-for-byte, excludes the Windows-only NVAPI/ViGEm gitlinks, and derives a libvirtualhid MIT subset inside the isolated Linux capture guest after the layer export/facts are frozen. The audit configures the actual upstream library subproject as Sunshine does, builds its Linux target, reads CMake File API target/configuration inputs, the exported API header tree and GCC dependency files, and checks every selected path against the pinned upstream license map. No handwritten source allowlist is used. Any SAL input stops publication.
 
 The subset retains original selected file bytes, the MIT license, repository license summary and path-to-license map. CI reconstructs the subset in a fresh directory and compiles it again, requiring the same source/header/configuration closure and hashes. The signed inventory and digest-bound source companion record the original commit/archive SHA-256, derived archive SHA-256, excluded SAL paths, exact audit script, CMake wrapper/options, compiler versions and reconstruction result. Full mixed-license libvirtualhid archives remain private CI scratch data and are not OCI source files. Audit-only dev packages are installed after export and never enter the layer.
+
+### Approved local-staged acceptance path
+
+An approved clean source checkout may perform the same KVM capture/replay/source
+build on an operator-owned temporary x86 Linux VM. Unsigned OCI artifacts use
+immutable staging tags and an operator token file. CI's `sign-staged` action
+anonymously validates their complete input/source bytes and policy before loading
+the publisher key. Signed verification provenance identifies `local-staged` plus
+the approved source SHA; CI does not attest that it executed the local replay.
+Only edge is promoted, after the existing four-artifact anonymous readback gate.
+The full hosted-KVM workflow remains supported. See the operations runbook for
+bootstrap, build, stage and signing dispatch commands.

@@ -40,3 +40,38 @@ it("publishes only manually behind the reviewed SHA gate, with file-only secrets
 	expect(build).not.toContain("installVendorTools");
 	expect(build).toContain("replayLayer");
 });
+
+it("signs staged artifacts without running KVM and verifies them before loading the signing key", () => {
+	const workflow = parse(
+		readFileSync(
+			resolve(
+				import.meta.dirname,
+				"../../../.github/workflows/linux-layers.yml",
+			),
+			"utf8",
+		),
+	);
+	expect(workflow.on.workflow_dispatch.inputs.action.options).toContain(
+		"sign-staged",
+	);
+	const steps = workflow.jobs.layers.steps;
+	const fetch = steps.findIndex((s: { name?: string }) =>
+		s.name?.startsWith("Pull staged"),
+	);
+	const key = steps.findIndex((s: { name?: string }) =>
+		s.name?.startsWith("Materialize recipe key"),
+	);
+	expect(fetch).toBeGreaterThan(-1);
+	expect(key).toBeGreaterThan(fetch);
+	expect(steps[fetch].run).toContain("verify-staged");
+	for (const prefix of [
+		"Install local QEMU",
+		"Probe actual KVM",
+		"Build the generic agent",
+		"Capture inputs",
+	]) {
+		expect(
+			steps.find((s: { name?: string }) => s.name?.startsWith(prefix)).if,
+		).toBe("inputs.action == 'build'");
+	}
+});

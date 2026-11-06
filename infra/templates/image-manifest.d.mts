@@ -32,7 +32,12 @@ export interface ImageManifest {
 	files: ImageFile[];
 	inventory: ImageBlob;
 	sources: { repository: string; digest: string };
-	verification: { ok: true; offlineReplay: true };
+	verification: {
+		ok: true;
+		offlineReplay: true;
+		buildHost?: "local-staged";
+		approvedSha?: string;
+	};
 }
 export interface ImagePointer {
 	format: "umiak-linux-channel/v1";
@@ -69,3 +74,11 @@ export function verifyImagePointer(options: {
 	channel: string;
 	minimumSequence?: number;
 }): ImagePointer;
+
+export function validateImageManifest(
+	manifest: unknown,
+	options: Pick<
+		Parameters<typeof verifyImageManifest>[0],
+		"slug" | "channel" | "platform" | "agent"
+	>,
+): ImageManifest;

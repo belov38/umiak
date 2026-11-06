@@ -1,6 +1,11 @@
 package ops
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
 	"os"
 	"testing"
 )
@@ -31,5 +36,41 @@ func TestLayerManifestSharedFixture(t *testing.T) {
 	sig[0] ^= 1
 	if _, e := verifyLayerManifest(data, sig, []string{string(pub)}, "0.1.0", "0.1.0", "stable", "linux"); e == nil {
 		t.Fatal("accepted tampered signature")
+	}
+}
+
+func TestLayerManifestLocalStagedProvenance(t *testing.T) {
+	data, e := os.ReadFile("../../../../infra/templates/testdata/layers/manifest.fixture")
+	if e != nil {
+		t.Fatal(e)
+	}
+	var value map[string]any
+	if e = json.Unmarshal(data, &value); e != nil {
+		t.Fatal(e)
+	}
+	verification := value["verification"].(map[string]any)
+	verification["buildHost"] = "local-staged"
+	verification["approvedSha"] = value["sourceCommit"]
+	public, private, e := ed25519.GenerateKey(rand.Reader)
+	if e != nil {
+		t.Fatal(e)
+	}
+	der, e := x509.MarshalPKIXPublicKey(public)
+	if e != nil {
+		t.Fatal(e)
+	}
+	key := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
+	for _, valid := range []bool{true, false} {
+		if !valid {
+			verification["approvedSha"] = "bad"
+		}
+		b, e := json.Marshal(value)
+		if e != nil {
+			t.Fatal(e)
+		}
+		_, e = verifyLayerManifest(b, ed25519.Sign(private, b), []string{key}, "0.1.0", "0.1.0", "stable", "linux")
+		if (e == nil) != valid {
+			t.Fatalf("local provenance valid=%v: %v", valid, e)
+		}
 	}
 }

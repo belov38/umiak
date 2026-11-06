@@ -75,7 +75,9 @@ function compare(a, b) {
 	return 0;
 }
 export function verifyImageManifest(options) {
-	const m = signed(options);
+	return validateImageManifest(signed(options), options);
+}
+export function validateImageManifest(m, options) {
 	object(m, [
 		"format",
 		"version",
@@ -191,7 +193,19 @@ export function verifyImageManifest(options) {
 		),
 		"Layer is missing its signed license inventory file",
 	);
-	object(m.verification, ["ok", "offlineReplay"]);
+	object(m.verification, [
+		"ok",
+		"offlineReplay",
+		...(m.verification.buildHost === undefined
+			? []
+			: ["buildHost", "approvedSha"]),
+	]);
+	if (m.verification.buildHost !== undefined)
+		check(
+			m.verification.buildHost === "local-staged" &&
+				m.verification.approvedSha === m.sourceCommit,
+			"Invalid local build provenance",
+		);
 	check(m.verification.ok === true && m.verification.offlineReplay === true);
 	return m;
 }

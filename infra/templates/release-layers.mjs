@@ -175,7 +175,7 @@ async function privateFile(path) {
 		throw Error("CI secret must be a restricted regular file");
 	return readFile(path);
 }
-async function oras(args, cwd, token) {
+export async function oras(args, cwd, token) {
 	const { stdout } = await exec(
 		"oras",
 		[
@@ -187,9 +187,12 @@ async function oras(args, cwd, token) {
 	);
 	return stdout.trim();
 }
-async function login(tokenDirectory) {
+export async function login(
+	tokenDirectory,
+	tokenFile = process.env.LAYER_GITHUB_TOKEN_FILE,
+) {
 	await mkdir(tokenDirectory, { recursive: true, mode: 0o700 });
-	const token = await privateFile(process.env.LAYER_GITHUB_TOKEN_FILE);
+	const token = await privateFile(tokenFile);
 	// execFile has no stdin option; write to the pipe without ever placing the token in argv/env.
 	const { spawn } = await import("node:child_process");
 	await new Promise((resolvePromise, reject) => {
@@ -199,7 +202,7 @@ async function login(tokenDirectory) {
 				"login",
 				"ghcr.io",
 				"--username",
-				process.env.GITHUB_ACTOR || "umiak-ci",
+				process.env.ORAS_USERNAME || process.env.GITHUB_ACTOR || "umiak-ci",
 				"--password-stdin",
 				"--registry-config",
 				join(tokenDirectory, "registry.json"),
@@ -355,12 +358,30 @@ async function command() {
 		ref: process.env.GITHUB_REF,
 	};
 	validateReleaseRequest(request);
+	if (mode === "fetch-staged") {
+		if (
+			request.channel !== "edge" ||
+			request.approvedSha !== request.sourceCommit
+		)
+			throw Error("Staged signing requires reviewed edge source SHA");
+		const { pullStaged } = await import("./staged-layers.mjs");
+		await pullStaged({ ...request, output });
+		return;
+	}
 	if (mode === "build") {
 		const { buildLayerRelease } = await import("./build-layers.mjs");
 		await buildLayerRelease({ ...request, output });
 		return;
 	}
-	if (!["sign", "publish", "preflight", "initialize-packages"].includes(mode))
+	if (
+		![
+			"sign",
+			"publish",
+			"preflight",
+			"initialize-packages",
+			"verify-staged",
+		].includes(mode)
+	)
 		throw Error(
 			"Usage: release-layers.mjs build|sign|preflight|publish|initialize-packages",
 		);
@@ -446,6 +467,11 @@ async function command() {
 				draft.sourceCommit !== request.sourceCommit
 			)
 				throw Error("Prepared layer does not match reviewed release identity");
+			if (
+				mode === "verify-staged" &&
+				draft.verification.buildHost !== "local-staged"
+			)
+				throw Error("Expected local-staged provenance");
 			const sourceDirectory = join(output, `${slug}-sources`);
 			const sourceIndex = JSON.parse(
 				await readFile(join(sourceDirectory, "index.json"), "utf8"),
@@ -504,6 +530,49 @@ async function command() {
 					JSON.stringify(inventoryData.binarySources)
 			)
 				throw Error("Signed inventory binary/source mapping mismatch");
+			if (draft.verification.buildHost === "local-staged") {
+				if (draft.verification.approvedSha !== request.sourceCommit)
+					throw Error("Unapproved local-staged provenance");
+				const { validateImageManifest } = await import("./image-manifest.mjs");
+				validateImageManifest(draft, {
+					slug,
+					channel: request.channel,
+					platform: draft.minPlatform,
+					agent: draft.minAgent,
+				});
+				const { verifySourceLayout } = await import("./staged-layers.mjs");
+				await verifySourceLayout(sourceDirectory);
+				await exec(
+					"python",
+					[
+						"infra/templates/check-staged-archive.py",
+						join(directory, "manifest.draft.json"),
+						directory,
+					],
+					{ timeout: 60 * 60_000, maxBuffer: 1024 ** 2 },
+				);
+				const { loadRecipe, recipeDigest } = await import(
+					"../../apps/template-builder/src/recipe.ts"
+				);
+				if (
+					recipeDigest(
+						loadRecipe(resolve("infra/templates"), slug, "linux"),
+					) !== draft.recipeSha256
+				)
+					throw Error("Staged recipe differs from approved source");
+			}
+			for (const file of draft.files.filter(
+				(f) =>
+					f.path.startsWith("apt/") &&
+					f.path.endsWith(".deb") &&
+					!f.path.startsWith("apt/docker-"),
+			))
+				if (
+					!inventoryData.binarySources.some(
+						(b) => b.binarySha256 === file.sha256,
+					)
+				)
+					throw Error("Staged deb lacks corresponding sources");
 			const descriptor = await readFile(join(directory, "layer-recipe.json"));
 			const verifyScript = await readFile(join(directory, "verify.sh"));
 			const { layerInventory } = await import("./layer-inventory.mjs");
@@ -516,6 +585,39 @@ async function command() {
 				fetches: inventoryData.nonDebInputs,
 				upstream: inventoryData.nonDebInputs.flatMap((f) => f.notices),
 			});
+			for (const [path, bytes] of [
+				["build/layer-recipe.json", descriptor],
+				["build/verify.sh", verifyScript],
+			]) {
+				const member = draft.files.find((f) => f.path === path);
+				if (
+					!member ||
+					member.sha256 !== sha(bytes) ||
+					member.sizeBytes !== bytes.length
+				)
+					throw Error("Staged control/input binding mismatch");
+			}
+			if (mode === "verify-staged") {
+				const { validateOfflineLayerInputs } = await import(
+					"../../apps/template-builder/src/layer-release.ts"
+				);
+				const validated = validateOfflineLayerInputs(
+					draft,
+					descriptor,
+					verifyScript,
+				);
+				const { loadRecipe, loadVersions } = await import(
+					"../../apps/template-builder/src/recipe.ts"
+				);
+				if (
+					JSON.stringify(validated.versions) !==
+					JSON.stringify(
+						loadVersions(loadRecipe(resolve("infra/templates"), slug, "linux")),
+					)
+				)
+					throw Error("Staged version pins differ from approved recipe");
+				continue;
+			}
 			if (mode === "sign") {
 				const key = await privateFile(process.env.RECIPE_SIGNING_KEY_FILE);
 				const signed = signLayerMetadata({
@@ -566,6 +668,7 @@ async function command() {
 			});
 			artifacts.push({ slug, directory, repository: OCI_REPOSITORIES[slug] });
 		}
+		if (mode === "verify-staged") return;
 		if (mode === "sign") {
 			const sequence = Number(process.env.LAYER_SEQUENCE);
 			const key = await privateFile(process.env.RECIPE_SIGNING_KEY_FILE);

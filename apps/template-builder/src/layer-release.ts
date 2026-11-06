@@ -44,6 +44,30 @@ export function verifyOfflineLayer(o: {
 	slug: string;
 }): VerifiedOfflineLayer {
 	const m = verifyImageManifest(o);
+	const { descriptor, versions } = validateOfflineLayerInputs(
+		m,
+		o.descriptor,
+		o.verifyScript,
+	);
+	const layer: VerifiedOfflineLayer = {
+		manifest: m,
+		bytes: Buffer.from(o.bytes),
+		signature: Buffer.from(o.signature),
+		descriptor,
+		descriptorBytes: Buffer.from(o.descriptor),
+		verifyScript: o.verifyScript.toString("utf8"),
+		versions,
+		manifestSha256: createHash("sha256").update(o.bytes).digest("hex"),
+	};
+	verifiedLayers.add(layer);
+	return Object.freeze(layer);
+}
+/** Structural/input policy also runs before the publisher signing key is loaded. */
+export function validateOfflineLayerInputs(
+	m: ImageManifest,
+	descriptorBytes: Buffer,
+	verifyScript: Buffer,
+): { descriptor: LayerRecipeDescriptor; versions: Versions } {
 	const bound = (path: string, bytes: Buffer) => {
 		const file = m.files.find((f) => f.path === path);
 		if (
@@ -53,9 +77,9 @@ export function verifyOfflineLayer(o: {
 		)
 			throw Error(`Offline layer ${path} does not match signed metadata`);
 	};
-	bound("build/layer-recipe.json", o.descriptor);
-	bound("build/verify.sh", o.verifyScript);
-	const descriptor = parseLayerRecipe(o.descriptor, m.slug);
+	bound("build/layer-recipe.json", descriptorBytes);
+	bound("build/verify.sh", verifyScript);
+	const descriptor = parseLayerRecipe(descriptorBytes, m.slug);
 	const versions = versionsSchema.parse(descriptor.versions);
 	if (
 		versions.base.serial !== m.base.serial ||
@@ -89,18 +113,8 @@ export function verifyOfflineLayer(o: {
 		throw Error("Offline layer must not bundle Bun");
 	if ((descriptor.facts.tools.opencode ?? null) !== null)
 		throw Error("Offline layer must not bundle OpenCode");
-	const layer: VerifiedOfflineLayer = {
-		manifest: m,
-		bytes: Buffer.from(o.bytes),
-		signature: Buffer.from(o.signature),
-		descriptor,
-		descriptorBytes: Buffer.from(o.descriptor),
-		verifyScript: o.verifyScript.toString("utf8"),
-		versions,
-		manifestSha256: createHash("sha256").update(o.bytes).digest("hex"),
-	};
-	verifiedLayers.add(layer);
-	return Object.freeze(layer);
+
+	return { descriptor, versions };
 }
 export function offlineRecipe(
 	layer: VerifiedOfflineLayer,

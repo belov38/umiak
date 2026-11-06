@@ -74,8 +74,10 @@ type layerManifest struct {
 		Digest     string `json:"digest"`
 	} `json:"sources"`
 	Verification struct {
-		OK            bool `json:"ok"`
-		OfflineReplay bool `json:"offlineReplay"`
+		OK            bool   `json:"ok"`
+		BuildHost     string `json:"buildHost,omitempty"`
+		ApprovedSHA   string `json:"approvedSha,omitempty"`
+		OfflineReplay bool   `json:"offlineReplay"`
 	} `json:"verification"`
 }
 
@@ -196,6 +198,9 @@ func verifyLayerManifest(data, sig []byte, keys []string, platform, agent, chann
 		return fail()
 	}
 	if m.Format != "umiak-linux-layer/v1" || m.Arch != "amd64" || m.Distro != "ubuntu" || m.Release != "26.04" || m.BuilderAPI != 1 || m.BootTrust != "smbios-ca-sha256-v1" || !m.Verification.OK || !m.Verification.OfflineReplay {
+		return fail()
+	}
+	if (m.Verification.BuildHost != "" || m.Verification.ApprovedSHA != "") && (m.Verification.BuildHost != "local-staged" || m.Verification.ApprovedSHA != m.SourceCommit) {
 		return fail()
 	}
 	if channel != "stable" && channel != "edge" || m.Channel != channel || m.Slug != slug || slug != "linux" && slug != "linux-desktop" || !layerVersionRE.MatchString(m.Version) || (channel == "edge") != strings.Contains(m.Version, "-edge.") {
