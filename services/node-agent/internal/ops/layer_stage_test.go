@@ -83,7 +83,8 @@ func TestLayerStageRejectsMalformedZstdBeforeCreatingMedia(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("fixture")) }))
 	defer server.Close()
 	h.srv.LayerHTTP = server.Client()
-	h.srv.Cfg.LayerBaseURL = server.URL
+	h.srv.Cfg.LayerRegistryURL = server.URL
+	h.srv.Cfg.LayerRepositories = map[string]string{"linux": "fixture/linux-layer"}
 	response := h.call(t, "layer.stage", layerArgs(t))
 	if response.OK {
 		t.Fatal("accepted malformed compressed layer")
@@ -243,14 +244,15 @@ func TestLayerStageCreatesAndReusesVerifiedMedia(t *testing.T) {
 	requests, formats := 0, 0
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
-		if r.URL.Path != "/blobs/sha256/"+m.Archive.SHA256 {
+		if r.URL.Path != "/v2/fixture/linux-layer/blobs/sha256:"+m.Archive.SHA256 {
 			t.Error("unexpected blob path", r.URL.Path)
 		}
 		_, _ = w.Write(compressed)
 	}))
 	defer server.Close()
 	h.srv.LayerHTTP = server.Client()
-	h.srv.Cfg.LayerBaseURL = server.URL
+	h.srv.Cfg.LayerRegistryURL = server.URL
+	h.srv.Cfg.LayerRepositories = map[string]string{"linux": "fixture/linux-layer"}
 	h.srv.Host.Run = func(_ context.Context, name string, args ...string) ([]byte, error) {
 		formats++
 		if name != "mke2fs" {

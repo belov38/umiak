@@ -68,4 +68,3 @@ export function verifyImagePointer(options: {
 	channel: string;
 	minimumSequence?: number;
 }): ImagePointer;
-export function imageObjectUrl(base: string, key: string): string;

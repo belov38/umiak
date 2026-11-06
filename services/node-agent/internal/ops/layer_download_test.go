@@ -20,7 +20,7 @@ func TestLayerDownloadRetriesAndReusesVerifiedChunks(t *testing.T) {
 	blob := layerBlob{SHA256: hex.EncodeToString(sum[:]), SizeBytes: int64(len(body))}
 	var requests atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/blobs/sha256/"+blob.SHA256 {
+		if r.URL.Path != "/v2/fixture/layer/blobs/sha256:"+blob.SHA256 {
 			t.Error("unexpected path")
 		}
 		if requests.Add(1) == 1 {
@@ -32,7 +32,7 @@ func TestLayerDownloadRetriesAndReusesVerifiedChunks(t *testing.T) {
 	defer server.Close()
 	dir := t.TempDir()
 	wait := func(context.Context, time.Duration) error { return nil }
-	p, e := downloadLayerBlob(t.Context(), server.Client(), server.URL, dir, blob, wait)
+	p, e := downloadLayerBlob(t.Context(), server.Client(), server.URL+"/v2/fixture/layer", dir, blob, wait)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -43,13 +43,13 @@ func TestLayerDownloadRetriesAndReusesVerifiedChunks(t *testing.T) {
 	if e != nil || string(got) != string(body) {
 		t.Fatal(e)
 	}
-	if _, e = downloadLayerBlob(t.Context(), server.Client(), server.URL, dir, blob, wait); e != nil || requests.Load() != 2 {
+	if _, e = downloadLayerBlob(t.Context(), server.Client(), server.URL+"/v2/fixture/layer", dir, blob, wait); e != nil || requests.Load() != 2 {
 		t.Fatal("did not reuse verified chunk", e)
 	}
 	if e = os.WriteFile(p, []byte("bad"), 0600); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = downloadLayerBlob(t.Context(), server.Client(), server.URL, dir, blob, wait); e != nil || requests.Load() != 3 {
+	if _, e = downloadLayerBlob(t.Context(), server.Client(), server.URL+"/v2/fixture/layer", dir, blob, wait); e != nil || requests.Load() != 3 {
 		t.Fatal("did not repair corrupt cache", e)
 	}
 }
@@ -60,7 +60,7 @@ func TestLayerDownloadRejectsHashMismatchRedirectAndSymlink(t *testing.T) {
 	wait := func(context.Context, time.Duration) error { return nil }
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "changed") }))
 	defer server.Close()
-	if _, e := downloadLayerBlob(t.Context(), server.Client(), server.URL, t.TempDir(), blob, wait); e == nil {
+	if _, e := downloadLayerBlob(t.Context(), server.Client(), server.URL+"/v2/fixture/layer", t.TempDir(), blob, wait); e == nil {
 		t.Fatal("accepted changed bytes")
 	}
 	dir := t.TempDir()
@@ -71,14 +71,14 @@ func TestLayerDownloadRejectsHashMismatchRedirectAndSymlink(t *testing.T) {
 	if e := os.Symlink(outside, filepath.Join(dir, blob.SHA256)); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := downloadLayerBlob(t.Context(), server.Client(), server.URL, dir, blob, wait); e == nil {
+	if _, e := downloadLayerBlob(t.Context(), server.Client(), server.URL+"/v2/fixture/layer", dir, blob, wait); e == nil {
 		t.Fatal("accepted symlink cache")
 	}
 	redirect := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "https://untrusted.invalid/chunk", http.StatusFound)
 	}))
 	defer redirect.Close()
-	if _, e := downloadLayerBlob(t.Context(), redirect.Client(), redirect.URL, t.TempDir(), blob, wait); e == nil {
+	if _, e := downloadLayerBlob(t.Context(), redirect.Client(), redirect.URL+"/v2/fixture/layer", t.TempDir(), blob, wait); e == nil {
 		t.Fatal("followed outside origin")
 	}
 }

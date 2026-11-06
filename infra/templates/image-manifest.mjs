@@ -196,27 +196,6 @@ export function verifyImagePointer(options) {
 	hash(m.images["linux-desktop"]);
 	return m;
 }
-export function imageObjectUrl(base, key) {
-	const u = new URL(base);
-	check(
-		u.protocol === "https:" &&
-			!u.username &&
-			!u.password &&
-			!u.search &&
-			!u.hash,
-		"Image base must be HTTPS",
-	);
-	check(
-		typeof key === "string" &&
-			/^(?:blobs\/sha256\/[a-f0-9]{64}|channels\/(?:stable|edge)\.json(?:\.sig)?|releases\/[0-9.edge-]+\/(?:linux|linux-desktop)\/manifest\.(?:json|sig))$/.test(
-				key,
-			),
-		"Invalid image object key",
-	);
-	u.pathname = `${u.pathname.replace(/\/$/, "")}/${key}`;
-	return u.toString();
-}
-
 /** Outer layer files are inert inputs; no disk images, links or path escapes. */
 export function validLayerPath(path) {
 	return (

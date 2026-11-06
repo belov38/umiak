@@ -19,13 +19,13 @@ import (
 
 func layerObjectURL(base, key string) (string, error) {
 	u, e := url.Parse(base)
-	if e != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" {
+	if e != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" || !strings.HasPrefix(u.Path, "/v2/") || !layerRepoRE.MatchString(strings.TrimPrefix(u.Path, "/v2/")) {
 		return "", errors.New("layer origin must be configured HTTPS")
 	}
 	if !layerDigestRE.MatchString(key) {
 		return "", errors.New("invalid layer digest")
 	}
-	u.Path = strings.TrimSuffix(u.Path, "/") + "/blobs/sha256/" + key
+	u.Path = strings.TrimSuffix(u.Path, "/") + "/blobs/sha256:" + key
 	return u.String(), nil
 }
 func layerFileVerified(path string, blob layerBlob) (bool, error) {
@@ -80,12 +80,12 @@ func downloadLayerBlob(ctx context.Context, client *http.Client, base, directory
 		return path, nil
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Minute}
+		client = &http.Client{Timeout: 2 * time.Hour}
 	}
 	copyClient := *client
 	origin, _ := url.Parse(remote)
 	copyClient.CheckRedirect = func(r *http.Request, via []*http.Request) error {
-		if r.URL.Scheme != "https" || r.URL.Host != origin.Host || len(via) >= 5 {
+		if !layerOCIRedirectAllowed(origin, r.URL) || len(via) >= 5 {
 			return errors.New("layer redirect outside configured origin")
 		}
 		return nil

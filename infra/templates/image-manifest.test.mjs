@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { test } from "node:test";
 import {
-	imageObjectUrl,
 	validLayerPath,
 	verifyImageManifest,
 	verifyImagePointer,
@@ -86,22 +85,6 @@ test("pointer binds both product slugs, channel and monotonic sequence", () => {
 	assert.deepEqual(verifyImagePointer(opts), m);
 	assert.throws(() => verifyImagePointer({ ...opts, minimumSequence: 3 }));
 	assert.throws(() => verifyImagePointer({ ...opts, channel: "edge" }));
-});
-test("object URLs cannot escape configured HTTPS origin", () => {
-	assert.equal(
-		imageObjectUrl("https://example.test/images/", `blobs/sha256/${sha}`),
-		`https://example.test/images/blobs/sha256/${sha}`,
-	);
-	for (const key of [
-		"../x",
-		"https://evil.test/x",
-		"//evil.test",
-		"blobs/%2e%2e/x",
-	])
-		assert.throws(() => imageObjectUrl("https://example.test/", key));
-	assert.throws(() =>
-		imageObjectUrl("http://example.test/", `blobs/sha256/${sha}`),
-	);
 });
 
 test("rejects any rehosted base, modified disk contract or incomplete offline proof", () => {

@@ -25,8 +25,6 @@ import (
 //go:embed recipe-publisher.pub
 var layerPublisherKey string
 
-const defaultLayerBaseURL = "https://pub-bdc85570347b44df991bfcee2718c4a1.r2.dev"
-
 type layerRequest struct {
 	MediaStorage string          `json:"mediaStorage,omitempty"`
 	JobID        string          `json:"jobId"`
@@ -314,13 +312,25 @@ func (s *Server) layerStage(ctx context.Context, raw json.RawMessage) (any, erro
 		}
 	}()
 	defer func() { cancel(); <-stopped }()
-	base := s.Cfg.LayerBaseURL
-	if base == "" {
-		base = defaultLayerBaseURL
+	registry := s.Cfg.LayerRegistryURL
+	if registry == "" {
+		registry = defaultLayerRegistry
+	}
+	repository := s.Cfg.LayerRepositories[m.Slug]
+	if repository == "" {
+		repository = defaultLayerRepositories[m.Slug]
+	}
+	base, e := layerRegistryBase(registry, repository)
+	if e != nil {
+		return nil, e
 	}
 	client := s.LayerHTTP
 	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Minute}
+		client = &http.Client{Timeout: 2 * time.Hour}
+	}
+	client, e = layerOCIClient(client, base)
+	if e != nil {
+		return nil, e
 	}
 	paths := make([]string, 0, len(m.Archive.Chunks))
 	for _, c := range m.Archive.Chunks {
