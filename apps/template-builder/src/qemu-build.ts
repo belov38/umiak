@@ -141,6 +141,7 @@ export interface LayerCaptureOptions {
 	unitsDirectory: string;
 	updateKeysFile: string;
 	umiakCli?: string;
+	afterCapture?: (capture: LayerCapture, guest: GuestIo) => Promise<void>;
 	signal?: AbortSignal;
 	log: (text: string) => void;
 }
@@ -307,7 +308,7 @@ export async function captureLayer(
 			const binaryHash = createHash("sha256")
 				.update(await readFile(o.agentBinary))
 				.digest("hex");
-			return {
+			const captured: LayerCapture = {
 				directory: destination,
 				recipe,
 				recipeSha256: recipeDigest(recipe),
@@ -320,6 +321,8 @@ export async function captureLayer(
 				facts,
 				files: await describeLayerFiles(destination),
 			};
+			await o.afterCapture?.(captured, vm.guest);
+			return captured;
 		} finally {
 			o.signal?.removeEventListener("abort", stop);
 		}

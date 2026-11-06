@@ -18,9 +18,11 @@ export function buildSourceCompanion(options: {
 	directory: string;
 	version: string;
 	sourceCommit: string;
+	auditGuest?: import("../../apps/template-builder/src/runner.ts").GuestIo;
 }): Promise<{
 	reference: { repository: string; digest: string };
 	mapping: BinarySources[];
+	sourceSubsets: unknown[];
 	dockerBinaries: {
 		binarySha256: string;
 		path: string;

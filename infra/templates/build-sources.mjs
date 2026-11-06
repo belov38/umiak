@@ -8,6 +8,7 @@ import {
 	verifyAptMetadata,
 	verifyAptSources,
 } from "../../apps/template-builder/src/offline-apt.ts";
+import { deriveLinuxSourceSubset } from "./linux-source-subset.mjs";
 import { captureSourceFile, writeSourceLayout } from "./source-artifact.mjs";
 
 const exec = promisify(execFile);
@@ -97,6 +98,7 @@ async function gitSource(
 	files,
 	seen = new Set(),
 	depth = 0,
+	auditGuest,
 ) {
 	if (
 		depth > 5 ||
@@ -114,13 +116,52 @@ async function gitSource(
 		url: `https://codeload.github.com/${repository}/tar.gz/${commit}`,
 		cache,
 	});
-	files.push({ ...source, path, repository, commit });
+	if (repository.toLowerCase() === "lizardbyte/libvirtualhid") {
+		const subset = await deriveLinuxSourceSubset({
+			source,
+			cache,
+			guest: auditGuest,
+			commit,
+		});
+		const subsetPath = path.replace(/\.tar\.gz$/, "-linux-mit.tar.gz");
+		files.push({
+			...subset,
+			path: subsetPath,
+			repository,
+			commit,
+			license: "MIT (Linux CMake/compiler-derived subset)",
+		});
+		return [subsetPath];
+	}
+	const entry = {
+		...source,
+		path,
+		repository,
+		commit,
+		license:
+			repo.license?.spdx_id || "See original source archive license texts",
+	};
+	files.push(entry);
 	const paths = [path];
 	const tree = await githubJSON(
 		`repos/${repository}/git/trees/${commit}?recursive=1`,
 	);
 	if (tree.truncated) throw Error("Corresponding-source tree is truncated");
-	const links = tree.tree.filter((entry) => entry.mode === "160000");
+	const nonLinux = new Set(["third-party/nvapi", "third-party/ViGEmClient"]);
+	const excluded =
+		repository.toLowerCase() === "lizardbyte/sunshine"
+			? tree.tree.filter(
+					(item) => item.mode === "160000" && nonLinux.has(item.path),
+				)
+			: [];
+	entry.excludedGitlinks = excluded.map((item) => ({
+		path: item.path,
+		commit: item.sha,
+		reason: "Windows-only dependency; not used by the Linux deb build",
+	}));
+	const links = tree.tree.filter(
+		(item) => item.mode === "160000" && !excluded.includes(item),
+	);
 	if (!links.length) return paths;
 	// Resolve every gitlink against the pinned .gitmodules, retaining nested source archives too.
 	const modules = await fetch(
@@ -164,6 +205,7 @@ async function gitSource(
 				files,
 				seen,
 				depth + 1,
+				auditGuest,
 			)),
 		);
 	}
@@ -175,6 +217,7 @@ export async function buildSourceCompanion({
 	directory,
 	version,
 	sourceCommit,
+	auditGuest,
 }) {
 	console.log(
 		`[sources ${capture.recipe.slug}] collecting corresponding sources`,
@@ -383,6 +426,9 @@ export async function buildSourceCompanion({
 				`upstream/${name}/${commit}.tar.gz`,
 				cache,
 				files,
+				new Set(),
+				0,
+				auditGuest,
 			);
 			const binary = fetches.find((f) =>
 				f.url.startsWith(`https://github.com/${repository}/releases/`),
@@ -417,6 +463,14 @@ export async function buildSourceCompanion({
 	return {
 		reference: { repository: reference.repository, digest: reference.digest },
 		mapping,
+		sourceSubsets: unique
+			.filter((f) => f.originalArchive)
+			.map(({ path, sha256, originalArchive, derivation }) => ({
+				path,
+				sha256,
+				originalArchive,
+				derivation,
+			})),
 		dockerBinaries: docker.map((f) => ({
 			binarySha256: f.sha256,
 			path: f.path,

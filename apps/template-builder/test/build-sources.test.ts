@@ -9,6 +9,17 @@ const { packages, sources } = vi.hoisted(() => ({
 	packages: [] as unknown[],
 	sources: [] as unknown[],
 }));
+vi.mock("../../../infra/templates/linux-source-subset.mjs", () => ({
+	deriveLinuxSourceSubset: vi.fn(async ({ source, commit }) => ({
+		...source,
+		sha256: "f".repeat(64),
+		originalArchive: { sha256: source.sha256, commit },
+		derivation: {
+			reconstructionVerified: true,
+			excludedSALPaths: ["src/platform/windows/driver/"],
+		},
+	})),
+}));
 vi.mock("../src/offline-apt.ts", () => ({
 	verifyAptIndex: vi.fn(async () => packages),
 	verifyAptMetadata: vi.fn(async () => {}),
@@ -16,6 +27,7 @@ vi.mock("../src/offline-apt.ts", () => ({
 }));
 
 import { buildSourceCompanion } from "../../../infra/templates/build-sources.mjs";
+import { deriveLinuxSourceSubset } from "../../../infra/templates/linux-source-subset.mjs";
 
 const hash = (b: Buffer) => createHash("sha256").update(b).digest("hex");
 afterEach(() => {
@@ -113,6 +125,102 @@ it("collects every indexed source file and maps the deb hash, while excluding Ap
 			await readFile(join(directory, "index.json"), "utf8"),
 		);
 		expect(index.manifests[0].digest).toBe(result.reference.digest);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+it("keeps the original Sunshine archive while excluding unrelated Windows SDK gitlinks", async () => {
+	const root = await mkdtemp(join(tmpdir(), "umiak-source-platforms-"));
+	try {
+		const layer = join(root, "layer");
+		await mkdir(join(layer, "build"), { recursive: true });
+		await mkdir(join(layer, "inputs"));
+		await writeFile(
+			join(layer, "build/layer-recipe.json"),
+			JSON.stringify({
+				versions: {
+					desktop: {
+						sunshine: { version: "1" },
+						moonlight_web: { version: "2" },
+					},
+				},
+			}),
+		);
+		await writeFile(
+			join(layer, "inputs/fetch.jsonl"),
+			[
+				{
+					url: "https://github.com/LizardByte/Sunshine/releases/download/v1/sunshine.deb",
+					sha256: "a".repeat(64),
+				},
+				{
+					url: "https://github.com/MrCreativ3001/moonlight-web-stream/releases/download/v2/moonlight.tar.gz",
+					sha256: "b".repeat(64),
+				},
+			]
+				.map((x) => JSON.stringify(x))
+				.join("\n"),
+		);
+		const requests: string[] = [];
+		vi.stubGlobal("fetch", async (url: string) => {
+			const u = String(url);
+			requests.push(u);
+			if (/NVIDIA|ViGEmClient/.test(u))
+				throw Error("Non-Linux source must not be fetched");
+			if (u.includes("/git/ref/tags/"))
+				return Response.json({
+					object: { type: "commit", sha: "c".repeat(40) },
+				});
+			if (u.includes("/git/trees/"))
+				return Response.json({
+					truncated: false,
+					tree: u.includes("Sunshine")
+						? [
+								"third-party/nvapi",
+								"third-party/libvirtualhid",
+								"third-party/ViGEmClient",
+							].map((path) => ({ mode: "160000", path, sha: "d".repeat(40) }))
+						: [],
+				});
+			if (u.startsWith("https://raw.githubusercontent.com/"))
+				return new Response(
+					'[submodule "hid"]\n path = third-party/libvirtualhid\n url = https://github.com/LizardByte/libvirtualhid.git\n',
+				);
+			if (u.startsWith("https://codeload.github.com/"))
+				return new Response("original source archive fixture");
+			return Response.json({ private: false, license: { spdx_id: "GPL-3.0" } });
+		});
+		const result = await buildSourceCompanion({
+			capture: {
+				directory: layer,
+				recipe: { slug: "linux-desktop" },
+				aptSnapshot: "20261030T000000Z",
+				files: [],
+			},
+			cache: join(root, "cache"),
+			directory: join(root, "sources"),
+			version: "20261106.1",
+			sourceCommit: "e".repeat(40),
+		});
+		expect(result.mapping).toHaveLength(2);
+		expect(deriveLinuxSourceSubset).toHaveBeenCalledWith(
+			expect.objectContaining({ commit: "d".repeat(40) }),
+		);
+		expect(
+			result.mapping[0]?.sources.some((p) => p.endsWith("-linux-mit.tar.gz")),
+		).toBe(true);
+		expect(result.sourceSubsets).toEqual([
+			expect.objectContaining({
+				originalArchive: expect.objectContaining({ commit: "d".repeat(40) }),
+				derivation: expect.objectContaining({ reconstructionVerified: true }),
+			}),
+		]);
+		expect(
+			requests.filter((u) => u.startsWith("https://codeload.github.com/")),
+		).toHaveLength(3);
+		expect(
+			requests.some((url) => url.includes("/LizardByte/libvirtualhid")),
+		).toBe(true);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
