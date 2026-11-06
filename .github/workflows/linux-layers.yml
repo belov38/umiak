@@ -1,0 +1,182 @@
+name: linux-layers
+
+# Manual only. This publishes offline INPUTS, never an Ubuntu base or modified disk.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Initialize creates tiny packages so their visibility can be set Public once
+        type: choice
+        options: [build, initialize-packages]
+        default: build
+      version:
+        description: Immutable layer version (edge example 20261106.1-edge.20261106.1)
+        required: true
+        type: string
+      channel:
+        type: choice
+        options: [edge, stable]
+        default: edge
+      agent_version:
+        description: Version recorded in the CA-free agent built from this reviewed source
+        required: true
+        type: string
+        default: "0.4.0"
+      publish:
+        description: Explicitly authorize public OCI uploads (default builds and signs locally only)
+        type: boolean
+        default: false
+      approved_sha:
+        description: Full reviewed head SHA, required for any upload; stable also requires main
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-layers
+  cancel-in-progress: false
+
+jobs:
+  layers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      contents: read
+      packages: write
+    env:
+      LAYER_VERSION: ${{ inputs.version }}
+      LAYER_CHANNEL: ${{ inputs.channel }}
+      LAYER_AGENT_VERSION: ${{ inputs.agent_version }}
+      LAYER_PUBLISH: ${{ inputs.publish }}
+      LAYER_APPROVED_SHA: ${{ inputs.approved_sha }}
+      LAYER_SEQUENCE: ${{ github.run_number }}
+      LAYER_OUTPUT: ${{ runner.temp }}/linux-layers
+      LAYER_AGENT_BINARY: ${{ runner.temp }}/layer-agent/umiak-agent
+      LAYER_GITHUB_TOKEN_FILE: ${{ runner.temp }}/layer-secrets/github-token
+      RECIPE_SIGNING_KEY_FILE: ${{ runner.temp }}/layer-secrets/recipe-key
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@v5.2.6
+        with:
+          install_args: node pnpm go python
+      - uses: oras-project/setup-oras@v2.0.3
+        with:
+          version: 1.3.6
+      - name: Validate reviewed release and explicit upload gate
+        run: |
+          mise exec -- node --input-type=module <<'JS'
+          import {validateReleaseRequest} from './infra/templates/release-layers.mjs';
+          validateReleaseRequest({publish:process.env.LAYER_PUBLISH==='true',channel:process.env.LAYER_CHANNEL,version:process.env.LAYER_VERSION,sourceCommit:process.env.GITHUB_SHA,approvedSha:process.env.LAYER_APPROVED_SHA,ref:process.env.GITHUB_REF});
+          if(!/^\d+\.\d+\.\d+(?:-edge\.\d{8}\.\d+)?$/.test(process.env.LAYER_AGENT_VERSION || ''))throw Error('Invalid agent version');
+          JS
+      - name: Materialize built-in GitHub token as a restricted file
+        # Values appear only in this runner-generated script file and restricted output files.
+        # Do not move secrets to env, command arguments, action inputs or logging.
+        run: |
+          umask 077
+          mise exec -- node --input-type=module <<'JS'
+          import {mkdirSync,writeFileSync} from 'node:fs';
+          import {dirname} from 'node:path';
+          mkdirSync(dirname(process.env.LAYER_GITHUB_TOKEN_FILE),{recursive:true,mode:0o700});
+          writeFileSync(process.env.LAYER_GITHUB_TOKEN_FILE,${{ toJSON(github.token) }},{mode:0o600});
+          JS
+      - name: Initialize packages for one-time Public visibility
+        if: inputs.action == 'initialize-packages'
+        run: |
+          [ "$LAYER_PUBLISH" = true ] || { echo 'initialize-packages requires publish=true and the reviewed SHA'; exit 1; }
+          mise exec -- node infra/templates/release-layers.mjs initialize-packages
+          echo 'Set all four packages (two layers and their source companions) to Public in their GitHub package settings, then dispatch action=build.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Refuse existing immutable tags
+        if: inputs.action == 'build' && inputs.publish
+        run: mise exec -- node infra/templates/release-layers.mjs preflight
+      - name: Install local QEMU tools and grant this ephemeral runner KVM access
+        if: inputs.action == 'build'
+        run: |
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends qemu-system-x86 qemu-utils xorriso e2fsprogs zstd gnupg
+          if [ -e /dev/kvm ]; then sudo chmod 0666 /dev/kvm; fi
+      - name: Probe actual KVM, RAM and free disk (no TCG or Proxmox fallback)
+        if: inputs.action == 'build'
+        run: |
+          mise exec -- pnpm install --frozen-lockfile
+          mise exec -- node --input-type=module <<'JS'
+          import {mkdtemp,rm} from 'node:fs/promises';
+          import {join} from 'node:path';
+          import {probeQemu} from './apps/template-builder/src/qemu.ts';
+          const directory=await mkdtemp(join(process.env.RUNNER_TEMP,'umiak-kvm-probe-'));
+          try {await probeQemu(directory);} finally {await rm(directory,{recursive:true});}
+          JS
+      - name: Local fixture and policy tests
+        if: inputs.action == 'build'
+        run: |
+          mise exec -- pnpm exec biome check infra/templates/linux-source-subset.mjs infra/templates/build-layers.mjs infra/templates/build-sources.mjs infra/templates/source-artifact.mjs infra/templates/layer-inventory.mjs infra/templates/layer-notices.mjs infra/templates/release-layers.mjs infra/templates/oci.mjs
+          mise exec -- pnpm exec biome lint --only=correctness/noUndeclaredVariables infra/templates/linux-source-subset.mjs infra/templates/build-layers.mjs infra/templates/build-sources.mjs infra/templates/release-layers.mjs infra/templates/layer-notices.mjs
+          mise exec -- node --test infra/templates/image-manifest.test.mjs infra/templates/layer-recipe.test.mjs infra/templates/oci.test.mjs infra/templates/layer-inventory.test.mjs infra/templates/release-layers.test.mjs infra/templates/oci-layout.test.mjs infra/templates/source-artifact.test.mjs infra/templates/linux-source-subset.test.mjs
+          mise exec -- pnpm --filter @umiak/template-builder typecheck
+          mise exec -- pnpm --filter @umiak/template-builder test
+      - name: Build the generic agent (outer image authority only; no update signing key)
+        if: inputs.action == 'build'
+        run: |
+          mkdir -p "$(dirname "$LAYER_AGENT_BINARY")"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 mise exec -- go -C services/guest-agent build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=$LAYER_AGENT_VERSION" -o "$LAYER_AGENT_BINARY" ./cmd/umiak-agent
+      - name: Capture inputs and prove fresh replay with no NIC (both products, sequentially)
+        if: inputs.action == 'build'
+        run: mise exec -- node infra/templates/release-layers.mjs build
+      - name: Materialize recipe key only after replay and policy gates pass
+        if: inputs.action == 'build'
+        run: |
+          umask 077
+          mise exec -- node --input-type=module <<'JS'
+          import {mkdirSync,writeFileSync} from 'node:fs';
+          import {dirname} from 'node:path';
+          mkdirSync(dirname(process.env.RECIPE_SIGNING_KEY_FILE),{recursive:true,mode:0o700});
+          const key=${{ toJSON(secrets.RECIPE_SIGNING_KEY) }};
+          if(!key)throw Error('RECIPE_SIGNING_KEY is required to sign the verified layer metadata');
+          writeFileSync(process.env.RECIPE_SIGNING_KEY_FILE,key,{mode:0o600});
+          JS
+      - name: Sign exact metadata and inventories with the existing recipe authority
+        if: inputs.action == 'build'
+        run: mise exec -- node infra/templates/release-layers.mjs sign
+      - name: Upload immutable artifacts, anonymously verify, then advance the selected channel
+        if: inputs.action == 'build' && inputs.publish
+        run: mise exec -- node infra/templates/release-layers.mjs publish
+      - name: Record measured sizes and offline timings
+        if: inputs.action == 'build' && success()
+        run: |
+          mise exec -- node --input-type=module <<'JS'
+          import {readFileSync,appendFileSync,existsSync} from 'node:fs';
+          import {join} from 'node:path';
+          const measurements=JSON.parse(readFileSync(join(process.env.LAYER_OUTPUT,'measurements.json')));
+          const lines=['| Product | Base MiB | Layer MiB | Source MiB | Source capture | Offline replay | Download at 20 / 100 Mbit/s |','|---|---:|---:|---:|---:|---:|---:|'];
+          for(const m of measurements)lines.push(`| ${m.slug} | ${(m.baseBytes/1048576).toFixed(1)} | ${(m.layerCompressedBytes/1048576).toFixed(1)} | ${(m.sourceBytes/1048576).toFixed(1)} | ${(m.sourceCaptureMs/1000).toFixed(0)} s | ${(m.replayMs/1000).toFixed(0)} s | ${m.downloadAt20MbitSeconds} / ${m.downloadAt100MbitSeconds} s |`);
+          const publicationFile=join(process.env.LAYER_OUTPUT,'publication.json');
+          if(existsSync(publicationFile))for(const p of JSON.parse(readFileSync(publicationFile)))lines.push(`${p.slug} ${p.kind} ${p.phase}: ${(p.durationMs/1000).toFixed(0)} s`);
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY,lines.join('\n')+'\n\nDownload figures are bandwidth-only estimates, excluding retries. PVE replay/import, vendor and S21 timings require the live stand run.\n');
+          JS
+      - name: Retain signed controls and measurements (no base disk or credentials)
+        if: inputs.action == 'build' && success()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: linux-layer-controls-${{ inputs.version }}
+          retention-days: 7
+          path: |
+            ${{ env.LAYER_OUTPUT }}/measurements.json
+            ${{ env.LAYER_OUTPUT }}/publication.json
+            ${{ env.LAYER_OUTPUT }}/linux/*.json
+            ${{ env.LAYER_OUTPUT }}/linux/*.sig
+            ${{ env.LAYER_OUTPUT }}/linux/verify.sh
+            ${{ env.LAYER_OUTPUT }}/linux-desktop/*.json
+            ${{ env.LAYER_OUTPUT }}/linux-desktop/*.sig
+            ${{ env.LAYER_OUTPUT }}/linux-desktop/verify.sh
+      - name: Remove file-only credentials
+        if: always()
+        run: |
+          mise exec -- node --input-type=module <<'JS'
+          import {rm} from 'node:fs/promises';
+          import {dirname} from 'node:path';
+          await rm(dirname(process.env.RECIPE_SIGNING_KEY_FILE),{recursive:true,force:true});
+          JS
