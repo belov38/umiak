@@ -92,6 +92,18 @@ const workerSchema = z.object({
 	UMIAK_LOG_LEVEL: logLevel,
 	UMIAK_DB_POOL_MAX: int(30, 2, 1000),
 	UMIAK_PORT_DOMAIN: optional,
+	UMIAK_API_URL: z.preprocess(
+		unsetEmpty,
+		z
+			.url()
+			.refine((v) => {
+				const u = new URL(v);
+				return (
+					["http:", "https:"].includes(u.protocol) && !u.username && !u.password
+				);
+			}, "must be a public HTTP(S) API URL")
+			.optional(),
+	),
 	UMIAK_SSH_USER_CA_KEYS_FILE: optional,
 });
 
@@ -123,6 +135,7 @@ const adminSchema = z.object({
 });
 
 export interface WorkerEnv {
+	publicApiUrl?: string;
 	databaseUrl: string;
 	dataKeysFile: string;
 	secretsDir: string;
@@ -177,6 +190,9 @@ export function parseWorkerEnv(env: Env = process.env): WorkerEnv {
 		logLevel: e.UMIAK_LOG_LEVEL,
 		dbPoolMax: e.UMIAK_DB_POOL_MAX,
 		portDomain: e.UMIAK_PORT_DOMAIN,
+		...(e.UMIAK_API_URL
+			? { publicApiUrl: e.UMIAK_API_URL.replace(/\/+$/, "") }
+			: {}),
 		sshUserCaKeysFile: e.UMIAK_SSH_USER_CA_KEYS_FILE,
 	};
 }

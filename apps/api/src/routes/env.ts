@@ -145,7 +145,11 @@ async function deliver(
 	try {
 		// Each mutating agent call gets its own request id (S7 §5.7).
 		if (changed.env) {
-			await deps.agent.updateEnv(s.machineId, sets.env, randomUUID());
+			await deps.agent.updateEnv(
+				s.machineId,
+				{ UMIAK_API_URL: deps.settings.apiUrl, ...sets.env },
+				randomUUID(),
+			);
 		}
 		if (changed.secrets) {
 			// A lost response may still have written files. Record uncertainty
