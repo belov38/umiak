@@ -8,6 +8,7 @@ import json
 import os
 import socket
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -26,18 +27,35 @@ class CommandError(Exception):
         self.stderr = stderr
 
 
+PCT_EXEC_ATTEMPTS = 3
+SIGHUP_EXIT = 129
+RETRY_DELAY_S = 1.0
+
+
 class Runner:
-    def __init__(self, root: Path = Path("/")):
+    def __init__(self, root: Path = Path("/"), sleep=time.sleep):
         self.root = Path(root)
+        self.sleep = sleep
 
     def run(self, argv: list[str], input: str | None = None) -> str:
         argv = list(argv)
         if not argv or not all(isinstance(part, str) for part in argv):
             raise TypeError("argv must be a non-empty list of strings")
-        try:
-            result = subprocess.run(argv, input=input, text=True, capture_output=True, check=False)
-        except FileNotFoundError as error:
-            raise CommandError(argv, 127, "", str(error)) from error
+        # Retry `pct exec` only when lxc-attach itself was hung up (128 + SIGHUP);
+        # installer commands in the CT are idempotent, so a repeat is safe.
+        attempts = PCT_EXEC_ATTEMPTS if argv[:2] == ["pct", "exec"] else 1
+        for attempt in range(attempts):
+            try:
+                # Never inherit the installer's terminal: with a tty on stdin,
+                # lxc-attach allocates a pty and can be hung up (exit 129) even
+                # though the command inside the CT succeeded.
+                result = subprocess.run(argv, input=input, stdin=None if input is not None else subprocess.DEVNULL,
+                                        text=True, capture_output=True, check=False)
+            except FileNotFoundError as error:
+                raise CommandError(argv, 127, "", str(error)) from error
+            if result.returncode != SIGHUP_EXIT or attempt == attempts - 1:
+                break
+            self.sleep(RETRY_DELAY_S)
         if result.returncode != 0:
             raise CommandError(argv, result.returncode, result.stdout, result.stderr)
         return result.stdout.strip()
