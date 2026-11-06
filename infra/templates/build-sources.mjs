@@ -58,14 +58,26 @@ async function githubJSON(path) {
 		}
 	}
 	for (let attempt = 0; attempt < 4; attempt++) {
-		const response = await fetch(`https://api.github.com/${path}`, {
-			redirect: "error",
-			signal: AbortSignal.timeout(30000),
-			headers: {
-				Accept: "application/vnd.github+json",
-				...(authorization ? { Authorization: authorization } : {}),
-			},
-		});
+		// Renamed or transferred repositories answer 301 to /repositories/<id>/...
+		// Follow only same-origin API redirects; content stays pinned by commit SHA.
+		let url = new URL(`https://api.github.com/${path}`);
+		let response;
+		for (let hop = 0; ; hop++) {
+			response = await fetch(url, {
+				redirect: "manual",
+				signal: AbortSignal.timeout(30000),
+				headers: {
+					Accept: "application/vnd.github+json",
+					...(authorization ? { Authorization: authorization } : {}),
+				},
+			});
+			if (![301, 302, 307, 308].includes(response.status)) break;
+			await response.body?.cancel();
+			const next = new URL(response.headers.get("location") || "", url);
+			if (next.origin !== "https://api.github.com" || hop >= 4)
+				throw Error(`GitHub source metadata redirect refused: ${path}`);
+			url = next;
+		}
 		if (response.ok) {
 			const bytes = Buffer.from(await response.arrayBuffer());
 			if (bytes.length > 16 * 1024 ** 2)
