@@ -85,7 +85,13 @@ it("dry-runs capture cloud-init without interface-name assumptions and preserves
 	expect(config.output.all).toContain("/dev/ttyS0");
 	expect(parse(String(seed.get("network-config")))).toEqual({
 		version: 2,
-		ethernets: { capture: { match: { macaddress: CAPTURE_MAC }, dhcp4: true } },
+		ethernets: {
+			capture: {
+				match: { macaddress: CAPTURE_MAC },
+				"set-name": "capture0",
+				dhcp4: true,
+			},
+		},
 	});
 	const offline = new Map<string, string | Buffer>([
 		["user-data", "#cloud-config\nusers: []\n"],

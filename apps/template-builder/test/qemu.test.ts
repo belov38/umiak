@@ -139,7 +139,7 @@ it("closes QGA file handles even when reads fail", async () => {
 	expect(calls.at(-1)).toBe("guest-file-close");
 });
 
-it("records a serial console and pairs capture DHCP identity with network-stage NoCloud", async () => {
+it("records a serial console and pairs capture DHCP identity with local-seed NoCloud", async () => {
 	const { CAPTURE_MAC } = await import("../src/qemu.ts");
 	const options = {
 		disk: "/tmp/disk",
@@ -152,7 +152,7 @@ it("records a serial console and pairs capture DHCP identity with network-stage 
 	const args = qemuArguments(options);
 	expect(args).toContain("file:/tmp/serial.log");
 	expect(args).toContain(`user,model=virtio-net-pci,mac=${CAPTURE_MAC}`);
-	expect(args).toContain("type=1,serial=ds=nocloud;dsmode=net");
+	expect(args).toContain("type=1,serial=ds=nocloud;dsmode=local");
 	expect(qemuArguments({ ...options, network: false })).toContain(
 		"type=1,serial=ds=nocloud;dsmode=local",
 	);

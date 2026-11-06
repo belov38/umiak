@@ -292,7 +292,7 @@ export function qemuArguments(o: {
 			? ["-drive", `file=${o.layer},format=raw,if=virtio,readonly=on`]
 			: []),
 		"-smbios",
-		`type=1,serial=ds=nocloud;dsmode=${o.network ? "net" : "local"}`,
+		"type=1,serial=ds=nocloud;dsmode=local",
 		...(o.network
 			? ["-nic", `user,model=virtio-net-pci,mac=${CAPTURE_MAC}`]
 			: ["-nic", "none"]),
@@ -418,6 +418,11 @@ export class QemuVM {
 			if (this.process.exitCode !== null || this.process.signalCode !== null)
 				throw Error(
 					`QEMU exited: ${this.diagnostic}\nSerial tail:\n${serialTail(join(this.diagnosticsDirectory, "serial.log"))}`,
+				);
+			const serial = serialTail(join(this.diagnosticsDirectory, "serial.log"));
+			if (serial.includes("UMIAK_CAPTURE_NETWORK_FAILED"))
+				throw Error(
+					`Capture network bootstrap failed before apt; stopping VM.\n${serial}`,
 				);
 			if (await this.guest.ping()) return;
 			await sleep(500);

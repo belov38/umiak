@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, readFileSync } from "node:fs";
 import {
 	cp,
 	lstat,
@@ -53,6 +53,29 @@ export function qemuBootSeed(
 		"-c",
 		"echo UMIak-boot-diagnostics; cat /proc/cmdline; ip -br address; ip route; cat /etc/resolv.conf; lsblk -f; true",
 	]);
+	if (online) {
+		const check = readFileSync(
+			new URL(
+				"../../../infra/templates/linux/capture-network-check.sh",
+				import.meta.url,
+			),
+			"utf8",
+		);
+		config.bootcmd.push([
+			"bash",
+			"-euc",
+			`mkdir -p /usr/local/lib/umiak-build
+cat > /usr/local/lib/umiak-build/capture-network-check <<'UMIAK_NETWORK_CHECK'
+${check}
+UMIAK_NETWORK_CHECK
+chmod 0755 /usr/local/lib/umiak-build/capture-network-check
+cat > /etc/apt/apt.conf.d/00umiak-network-check <<'UMIAK_APT_CHECK'
+APT::Update::Pre-Invoke { "/usr/local/lib/umiak-build/capture-network-check"; };
+DPkg::Pre-Invoke { "/usr/local/lib/umiak-build/capture-network-check"; };
+UMIAK_APT_CHECK
+`,
+		]);
+	}
 	seed.set("user-data", `#cloud-config\n${stringify(config)}`);
 	if (online)
 		seed.set(
@@ -60,7 +83,11 @@ export function qemuBootSeed(
 			stringify({
 				version: 2,
 				ethernets: {
-					capture: { match: { macaddress: CAPTURE_MAC }, dhcp4: true },
+					capture: {
+						match: { macaddress: CAPTURE_MAC },
+						"set-name": "capture0",
+						dhcp4: true,
+					},
 				},
 			}),
 		);
@@ -294,6 +321,19 @@ export async function captureLayer(
 		o.signal?.addEventListener("abort", stop, { once: true });
 		try {
 			await vm.ready(20 * 60_000);
+			const networkProof = await must(vm.guest, [
+				"bash",
+				"-euc",
+				`/usr/local/lib/umiak-build/capture-network-check
+networkctl status capture0 --no-pager
+cat /run/systemd/netif/leases/*
+grep -h '^ADDRESS=10.0.2.' /run/systemd/netif/leases/*
+`,
+			]);
+			await writeFile(
+				join(diagnosticsDirectory, "dhcp-lease.log"),
+				networkProof,
+			);
 			await runLayerRecipe(vm.guest, recipe, {
 				mode: "capture",
 				log: o.log,

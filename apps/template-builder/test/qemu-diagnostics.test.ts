@@ -55,6 +55,13 @@ it("retains QMP events, stderr and serial context when QGA cannot bootstrap", as
 		expect(readFileSync(join(root, "logs/qemu-stderr.log"), "utf8")).toContain(
 			"fixture QEMU stderr",
 		);
+		writeFileSync(
+			join(root, "logs/serial.log"),
+			"network diagnostics\nUMIAK_CAPTURE_NETWORK_FAILED\n",
+		);
+		await expect(vm.ready(1000)).rejects.toThrow(
+			"Capture network bootstrap failed before apt",
+		);
 		vi.spyOn(vm.guest, "ping").mockResolvedValue(true);
 		vi.spyOn(vm.guest, "readFile").mockResolvedValue(
 			Buffer.from("cloud-init trace\n"),
