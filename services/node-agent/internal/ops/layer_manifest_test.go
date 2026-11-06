@@ -49,6 +49,7 @@ func TestLayerManifestLocalStagedProvenance(t *testing.T) {
 		t.Fatal(e)
 	}
 	verification := value["verification"].(map[string]any)
+	verification["aptCacheProxyUsed"] = true
 	verification["buildHost"] = "local-staged"
 	verification["approvedSha"] = value["sourceCommit"]
 	public, private, e := ed25519.GenerateKey(rand.Reader)
@@ -72,5 +73,33 @@ func TestLayerManifestLocalStagedProvenance(t *testing.T) {
 		if (e == nil) != valid {
 			t.Fatalf("local provenance valid=%v: %v", valid, e)
 		}
+	}
+}
+
+func TestLayerManifestRejectsProxyURLInsteadOfBoolean(t *testing.T) {
+	data, e := os.ReadFile("../../../../infra/templates/testdata/layers/manifest.fixture")
+	if e != nil {
+		t.Fatal(e)
+	}
+	var value map[string]any
+	if e = json.Unmarshal(data, &value); e != nil {
+		t.Fatal(e)
+	}
+	value["verification"].(map[string]any)["aptCacheProxyUsed"] = "http://192.0.2.1:3142"
+	public, private, e := ed25519.GenerateKey(rand.Reader)
+	if e != nil {
+		t.Fatal(e)
+	}
+	der, e := x509.MarshalPKIXPublicKey(public)
+	if e != nil {
+		t.Fatal(e)
+	}
+	key := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
+	b, e := json.Marshal(value)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = verifyLayerManifest(b, ed25519.Sign(private, b), []string{key}, "0.1.0", "0.1.0", "stable", "linux"); e == nil {
+		t.Fatal("accepted URL in proxy provenance")
 	}
 }

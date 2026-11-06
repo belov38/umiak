@@ -18,6 +18,7 @@ const sha = (b) => createHash("sha256").update(b).digest("hex");
 test("staged provenance is signed and cannot claim another approved SHA", () => {
 	const m = layerFixture(),
 		keys = generateKeyPairSync("ed25519");
+	m.verification.aptCacheProxyUsed = true;
 	m.verification.buildHost = "local-staged";
 	m.verification.approvedSha = m.sourceCommit;
 	const args = {
@@ -32,6 +33,9 @@ test("staged provenance is signed and cannot claim another approved SHA", () => 
 		JSON.parse(signLayerMetadata(args).bytes).verification.buildHost,
 		"local-staged",
 	);
+	m.verification.aptCacheProxyUsed = "http://192.0.2.1:3142";
+	assert.throws(() => signLayerMetadata(args), /proxy provenance/);
+	m.verification.aptCacheProxyUsed = true;
 	m.verification.approvedSha = "b".repeat(40);
 	assert.throws(() => signLayerMetadata(args), /provenance/);
 });

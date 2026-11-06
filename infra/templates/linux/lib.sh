@@ -87,6 +87,10 @@ apt_snapshot() {
  if [ "${UMIAK_LAYER_MODE:-}" = replay ]; then return 0; fi
 	local ts=$1 f=${2:-/etc/apt/sources.list.d/ubuntu.sources}
 	[ -f "$f" ] || die "$f not found"
+ if [ "${UMIAK_LAYER_MODE:-}" = capture ] && [ -f /etc/apt/apt.conf.d/98umiak-build-proxy ] && [ -n "$ts" ]; then
+  python3 -I "$UMIAK_BUILD_DIR/build-apt-proxy.py" sources "$ts" "$f"
+  return 0
+ fi
 	awk -v ts="$ts" '
 function flush() {
   for (i = 1; i <= n; i++) print buf[i]
@@ -101,6 +105,17 @@ END { flush() }
 ' "$f" >"$f.new"
 	cat "$f.new" >"$f"
 	rm -f "$f.new"
+}
+
+# Only the disposable capture VM rewrites these apt remap URLs; replay has no proxy.
+apt_capture_uri() {
+ local uri=$1
+ if [ "${UMIAK_LAYER_MODE:-}" = capture ] && [ -f /etc/apt/apt.conf.d/98umiak-build-proxy ]; then
+  case "$uri" in
+   https://download.docker.com/linux/ubuntu*|https://ppa.launchpadcontent.net/xtradeb/apps/ubuntu*) uri="http://${uri#https://}" ;;
+  esac
+ fi
+ printf '%s\n' "$uri"
 }
 
 # fetch_verify <url> <sha256> <out>: downloads url to out unless out already

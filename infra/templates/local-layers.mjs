@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { validateBuildAptProxy } from "../../apps/template-builder/src/build-apt-proxy.ts";
 import {
 	AnonymousOCI,
 	OCI_REPOSITORIES,
@@ -25,6 +26,7 @@ const temporary = await mkdtemp(join(tmpdir(), "umiak-local-layers-"));
 try {
 	if (action === "build") {
 		const agentVersion = arg;
+		const aptProxy = validateBuildAptProxy(process.env.UMIAK_BUILD_APT_PROXY);
 		if (!/^\d+\.\d+\.\d+(?:-edge\.\d{8}\.\d+)?$/.test(agentVersion || ""))
 			throw Error("Usage: local-layers.mjs build VERSION AGENT_VERSION OUTPUT");
 		if ((await exec("git", ["status", "--porcelain"])).stdout.trim())
@@ -59,7 +61,13 @@ try {
 		if (process.env.ORAS_TOKEN_FILE)
 			process.env.LAYER_GITHUB_TOKEN_FILE = process.env.ORAS_TOKEN_FILE;
 		const { buildLayerRelease } = await import("./build-layers.mjs");
-		await buildLayerRelease({ output, version, channel, sourceCommit });
+		await buildLayerRelease({
+			output,
+			version,
+			channel,
+			sourceCommit,
+			aptProxy,
+		});
 		for (const slug of ["linux", "linux-desktop"])
 			await stagingLayout(join(output, slug), version);
 		console.log(

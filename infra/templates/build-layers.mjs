@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { validateBuildAptProxy } from "../../apps/template-builder/src/build-apt-proxy.ts";
 import {
 	defaultDownloadFetch,
 	fetchBaseImage,
@@ -38,6 +39,7 @@ const exec = promisify(execFile);
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 export async function buildLayerRelease(o) {
+	const aptProxy = validateBuildAptProxy(o.aptProxy);
 	const output = resolve(o.output);
 	try {
 		await lstat(output);
@@ -70,6 +72,7 @@ export async function buildLayerRelease(o) {
 					}
 				: {}),
 			slug,
+			...(aptProxy ? { aptProxy } : {}),
 			version: o.version,
 			templatesDir: resolve("infra/templates"),
 			outputDir: directory,
@@ -216,7 +219,11 @@ export async function buildLayerRelease(o) {
 				sha256: hash(inventoryBytes),
 				sizeBytes: inventoryBytes.length,
 			},
-			verification: { ok: true, offlineReplay: true },
+			verification: {
+				ok: true,
+				offlineReplay: true,
+				...(aptProxy ? { aptCacheProxyUsed: true } : {}),
+			},
 		};
 		await writeFile(
 			join(product, "manifest.draft.json"),

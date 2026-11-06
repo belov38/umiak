@@ -20,9 +20,10 @@ fprs=$(gpg_primary_fprs "$key.part") || die "cannot read the Docker key file"
 chmod 0644 "$key.part"
 mv "$key.part" "$key"
 
+docker_uri=$(apt_capture_uri https://download.docker.com/linux/ubuntu)
 cat >/etc/apt/sources.list.d/docker.sources <<EOF
 Types: deb
-URIs: https://download.docker.com/linux/ubuntu
+URIs: $docker_uri
 Suites: resolute
 Components: stable
 Architectures: amd64

@@ -17,6 +17,7 @@ import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { parse, stringify } from "yaml";
 import { layerRecipeDescriptor } from "../../../infra/templates/layer-recipe.mjs";
+import { validateBuildAptProxy } from "./build-apt-proxy.ts";
 import { defaultDownloadFetch, fetchBaseImage } from "./image.ts";
 import {
 	type CapturedFile,
@@ -44,7 +45,11 @@ const exec = promisify(execFile);
 export function qemuBootSeed(
 	seed: Map<string, string | Buffer>,
 	online: boolean,
+	proxyOptions?: { url: string; snapshot: string },
 ): void {
+	const proxy = validateBuildAptProxy(proxyOptions?.url);
+	if (proxy && !online)
+		throw Error("Build apt proxy is forbidden on offline replay");
 	const config = parse(String(seed.get("user-data")));
 	config.output = { all: "| tee -a /var/log/cloud-init-output.log /dev/ttyS0" };
 	config.bootcmd ??= [];
@@ -76,7 +81,22 @@ UMIAK_APT_CHECK
 `,
 		]);
 	}
-	seed.set("user-data", `#cloud-config\n${stringify(config)}`);
+	if (proxy) {
+		if (!/^\d{8}T\d{6}Z$/.test(proxyOptions?.snapshot ?? ""))
+			throw Error("Invalid apt proxy snapshot");
+		config.bootcmd.push([
+			"python3",
+			"-I",
+			"/mnt/seed/build/build-apt-proxy.py",
+			"configure",
+			proxyOptions?.snapshot,
+			proxy,
+		]);
+	}
+	seed.set(
+		"user-data",
+		`#cloud-config\n${stringify(config, proxy ? { defaultStringType: "QUOTE_DOUBLE", defaultKeyType: "PLAIN" } : {})}`,
+	);
 	if (online)
 		seed.set(
 			"network-config",
@@ -214,6 +234,7 @@ export interface LayerCaptureOptions {
 	updateKeysFile: string;
 	umiakCli?: string;
 	diagnosticsDirectory?: string;
+	aptProxy?: string;
 	afterCapture?: (capture: LayerCapture, guest: GuestIo) => Promise<void>;
 	signal?: AbortSignal;
 	log: (text: string) => void;
@@ -267,6 +288,7 @@ export async function captureLayer(
 		!["linux", "linux-desktop"].includes(o.slug)
 	)
 		throw Error("Invalid offline layer release identity");
+	const aptProxy = validateBuildAptProxy(o.aptProxy);
 	const recipe = loadRecipe(o.templatesDir, o.slug, "linux");
 	const versions = loadVersions(recipe);
 	const verify = loadVerifyScript(o.templatesDir, recipe.verify, "linux");
@@ -304,7 +326,11 @@ export async function captureLayer(
 			...(o.umiakCli ? { umiakCli: o.umiakCli } : {}),
 		});
 		seed.set("build/verify.sh", verify);
-		qemuBootSeed(seed, true);
+		qemuBootSeed(
+			seed,
+			true,
+			aptProxy ? { url: aptProxy, snapshot: versions.apt.snapshot } : undefined,
+		);
 		const diagnosticsDirectory =
 			o.diagnosticsDirectory ??
 			join(dirname(destination), "diagnostics", o.slug, "capture");

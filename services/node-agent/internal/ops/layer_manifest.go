@@ -74,10 +74,11 @@ type layerManifest struct {
 		Digest     string `json:"digest"`
 	} `json:"sources"`
 	Verification struct {
-		OK            bool   `json:"ok"`
-		BuildHost     string `json:"buildHost,omitempty"`
-		ApprovedSHA   string `json:"approvedSha,omitempty"`
-		OfflineReplay bool   `json:"offlineReplay"`
+		OK                bool   `json:"ok"`
+		AptCacheProxyUsed *bool  `json:"aptCacheProxyUsed,omitempty"`
+		BuildHost         string `json:"buildHost,omitempty"`
+		ApprovedSHA       string `json:"approvedSha,omitempty"`
+		OfflineReplay     bool   `json:"offlineReplay"`
 	} `json:"verification"`
 }
 

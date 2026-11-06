@@ -270,6 +270,7 @@ export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 			"generic-chromium.sh",
 			"generic-npm.sh",
 			"capture-bootstrap.sh",
+			"build-apt-proxy.py",
 			"capture-apt.py",
 			"capture-layer.sh",
 			"layer-inputs.json",

@@ -22,6 +22,10 @@ on:
         required: true
         type: string
         default: "0.4.0"
+      apt_proxy:
+        description: Optional dev-only HTTP apt cache reachable from the capture VM
+        type: string
+        default: ""
       publish:
         description: Explicitly authorize public OCI uploads (default builds and signs locally only)
         type: boolean
@@ -51,6 +55,7 @@ jobs:
       LAYER_AGENT_VERSION: ${{ inputs.agent_version }}
       LAYER_PUBLISH: ${{ inputs.publish }}
       LAYER_APPROVED_SHA: ${{ inputs.approved_sha }}
+      UMIAK_BUILD_APT_PROXY: ${{ inputs.apt_proxy }}
       LAYER_SEQUENCE: ${{ github.run_number }}
     steps:
       # The runner context is not available in job-level env; derive the paths here.

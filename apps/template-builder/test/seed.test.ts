@@ -451,6 +451,7 @@ it("generic seed carries stable browser/tool pins and offline bootstrap without 
 	);
 	expect(text(files, "build/env")).toContain("UMIAK_LAYER_MODE='capture'");
 	expect(files.has("build/offline-bootstrap.sh")).toBe(true);
+	expect(files.has("build/build-apt-proxy.py")).toBe(true);
 	expect(files.has("build/generic-chromium.sh")).toBe(true);
 	expect(files.has("build/xtradeb-apps.asc")).toBe(true);
 	const pins = JSON.parse(text(files, "build/layer-inputs.json"));

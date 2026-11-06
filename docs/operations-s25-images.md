@@ -266,3 +266,15 @@ networkctl, rendered network files, netplan and cloud-init status to serial. The
 host detects the failure marker and stops the VM promptly. Successful capture
 records the slirp lease and address in `dhcp-lease.log` (the network has no static
 address configuration). No separate boot-smoke action is needed for local acceptance.
+
+
+For a dev-only apt cache during **online capture**, prefix the local build command
+with `UMIAK_BUILD_APT_PROXY=http://192.168.68.128:3142` (or set the hosted workflow's
+optional `apt_proxy` input to a reachable HTTP proxy). It is an HTTP origin with no
+credentials, path, query or fragment. Bootstrap QGA apt and recipe apt use explicit
+pinned snapshot HTTP URIs, no `Snapshot:` discovery field, plus Docker/xtradeb HTTP
+remaps; upstream signatures, Signed-By keys and package hashes stay mandatory.
+The endpoint is runtime capture configuration, never a layer input or replay
+setting. Restored source definitions use canonical HTTPS. Signed metadata records
+only `verification.aptCacheProxyUsed: true`; unset builds retain the normal path.
+Host-side source-companion collection still uses canonical HTTPS directly.

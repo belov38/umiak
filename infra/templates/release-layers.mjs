@@ -370,7 +370,11 @@ async function command() {
 	}
 	if (mode === "build") {
 		const { buildLayerRelease } = await import("./build-layers.mjs");
-		await buildLayerRelease({ ...request, output });
+		await buildLayerRelease({
+			...request,
+			output,
+			aptProxy: process.env.UMIAK_BUILD_APT_PROXY,
+		});
 		return;
 	}
 	if (

@@ -196,10 +196,18 @@ export function validateImageManifest(m, options) {
 	object(m.verification, [
 		"ok",
 		"offlineReplay",
+		...(m.verification.aptCacheProxyUsed === undefined
+			? []
+			: ["aptCacheProxyUsed"]),
 		...(m.verification.buildHost === undefined
 			? []
 			: ["buildHost", "approvedSha"]),
 	]);
+	if (m.verification.aptCacheProxyUsed !== undefined)
+		check(
+			typeof m.verification.aptCacheProxyUsed === "boolean",
+			"Invalid build proxy provenance",
+		);
 	if (m.verification.buildHost !== undefined)
 		check(
 			m.verification.buildHost === "local-staged" &&

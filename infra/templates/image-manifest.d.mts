@@ -35,6 +35,7 @@ export interface ImageManifest {
 	verification: {
 		ok: true;
 		offlineReplay: true;
+		aptCacheProxyUsed?: boolean;
 		buildHost?: "local-staged";
 		approvedSha?: string;
 	};

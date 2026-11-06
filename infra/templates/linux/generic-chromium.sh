@@ -16,9 +16,10 @@ if [ "${UMIAK_LAYER_MODE:-}" = replay ]; then
 else
  install -D -m 0644 "$UMIAK_BUILD_DIR/xtradeb-apps.asc" /etc/apt/keyrings/xtradeb-apps.asc
  [ "$(gpg_primary_fprs /etc/apt/keyrings/xtradeb-apps.asc)" = "$fpr" ] || die 'xtradeb key fingerprint mismatch'
- cat >/etc/apt/sources.list.d/xtradeb.sources <<'SOURCE'
+ chromium_uri=$(apt_capture_uri https://ppa.launchpadcontent.net/xtradeb/apps/ubuntu/)
+ cat >/etc/apt/sources.list.d/xtradeb.sources <<SOURCE
 Types: deb
-URIs: https://ppa.launchpadcontent.net/xtradeb/apps/ubuntu/
+URIs: $chromium_uri
 Suites: resolute
 Components: main
 Architectures: amd64

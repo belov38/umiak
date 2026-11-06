@@ -11,6 +11,11 @@ it("publishes only manually behind the reviewed SHA gate, with file-only secrets
 	const workflow = parse(source);
 	expect(Object.keys(workflow.on)).toEqual(["workflow_dispatch"]);
 	expect(workflow.on.workflow_dispatch.inputs.publish.default).toBe(false);
+	expect(workflow.on.workflow_dispatch.inputs.apt_proxy.default).toBe("");
+	expect(workflow.jobs.layers.env.UMIAK_BUILD_APT_PROXY).toBe(
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub expression, not JavaScript interpolation.
+		"${{ inputs.apt_proxy }}",
+	);
 	expect(workflow.jobs.layers.permissions.packages).toBe("write");
 	expect(workflow.jobs.layers.env).not.toHaveProperty("GITHUB_TOKEN");
 	expect(workflow.jobs.layers.env).not.toHaveProperty("RECIPE_SIGNING_KEY");

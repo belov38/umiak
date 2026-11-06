@@ -75,13 +75,21 @@ snapshot_ids = {
     for line in Path('/etc/apt/sources.list.d/ubuntu.sources').read_text().splitlines()
     if line.startswith('Snapshot:')
 }
+# A capture-only cache proxy uses an explicit pinned URI instead of apt 3 discovery.
+for line in Path('/etc/apt/sources.list.d/ubuntu.sources').read_text().splitlines():
+    if line.startswith('URIs:'):
+        for uri in line.split(':', 1)[1].split():
+            match = re.fullmatch(r'https?://snapshot\.ubuntu\.com/ubuntu/(\d{8}T\d{6}Z)/?', uri)
+            if match:
+                snapshot_ids.add(match.group(1))
 if len(snapshot_ids) != 1:
     raise ValueError('expected exactly one pinned Ubuntu apt snapshot')
-snapshot_base = f'https://snapshot.ubuntu.com/ubuntu/{snapshot_ids.pop()}/'
+snapshot_id = snapshot_ids.pop()
+snapshot_bases = tuple(f'{scheme}://snapshot.ubuntu.com/ubuntu/{snapshot_id}/' for scheme in ('https', 'http'))
 
 
 def live_ubuntu_discovery(target):
-    return target.get('origin') == 'Ubuntu' and not target.get('base-uri', '').startswith(snapshot_base)
+    return target.get('origin') == 'Ubuntu' and not target.get('base-uri', '').startswith(snapshot_bases)
 
 
 releases = {}
@@ -195,6 +203,12 @@ for tool in ('runc','containerd','dockerd'):
 after = root / 'build/apt-after'
 after.mkdir(parents=True, exist_ok=True)
 for p in Path('/etc/apt/sources.list.d').glob('*.sources'):
-    shutil.copyfile(p, after / p.name)
+    if not Path('/etc/apt/apt.conf.d/98umiak-build-proxy').is_file():
+        shutil.copyfile(p, after / p.name)
+        continue
+    text = p.read_text()
+    for repository in ('snapshot.ubuntu.com/ubuntu/', 'download.docker.com/linux/ubuntu', 'ppa.launchpadcontent.net/xtradeb/apps/ubuntu'):
+        text = text.replace('http://' + repository, 'https://' + repository)
+    (after / p.name).write_text(text)
 for p in Path('/etc/apt/preferences.d').glob('*'):
     if p.is_file(): shutil.copyfile(p, after / (p.name + '.pref'))
