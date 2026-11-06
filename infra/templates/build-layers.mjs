@@ -30,6 +30,7 @@ import { buildSourceCompanion } from "./build-sources.mjs";
 import { layerInventory } from "./layer-inventory.mjs";
 import {
 	collectAgentNotices,
+	collectNpmUpstreamNotices,
 	collectUpstreamNotices,
 	dockerLicenseReferences,
 } from "./layer-notices.mjs";
@@ -98,8 +99,9 @@ export async function buildLayerRelease(o) {
 		const packages = JSON.parse(
 			await readFile(join(directory, "licenses/packages.json"), "utf8"),
 		);
-		const npm = JSON.parse(
-			await readFile(join(directory, "licenses/npm.json"), "utf8"),
+		const npm = await collectNpmUpstreamNotices(
+			directory,
+			JSON.parse(await readFile(join(directory, "licenses/npm.json"), "utf8")),
 		);
 		const fetches = (
 			await readFile(join(directory, "inputs/fetch.jsonl"), "utf8")

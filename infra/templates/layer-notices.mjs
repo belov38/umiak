@@ -255,3 +255,51 @@ export async function dockerLicenseReferences(capture, packages) {
 		notices: [...new Set(notices)],
 	};
 }
+
+/**
+ * Some npm tarballs (pnpm, the Codex CLI, node-pty prebuilds) ship no LICENSE
+ * file. Fetch the license text from the package's GitHub repository at a tag
+ * of that exact version (never a branch), hash it and attach it; fail when no
+ * tagged license exists.
+ */
+export async function collectNpmUpstreamNotices(directory, npm) {
+	const files = ["LICENSE", "LICENSE.md", "LICENSE.txt", "LICENCE", "COPYING"];
+	for (const p of npm) {
+		if (p.notices?.length) continue;
+		const repo = /github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?$/.exec(
+			String(p.repository?.url || p.repository || ""),
+		);
+		if (!repo)
+			throw Error(
+				`npm package without notices or GitHub repository: ${p.name}`,
+			);
+		// Platform packages carry a suffix (0.166.0-linux-x64); tags use the base version.
+		const base = String(p.version).replace(
+			/-(?:linux|darwin|win32)-[\w]+$/,
+			"",
+		);
+		const raw = "https://raw.githubusercontent.com";
+		let found;
+		search: for (const tag of [`v${base}`, base, `rust-v${base}`])
+			for (const name of files) {
+				const url = `${raw}/${repo[1]}/${repo[2]}/${tag}/${name}`;
+				const bytes = await downloadNotice(url, true);
+				if (bytes) {
+					found = { url, bytes };
+					break search;
+				}
+			}
+		if (!found)
+			throw Error(
+				`No tagged upstream license for npm package ${p.name}@${p.version}`,
+			);
+		const sha256 = createHash("sha256").update(found.bytes).digest("hex");
+		const path = `licenses/upstream/${sha256}.txt`;
+		await mkdir(join(directory, "licenses/upstream"), { recursive: true });
+		await writeFile(join(directory, path), found.bytes);
+		p.notices = [path];
+		p.noticeSource = found.url;
+	}
+	await writeFile(join(directory, "licenses/npm.json"), JSON.stringify(npm));
+	return npm;
+}
