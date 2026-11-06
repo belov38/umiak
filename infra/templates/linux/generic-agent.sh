@@ -16,4 +16,5 @@ ln -s "versions/$UMIAK_AGENT_VERSION" /usr/local/lib/umiak-agent/current
 ln -s /usr/local/lib/umiak-agent/current/umiak-agent /usr/local/bin/umiak-agent
 install -d -m 0755 /etc/umiak-template
 touch /etc/umiak-template/generic
+install -D -m 0644 "$UMIAK_BUILD_DIR/umiak-LICENSE" /usr/share/doc/umiak-agent/copyright
 systemctl daemon-reload

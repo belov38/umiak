@@ -6,6 +6,8 @@ python3 -I - <<'PY'
 import hashlib,json,os,shutil,stat
 from pathlib import Path
 root=Path('/var/lib/umiak-layer-capture')
+(root/'licenses/umiak').mkdir(parents=True,exist_ok=True)
+shutil.copyfile('/mnt/seed/build/umiak-LICENSE',root/'licenses/umiak/LICENSE')
 if (root/'inputs.jsonl').exists(): shutil.copyfile(root/'inputs.jsonl',root/'inputs/fetch.jsonl')
 # npm's package-lock preserves exact tarball URLs, integrity and all transitive versions.
 prefix=Path('/opt/umiak-npm')

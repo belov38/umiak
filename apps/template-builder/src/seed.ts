@@ -265,6 +265,8 @@ export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 		);
 		for (const name of [
 			"offline-bootstrap.sh",
+			"offline-cdp.sh",
+			"offline-cdp.py",
 			"generic-chromium.sh",
 			"generic-npm.sh",
 			"capture-bootstrap.sh",
@@ -278,6 +280,10 @@ export function renderSeed(i: SeedInput): Map<string, string | Buffer> {
 					new URL(`../../../infra/templates/linux/${name}`, import.meta.url),
 				),
 			);
+		out.set(
+			"build/umiak-LICENSE",
+			readFileSync(new URL("../../../LICENSE", import.meta.url)),
+		);
 		out.set(
 			"build/xtradeb-apps.asc",
 			readFileSync(

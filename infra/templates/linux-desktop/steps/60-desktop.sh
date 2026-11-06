@@ -92,4 +92,14 @@ else
  as_user xdg-settings set default-web-browser google-chrome.desktop
  update-alternatives --set x-www-browser /usr/bin/google-chrome-stable
 fi
+install -d -m 0755 /usr/share/doc/umiak-desktop
+install -m 0644 /usr/share/common-licenses/GPL-3 /usr/share/doc/umiak-desktop/GPL-3.0.txt
+cat >/usr/share/doc/umiak-desktop/SOURCES.txt <<SOURCES
+Sunshine v${sunshine}: https://github.com/LizardByte/Sunshine/tree/v${sunshine}
+Complete source: https://github.com/LizardByte/Sunshine/archive/refs/tags/v${sunshine}.tar.gz
+moonlight-web-stream v${moonlight}: https://github.com/MrCreativ3001/moonlight-web-stream/tree/v${moonlight}
+Complete source: https://github.com/MrCreativ3001/moonlight-web-stream/archive/refs/tags/v${moonlight}.tar.gz
+Both programs are distributed under GPLv3; retain their license and copyright notices.
+The signed layer inventory records the exact versions, notices and corresponding source locations.
+SOURCES
 log "desktop installed; session startup and streaming stay under agent control"

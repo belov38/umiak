@@ -15,6 +15,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { layerRecipeDescriptor } from "../../../infra/templates/layer-recipe.mjs";
 import { defaultDownloadFetch, fetchBaseImage } from "./image.ts";
 import {
 	type CapturedFile,
@@ -108,7 +109,14 @@ export async function runLayerRecipe(
 	await mountSeed(io, o.mode === "capture" ? "cidata" : "umiak-layer");
 	for (const step of recipe.steps) {
 		o.signal?.throwIfAborted();
-		if (o.mode === "capture" && step === "90-cleanup") break;
+		if (step === "90-cleanup") {
+			await runStep(io, {
+				name: "offline-browser",
+				script: "/mnt/seed/build/offline-cdp.sh",
+				log: o.log,
+			});
+			if (o.mode === "capture") break;
+		}
 		if (step === REBOOT_STEP) {
 			await rebootGuest(io, {
 				seedLabel: o.mode === "capture" ? "cidata" : "umiak-layer",
@@ -253,6 +261,10 @@ export async function captureLayer(
 			const raw = join(job, "raw");
 			await copyCapturedFiles(vm.guest, captureRoot, raw, files, o.signal);
 			const facts = await collectFacts(vm.guest, verify);
+			seed.set(
+				"build/layer-recipe.json",
+				layerRecipeDescriptor(recipe, versions, facts),
+			);
 			await mkdir(destination);
 			outputOwned = true;
 			for (const [path, bytes] of seed) {

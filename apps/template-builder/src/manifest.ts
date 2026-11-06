@@ -89,6 +89,15 @@ export interface Manifest {
 	buildId: string;
 	/** Durable control-plane job identity, absent for standalone CLI builds. */
 	nodeBuildJobId?: string;
+	/** Signed offline input release used to customize the official cloud base locally. */
+	offlineLayer?: {
+		version: string;
+		channel: "stable" | "edge";
+		manifestSha256: string;
+		inventorySha256: string;
+		sourceCommit: string;
+		verifyScript: string;
+	};
 	templateSlug: string;
 	/** YYYYMMDD.n */
 	version: string;

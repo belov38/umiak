@@ -548,6 +548,8 @@ class World {
 							}),
 						),
 					);
+				if (c0 === "bash" && c2.includes("umiak-offline-check"))
+					return ok("0.3.1\n");
 				if (c0 === "bash" && c2.includes("hello-world"))
 					return ok("\nHello from Docker!\nThis message shows ...\n");
 				if (c0 === "bash" && c2.includes("grubenv"))
@@ -973,4 +975,50 @@ describe("parseCheckLines: a broken TOOLS line", () => {
 			expect.objectContaining({ id: "verify_sh_tools", status: "FAIL" }),
 		]);
 	});
+});
+
+it("requires firmware trust for generic layer clones and verifies Docker without a pull", async () => {
+	const { w, deps } = setup();
+	deps.tunnelCAPin = "a".repeat(64);
+	const m = manifest();
+	m.offlineLayer = {
+		version: "20261106.1",
+		channel: "stable",
+		manifestSha256: "b".repeat(64),
+		inventorySha256: "c".repeat(64),
+		sourceCommit: "d".repeat(40),
+		verifyScript: VERIFY_SH,
+	};
+	const smbios: Smbios[] = [];
+	const create = w.machines.create,
+		fork = w.machines.fork;
+	deps.machines = {
+		...w.machines,
+		create: async (o) => {
+			smbios.push(o?.smbios as Smbios);
+			return create(o);
+		},
+		fork: async (s, o) => {
+			smbios.push(o?.smbios as Smbios);
+			return fork(s, o);
+		},
+	};
+	const result = await verifyTemplate(deps, m);
+	expect(result.ok).toBe(true);
+	expect(smbios).toHaveLength(2);
+	expect(smbios.every((s) => s.sku === `umiakca1:${"a".repeat(64)}`)).toBe(
+		true,
+	);
+	const scripts = w.execs.map((e) => e.cmd.join(" ")).join("\n");
+	expect(scripts).toContain("docker import");
+	expect(scripts).toContain("--pull=never");
+	expect(scripts).not.toContain("hello-world");
+	expect(
+		w.execs.some((e) => e.input?.includes("UMIAK_OFFLINE_TEMPLATE=1")),
+	).toBe(true);
+});
+it("permits absent proprietary CLIs only for generic offline template checks", () => {
+	const tools = { claude: { direct: "missing", login: "missing" } };
+	expect(failed(checkTools(tools, { claude: null }))).toEqual(["tool_claude"]);
+	expect(failed(checkTools(tools, { claude: null }, true))).toEqual([]);
 });

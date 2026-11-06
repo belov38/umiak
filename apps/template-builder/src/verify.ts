@@ -16,6 +16,7 @@ import {
 	type Smbios,
 	type SnapshotRef,
 	s2SerialPayload,
+	skuForTunnelCA,
 } from "@umiak/pve";
 import { guestSubnet } from "./guest-subnet.ts";
 import type {
@@ -82,6 +83,7 @@ export function defaultSecretFiles(
 }
 
 export interface VerifyDeps {
+	tunnelCAPin?: string;
 	/** S1 machines built with `templateVmid = manifest.pveVmid`. */
 	machines: Pick<
 		Machines,
@@ -242,7 +244,10 @@ const OPTIONAL_TOOLS = new Set(["umiak"]);
 export function checkTools(
 	tools: Record<string, { direct: string; login: string }>,
 	manifestTools: Record<string, string | null>,
+	offlineLayer = false,
 ): CheckResult[] {
+	const optional = (key: string) =>
+		OPTIONAL_TOOLS.has(key) || (offlineLayer && key === "claude");
 	const out: CheckResult[] = [];
 	for (const [key, built] of Object.entries(manifestTools)) {
 		const id = `tool_${key}`;
@@ -260,8 +265,8 @@ export function checkTools(
 			out.push(
 				pass(
 					id,
-					OPTIONAL_TOOLS.has(key),
-					OPTIONAL_TOOLS.has(key) ? "missing (as built)" : "missing",
+					optional(key),
+					optional(key) ? "missing (as built)" : "missing",
 				),
 			);
 		else if (t.direct.startsWith("error:")) out.push(pass(id, false, t.direct));
@@ -481,6 +486,13 @@ const FACTS_SCRIPT = [
 ].join("\n");
 
 const DOCKER_SCRIPT = "docker info >/dev/null && docker run --rm hello-world";
+const OFFLINE_DOCKER_SCRIPT = `set -euo pipefail
+docker info >/dev/null
+tar -C /usr/local/lib/umiak-agent/current -cf - umiak-agent | docker import --change 'ENTRYPOINT ["/umiak-agent"]' - umiak-offline-check:verify >/dev/null
+status=0
+docker run --rm --network=none --pull=never umiak-offline-check:verify version || status=$?
+docker image rm -f umiak-offline-check:verify >/dev/null
+exit "$status"`;
 
 function errorText(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
@@ -516,13 +528,21 @@ export async function verifyTemplate(
 	const { signal } = o;
 	const tunnelUrl = o.connect?.url ?? TEST_TUNNEL_URL;
 	const family = familyForTunnelUrl(tunnelUrl);
+	const sku = manifest.offlineLayer
+		? skuForTunnelCA(deps.tunnelCAPin ?? "")
+		: undefined;
 	const identity = () => {
 		const id = uuid();
 		const bs = randomBytes(32);
 		return {
 			uuid: id,
 			bs,
-			smbios: { uuid: id, serial: s2SerialPayload(id, bs), family },
+			smbios: {
+				uuid: id,
+				serial: s2SerialPayload(id, bs),
+				family,
+				...(sku ? { sku } : {}),
+			},
 		};
 	};
 
@@ -652,7 +672,7 @@ export async function verifyTemplate(
 
 		step("guest checks (verify.sh)");
 		const vs = await io.exec(["bash", "-s"], {
-			input: `export MACHINE_ID=${A.uuid}\nexport EXPECT_SUBNET=${guestSubnet()}\n${deps.verifyScript}`,
+			input: `export MACHINE_ID=${A.uuid}\nexport EXPECT_SUBNET=${guestSubnet()}\n${manifest.offlineLayer ? "export UMIAK_OFFLINE_TEMPLATE=1\n" : ""}${deps.verifyScript}`,
 			timeoutMs: VERIFY_SH_TIMEOUT_MS,
 		});
 		const parsed = parseCheckLines(vs.stdout);
@@ -669,7 +689,13 @@ export async function verifyTemplate(
 		if (k === "available") kvm = { available: true };
 		else if (k?.startsWith("unavailable: "))
 			kvm = { available: false, reason: k.slice("unavailable: ".length) };
-		add(...checkTools(parsed.tools, manifest.tools));
+		add(
+			...checkTools(
+				parsed.tools,
+				manifest.tools,
+				Boolean(manifest.offlineLayer),
+			),
+		);
 
 		step("agent (umiak-agent doctor)");
 		const dr = await io.exec(["umiak-agent", "doctor", "--json"]);
@@ -697,14 +723,26 @@ export async function verifyTemplate(
 				evidence: "skipped: no --connect-url",
 			});
 
-		step("docker hello-world");
-		const dk = await io.exec(["bash", "-c", DOCKER_SCRIPT], {
-			timeoutMs: DOCKER_TIMEOUT_MS,
-		});
+		step(
+			manifest.offlineLayer ? "offline docker container" : "docker hello-world",
+		);
+		const dk = await io.exec(
+			[
+				"bash",
+				"-c",
+				manifest.offlineLayer ? OFFLINE_DOCKER_SCRIPT : DOCKER_SCRIPT,
+			],
+			{
+				timeoutMs: DOCKER_TIMEOUT_MS,
+			},
+		);
 		add(
 			pass(
 				"docker",
-				dk.exitCode === 0 && dk.stdout.includes("Hello from Docker!"),
+				dk.exitCode === 0 &&
+					(manifest.offlineLayer
+						? dk.stdout.trim() === manifest.agentVersion
+						: dk.stdout.includes("Hello from Docker!")),
 				dk.exitCode === 0
 					? (dk.stdout.split("\n").find((l) => l.trim() !== "") ?? "")
 					: `exit ${dk.exitCode}: ${dk.stderr.trim()}`,

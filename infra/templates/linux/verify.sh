@@ -239,6 +239,10 @@ check_network() {
 	[ -n "$ip" ] && ip_in_cidr "$ip" "${EXPECT_SUBNET:-0.0.0.0/32}"
 	report ipv4 $? "ip=${ip:-none} expect=${EXPECT_SUBNET:-unset}"
 
+ if [ "${UMIAK_OFFLINE_TEMPLATE:-}" = 1 ]; then
+  report dns INFO 'external DNS query skipped for offline layer verification'
+  report https INFO 'external HTTPS fetch skipped for offline layer verification'
+ else
 	local dns
 	dns=$(timeout 20 getent hosts example.com 2>&1 | head -n1)
 	[ -n "$dns" ]
@@ -246,6 +250,7 @@ check_network() {
 	local https
 	https=$(curl -fsS -o /dev/null -m 30 -w '%{http_code}' https://example.com 2>&1)
 	report https $? "$https"
+ fi
 
 	# netplan (26.04) runs wait-online only for interfaces it can name; with "match: en*" the
 	# unit is skipped by its condition and network-online.target is reached without waiting.

@@ -28,6 +28,7 @@ import {
 	fetchBaseImage,
 	fetchVirtioWin,
 } from "./image.ts";
+import { loadOfflineLayer } from "./layer-release.ts";
 import type { Manifest, VerifyResult } from "./manifest.ts";
 import { preflight } from "./preflight.ts";
 import { loadRecipe, loadVerifyScript, loadVersions } from "./recipe.ts";
@@ -43,6 +44,7 @@ import { formatRecipeVersions, updateVersionsFile } from "./versions-update.ts";
 const USAGE = `usage:
   umiak-tpl preflight [<slug>] [--node <node>]
   umiak-tpl versions <slug> [--update]
+  umiak-tpl build <slug> --offline-layer <file> --template-vmid <id> [--node <node>]
   umiak-tpl build <slug> --agent-package <tar> [--node <node>] [--umiak-cli <file>] [--api-url <url>]
                 [--template-vmid <id>] [--tunnel-url <wss-url>] [--ssh-user-ca <file>] [--refresh] [--keep-on-failure]
                 [--no-verify] [--fail-step <step>] [--connect-url <wss-url> --dev-cp-ssh <user@host>]
@@ -129,7 +131,12 @@ function runVerify(
 			io: (vmid) => pveGuestIo(ioApi, cfg.node, vmid),
 			node: ctx.node,
 			ramGuard,
-			verifyScript: loadVerifyScript(TEMPLATES_DIR, recipe.verify, m.os),
+			verifyScript:
+				m.offlineLayer?.verifyScript ??
+				loadVerifyScript(TEMPLATES_DIR, recipe.verify, m.os),
+			...(process.env.UMIAK_TUNNEL_CA_PIN
+				? { tunnelCAPin: process.env.UMIAK_TUNNEL_CA_PIN }
+				: {}),
 			secretFiles: defaultSecretFiles(cfg),
 			windows: {
 				fsfreezeFreeze: (vmid) => qga.fsfreezeFreeze(vmid),
@@ -258,7 +265,31 @@ async function cmdBuild(
 	const str = (k: string) =>
 		typeof v[k] === "string" ? (v[k] as string) : undefined;
 	const agentPackage = str("agent-package");
-	if (!agentPackage) throw new UsageError("--agent-package is required");
+	const layerFile = str("offline-layer");
+	if (!agentPackage && !layerFile)
+		throw new UsageError("--agent-package or --offline-layer is required");
+	if (
+		layerFile &&
+		(agentPackage || v.refresh === true || v["no-verify"] === true)
+	)
+		throw new UsageError(
+			"Offline layers cannot use a legacy agent package, --refresh or --no-verify",
+		);
+	const offlineLayer = layerFile
+		? loadOfflineLayer(layerFile, {
+				platform: process.env.UMIAK_PLATFORM_VERSION || "0.1.0",
+				agent: process.env.UMIAK_AGENT_VERSION || "0.1.0",
+				channel:
+					process.env.UMIAK_TEMPLATE_LAYER_CHANNEL ||
+					process.env.UMIAK_RELEASE_CHANNEL ||
+					"stable",
+				slug,
+				...(process.env.UMIAK_RECIPE_PUBLISHER_KEYS_FILE &&
+				existsSync(process.env.UMIAK_RECIPE_PUBLISHER_KEYS_FILE)
+					? { keysFile: process.env.UMIAK_RECIPE_PUBLISHER_KEYS_FILE }
+					: {}),
+			})
+		: undefined;
 	const noVerify = v["no-verify"] === true;
 	if (v.refresh === true) {
 		const { file, changes } = await updateVersionsFile({
@@ -295,7 +326,11 @@ async function cmdBuild(
 			storage: cfg.storage,
 			pool: cfg.pool,
 			vnet: cfg.vnet,
-			agentPackage,
+			agentPackage: agentPackage ?? "",
+			...(offlineLayer ? { offlineLayer } : {}),
+			...(process.env.UMIAK_TUNNEL_CA_PIN
+				? { tunnelCAPin: process.env.UMIAK_TUNNEL_CA_PIN }
+				: {}),
 			...(str("template-vmid") !== undefined
 				? { templateVmid: Number(str("template-vmid")) }
 				: {}),
@@ -383,6 +418,7 @@ async function main(argv: string[]): Promise<number> {
 			update: { type: "boolean", default: false },
 			node: { type: "string" },
 			"agent-package": { type: "string" },
+			"offline-layer": { type: "string" },
 			"template-vmid": { type: "string" },
 			"umiak-cli": { type: "string" },
 			"api-url": { type: "string" },
