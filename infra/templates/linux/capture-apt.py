@@ -42,16 +42,31 @@ authorities = {
     'Docker': ('docker', '9DC858229FC7DD38854AE2D88D81803C0EBFCD88', '/etc/apt/keyrings/docker.asc'),
     'LP-PPA-xtradeb-apps': ('xtradeb', '5301FA4FD93244FBC6F6149982BB6851C64F6880', '/etc/apt/keyrings/xtradeb-apps.asc'),
 }
-releases = {}
-for path in Path('/var/lib/apt/lists').glob('*_InRelease'):
+lists = Path('/var/lib/apt/lists')
+
+
+def release_of(target):
+    # The InRelease beside the index apt actually uses. Earlier updates (cloud-init
+    # bootstrap before the snapshot pin) leave stale lists from other mirrors with
+    # the same origin/suite; never pick a Release by scanning the whole directory.
+    index = Path(target['filename'])
+    prefix, sep, rest = index.name.partition('_dists_')
+    if not sep or index.parent != lists:
+        raise ValueError('unexpected apt index location')
+    dist = rest.split('_', 1)[0]
+    path = lists / f'{prefix}_dists_{dist}_InRelease'
+    if not path.is_file():
+        raise ValueError('apt InRelease missing for an active index')
     text = path.read_text()
     # Parse only the signed cleartext body; signature verification happens on the host.
     body = text.split('\n\n', 1)[1].split('-----BEGIN PGP SIGNATURE-----', 1)[0]
     fields = records(body)[0]
-    identity = (fields.get('origin'), fields.get('suite'))
-    if identity in releases:
-        raise ValueError(f'ambiguous captured apt Release: {identity}')
-    releases[identity] = path
+    if (fields.get('origin'), fields.get('suite')) != (target.get('origin'), target.get('suite')):
+        raise ValueError('apt InRelease does not match its index target')
+    return path
+
+
+releases = {}
 repos = {}
 for target in records(run('apt-get', 'indextargets', 'Identifier: Packages')):
     if target.get('architecture') != 'amd64':
@@ -67,7 +82,9 @@ for target in records(run('apt-get', 'indextargets', 'Identifier: Packages')):
     if repo is None:
         directory = output / name
         directory.mkdir()
-        shutil.copyfile(releases[(origin, suite)], directory / 'InRelease')
+        release = release_of(target)
+        releases[name] = release
+        shutil.copyfile(release, directory / 'InRelease')
         key = Path(keyring).read_bytes()
         if not key.startswith(b'-----BEGIN PGP PUBLIC KEY BLOCK-----'):
             key = subprocess.check_output(['gpg', '--batch', '--no-options', '--no-default-keyring', '--keyring', keyring, '--armor', '--export', fingerprint])
@@ -76,6 +93,8 @@ for target in records(run('apt-get', 'indextargets', 'Identifier: Packages')):
         (directory / 'archive.asc').write_bytes(key)
         repo = dict(name=name, suite=suite, components=[], keyFingerprint=fingerprint, indexes=[])
         repos[name] = repo
+    if release_of(target) != releases[name]:
+        raise ValueError(f'ambiguous captured apt Release: {name}')
     meta = target['metakey']
     if not re.fullmatch(r'[a-z][a-z0-9-]*/binary-amd64/Packages', meta):
         raise ValueError('unexpected apt index path')
