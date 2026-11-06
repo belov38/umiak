@@ -145,6 +145,7 @@ export async function sealGuest(
 		`umount ${SEED_DIR} 2>/dev/null || true; rmdir ${SEED_DIR} 2>/dev/null || true`,
 	]);
 	await must(io, ["rm", "-rf", BUILD_LOG_DIR]);
+	await must(io, ["rm", "-rf", "/var/lib/umiak-build"]);
 	// No two clones may share these. Stopping systemd-random-seed runs its ExecStop, which saves
 	// a seed, so the files go after the stop; an inactive unit saves nothing at poweroff.
 	await must(io, [

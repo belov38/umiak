@@ -312,6 +312,8 @@ export class FakeGuest implements GuestIo {
 			return ok("systemd 259 (259.1-1ubuntu1)\n+PAM +AUDIT\n");
 		if (c0 === "cat" && c1 === "/proc/sys/kernel/random/boot_id")
 			return ok(`boot-${this.#bootId}\n`);
+		if (c0 === "/usr/local/bin/umiak" && c1 === "--version")
+			return ok("umiak 0.4.0\n");
 		if (c0 === "uname") return ok("7.0.0-10-generic\n");
 		if (c0 === "dpkg-query") {
 			this.log.push("guest:dpkg-query");

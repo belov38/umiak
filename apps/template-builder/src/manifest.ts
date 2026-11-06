@@ -98,6 +98,7 @@ export interface Manifest {
 		sourceCommit: string;
 		verifyScript: string;
 	};
+	platformTools?: import("./platform-tools.ts").PlatformToolRecord[];
 	vendorTools?: import("./vendor-tools.ts").VendorToolRecord[];
 	templateSlug: string;
 	/** YYYYMMDD.n */

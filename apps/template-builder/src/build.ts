@@ -13,6 +13,10 @@ import {
 	offlineRecipe,
 } from "./layer-release.ts";
 import type { BuildError, Manifest } from "./manifest.ts";
+import {
+	assertPlatformCliAsset,
+	installPlatformCli,
+} from "./platform-tools.ts";
 import { assertOfflineReplayFacts } from "./qemu-build.ts";
 import {
 	type LinuxRecipe,
@@ -105,6 +109,7 @@ function prepare(
 	const layer = o.offlineLayer;
 	if (layer) {
 		assertVerifiedLayer(layer);
+		assertPlatformCliAsset(o.umiakCli);
 		if (
 			o.noVerify ||
 			!o.nodeBuildJobId ||
@@ -310,6 +315,12 @@ function linuxJob(deps: BuildDeps, o: BuildOptions, recipe: LinuxRecipe): Job {
 				assertOfflineReplayFacts(o.offlineLayer.descriptor.facts, facts);
 				run.log(
 					"-- offline parity checks passed; vendor phase starts separately",
+				);
+				enter("platform-tools");
+				const platformTool = await installPlatformCli(io, o.umiakCli as string);
+				save({ platformTools: [platformTool] });
+				run.log(
+					`-- platform-tools: Umiak CLI ${platformTool.version} (${platformTool.durationS.toFixed(1)}s, installed release asset)`,
 				);
 				enter("vendor-tools");
 				const configPath = `/nodes/${o.node}/qemu/${vmid}/config`;

@@ -177,6 +177,7 @@ export type Stage =
 	| "steps"
 	| "offline"
 	| "verify-offline"
+	| "platform-tools"
 	| "vendor-tools"
 	| "seal"
 	| "template"

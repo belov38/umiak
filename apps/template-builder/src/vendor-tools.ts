@@ -42,6 +42,8 @@ export interface VendorToolRecord {
 	id: string;
 	name: string;
 	requestedVersion: string;
+	requestedSha256: string;
+	checksumSubject: "installed-binary" | "release-archive";
 	installer: string;
 	status: "installed" | "failed";
 	vendorInstalled: true;
@@ -70,6 +72,9 @@ export async function installVendorTools(deps: {
 				id: tool.id,
 				name: tool.name,
 				requestedVersion: tool.version,
+				requestedSha256: tool.sha256,
+				checksumSubject:
+					tool.id === "claude-code" ? "installed-binary" : "release-archive",
 				installer: tool.installer,
 				status: "failed",
 				vendorInstalled: true,

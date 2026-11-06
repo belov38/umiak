@@ -44,7 +44,7 @@ import { formatRecipeVersions, updateVersionsFile } from "./versions-update.ts";
 const USAGE = `usage:
   umiak-tpl preflight [<slug>] [--node <node>]
   umiak-tpl versions <slug> [--update]
-  umiak-tpl build <slug> --offline-layer <file> --template-vmid <id> [--node <node>]
+  umiak-tpl build <slug> --offline-layer <file> --umiak-cli <installed-release-cli> --template-vmid <id> [--node <node>]
   umiak-tpl build <slug> --agent-package <tar> [--node <node>] [--umiak-cli <file>] [--api-url <url>]
                 [--template-vmid <id>] [--tunnel-url <wss-url>] [--ssh-user-ca <file>] [--refresh] [--keep-on-failure]
                 [--no-verify] [--fail-step <step>] [--connect-url <wss-url> --dev-cp-ssh <user@host>]

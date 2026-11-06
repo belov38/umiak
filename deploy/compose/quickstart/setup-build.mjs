@@ -128,6 +128,8 @@ export function buildInvocation(
 		args.push(
 			"--offline-layer",
 			input.layerFile || join(directory, "layer.json"),
+			"--umiak-cli",
+			join(assetsDir, "umiak-linux-x64"),
 		);
 	else
 		args.push(

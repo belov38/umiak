@@ -1001,6 +1001,8 @@ it.each([false, true])(
 		);
 		if (vendorFails) s.guest.failRc["vendor-claude-code"] = "1";
 		const jobId = "a".repeat(24);
+		const platformCli = join(tmp(), "umiak-linux-x64");
+		writeFileSync(platformCli, "fixture release CLI");
 		s.node.handlers["layer.base"] = () => ({
 			verified: true,
 			name: IMAGE_NAME,
@@ -1024,6 +1026,7 @@ it.each([false, true])(
 		const result = await buildTemplate(s.deps, {
 			...s.opts,
 			offlineLayer: layer,
+			umiakCli: platformCli,
 			nodeBuildJobId: jobId,
 			templateVmid: 597,
 			tunnelCAPin: "c".repeat(64),
@@ -1048,6 +1051,11 @@ it.each([false, true])(
 			expect(result.vendorTools?.[0]?.warning).toMatch(
 				/^Claude Code not installed:/,
 			);
+		expect(result.platformTools?.[0]).toMatchObject({
+			id: "umiak-cli",
+			source: "installed-platform-release",
+			partOfSignedLayer: false,
+		});
 		expect(result.defaultTunnelUrl).toBeNull();
 		const create = s.pve.calls.find(
 			(c) => c.method === "POST" && c.path === "/nodes/pve/qemu",
