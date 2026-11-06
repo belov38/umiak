@@ -155,6 +155,16 @@ for path in sorted((root / 'debs').glob('*.deb')):
 (output / 'capture.json').write_text(json.dumps(dict(repositories=list(repos.values()), debs=debs)))
 # Exact final installed package versions and distribution-provided notices, including base packages.
 DOCKER_PACKAGES = {'docker-ce', 'docker-ce-cli', 'docker-ce-rootless-extras', 'docker-buildx-plugin', 'docker-compose-plugin', 'containerd.io'}
+# Upstream .deb packages fetched directly (not from an apt archive) that ship no
+# Debian copyright file. Their GPL-3.0 license text is collected by the host from
+# the pinned upstream tag and their exact source sits in the source companion.
+UPSTREAM_GPL_PACKAGES = {'sunshine'}
+UPSTREAM_GPL_NOTICE = (
+    '{name} {version} is the upstream release .deb and ships no /usr/share/doc copyright file.\n'
+    'License: GPL-3.0. The exact license text is collected from the pinned upstream\n'
+    'release tag into licenses/upstream, and the corresponding source is published in\n'
+    'the layer source companion.\n'
+)
 DOCKER_NOTICE = (
     '{name} {version} from download.docker.com ships no /usr/share/doc copyright file.\n'
     'Upstream license: Apache License 2.0. The exact LICENSE and NOTICE texts are\n'
@@ -172,6 +182,8 @@ for line in run('dpkg-query', '-W', '-f', '${db:Status-Status}\t${binary:Package
     destination.parent.mkdir(parents=True, exist_ok=True)
     if doc.is_file():
         shutil.copyfile(doc, destination)
+    elif name.split(':')[0] in UPSTREAM_GPL_PACKAGES:
+        destination.write_text(UPSTREAM_GPL_NOTICE.format(name=name, version=version))
     elif name.split(':')[0] in DOCKER_PACKAGES:
         # Docker's own repository packages ship no Debian copyright file. The host
         # collects their Apache-2.0 LICENSE/NOTICE texts from the pinned upstream
