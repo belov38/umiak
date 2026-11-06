@@ -146,6 +146,13 @@ for path in sorted((root / 'debs').glob('*.deb')):
         debs.append(dict(path=relative, sha256=sha, sizeBytes=path.stat().st_size))
 (output / 'capture.json').write_text(json.dumps(dict(repositories=list(repos.values()), debs=debs)))
 # Exact final installed package versions and distribution-provided notices, including base packages.
+DOCKER_PACKAGES = {'docker-ce', 'docker-ce-cli', 'docker-ce-rootless-extras', 'docker-buildx-plugin', 'docker-compose-plugin', 'containerd.io'}
+DOCKER_NOTICE = (
+    '{name} {version} from download.docker.com ships no /usr/share/doc copyright file.\n'
+    'Upstream license: Apache License 2.0. The exact LICENSE and NOTICE texts are\n'
+    'collected from the pinned upstream release tags into licenses/upstream and\n'
+    'listed in the layer inventory (Docker components).\n'
+)
 packages = []
 for line in run('dpkg-query', '-W', '-f', '${db:Status-Status}\t${binary:Package}\t${Version}\t${Architecture}\t${source:Package}\t${source:Version}\n').splitlines():
     status, name, version, arch, source, source_version = line.split('\t')
@@ -153,12 +160,21 @@ for line in run('dpkg-query', '-W', '-f', '${db:Status-Status}\t${binary:Package
         continue
     doc = Path('/usr/share/doc') / name.split(':')[0] / 'copyright'
     notice = f'licenses/deb/{name.replace(":", "_")}.copyright'
-    if not doc.is_file():
-        raise ValueError(f'package license notice missing: {name}')
     destination = root / notice
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(doc, destination)
+    if doc.is_file():
+        shutil.copyfile(doc, destination)
+    elif name.split(':')[0] in DOCKER_PACKAGES:
+        # Docker's own repository packages ship no Debian copyright file. The host
+        # collects their Apache-2.0 LICENSE/NOTICE texts from the pinned upstream
+        # release tags (layer-notices.mjs); record that here instead of a copy.
+        destination.write_text(DOCKER_NOTICE.format(name=name, version=version))
+    else:
+        raise ValueError(f'package license notice missing: {name}')
     notices=[notice]
+    if not doc.parent.is_dir():
+        packages.append(dict(name=name, version=version, arch=arch, source=source, sourceVersion=source_version, notice=notice, notices=notices))
+        continue
     for extra in sorted(doc.parent.iterdir()):
         if extra.is_file() and extra.name.lower().startswith(('license','licence','copying','notice')):
             relative=f'licenses/deb-notices/{name.replace(":", "_")}/{extra.name}'
