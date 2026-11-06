@@ -28,14 +28,15 @@ var layerPublisherKey string
 const defaultLayerBaseURL = "https://pub-bdc85570347b44df991bfcee2718c4a1.r2.dev"
 
 type layerRequest struct {
-	JobID     string          `json:"jobId"`
-	VMID      int             `json:"vmid"`
-	Manifest  json.RawMessage `json:"manifest"`
-	Signature []byte          `json:"signature"`
-	Platform  string          `json:"platform"`
-	Agent     string          `json:"agent"`
-	Channel   string          `json:"channel"`
-	Slug      string          `json:"slug"`
+	MediaStorage string          `json:"mediaStorage,omitempty"`
+	JobID        string          `json:"jobId"`
+	VMID         int             `json:"vmid"`
+	Manifest     json.RawMessage `json:"manifest"`
+	Signature    []byte          `json:"signature"`
+	Platform     string          `json:"platform"`
+	Agent        string          `json:"agent"`
+	Channel      string          `json:"channel"`
+	Slug         string          `json:"slug"`
 }
 type layerReceipt struct {
 	TempName       string `json:"tempName,omitempty"`
@@ -49,7 +50,7 @@ type layerReceipt struct {
 	Verified       bool   `json:"verified"`
 }
 
-func (s *Server) layerRequest(raw json.RawMessage) (layerRequest, layerManifest, error) {
+func (s *Server) layerRequest(raw json.RawMessage, allowOccupied bool) (layerRequest, layerManifest, error) {
 	var a layerRequest
 	var m layerManifest
 	if e := decodeArgs(raw, &a); e != nil {
@@ -57,6 +58,13 @@ func (s *Server) layerRequest(raw json.RawMessage) (layerRequest, layerManifest,
 	}
 	if !regexp.MustCompile(`^[a-f0-9]{24}$`).MatchString(a.JobID) || !s.Cfg.IsTemplateSlot(a.VMID) || a.VMID == 590 {
 		return a, m, forbidden("invalid layer job or template VMID")
+	}
+	storage := s.Cfg.LayerMediaStorage
+	if storage == "" {
+		storage = "local"
+	}
+	if a.MediaStorage != "" && a.MediaStorage != storage {
+		return a, m, forbidden("layer media storage does not match node-agent layerMediaStorage; configure its importDir and storage first")
 	}
 	keys := []string{layerPublisherKey}
 	if s.Cfg.LayerKeysFile != "" {
@@ -75,6 +83,9 @@ func (s *Server) layerRequest(raw json.RawMessage) (layerRequest, layerManifest,
 	m, e := verifyLayerManifest(a.Manifest, a.Signature, keys, a.Platform, a.Agent, a.Channel, a.Slug)
 	if e != nil {
 		return a, m, e
+	}
+	if allowOccupied {
+		return a, m, nil
 	}
 	if _, e = fs.ReadFile(s.Host.FS, fmt.Sprintf("etc/pve/qemu-server/%d.conf", a.VMID)); e == nil {
 		return a, m, forbidden("layer target VMID is occupied")
@@ -97,7 +108,7 @@ func layerDirectory(path string) error {
 	return nil
 }
 func (s *Server) layerPrepare(_ context.Context, raw json.RawMessage) (any, error) {
-	a, m, e := s.layerRequest(raw)
+	a, m, e := s.layerRequest(raw, false)
 	if e != nil {
 		return nil, e
 	}
@@ -165,7 +176,7 @@ func durableLayerReceipt(path string, r layerReceipt) error {
 	return dir.Sync()
 }
 func (s *Server) layerStage(ctx context.Context, raw json.RawMessage) (any, error) {
-	a, m, e := s.layerRequest(raw)
+	a, m, e := s.layerRequest(raw, false)
 	if e != nil {
 		return nil, e
 	}
@@ -239,6 +250,9 @@ func (s *Server) layerStage(ctx context.Context, raw json.RawMessage) (any, erro
 	budget := s.Cfg.LayerCacheBytes
 	if budget == 0 {
 		budget = 16 << 30
+	}
+	if e = pruneLayerCache(cache, m, budget); e != nil {
+		return nil, e
 	}
 	entries, e := os.ReadDir(cache)
 	if e != nil {

@@ -304,7 +304,8 @@ export class SshNodeOps implements NodeOps {
 export interface OfflineLayerRequest {
 	jobId: string;
 	vmid: number;
-	manifest: Record<string, unknown>;
+	manifest: object;
+	mediaStorage?: string;
 	signature: string;
 	platform: string;
 	agent: string;

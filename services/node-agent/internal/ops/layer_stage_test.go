@@ -282,3 +282,114 @@ func TestLayerStageCreatesAndReusesVerifiedMedia(t *testing.T) {
 		t.Fatal("did not reuse verified staging", requests, formats)
 	}
 }
+
+func TestLayerReleaseRemovesOnlyReceiptOwnedMediaEvenAfterVMRegistration(t *testing.T) {
+	h := newHarness(fstest.MapFS{"etc/pve/qemu-server/598.conf": {Data: []byte("template: 1\n")}})
+	h.srv.Cfg.StateDir = t.TempDir()
+	h.srv.Cfg.ImportDir = t.TempDir()
+	h.srv.Cfg.LayerKeysFile = "../../../../infra/templates/testdata/layers/publisher.pub"
+	a := layerArgs(t)
+	sum := sha256.Sum256(a["manifest"].(json.RawMessage))
+	job := a["jobId"].(string)
+	name := "umiak-layer-" + job + ".raw"
+	media := filepath.Join(h.srv.Cfg.ImportDir, name)
+	if e := os.WriteFile(media, []byte("media"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	info, _ := os.Stat(media)
+	identity, e := fileIdentity(info)
+	if e != nil {
+		t.Fatal(e)
+	}
+	jobs := filepath.Join(h.srv.Cfg.StateDir, "layer-jobs")
+	if e = os.Mkdir(jobs, 0700); e != nil {
+		t.Fatal(e)
+	}
+	receipt := layerReceipt{JobID: job, VMID: 598, ManifestSHA256: hex.EncodeToString(sum[:]), MediaName: name, MediaIdentity: identity, Verified: true}
+	marker := filepath.Join(jobs, job+".json")
+	if e = durableLayerReceipt(marker, receipt); e != nil {
+		t.Fatal(e)
+	}
+	if reply := h.call(t, "layer.release", a); !reply.OK {
+		t.Fatal(reply.Error)
+	}
+	if _, e = os.Stat(media); !os.IsNotExist(e) {
+		t.Fatal("owned staging media remains")
+	}
+	if reply := h.call(t, "layer.release", a); !reply.OK {
+		t.Fatal("release is not idempotent", reply.Error)
+	}
+	if e = os.WriteFile(media, []byte("foreign generation"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	if reply := h.call(t, "layer.release", a); reply.OK {
+		t.Fatal("removed media without receipt")
+	}
+	if _, e = os.Stat(media); e != nil {
+		t.Fatal("foreign generation removed")
+	}
+}
+
+func TestLayerBaseAuthenticatesCachedOfficialBaseBeforeImport(t *testing.T) {
+	h := newHarness(nil)
+	h.srv.Cfg.StateDir = t.TempDir()
+	h.srv.Cfg.ImportDir = t.TempDir()
+	h.srv.Cfg.LayerKeysFile = "../../../../infra/templates/testdata/layers/publisher.pub"
+	name := "umiak-ubuntu-26.04-minimal-20261024.qcow2"
+	if e := os.WriteFile(filepath.Join(h.srv.Cfg.ImportDir, name), []byte("fixture"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	reply := h.call(t, "layer.base", layerArgs(t))
+	if !reply.OK {
+		t.Fatal(reply.Error)
+	}
+	if !resultMap(t, reply)["verified"].(bool) {
+		t.Fatal("valid cached base rejected")
+	}
+	if e := os.WriteFile(filepath.Join(h.srv.Cfg.ImportDir, name), []byte("changed"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	reply = h.call(t, "layer.base", layerArgs(t))
+	if !reply.OK {
+		t.Fatal(reply.Error)
+	}
+	if resultMap(t, reply)["verified"].(bool) {
+		t.Fatal("reused same-sized corrupt base")
+	}
+}
+
+func TestLayerCacheEvictsOnlyVerifiedUnusedBlobs(t *testing.T) {
+	cache := t.TempDir()
+	old := []byte("old blob")
+	needed := []byte("needed blob")
+	oldHash := sha256.Sum256(old)
+	needHash := sha256.Sum256(needed)
+	oldName := hex.EncodeToString(oldHash[:])
+	neededName := hex.EncodeToString(needHash[:])
+	for name, body := range map[string][]byte{oldName: old, neededName: needed} {
+		if e := os.WriteFile(filepath.Join(cache, name), body, 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+	m := layerManifest{}
+	m.Archive.Chunks = []layerBlob{{SHA256: neededName, SizeBytes: int64(len(needed))}}
+	if e := pruneLayerCache(cache, m, int64(len(needed))); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := os.Stat(filepath.Join(cache, oldName)); !os.IsNotExist(e) {
+		t.Fatal("unused cache retained")
+	}
+	if _, e := os.Stat(filepath.Join(cache, neededName)); e != nil {
+		t.Fatal("needed blob evicted")
+	}
+	foreign := strings.Repeat("f", 64)
+	if e := os.WriteFile(filepath.Join(cache, foreign), old, 0600); e != nil {
+		t.Fatal(e)
+	}
+	if e := pruneLayerCache(cache, m, int64(len(needed))); e == nil {
+		t.Fatal("removed unproved cache contents")
+	}
+	if _, e := os.Stat(filepath.Join(cache, foreign)); e != nil {
+		t.Fatal("foreign contents deleted")
+	}
+}

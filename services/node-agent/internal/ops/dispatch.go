@@ -73,6 +73,8 @@ type handler func(s *Server, ctx context.Context, args json.RawMessage) (any, er
 
 var handlers = map[string]handler{
 	"layer.prepare":        (*Server).layerPrepare,
+	"layer.release":        (*Server).layerRelease,
+	"layer.base":           (*Server).layerBase,
 	"layer.stage":          (*Server).layerStage,
 	"volume.cleanupImport": (*Server).volumeCleanupImport,
 	"volume.sendTo":        (*Server).volumeSendTo,
@@ -156,7 +158,7 @@ func redactArgs(op string, raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return "{}"
 	}
-	if op == "layer.prepare" || op == "layer.stage" {
+	if strings.HasPrefix(op, "layer.") {
 		return "<signed offline layer request>"
 	}
 	secret := map[string]string{"inventory": "search", "lv.scan": "patterns"}[op]
