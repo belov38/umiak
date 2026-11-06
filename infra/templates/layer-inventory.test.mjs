@@ -76,3 +76,29 @@ for (const kind of [
 		assert.throws(() => layerInventory(s));
 	});
 }
+
+for (const [name, repository] of Object.entries({
+	"docker-ce": "moby/moby",
+	"docker-ce-cli": "docker/cli",
+	"docker-ce-rootless-extras": "docker/docker-ce-packaging",
+	"docker-buildx-plugin": "docker/buildx",
+	"docker-compose-plugin": "docker/compose",
+	"containerd.io": "containerd/containerd",
+}))
+	test(`Docker source reference points upstream: ${name}`, () => {
+		const input = fixture();
+		input.facts.packages = { [name]: "1" };
+		Object.assign(input.packages[0], { name, source: name });
+		const inventory = layerInventory(input);
+		assert.equal(
+			inventory.packages[0].sourceURL,
+			`https://github.com/${repository}`,
+		);
+		assert.equal(inventory.packages[0].version, "1");
+	});
+test("Ubuntu source references still retain their exact package/version URL", () => {
+	assert.equal(
+		layerInventory(fixture()).packages[0].sourceURL,
+		"https://launchpad.net/ubuntu/+source/bash/1",
+	);
+});

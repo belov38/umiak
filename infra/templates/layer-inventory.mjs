@@ -78,6 +78,15 @@ const policy = [
 		"https://github.com/sigstore/cosign",
 	],
 ];
+// Primary upstream references; exact Docker release/packaging pins are in apacheDocker.
+const dockerSources = {
+	"docker-ce": "moby/moby",
+	"docker-ce-cli": "docker/cli",
+	"docker-ce-rootless-extras": "docker/docker-ce-packaging",
+	"docker-buildx-plugin": "docker/buildx",
+	"docker-compose-plugin": "docker/compose",
+	"containerd.io": "containerd/containerd",
+};
 export function layerInventory({
 	sourceCommit,
 	facts,
@@ -107,7 +116,9 @@ export function layerInventory({
 			...p,
 			license: "LicenseRef-Distribution-Copyright",
 			noticeFile: notice(p.notice),
-			sourceURL: `https://launchpad.net/ubuntu/+source/${encodeURIComponent(p.source)}/${encodeURIComponent(p.sourceVersion)}`,
+			sourceURL: Object.hasOwn(dockerSources, p.name.split(":")[0])
+				? `https://github.com/${dockerSources[p.name.split(":")[0]]}`
+				: `https://launchpad.net/ubuntu/+source/${encodeURIComponent(p.source)}/${encodeURIComponent(p.sourceVersion)}`,
 		};
 	});
 	const actual = Object.entries(facts.packages).sort();
