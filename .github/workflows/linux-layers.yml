@@ -7,7 +7,7 @@ on:
       action:
         description: Initialize creates tiny packages so their visibility can be set Public once
         type: choice
-        options: [build, initialize-packages]
+        options: [build, initialize-packages, sign-staged]
         default: build
       version:
         description: Immutable layer version (edge example 20261106.1-edge.20261106.1)
@@ -22,6 +22,10 @@ on:
         required: true
         type: string
         default: "0.4.0"
+      apt_proxy:
+        description: Optional dev-only HTTP apt cache reachable from the capture VM
+        type: string
+        default: ""
       publish:
         description: Explicitly authorize public OCI uploads (default builds and signs locally only)
         type: boolean
@@ -51,6 +55,7 @@ jobs:
       LAYER_AGENT_VERSION: ${{ inputs.agent_version }}
       LAYER_PUBLISH: ${{ inputs.publish }}
       LAYER_APPROVED_SHA: ${{ inputs.approved_sha }}
+      UMIAK_BUILD_APT_PROXY: ${{ inputs.apt_proxy }}
       LAYER_SEQUENCE: ${{ github.run_number }}
     steps:
       # The runner context is not available in job-level env; derive the paths here.
@@ -76,6 +81,7 @@ jobs:
           mise exec -- node --input-type=module <<'JS'
           import {validateReleaseRequest} from './infra/templates/release-layers.mjs';
           validateReleaseRequest({publish:process.env.LAYER_PUBLISH==='true',channel:process.env.LAYER_CHANNEL,version:process.env.LAYER_VERSION,sourceCommit:process.env.GITHUB_SHA,approvedSha:process.env.LAYER_APPROVED_SHA,ref:process.env.GITHUB_REF});
+          if(${{ toJSON(inputs.action) }}==='sign-staged' && (process.env.LAYER_CHANNEL!=='edge'||process.env.LAYER_PUBLISH!=='true'))throw Error('sign-staged requires edge, publish=true and approved_sha');
           if(!/^\d+\.\d+\.\d+(?:-edge\.\d{8}\.\d+)?$/.test(process.env.LAYER_AGENT_VERSION || ''))throw Error('Invalid agent version');
           JS
       - name: Materialize built-in GitHub token as a restricted file
@@ -96,7 +102,7 @@ jobs:
           mise exec -- node infra/templates/release-layers.mjs initialize-packages
           echo 'Set all four packages (two layers and their source companions) to Public in their GitHub package settings, then dispatch action=build.' >> "$GITHUB_STEP_SUMMARY"
       - name: Refuse existing immutable tags
-        if: inputs.action == 'build' && inputs.publish
+        if: (inputs.action == 'build' || inputs.action == 'sign-staged') && inputs.publish
         run: mise exec -- node infra/templates/release-layers.mjs preflight
       - name: Install local QEMU tools and grant this ephemeral runner KVM access
         if: inputs.action == 'build'
@@ -115,12 +121,18 @@ jobs:
           const directory=await mkdtemp(join(process.env.RUNNER_TEMP,'umiak-kvm-probe-'));
           try {await probeQemu(directory);} finally {await rm(directory,{recursive:true});}
           JS
-      - name: Local fixture and policy tests
-        if: inputs.action == 'build'
+      - name: Prepare staged verification tools (no KVM)
+        if: inputs.action == 'sign-staged'
         run: |
-          mise exec -- pnpm exec biome check infra/templates/linux-source-subset.mjs infra/templates/build-layers.mjs infra/templates/build-sources.mjs infra/templates/source-artifact.mjs infra/templates/layer-inventory.mjs infra/templates/layer-notices.mjs infra/templates/release-layers.mjs infra/templates/oci.mjs
-          mise exec -- pnpm exec biome lint --only=correctness/noUndeclaredVariables infra/templates/linux-source-subset.mjs infra/templates/build-layers.mjs infra/templates/build-sources.mjs infra/templates/release-layers.mjs infra/templates/layer-notices.mjs
-          mise exec -- node --test infra/templates/image-manifest.test.mjs infra/templates/layer-recipe.test.mjs infra/templates/oci.test.mjs infra/templates/layer-inventory.test.mjs infra/templates/release-layers.test.mjs infra/templates/oci-layout.test.mjs infra/templates/source-artifact.test.mjs infra/templates/linux-source-subset.test.mjs
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends zstd
+          mise exec -- pnpm install --frozen-lockfile
+      - name: Local fixture and policy tests
+        if: inputs.action == 'build' || inputs.action == 'sign-staged'
+        run: |
+          mise exec -- pnpm exec biome check infra/templates/staged-layers.mjs infra/templates/local-layers.mjs infra/templates/linux-source-subset.mjs infra/templates/build-layers.mjs infra/templates/build-sources.mjs infra/templates/source-artifact.mjs infra/templates/layer-inventory.mjs infra/templates/layer-notices.mjs infra/templates/release-layers.mjs infra/templates/oci.mjs
+          mise exec -- pnpm exec biome lint --only=correctness/noUndeclaredVariables infra/templates/staged-layers.mjs infra/templates/local-layers.mjs infra/templates/linux-source-subset.mjs infra/templates/build-layers.mjs infra/templates/build-sources.mjs infra/templates/release-layers.mjs infra/templates/layer-notices.mjs
+          mise exec -- node --test infra/templates/image-manifest.test.mjs infra/templates/layer-recipe.test.mjs infra/templates/oci.test.mjs infra/templates/layer-inventory.test.mjs infra/templates/release-layers.test.mjs infra/templates/oci-layout.test.mjs infra/templates/source-artifact.test.mjs infra/templates/linux-source-subset.test.mjs infra/templates/staged-layers.test.mjs
           mise exec -- pnpm --filter @umiak/template-builder typecheck
           mise exec -- pnpm --filter @umiak/template-builder test
       - name: Build the generic agent (outer image authority only; no update signing key)
@@ -130,9 +142,27 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 mise exec -- go -C services/guest-agent build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=$LAYER_AGENT_VERSION" -o "$LAYER_AGENT_BINARY" ./cmd/umiak-agent
       - name: Capture inputs and prove fresh replay with no NIC (both products, sequentially)
         if: inputs.action == 'build'
-        run: mise exec -- node infra/templates/release-layers.mjs build
+        run: |
+          # Host reachability is diagnostic only; guest apt still verifies pinned repositories.
+          mise exec -- node --input-type=module <<'JS'
+          import {readFileSync,writeFileSync} from 'node:fs';
+          const snapshot=readFileSync('infra/templates/linux/versions.toml','utf8').match(/\[apt\][\s\S]*?snapshot = "([^"]+)"/)[1];
+          const results=await Promise.all(['http','https'].map(async protocol=>{
+            const url=`${protocol}://snapshot.ubuntu.com/ubuntu/${snapshot}/dists/resolute/InRelease`;
+            try {const response=await fetch(url,{redirect:'manual',signal:AbortSignal.timeout(15000)});await response.body?.cancel();return {url,status:response.status};}
+            catch(error){return {url,error:error.message,cause:error.cause?.message};}
+          }));
+          writeFileSync(`${process.env.LAYER_OUTPUT}-host-apt-probe.json`,JSON.stringify(results,null,2));
+          console.log('Runner snapshot reachability:',JSON.stringify(results));
+          JS
+          mise exec -- node infra/templates/release-layers.mjs build
+      - name: Pull staged artifacts anonymously and verify all input/source bytes
+        if: inputs.action == 'sign-staged'
+        run: |
+          mise exec -- node infra/templates/release-layers.mjs fetch-staged
+          mise exec -- node infra/templates/release-layers.mjs verify-staged
       - name: Materialize recipe key only after replay and policy gates pass
-        if: inputs.action == 'build'
+        if: inputs.action == 'build' || inputs.action == 'sign-staged'
         run: |
           umask 077
           mise exec -- node --input-type=module <<'JS'
@@ -144,10 +174,10 @@ jobs:
           writeFileSync(process.env.RECIPE_SIGNING_KEY_FILE,key,{mode:0o600});
           JS
       - name: Sign exact metadata and inventories with the existing recipe authority
-        if: inputs.action == 'build'
+        if: inputs.action == 'build' || inputs.action == 'sign-staged'
         run: mise exec -- node infra/templates/release-layers.mjs sign
       - name: Upload immutable artifacts, anonymously verify, then advance the selected channel
-        if: inputs.action == 'build' && inputs.publish
+        if: (inputs.action == 'build' || inputs.action == 'sign-staged') && inputs.publish
         run: mise exec -- node infra/templates/release-layers.mjs publish
       - name: Record measured sizes and offline timings
         if: inputs.action == 'build' && success()
@@ -177,6 +207,16 @@ jobs:
             ${{ env.LAYER_OUTPUT }}/linux-desktop/*.json
             ${{ env.LAYER_OUTPUT }}/linux-desktop/*.sig
             ${{ env.LAYER_OUTPUT }}/linux-desktop/verify.sh
+      - name: Retain failed guest boot diagnostics (no credentials or disks)
+        if: failure() && inputs.action == 'build'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: linux-layer-boot-diagnostics-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ env.LAYER_OUTPUT }}/diagnostics/
+            ${{ env.LAYER_OUTPUT }}-host-apt-probe.json
       - name: Remove file-only credentials
         if: always()
         run: |
