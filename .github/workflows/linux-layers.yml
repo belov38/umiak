@@ -52,11 +52,16 @@ jobs:
       LAYER_PUBLISH: ${{ inputs.publish }}
       LAYER_APPROVED_SHA: ${{ inputs.approved_sha }}
       LAYER_SEQUENCE: ${{ github.run_number }}
-      LAYER_OUTPUT: ${{ runner.temp }}/linux-layers
-      LAYER_AGENT_BINARY: ${{ runner.temp }}/layer-agent/umiak-agent
-      LAYER_GITHUB_TOKEN_FILE: ${{ runner.temp }}/layer-secrets/github-token
-      RECIPE_SIGNING_KEY_FILE: ${{ runner.temp }}/layer-secrets/recipe-key
     steps:
+      # The runner context is not available in job-level env; derive the paths here.
+      - name: Set runner-local paths
+        run: |
+          {
+            echo "LAYER_OUTPUT=$RUNNER_TEMP/linux-layers"
+            echo "LAYER_AGENT_BINARY=$RUNNER_TEMP/layer-agent/umiak-agent"
+            echo "LAYER_GITHUB_TOKEN_FILE=$RUNNER_TEMP/layer-secrets/github-token"
+            echo "RECIPE_SIGNING_KEY_FILE=$RUNNER_TEMP/layer-secrets/recipe-key"
+          } >> "$GITHUB_ENV"
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
