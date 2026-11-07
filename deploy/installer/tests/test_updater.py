@@ -173,6 +173,9 @@ def test_busy_template_build_is_a_skip_without_backup_or_restart(tmp_path,monkey
         def run(self,argv,input=None):
             calls.append(argv)
             return ""
+        def stream(self,argv,on_line):
+            calls.append(argv)
+            on_line("0123456789ab: Download complete")
     runner=Fake(tmp_path)
     runner.path(day2.SECRETS_DIR).mkdir(parents=True)
     monkeypatch.setattr(day2,"_umiak_ct",lambda *args:{"tags":"umiak"})

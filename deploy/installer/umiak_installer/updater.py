@@ -135,7 +135,8 @@ class HostBackend:
         day2._require_complete(self.current)
         if day2._umiak_ct(self.runner, self.current.ct_id) is None:
             raise InstallerError("Recorded Umiak CT is missing")
-        from .ct import run_in
+        from . import pull_progress
+        from .ct import exec_argv, run_in
         # Older CT templates did not explicitly provision Python. Install the
         # distro runtime before fencing; the backup helper is stdlib-only.
         try:
@@ -148,8 +149,11 @@ class HostBackend:
         # writers. Downloads dominate update duration on a home connection.
         self.ui.say("Pulling the release images before maintenance…")
         for image in self.bundle.images:
-            run_in(self.runner, self.current.ct_id, "docker", "pull",
-                   image)
+            layers = pull_progress.layer_sizes(image)
+            if layers:
+                self.ui.say(f"  {image.rsplit('/', 1)[-1]}: {pull_progress.human_size(sum(layers.values()))}")
+            progress = pull_progress.PullProgress(layers, self.ui.say)
+            self.runner.stream(exec_argv(self.current.ct_id, "docker", "pull", image), progress.feed)
         import hashlib
         import shutil
 

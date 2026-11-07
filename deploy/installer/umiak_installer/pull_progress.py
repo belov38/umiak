@@ -21,6 +21,7 @@ ACCEPT = ", ".join((
     "application/vnd.oci.image.manifest.v1+json",
     "application/vnd.docker.distribution.manifest.v2+json",
 ))
+PLAIN_LINE = re.compile(r"([0-9a-f]{12}): (.+)")
 DONE_TEXTS = frozenset({"Verifying Checksum", "Download complete", "Extracting", "Pull complete"})
 
 
@@ -113,10 +114,14 @@ class PullProgress:
         return sum(self.done.values())
 
     def feed(self, line: str) -> None:
+        """Accept compose JSON events and plain `docker pull` lines (`<layer>: Download complete`)."""
         try:
             event = json.loads(line)
         except ValueError:
-            return
+            plain = PLAIN_LINE.fullmatch(line.strip())
+            if not plain:
+                return
+            event = {"id": plain[1], "parent_id": "plain", "text": plain[2]}
         if not isinstance(event, dict) or not event.get("parent_id") or not isinstance(event.get("id"), str):
             return
         layer = event["id"]
@@ -135,7 +140,8 @@ class PullProgress:
         now = self.clock()
         if now - self.reported >= self.every:
             self.reported = now
-            self.say(self.status(now))
+            if self.downloaded or self.total:
+                self.say(self.status(now))
 
     def status(self, now: float) -> str:
         done, total = self.downloaded, self.total

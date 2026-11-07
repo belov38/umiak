@@ -40,6 +40,26 @@ def test_progress_without_manifest_shows_bytes_and_speed():
     assert said == ["  200 MB downloaded · 10 MB/s"]
 
 
+def test_plain_docker_pull_lines_count_completed_layers():
+    now = [0.0]
+    said = []
+    progress = pull_progress.PullProgress({"0123456789ab": 300_000_000, "ba9876543210": 100_000_000},
+                                          said.append, clock=lambda: now[0], every=10)
+    progress.feed("1.3.0: Pulling from belov38/umiak-quickstart")
+    progress.feed("ba9876543210: Already exists")
+    now[0] = 10
+    progress.feed("0123456789ab: Download complete")
+    assert said == ["  300 MB of 300 MB (100%) · 30 MB/s"]
+
+
+def test_no_status_line_before_anything_is_known():
+    said = []
+    progress = pull_progress.PullProgress(None, said.append, clock=lambda: 99.0, every=10)
+    progress.started = 0.0
+    progress.feed("0123456789ab: Pulling fs layer")
+    assert said == []
+
+
 def test_human_formats():
     assert pull_progress.human_size(665_000_000) == "665 MB"
     assert pull_progress.human_size(1_240_000_000) == "1.2 GB"
