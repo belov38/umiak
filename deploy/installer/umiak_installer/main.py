@@ -502,7 +502,10 @@ class Flow:
         self.save("ct-created", a)
 
         self.progress("Connecting the control plane to your tailnet")
-        tailnet.up(runner, ct_id, a["hostname"], out=self.ui.say, sleep=self.sleep)
+        joined = tailnet.up(runner, ct_id, a["hostname"], out=self.ui.say, sleep=self.sleep)
+        renamed = tailnet.rename_hint(a["hostname"], joined.dns_name)
+        if renamed:
+            self.ui.say(renamed)
         while True:
             info = tailnet.status(runner, ct_id)
             try:

@@ -143,8 +143,7 @@ def _dispatch(runner: Runner, request: dict) -> dict:
         from .day2 import _remove_zone_dnsmasq
         _remove_zone_dnsmasq(runner)
         # The forced-command line is cluster-wide. Never remove it for one node.
-        for name in (prepare_host.NODE_BINARY, prepare_host.NODE_CONFIG):
-            runner.path(name).unlink(missing_ok=True)
+        prepare_host.remove_node_artifacts(runner)
         return {"ok": True}
     if request["op"] not in ("inspect", "prepare", "update"):
         raise InstallerError("Unknown root node action")

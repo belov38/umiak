@@ -19,7 +19,9 @@ import ipaddress
 import json
 import os
 import re
+import shutil
 import sys
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -45,6 +47,10 @@ STATE_DIR = "/var/lib/umiak-installer"
 ROLLBACK_UNIT = "umiak-installer-rollback"
 NODE_BINARY = "/usr/local/bin/umiak-node"
 NODE_CONFIG = "/etc/umiak-node.toml"
+NODE_STATE_DIR = "/var/lib/umiak-node"
+# Every file the builder and node-agent put on PVE media storage starts with one of these.
+MEDIA_PREFIXES = ("umiak-", ".umiak-")
+DEFAULT_MEDIA_DIRS = ("/var/lib/vz/import", "/var/lib/vz/template/iso")
 AUTHORIZED_KEYS = "/etc/pve/priv/authorized_keys"
 STAGED_NODE_CONFIG = "umiak-node.toml"
 NAME = re.compile(r"[a-zA-Z][a-zA-Z0-9_-]*")
@@ -703,3 +709,28 @@ def install_node_agent(runner: Runner, binary: Path, sha256: str, public_key: st
             except Exception as error:  # noqa: BLE001 - restore the rest, keep the original error
                 print(f"Could not restore {path}: {error}", file=sys.stderr)
         raise
+
+
+def remove_node_artifacts(runner) -> None:
+    """Remove the node-agent, its cache and the Umiak media it left on this node.
+
+    Media directories come from the node-agent config (read before it is deleted);
+    only regular files with a Umiak prefix are removed there.
+    """
+    dirs = list(DEFAULT_MEDIA_DIRS)
+    config = runner.path(NODE_CONFIG)
+    if config.exists():
+        cfg = tomllib.loads(config.read_text())
+        dirs = [cfg.get("importDir", dirs[0]), cfg.get("isoDir", dirs[1])]
+    for name in dirs:
+        if not isinstance(name, str) or not name.startswith("/"):
+            continue
+        directory = runner.path(name)
+        if not directory.is_dir():
+            continue
+        for item in directory.iterdir():
+            if item.name.startswith(MEDIA_PREFIXES) and item.is_file() and not item.is_symlink():
+                item.unlink(missing_ok=True)
+    shutil.rmtree(runner.path(NODE_STATE_DIR), ignore_errors=True)
+    for name in (NODE_BINARY, NODE_CONFIG):
+        runner.path(name).unlink(missing_ok=True)

@@ -78,12 +78,24 @@ def up(runner: Runner, ct_id: int, hostname: str, out=print, sleep=time.sleep, t
             style.action(out, "Approve this device in the Tailscale admin console:", MACHINES_URL)
             shown = MACHINES_URL
         if clock() >= deadline:
-            raise InstallerError("Tailscale login did not complete in time; rerun the installer to resume")
+            raise InstallerError(
+                f"Nobody approved the Tailscale login within {int(timeout // 60)} minutes, so the link above has "
+                "expired. Rerun the same install command: it resumes here and prints a new link. Open it right "
+                "away on a device signed in to your tailnet.")
         sleep(2)
 
 
 def serve(runner: Runner, ct_id: int) -> None:
     run_in(runner, ct_id, "tailscale", "serve", "--bg", "--https=443", "http://127.0.0.1:4181")
+
+
+def rename_hint(requested: str, dns_name: str) -> str | None:
+    """Tailscale appends -2, -3, ... when the name is taken, usually by a previous Umiak install."""
+    machine = dns_name.split(".", 1)[0]
+    if not machine or machine == requested:
+        return None
+    return (f"Note: Tailscale named this device '{machine}' because '{requested}' is taken (often by a previous "
+            f"install). To use '{requested}', remove the old device and rename this one at {MACHINES_URL}")
 
 
 def key_expiry_hint(dns_name: str) -> str:

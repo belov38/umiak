@@ -422,8 +422,7 @@ def _remove_zone_dnsmasq(runner: Runner) -> None:
 
 def _remove_node_files(runner: Runner) -> None:
     prepare_host.remove_node_agent_key_lines(runner.path(prepare_host.AUTHORIZED_KEYS))
-    for name in (prepare_host.NODE_BINARY, prepare_host.NODE_CONFIG):
-        runner.path(name).unlink(missing_ok=True)
+    prepare_host.remove_node_artifacts(runner)
 
 
 def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: bool, remove_guests: bool, *, ui,
@@ -483,7 +482,8 @@ def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: b
         plan += [f"destroy {row['type']} {row['vmid']} ({row.get('name', 'unnamed')}) on {row.get('node')}"
                  for row in guests]
         plan += [f"remove LV {lv_target[0]}/{name} if PVE leaves it (Umiak snapshot or guest disk)" for name in lv_names]
-    plan += [f"remove sandbox node {n['name']}: its node agent, leftover Umiak disks and Umiak network membership"
+    plan += [f"remove sandbox node {n['name']}: its node agent and cache, leftover Umiak disks and media, "
+             "and Umiak network membership"
              for n in others]
     if remove_pve_objects:
         plan += [f"remove {description}" for description, _ in pve_steps]
@@ -491,7 +491,9 @@ def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: b
             plan.append("apply SDN (pvesh set /cluster/sdn)")
             plan.append("disable dnsmasq@umiak and remove " + ", ".join(DNSMASQ_DIRS + DNSMASQ_FILES)
                         + " (reload dbus)")
-        plan += [f"remove {prepare_host.NODE_BINARY} and {prepare_host.NODE_CONFIG}",
+        plan += [f"remove {prepare_host.NODE_BINARY}, {prepare_host.NODE_CONFIG} and the node-agent cache "
+                 f"{prepare_host.NODE_STATE_DIR}",
+                 "remove Umiak media (umiak-* images, seeds and layers) from this node's import and ISO storage",
                  f"remove the umiak-node forced-command line from {prepare_host.AUTHORIZED_KEYS} (other lines kept)",
                  f"remove {STATE_DIR_ON_PVE} and {prepare_host.STATE_DIR} (installer state and secrets)"]
     else:
@@ -571,5 +573,6 @@ def uninstall(runner: Runner, current: state.InstallState, remove_pve_objects: b
     from . import update_timer
     update_timer.remove(runner)
     (state_path or runner.path(str(state.DEFAULT_PATH))).unlink(missing_ok=True)
-    style.action(ui.say, f"Remove the device {current.answers.get('hostname', 'umiak')} from your tailnet:",
-                 tailnet.MACHINES_URL)
+    # Tailscale renames on collision (umiak-2, ...): name the device that actually joined.
+    device = (current.tailnet_host or "").split(".")[0] or current.answers.get("hostname", "umiak")
+    style.action(ui.say, f"Remove the device {device} from your tailnet:", tailnet.MACHINES_URL)

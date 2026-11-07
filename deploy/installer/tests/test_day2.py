@@ -1,3 +1,4 @@
+import dataclasses
 import hashlib
 import json
 
@@ -598,3 +599,11 @@ def test_full_uninstall_removes_the_other_sandbox_nodes(installed, monkeypatch):
     day2.uninstall(runner, current, True, True, ui=FakeUi(answers=["DELETE"]), progress=lambda _: None)
     assert calls[0][:2] == ("pve2", "remove")
     assert calls[0][2]["remaining_nodes"] == ["pve"] and calls[0][2]["purge_disks"]["storage"] == "local-lvm"
+
+
+def test_uninstall_names_the_tailnet_device_that_actually_joined(installed):
+    runner, current, _ = installed
+    current = dataclasses.replace(current, tailnet_host="umiak-3.tail1.ts.net")
+    ui = FakeUi(answers=["y"])
+    day2.uninstall(runner, current, remove_pve_objects=False, remove_guests=False, ui=ui)
+    assert any("Remove the device umiak-3 from your tailnet" in line for line in ui.said)

@@ -445,6 +445,7 @@ test("installation test requires a Linux template on the selected node", () => {
 	browser.element("#smoke-node").dataset.ready = "true";
 	browser.element("#smoke-node").change();
 	assert.equal(browser.element("#smoke-submit").disabled, false);
+	assert.equal(browser.element("#back-to-build-row").hidden, true);
 	const html = renderSetup({
 		sandboxNodes: [{ nodeId: "one", name: "pve", templates: [] }],
 	});
@@ -585,4 +586,29 @@ test("missing vendor tool offers a new-template rebuild with an explicit unaffec
 	assert.match(html, /Claude Code not installed: vendor down &lt;offline&gt;/);
 	assert.match(html, /data-vendor-rebuild="linux"/);
 	assert.match(html, /vendorRetry: true/);
+});
+
+test("a ready Linux template hides the download button and the step 3 link", () => {
+	const ready = renderSetup({
+		steps: {
+			limits: { status: "ready" },
+			network: { status: "ready" },
+			templates: { status: "ready" },
+		},
+		sandboxNodes: [
+			{
+				nodeId: "one",
+				name: "pve",
+				state: "active",
+				templates: [{ templateSlug: "linux" }],
+			},
+		],
+	});
+	assert.match(ready, /<button type="button" id="build-linux"[^>]* hidden>/);
+	assert.match(ready, /<p id="back-to-build-row" hidden>/);
+	const missing = renderSetup({
+		sandboxNodes: [{ nodeId: "one", name: "pve", templates: [] }],
+	});
+	assert.doesNotMatch(missing, /id="build-linux"[^>]* hidden>/);
+	assert.match(missing, /<p id="back-to-build-row">/);
 });
