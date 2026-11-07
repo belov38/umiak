@@ -1,4 +1,6 @@
+import { readFileSync } from "node:fs";
 import { stringify } from "yaml";
+import { SEED_CLI_PATH } from "./platform-tools.ts";
 
 /**
  * Small NoCloud seed; the separately authenticated media carries every build input.
@@ -6,10 +8,13 @@ import { stringify } from "yaml";
  * bootcmd) from rewriting the default network sources that the offline
  * bootstrap just removed.
  */
-export function renderOfflineSeed(jobId: string): Map<string, string | Buffer> {
+export function renderOfflineSeed(
+	jobId: string,
+	umiakCli?: string,
+): Map<string, string | Buffer> {
 	if (!/^[a-f0-9]{24}$/.test(jobId))
 		throw Error("Invalid offline build job identity");
-	return new Map([
+	const files = new Map<string, string | Buffer>([
 		[
 			"meta-data",
 			stringify({
@@ -23,4 +28,7 @@ export function renderOfflineSeed(jobId: string): Map<string, string | Buffer> {
 			`#cloud-config\n${stringify({ users: [], disable_root: true, ssh_pwauth: false, package_update: false, package_upgrade: false, packages: [], apt: { preserve_sources_list: true }, bootcmd: [["bash", "-euc", "mkdir -p /mnt/layer; mount -o ro LABEL=umiak-layer /mnt/layer; bash /mnt/layer/build/offline-bootstrap.sh"]] })}`,
 		],
 	]);
+	// The installed release CLI rides on the seed; installPlatformCli verifies its hash in the guest.
+	if (umiakCli !== undefined) files.set(SEED_CLI_PATH, readFileSync(umiakCli));
+	return files;
 }

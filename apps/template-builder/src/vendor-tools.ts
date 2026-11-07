@@ -253,3 +253,53 @@ chmod 0755 "$work/opencode"
 install -m 0755 "$work/opencode" /usr/local/bin/opencode
 `;
 }
+
+/** Runtime-only DHCP config for the vendor phase; /run never reaches the template. */
+export const VENDOR_NETWORK_FILE =
+	"/run/systemd/network/10-umiak-vendor.network";
+const VENDOR_NETWORK = "[Match]\nType=ether\n\n[Network]\nDHCP=ipv4\n";
+export const ONLINE_TIMEOUT_MS = 90000;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * The offline seed configures no interfaces, so raising the link alone gives the
+ * guest no address or DNS. Enable DHCP from /run, then wait until names resolve.
+ */
+export async function guestDhcp(io: GuestIo, online: boolean): Promise<void> {
+	const script = online
+		? `install -d /run/systemd/network && printf '%s' "$2" > "$1"`
+		: `rm -f "$1"`;
+	const r = await io.exec([
+		"bash",
+		"-c",
+		`${script} && networkctl reload && for i in /sys/class/net/en*; do [ -e "$i" ] && networkctl reconfigure "\${i##*/}"; done; true`,
+		"bash",
+		VENDOR_NETWORK_FILE,
+		VENDOR_NETWORK,
+	]);
+	if (r.exitCode !== 0)
+		throw new Error(
+			`vendor phase: guest network ${online ? "setup" : "teardown"} failed: ${r.stderr.trim().slice(0, 300)}`,
+		);
+}
+
+export async function waitGuestOnline(
+	io: GuestIo,
+	pollMs: number,
+	timeoutMs = ONLINE_TIMEOUT_MS,
+	now: () => number = Date.now,
+): Promise<void> {
+	await guestDhcp(io, true);
+	const deadline = now() + timeoutMs;
+	for (;;) {
+		const r = await io.exec(["getent", "ahosts", "github.com"]);
+		if (r.exitCode === 0) return;
+		if (now() >= deadline) {
+			const status = await io.exec(["networkctl", "status", "--no-pager"]);
+			throw new Error(
+				`guest got no network within ${timeoutMs / 1000} s (DNS for github.com fails): ${status.stdout.replace(/\s+/g, " ").slice(0, 300)}`,
+			);
+		}
+		await sleep(pollMs);
+	}
+}

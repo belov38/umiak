@@ -54,7 +54,12 @@ import {
 	TASK_TIMEOUT_MS,
 	vmStatus,
 } from "./stages.ts";
-import { installGuestVendorTool, installVendorTools } from "./vendor-tools.ts";
+import {
+	guestDhcp,
+	installGuestVendorTool,
+	installVendorTools,
+	waitGuestOnline,
+} from "./vendor-tools.ts";
 import { isProtectedVmid } from "./vmid-guard.ts";
 import {
 	buildIsoName,
@@ -337,6 +342,8 @@ function linuxJob(deps: BuildDeps, o: BuildOptions, recipe: LinuxRecipe): Job {
 						throw new Error(
 							"vendor phase: could not confirm NIC isolation state",
 						);
+					if (online) await waitGuestOnline(io, run.pollMs ?? 2000);
+					else await guestDhcp(io, false);
 				};
 				const vendorTools = await installVendorTools({
 					network,

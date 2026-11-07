@@ -373,7 +373,7 @@ export async function stageSeed(
 		const name = seedName(st.m);
 		const path = join(dir, "seed.iso");
 		const files = o.offlineLayer
-			? renderOfflineSeed(o.nodeBuildJobId as string)
+			? renderOfflineSeed(o.nodeBuildJobId as string, o.umiakCli)
 			: renderSeed(input);
 		// The seed must carry the bytes prepare verified, not a later version of the file.
 		const pkg = files.get(SEED_AGENT_PACKAGE);
