@@ -612,3 +612,43 @@ test("a ready Linux template hides the download button and the step 3 link", () 
 	assert.doesNotMatch(missing, /id="build-linux"[^>]* hidden>/);
 	assert.match(missing, /<p id="back-to-build-row">/);
 });
+
+test("step 1 shows storage and RAM per node and edits only the installer node's RAM", () => {
+	const html = renderSetup({
+		steps: {
+			connection: { status: "ready", data: { node: "pve" } },
+			limits: {
+				status: "ready",
+				data: {
+					nodeId: "one",
+					storage: "fast",
+					ramCapMb: 8192,
+					vmidMin: 10000,
+					vmidMax: 19999,
+					templateVmidMin: 20000,
+					templateVmidMax: 20099,
+				},
+			},
+		},
+		sandboxNodes: [
+			{ nodeId: "one", name: "pve", storage: "fast", ramCapMb: 8192 },
+			{ nodeId: "two", name: "pve2", storage: "local-lvm", ramCapMb: 4096 },
+		],
+	});
+	assert.match(
+		html,
+		/<summary>✓ 1\. Storage and capacity: pve on fast, 8 GiB · pve2 on local-lvm, 4 GiB<\/summary>/,
+	);
+	assert.match(html, /<td>pve2<\/td><td>local-lvm<\/td><td>4 GiB<\/td>/);
+	assert.match(
+		html,
+		/sandboxes 10000–19999, templates 20000–20099 on every node/,
+	);
+	assert.match(html, /Sandbox RAM limit on pve \(MiB\)/);
+	assert.match(html, /<input type="hidden" name="storage" value="fast">/);
+	assert.doesNotMatch(html, /<input name="storage"/);
+	assert.match(
+		html,
+		/--action nodes --node NAME --node-action add --ram-cap-mb/,
+	);
+});

@@ -534,6 +534,35 @@ export function renderSetup(state) {
 		`<details name="setup-step" id="step-${name}"${(name === "templates" && (state.buildQueue?.active || ["running", "error"].includes(state.buildJob?.status))) || (!state.complete && name === current && state.buildJob?.status !== "running") ? " open" : ""}><summary>${steps[name]?.status === "ready" ? "✓ " : ""}${summary}</summary>${body}</details>`;
 	const form = (name, fields, button = "Verify and save") =>
 		`<form data-step="${name}">${fields}<button type="submit"${name === "smoke" ? ` id="smoke-submit"${!(nodes[0]?.templates || []).some((t) => t.templateSlug === "linux") || state.buildJob?.status === "running" ? " disabled" : ""}` : ""}>${button}</button><div data-result role="status">${status(name)}</div></form>`;
+	// Storage and VMID ranges are installer facts mirrored in every node-agent
+	// config; only the installer node's RAM limit is editable here.
+	const gib = (mb) => `${Number(mb || 8192) / 1024} GiB`;
+	const installerNode = state.steps?.connection?.data?.node || "";
+	const installed = Boolean(steps.limits?.data?.nodeId && limits.storage);
+	const limitNodes = nodes.length
+		? nodes
+		: installed
+			? [
+					{
+						name: installerNode,
+						storage: limits.storage,
+						ramCapMb: limits.ramCapMb,
+					},
+				]
+			: [];
+	const limitsSummary = installed
+		? `1. Storage and capacity: ${limitNodes.map((n) => `${escapeHtml(n.name)} on ${escapeHtml(n.storage)}, ${gib(n.ramCapMb)}`).join(" · ")}`
+		: `1. Storage: ${escapeHtml(limits.storage || "local-lvm")} · Sandbox memory limit: ${gib(limits.ramCapMb)}`;
+	const vmidRange = (a, b) => `${escapeHtml(a)}–${escapeHtml(b)}`;
+	const limitsBody = installed
+		? `<style>#step-limits code{overflow-wrap:anywhere}#node-limits{border-collapse:collapse;margin:0 0 1rem}#node-limits th,#node-limits td{text-align:left;padding:.25rem 1rem .25rem 0}</style><table id="node-limits"><thead><tr><th>Node</th><th>LVM-thin storage</th><th>Sandbox RAM limit</th></tr></thead><tbody>${limitNodes.map((n) => `<tr><td>${escapeHtml(n.name)}</td><td>${escapeHtml(n.storage)}</td><td>${gib(n.ramCapMb)}</td></tr>`).join("")}</tbody></table>
+<p>Each node keeps its sandboxes and templates on its own LVM-thin storage, chosen when the node was added. VMIDs are cluster-wide: sandboxes ${vmidRange(limits.vmidMin, limits.vmidMax)}, templates ${vmidRange(limits.templateVmidMin, limits.templateVmidMax)} on every node. Existing templates: ${escapeHtml((steps.templates?.data?.builds || []).map((build) => build.pveVmid).join(", ") || "none")}.</p>
+<p>To change another node's RAM limit, run on a Proxmox node: <code>curl -fsSL https://raw.githubusercontent.com/belov38/umiak/main/install.sh | sh -s -- --action nodes --node NAME --node-action add --ram-cap-mb 8192</code>. Storage and VMID ranges are set by the installer.</p>
+${form("limits", `<input type="hidden" name="storage" value="${escapeHtml(limits.storage)}"><input type="hidden" name="vmidMin" value="${escapeHtml(limits.vmidMin)}"><input type="hidden" name="vmidMax" value="${escapeHtml(limits.vmidMax)}"><input type="hidden" name="templateVmidMin" value="${escapeHtml(limits.templateVmidMin)}"><input type="hidden" name="templateVmidMax" value="${escapeHtml(limits.templateVmidMax)}">${field("ramCapMb", `Sandbox RAM limit on ${escapeHtml(installerNode)} (MiB)`, limits.ramCapMb || 8192, "number")}`, "Save RAM limit")}`
+		: form(
+				"limits",
+				`<details><summary>Advanced settings</summary>${field("storage", "LVM-thin storage", limits.storage || "local-lvm") + field("vmidMin", "First sandbox VMID", limits.vmidMin || 500, "number") + field("vmidMax", "Last sandbox VMID", limits.vmidMax || 589, "number") + field("templateVmidMin", "First template VMID (separate from sandboxes)", limits.templateVmidMin, "number") + field("templateVmidMax", "Last template VMID", limits.templateVmidMax, "number")}<p>New builds allocate a free VMID in this range. Existing adopted templates keep their VMIDs: ${escapeHtml((steps.templates?.data?.builds || []).map((build) => build.pveVmid).join(", ") || "none")}. Occupied IDs are skipped; no existing VM is replaced.</p>${field("ramCapMb", "Total sandbox RAM cap (MiB)", limits.ramCapMb || 8192, "number")}</details>`,
+			);
 	const linuxReady = steps.templates?.status === "ready";
 	const running =
 		state.buildJob?.status === "running" || Boolean(state.buildQueue?.active);
@@ -563,7 +592,7 @@ ${state.bootstrapError ? `<p class="error" role="alert">Installer data could not
 <div class="progress" role="progressbar" aria-label="Setup progress" aria-valuemin="0" aria-valuemax="4" aria-valuenow="${verified}"><span style="width:${(verified / 4) * 100}%"></span></div>
 ${linuxReady && needLinux.length === 0 && !running && !state.complete ? `<div id="linux-ready"><p class="ready">Linux template ready. Next, test your installation.</p>${continueLink}</div>` : ""}
 ${state.complete ? '<section><h2>You are ready</h2><p><a class="primary-action" href="/app/sandboxes/new">Create your first sandbox</a></p></section>' : ""}
-${section("limits", `1. Storage: ${escapeHtml(limits.storage || "local-lvm")} · Sandbox memory limit: ${Number(limits.ramCapMb || 8192) / 1024} GiB`, form("limits", `<details><summary>Advanced settings</summary>${field("storage", "LVM-thin storage", limits.storage || "local-lvm") + field("vmidMin", "First sandbox VMID", limits.vmidMin || 500, "number") + field("vmidMax", "Last sandbox VMID", limits.vmidMax || 589, "number") + field("templateVmidMin", "First template VMID (separate from sandboxes)", limits.templateVmidMin, "number") + field("templateVmidMax", "Last template VMID", limits.templateVmidMax, "number")}<p>New builds allocate a free VMID in this range. Existing adopted templates keep their VMIDs: ${escapeHtml((steps.templates?.data?.builds || []).map((build) => build.pveVmid).join(", ") || "none")}. Occupied IDs are skipped; no existing VM is replaced.</p>${field("ramCapMb", "Total sandbox RAM cap (MiB)", limits.ramCapMb || 8192, "number")}</details>`))}
+${section("limits", limitsSummary, limitsBody)}
 ${section("network", steps.network?.status === "ready" ? "2. Sandbox networking configured" : "2. Sandbox networking", form("network", `<details><summary>Advanced settings</summary>${field("gatewayAddress", "Gateway address reachable from guests", network.gatewayAddress) + field("tunnelUrl", "Guest tunnel URL (wss://gateway/v1/connect)", network.tunnelUrl) + field("previewDomain", "Preview domain (defaults to IP-derived sslip.io)", network.previewDomain) + field("guestDns", "Guest DNS resolver", network.guestDns || "1.1.1.1")}<p>Keep the gateway certificate and CA trusted by your existing templates. The default preview and tunnel names use external sslip.io DNS. Use your own wildcard DNS domain to replace it. Guests default to the external DNS resolver 1.1.1.1; choose another resolver during fresh preparation if needed. Saving here does not change an existing PVE DHCP configuration.</p></details>`))}
 ${section(
 	"templates",
