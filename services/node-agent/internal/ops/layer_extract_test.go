@@ -69,3 +69,26 @@ func TestLayerExtractRejectsEscapesLinksDuplicatesAndMissing(t *testing.T) {
 		t.Fatal("accepted missing file")
 	}
 }
+
+// Guest apt runs its gpgv sandbox as _apt: every media directory must be
+// world-traversable, or keyrings under it read as missing (NO_PUBKEY).
+func TestLayerExtractMakesDirectoriesReadableByUnprivilegedGuestUsers(t *testing.T) {
+	body := []byte("echo fixture\n")
+	raw, m := layerTar(t, []*tar.Header{
+		{Name: "build/", Mode: 0700, Typeflag: tar.TypeDir},
+		{Name: "build/run.sh", Mode: 0644, Typeflag: tar.TypeReg, Size: int64(len(body))},
+	}, body)
+	dir := t.TempDir()
+	if e := extractLayerTar(bytes.NewReader(raw), m, dir); e != nil {
+		t.Fatal(e)
+	}
+	for _, p := range []string{dir, filepath.Join(dir, "build")} {
+		info, e := os.Stat(p)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if got := info.Mode().Perm(); got != 0755 {
+			t.Fatalf("%s mode %o, want 755", p, got)
+		}
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"strings"
@@ -111,5 +112,13 @@ func extractLayerTar(input io.Reader, m layerManifest, directory string) error {
 			return fmt.Errorf("missing layer file %s", f.Path)
 		}
 	}
-	return nil
+	// Directories are created private while untrusted bytes stream in (the
+	// staging parent stays 0700). The guest reads the media as _apt (gpgv
+	// sandbox) and other users, so publish every directory as 0755.
+	return fs.WalkDir(root.FS(), ".", func(name string, d fs.DirEntry, e error) error {
+		if e != nil || !d.IsDir() {
+			return e
+		}
+		return root.Chmod(name, 0755)
+	})
 }
