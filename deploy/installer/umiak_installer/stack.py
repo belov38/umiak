@@ -15,7 +15,8 @@ import ssl
 import time
 from pathlib import Path
 
-from .ct import run_in, write_file
+from . import pull_progress
+from .ct import exec_argv, run_in, write_file
 from .prepare_host import TOKEN_ID
 from .pve import InstallerError, Runner, private_dir, write_secret
 from .release import Release
@@ -219,8 +220,8 @@ def _quiet(_line: str) -> None:
     pass
 
 
-def pull(runner: Runner, ct_id: int, say=_quiet) -> None:
-    """Pull image by image so a long first download shows progress (cached images return at once)."""
+def pull(runner: Runner, ct_id: int, say=_quiet, sizes=None, clock=time.monotonic) -> None:
+    """Pull image by image with size, bytes, speed and time left (cached images return at once)."""
     try:
         config = json.loads(run_in(runner, ct_id, *compose("config", "--format", "json")) or "{}")
     except ValueError:
@@ -234,8 +235,12 @@ def pull(runner: Runner, ct_id: int, say=_quiet) -> None:
         return
     for n, (image, service) in enumerate(sorted(by_image.items()), 1):
         name = image.rsplit("/", 1)[-1]
-        say(f"Downloading image {n}/{len(by_image)}: {name}")
-        run_in(runner, ct_id, *compose("pull", "--quiet", service))
+        layers = (sizes or pull_progress.layer_sizes)(image)
+        size = f" ({pull_progress.human_size(sum(layers.values()))})" if layers else ""
+        say(f"Downloading image {n}/{len(by_image)}: {name}{size}")
+        progress = pull_progress.PullProgress(layers, say, clock=clock)
+        runner.stream(exec_argv(ct_id, "docker", "compose", "--progress", "json", "--project-directory", DIR,
+                                "pull", service), progress.feed)
 
 
 def create(runner: Runner, ct_id: int) -> None:

@@ -260,7 +260,8 @@ def test_pull_reports_one_line_per_image(tmp_path):
 
     runner.run = run
     said = []
-    stack.pull(runner, 591, say=said.append)
-    assert said == ["Downloading image 1/2: umiak-quickstart:1", "Downloading image 2/2: umiak-web:1"]
+    stack.pull(runner, 591, say=said.append, sizes=lambda image: {"aaa": 400_000_000} if "quickstart" in image else None)
+    assert said == ["Downloading image 1/2: umiak-quickstart:1 (400 MB)", "Downloading image 2/2: umiak-web:1"]
     pulls = [a for a in runner.ct_commands() if "pull" in a]
     assert [a[-1] for a in pulls] == ["api", "web"]
+    assert all(a[a.index("--progress") + 1] == "json" for a in pulls)

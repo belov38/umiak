@@ -60,6 +60,24 @@ class Runner:
             raise CommandError(argv, result.returncode, result.stdout, result.stderr)
         return result.stdout.strip()
 
+    def stream(self, argv: list[str], on_line) -> None:
+        """Run a long command, handing each stdout/stderr line to on_line as it arrives."""
+        argv = list(argv)
+        if not argv or not all(isinstance(part, str) for part in argv):
+            raise TypeError("argv must be a non-empty list of strings")
+        tail: list[str] = []
+        try:
+            process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                       stderr=subprocess.STDOUT, text=True, bufsize=1)
+        except FileNotFoundError as error:
+            raise CommandError(argv, 127, "", str(error)) from error
+        with process:
+            for line in process.stdout:
+                tail = (tail + [line])[-20:]
+                on_line(line.rstrip("\n"))
+        if process.returncode != 0:
+            raise CommandError(argv, process.returncode, "", "".join(tail))
+
     def path(self, name: str | Path) -> Path:
         """Map an absolute host path into this runner's root."""
         text = str(name)

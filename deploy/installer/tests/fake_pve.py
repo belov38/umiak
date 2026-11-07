@@ -140,6 +140,10 @@ class FakeRunner(Runner):
     def mutations(self):
         return [argv for argv in self.commands if is_mutation(argv)]
 
+    def stream(self, argv, on_line):
+        for line in self.run(argv).splitlines():
+            on_line(line)
+
     def run(self, argv, input=None):
         argv = list(argv)
         assert all(isinstance(part, str) for part in argv), argv
