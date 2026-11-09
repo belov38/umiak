@@ -344,6 +344,21 @@ def test_menu_dispatches_signin_non_interactively(installed, capsys):
     assert f"  https://umiak.tail0000.ts.net/signin#{SIGNIN}" in printed
 
 
+def test_menu_node_remove_passes_delete_sandboxes(installed, monkeypatch):
+    from umiak_installer import nodes
+
+    runner, current, tmp_path = installed
+    seen = []
+    monkeypatch.setattr(nodes, "remove_node", lambda runner, current, node, *, ui, delete_sandboxes: seen.append(
+        (node, delete_sandboxes, ui.interactive, ui.yes)))
+    monkeypatch.setattr(nodes, "remember", lambda runner, current, path: current)
+    code = main.main(["--non-interactive", "--yes", "--action", "nodes", "--node-action", "remove", "--node", "pve2",
+                      "--delete-sandboxes"], runner=runner, bundle=new_bundle(tmp_path), out=lambda _: None,
+                     sleep=lambda _: None)
+    assert code == 0
+    assert seen == [("pve2", True, False, True)]
+
+
 def test_menu_uninstall_non_interactive_needs_yes(installed):
     runner, current, tmp_path = installed
     printed = []

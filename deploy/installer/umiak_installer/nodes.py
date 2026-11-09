@@ -12,6 +12,7 @@ import hashlib
 import ipaddress
 import json
 import shlex
+import time
 from pathlib import Path
 
 from . import day2, node_host, prepare_host, stack, state
@@ -283,8 +284,96 @@ def add_node(runner, current, bundle, node, *, ui, storage=None, ram_cap_mb=None
     return registered
 
 
+PURGE_POLL_S = 5
+PURGE_STALL_S = 600
+
+
+def _sandbox_text(s):
+    name = f' "{s["name"]}"' if s.get("name") else ""
+    vmids = ", ".join(str(v) for v in s.get("vmids") or [])
+    where = f", VMID {vmids}" if vmids else ""
+    return f'{s["slug"]}{name} ({s["state"]}{where}) id {s["id"]}'
+
+
+def _plan_lines(plan):
+    node = plan["node"]
+    lines = []
+    if plan["sandboxes"]:
+        lines.append(f"  Sandboxes ({len(plan['sandboxes'])}):")
+        lines += [f"    {_sandbox_text(s)}" for s in plan["sandboxes"]]
+    if plan["machines"]:
+        lines.append(f"  Machines without a sandbox ({len(plan['machines'])}):")
+        lines += [f"    VMID {m['vmid'] or '-'} ({m['state']}) id {m['id']}" for m in plan["machines"]]
+    if plan["snapshots"]:
+        lines.append(f"  Snapshots ({len(plan['snapshots'])}):")
+        lines += [f"    {s['name'] or s['id']} ({s['kind']}, {s['state']})" for s in plan["snapshots"]]
+    if plan["templates"]:
+        lines.append(f"  Templates on {node} ({len(plan['templates'])}):")
+        lines += [f"    {t['slug']} {t['version']} (VMID {t['vmid']})" for t in plan["templates"]]
+    return lines or [f"  Nothing Umiak-owned is left on {node}."]
+
+
+def _left(plan):
+    """'1 sandbox, 2 snapshots' still to delete; empty when the purge is done."""
+    parts = []
+    for key, one, many in (("sandboxes", "sandbox", "sandboxes"), ("machines", "machine", "machines"),
+                           ("snapshots", "snapshot", "snapshots")):
+        if count := len(plan[key]):
+            parts.append(f"{count} {one if count == 1 else many}")
+    return ", ".join(parts)
+
+
+def _left_items(plan):
+    items = [f"sandbox {s['slug']} ({s['state']})" for s in plan["sandboxes"]]
+    items += [f"machine VMID {m['vmid'] or '-'} ({m['state']})" for m in plan["machines"]]
+    items += [f"snapshot {s['name'] or s['id']} ({s['state']})" for s in plan["snapshots"]]
+    return ", ".join(items)
+
+
+def _reason(error):
+    """The console's own message: the last stderr line, not the pct/docker wrapper text."""
+    lines = [line.strip() for line in (getattr(error, "stderr", "") or "").splitlines() if line.strip()]
+    return lines[-1] if lines else str(error)
+
+
+def _wait_purged(console, node_id, plan, *, ui, sleep, clock):
+    """Poll until the worker has deleted every sandbox, machine and snapshot; report progress."""
+    node, last, changed = plan["node"], None, clock()
+    while _left(plan):
+        if _left(plan) != last:
+            last, changed = _left(plan), clock()
+            ui.say(f"  Deleting on {node}: {last} left")
+        elif clock() - changed > PURGE_STALL_S:
+            raise InstallerError(
+                f"Deleting on {node} made no progress for {PURGE_STALL_S // 60} minutes; still left: "
+                f"{_left_items(plan)}. Check that the control plane is running, then rerun the removal; "
+                "it continues where it stopped."
+            )
+        sleep(PURGE_POLL_S)
+        plan = console.call("removal-plan", nodeId=node_id)
+    return plan
+
+
+def _confirm_purge(node, plan, *, ui, delete_sandboxes):
+    from .main import UsageError  # main imports this module lazily
+
+    if not ui.confirm(f"Delete everything listed above and remove sandbox node {node}?"):
+        raise InstallerError("Cancelled; no sandbox node changes were applied")
+    if not (plan["sandboxes"] or plan["machines"] or plan["snapshots"]):
+        return
+    if not getattr(ui, "interactive", True):
+        if not delete_sandboxes:
+            raise UsageError(f"Node {node} still has sandboxes, machines or snapshots: rerun with --delete-sandboxes "
+                             "to delete them")
+        return
+    # Typed even with --yes: sandboxes and snapshots are gone for good.
+    if not ui.typed(f"Sandboxes and snapshots are deleted permanently. Type the node name {node} to continue", node):
+        raise InstallerError("Cancelled; no sandbox node changes were applied")
+
+
 @_serialized
-def remove_node(runner, current, node, *, ui, console=None, host=None):
+def remove_node(runner, current, node, *, ui, console=None, host=None, delete_sandboxes=False, sleep=time.sleep,
+                clock=time.monotonic):
     day2._require_node(runner, current)
     day2._require_complete(current)
     _target(runner, node)
@@ -292,19 +381,53 @@ def remove_node(runner, current, node, *, ui, console=None, host=None):
     _capable(console)
     listed = console.call("list")
     inventory = listed["nodes"]
-    target = next((n for n in inventory + listed.get("retiredNodes", []) if n["name"] == node), None)
-    if target is None:
+    target = next((n for n in inventory if n["name"] == node), None)
+    retired = next((n for n in listed.get("retiredNodes", []) if n["name"] == node), None)
+    if target is None and retired is None:
         raise InstallerError("Node is not registered for sandbox use")
-    ui.say(
-        f"Remove sandbox node {node}: retain history/control-plane CT and shared cluster key; "
-        "remove only its node-agent/config and narrow Umiak SDN membership."
-    )
-    if not ui.confirm("Remove this sandbox node if it is empty?"):
-        raise InstallerError("Cancelled; no sandbox node changes were applied")
+    retained = ("Other sandbox nodes keep their own templates and sandboxes. The control-plane CT, history and the "
+                f"shared cluster key are retained; only the node-agent/config and Umiak SDN membership of {node} "
+                "are removed.")
+    if target is None:
+        # A retry after the node was retired: only host cleanup is left.
+        ui.say(f"Sandbox node {node} is already retired; finishing its host cleanup. {retained}")
+        if not ui.confirm(f"Remove the Umiak node-agent and config from {node}?"):
+            raise InstallerError("Cancelled; no sandbox node changes were applied")
+        target = retired
+    else:
+        plan = console.call("removal-plan", nodeId=target["nodeId"])
+        ui.say(f"Removing sandbox node {node} deletes everything Umiak owns on it:")
+        for line in _plan_lines(plan):
+            ui.say(line)
+        ui.say(retained)
+        if plan["blockers"]:
+            raise InstallerError(f"Cannot remove {node} yet: " + "; ".join(b["message"] for b in plan["blockers"]))
+        _confirm_purge(node, plan, ui=ui, delete_sandboxes=delete_sandboxes)
+        try:
+            plan = console.call("purge", nodeId=target["nodeId"])
+        except CommandError as error:
+            raise InstallerError(f"Could not start deleting on {node}: {_reason(error)}") from error
+        plan = _wait_purged(console, target["nodeId"], plan, ui=ui, sleep=sleep, clock=clock)
+        for template in plan["templates"]:
+            label = f"{template['slug']} {template['version']} (VMID {template['vmid']})"
+            ui.say(f"  Deleting template {label}")
+            try:
+                console.call("retire-template", nodeId=target["nodeId"], buildId=template["buildId"])
+            except CommandError as error:
+                raise InstallerError(
+                    f"Could not delete template {label} on {node}: {_reason(error)}. Fix the cause and rerun the "
+                    "removal; finished deletions are kept."
+                ) from error
     result = console.call("retire", nodeId=target["nodeId"])
     if not result["ok"]:
-        blockers = ", ".join(f"{b['kind']} {b['id']}" for b in result["blockers"])
-        raise InstallerError("Node removal blocked: " + blockers)
+        left = console.call("removal-plan", nodeId=target["nodeId"])
+        details = [b["message"] for b in left["blockers"]]
+        if _left_items(left):
+            details.append("still left: " + _left_items(left))
+        if not details:
+            details = [", ".join(f"{b['kind']} {b['id']}" for b in result["blockers"])]
+        raise InstallerError(f"Node removal is still blocked on {node}: " + "; ".join(details) +
+                             ". Rerun the removal after fixing this.")
     remaining = sorted(n["name"] for n in inventory if n["name"] != node)
     host.call(node, "remove", remaining_nodes=remaining, control_plane_id=current.ct_id)
     return result

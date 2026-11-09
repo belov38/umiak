@@ -77,6 +77,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--action", choices=sorted(ACTIONS), help="day-2 action without the menu (non-interactive)")
     parser.add_argument("--node", help="Sandbox node name from this cluster")
     parser.add_argument("--node-action", choices=["add", "remove"], help="Action for --action nodes")
+    parser.add_argument("--delete-sandboxes", action="store_true",
+                        help="Node remove: also delete the node's sandboxes, machines and snapshots (non-interactive)")
     parser.add_argument("--channel", choices=["stable", "edge"], help="platform and recipe release channel")
     parser.add_argument("--auto-update", choices=["on", "off"], help="enable or disable automatic updates")
     parser.add_argument("--version", help="Update: release version (default: the latest release)")
@@ -629,7 +631,7 @@ class Flow:
                 nodes.add_node(self.runner, current, self.bundle, node, ui=ui, storage=args.storage,
                                ram_cap_mb=args.ram_cap_mb)
             else:
-                nodes.remove_node(self.runner, current, node, ui=ui)
+                nodes.remove_node(self.runner, current, node, ui=ui, delete_sandboxes=args.delete_sandboxes)
             self.current = nodes.remember(self.runner, current, self.state_path)
             ui.say(f"Sandbox node {node}: {operation} complete.")
         elif action == "Uninstall":

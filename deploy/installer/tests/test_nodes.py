@@ -5,23 +5,36 @@ from test_day2 import FakeUi
 from umiak_installer import nodes, state
 from umiak_installer.pve import CommandError, InstallerError
 
+EMPTY_PLAN = {"node": "pve2", "sandboxes": [], "machines": [], "snapshots": [], "templates": [], "blockers": []}
+TEMPLATE = {"buildId": "tb1", "slug": "linux", "version": "1.2.0", "vmid": 20001, "status": "active"}
+SANDBOX = {"id": "0190-sbx", "slug": "quiet-otter", "name": "agent box", "state": "ready", "vmids": [10007]}
+SNAPSHOT = {"id": "0190-snp", "name": "before-upgrade", "kind": "saved", "state": "ready"}
+
 
 class Console:
-    def __init__(self, blockers=None):
+    def __init__(self, blockers=None, plans=None, retired=False, template_error=None):
         self.calls = []
         self.blockers = blockers or []
+        # removal-plan answers in order; the last one repeats.
+        self.plans = list(plans or [EMPTY_PLAN])
+        self.retired = retired
+        self.template_error = template_error
 
     def call(self, op, **data):
         self.calls.append((op, data))
         if op == "capabilities":
             return {"multiNode": True}
         if op == "list":
+            node = {"nodeId": "b", "name": "pve2", "storage": "local-lvm", "ramCapMb": 4096}
             return {
-                "nodes": [
-                    {"nodeId": "a", "name": "pve", "storage": "local-lvm", "ramCapMb": 4096},
-                    {"nodeId": "b", "name": "pve2", "storage": "local-lvm", "ramCapMb": 4096},
-                ]
+                "nodes": [{"nodeId": "a", "name": "pve", "storage": "local-lvm", "ramCapMb": 4096}]
+                + ([] if self.retired else [node]),
+                "retiredNodes": [node] if self.retired else [],
             }
+        if op in ("removal-plan", "purge"):
+            return self.plans.pop(0) if len(self.plans) > 1 else self.plans[0]
+        if op == "retire-template" and self.template_error:
+            raise CommandError(["pct"], 1, stderr=self.template_error)
         if op == "retire":
             return {"ok": not self.blockers, "blockers": self.blockers}
         return {"ok": True}
@@ -56,13 +69,25 @@ def installed():
     )
 
 
-def test_remove_refuses_db_blockers_before_any_host_changes(tmp_path):
+def real_ui(answers, *, interactive=True, yes=False):
+    from umiak_installer.main import Ui
+
+    said = []
+    ui = Ui(interactive=interactive, yes=yes, input_fn=lambda prompt: answers.pop(0), out=said.append)
+    return ui, said
+
+
+def plan(**parts):
+    return dict(EMPTY_PLAN, **parts)
+
+
+def test_remove_refuses_retire_blockers_in_plain_language_before_host_changes(tmp_path):
     runner = FakeRunner(tmp_path)
-    cp, host = Console([{"kind": "snapshot", "id": "saved"}]), Host()
-    with pytest.raises(InstallerError, match="snapshot.*saved"):
+    leftover = plan(blockers=[{"kind": "disk", "id": "d1", "message": "Disk local-lvm:vm-1-disk-0 is still recorded"}])
+    cp, host = Console([{"kind": "disk", "id": "d1"}], plans=[EMPTY_PLAN, EMPTY_PLAN, leftover]), Host()
+    with pytest.raises(InstallerError, match="still blocked.*Disk local-lvm:vm-1-disk-0 is still recorded"):
         nodes.remove_node(runner, installed(), "pve2", ui=FakeUi(yes=True), console=cp, host=host)
     assert host.calls == []
-    assert [op for op, _ in cp.calls] == ["capabilities", "list", "retire"]
 
 
 def test_remove_marks_retired_before_root_cleanup_and_keeps_shared_key(tmp_path):
@@ -73,6 +98,105 @@ def test_remove_marks_retired_before_root_cleanup_and_keeps_shared_key(tmp_path)
     assert host.calls[0][0:2] == ("pve2", "remove")
     assert host.calls[0][2]["remaining_nodes"] == ["pve"]
     assert not any(is_mutation(a) for a in runner.commands)
+
+
+def test_remove_templates_only_node_lists_and_retires_its_templates_with_one_confirmation(tmp_path):
+    runner = FakeRunner(tmp_path)
+    cp, host = Console(plans=[plan(templates=[TEMPLATE]), plan(templates=[TEMPLATE])]), Host()
+    ui, said = real_ui(["y"])
+    nodes.remove_node(runner, installed(), "pve2", ui=ui, console=cp, host=host)
+    text = "\n".join(said)
+    assert "linux 1.2.0 (VMID 20001)" in text
+    assert "Other sandbox nodes keep their own templates" in text
+    assert "control-plane CT" in text
+    ops = [op for op, _ in cp.calls]
+    assert ops == ["capabilities", "list", "removal-plan", "purge", "retire-template", "retire"]
+    assert cp.calls[4][1] == {"nodeId": "b", "buildId": "tb1"}
+    assert host.calls[0][0:2] == ("pve2", "remove")
+
+
+def test_remove_with_sandboxes_needs_the_typed_node_name_even_with_yes(tmp_path):
+    runner = FakeRunner(tmp_path)
+    busy = plan(sandboxes=[SANDBOX], snapshots=[SNAPSHOT], templates=[TEMPLATE])
+    cp, host = Console(plans=[busy]), Host()
+    ui, said = real_ui(["pve"], yes=True)
+    with pytest.raises(InstallerError, match="Cancelled"):
+        nodes.remove_node(runner, installed(), "pve2", ui=ui, console=cp, host=host)
+    text = "\n".join(said)
+    assert 'quiet-otter "agent box" (ready, VMID 10007)' in text
+    assert "before-upgrade (saved, ready)" in text
+    assert "purge" not in [op for op, _ in cp.calls]
+    assert host.calls == []
+
+
+def test_remove_deletes_sandboxes_with_progress_then_templates(tmp_path):
+    runner = FakeRunner(tmp_path)
+    busy = plan(sandboxes=[SANDBOX], snapshots=[SNAPSHOT], templates=[TEMPLATE])
+    half = plan(snapshots=[dict(SNAPSHOT, state="deleting")], templates=[TEMPLATE])
+    cp, host = Console(plans=[busy, busy, half, plan(templates=[TEMPLATE])]), Host()
+    ui, said = real_ui(["y", "pve2"])
+    nodes.remove_node(runner, installed(), "pve2", ui=ui, console=cp, host=host, sleep=lambda s: None)
+    ops = [op for op, _ in cp.calls]
+    assert ops.index("purge") < ops.index("retire-template") < ops.index("retire")
+    progress = [line for line in said if "left" in line]
+    assert progress == ["  Deleting on pve2: 1 sandbox, 1 snapshot left", "  Deleting on pve2: 1 snapshot left"]
+    assert any("Deleting template linux 1.2.0 (VMID 20001)" in line for line in said)
+
+
+def test_remove_non_interactive_needs_delete_sandboxes(tmp_path):
+    from umiak_installer.main import UsageError
+
+    runner = FakeRunner(tmp_path)
+    cp = Console(plans=[plan(sandboxes=[SANDBOX])])
+    ui, _ = real_ui([], interactive=False, yes=True)
+    with pytest.raises(UsageError, match="--delete-sandboxes"):
+        nodes.remove_node(runner, installed(), "pve2", ui=ui, console=cp, host=Host())
+    assert "purge" not in [op for op, _ in cp.calls]
+    cp = Console(plans=[plan(sandboxes=[SANDBOX]), EMPTY_PLAN])
+    nodes.remove_node(runner, installed(), "pve2", ui=ui, console=cp, host=Host(), delete_sandboxes=True,
+                      sleep=lambda s: None)
+    assert [op for op, _ in cp.calls][-1] == "retire"
+
+
+def test_remove_reports_plan_blockers_before_any_change(tmp_path):
+    runner = FakeRunner(tmp_path)
+    message = "A template build windows is running on pve2 (job j1); wait until it finishes, then retry"
+    cp, host = Console(plans=[plan(templates=[TEMPLATE], blockers=[{"kind": "build", "id": "j1", "message": message}])]), Host()
+    with pytest.raises(InstallerError, match="template build windows is running on pve2"):
+        nodes.remove_node(runner, installed(), "pve2", ui=FakeUi(yes=True), console=cp, host=host)
+    assert [op for op, _ in cp.calls] == ["capabilities", "list", "removal-plan"]
+    assert host.calls == []
+
+
+def test_remove_stops_on_a_stalled_purge_and_says_what_is_left(tmp_path):
+    runner = FakeRunner(tmp_path)
+    stuck = plan(sandboxes=[dict(SANDBOX, state="deleting")])
+    cp, host = Console(plans=[stuck]), Host()
+    now = [0.0]
+
+    def sleep(seconds):
+        now[0] += seconds
+
+    with pytest.raises(InstallerError, match=r"no progress.*quiet-otter \(deleting\).*rerun"):
+        nodes.remove_node(runner, installed(), "pve2", ui=FakeUi(answers=["y", "pve2"]), console=cp, host=host,
+                          sleep=sleep, clock=lambda: now[0])
+    assert "retire" not in [op for op, _ in cp.calls]
+    assert host.calls == []
+
+
+def test_remove_explains_a_failed_template_delete(tmp_path):
+    runner = FakeRunner(tmp_path)
+    cp = Console(plans=[plan(templates=[TEMPLATE])], template_error="node: warning\nTemplate deletion task: VM is locked\n")
+    with pytest.raises(InstallerError, match=r"linux 1.2.0 \(VMID 20001\) on pve2: Template deletion task: VM is locked"):
+        nodes.remove_node(runner, installed(), "pve2", ui=FakeUi(yes=True), console=cp, host=Host())
+
+
+def test_remove_retry_of_a_retired_node_finishes_host_cleanup(tmp_path):
+    runner = FakeRunner(tmp_path)
+    cp, host = Console(retired=True), Host()
+    nodes.remove_node(runner, installed(), "pve2", ui=FakeUi(yes=True), console=cp, host=host)
+    assert [op for op, _ in cp.calls] == ["capabilities", "list", "retire"]
+    assert host.calls[0][0:2] == ("pve2", "remove")
 
 
 def test_node_host_refuses_other_host_identity_before_mutation(tmp_path):
