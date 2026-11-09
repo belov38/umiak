@@ -4,9 +4,13 @@ import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import {
 	beginNodeBuild,
+	ensureQueues,
 	finishNodeBuild,
 	lockNode,
+	nodeRemovalPlan,
+	PgBossJobSender,
 	registerSandboxNode,
+	requestNodePurge,
 	retireNode,
 } from "../../../packages/core/src/index.ts";
 import pg from "../../../packages/db/node_modules/pg/lib/index.js";
@@ -17,6 +21,27 @@ import { checkNode, pinnedPve } from "./setup-host.mjs";
 import { nodeService } from "./setup-nodes.mjs";
 import { replicateActiveTemplates } from "./template-replication.mjs";
 
+/** Send-only pg-boss, as the API uses it: the worker supervises and works the queues. */
+async function bossJobs(pool) {
+	const { PgBoss } = await import(
+		"../../../packages/core/node_modules/pg-boss/dist/index.js"
+	);
+	const boss = new PgBoss({
+		db: { executeSql: (text, values) => pool.query(text, values) },
+		schema: "pgboss",
+		supervise: false,
+		schedule: false,
+		registerInstance: false,
+	});
+	boss.on("error", (error) => console.error(`pg-boss: ${error.message}`));
+	await boss.start();
+	await ensureQueues(boss);
+	return {
+		jobs: new PgBossJobSender(boss),
+		stop: () => boss.stop({ graceful: false }),
+	};
+}
+
 export async function nodeCommand(
 	pool,
 	request,
@@ -24,6 +49,7 @@ export async function nodeCommand(
 		secretsDir = process.env.UMIAK_SECRETS_DIR || "/pve-secrets",
 		probe = checkNode,
 		makePve = pinnedPve,
+		makeJobs = bossJobs,
 	} = {},
 ) {
 	const state = await new PgSetupStore(pool).read();
@@ -207,7 +233,24 @@ export async function nodeCommand(
 		if (!owned.rowCount) throw Error("Unknown sandbox node");
 		return service.transact((tx) => retireNode(tx, request.nodeId));
 	}
+	if (request.op === "removal-plan") {
+		// Also answers for an already retired node: a retry after host cleanup failed.
+		const owned = await pool.query(
+			"SELECT id FROM runtime.nodes WHERE id=$1 AND provider_id=$2",
+			[request.nodeId, limits.providerId],
+		);
+		if (!owned.rowCount) throw Error("Unknown sandbox node");
+		return nodeRemovalPlan(pool, request.nodeId);
+	}
 	if (!node) throw Error("Unknown active sandbox node");
+	if (request.op === "purge") {
+		const boss = await makeJobs(pool);
+		try {
+			return await requestNodePurge(pool, boss.jobs, node.nodeId);
+		} finally {
+			await boss.stop?.();
+		}
+	}
 	if (request.op === "retire-template") {
 		const build = (
 			await pool.query(

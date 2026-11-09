@@ -1,7 +1,12 @@
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTopology } from "@umiak/core/testing";
+import {
+	createTopology,
+	insertMachine,
+	insertSandbox,
+} from "@umiak/core/testing";
 import { createTestDatabase, type TestDatabase } from "@umiak/db/testing";
 import { afterAll, beforeAll, expect, it } from "vitest";
 // @ts-expect-error JavaScript console adapter is tested across the real PostgreSQL boundary.
@@ -672,4 +677,47 @@ it("retirement retains its lease for local disks and recovers a lost delete repl
 	} finally {
 		await rm(dir, { recursive: true, force: true });
 	}
+});
+
+it("removal-plan lists what purge deletes; purge sends the normal delete jobs through pg-boss", async () => {
+	const a = await createTopology(db.pool, { build: { version: "2.0.0" } });
+	const team = randomUUID();
+	const sandboxId = randomUUID();
+	const machineId = await insertMachine(db.pool, a, {
+		state: "running",
+		sandboxId,
+	});
+	await insertSandbox(db.pool, a, {
+		id: sandboxId,
+		teamId: team,
+		state: "ready",
+		machineId,
+	});
+	await db.pool.query("UPDATE quickstart.setup SET state=$1 WHERE id=true", [
+		{
+			steps: {
+				limits: { data: { providerId: a.providerId } },
+				connection: { data: { node: "pve" } },
+			},
+		},
+	]);
+	const plan = await nodeCommand(db.pool, {
+		op: "removal-plan",
+		nodeId: a.nodeId,
+	});
+	expect(plan.sandboxes.map((s: { id: string }) => s.id)).toEqual([sandboxId]);
+	expect(plan.templates[0]).toMatchObject({
+		buildId: a.templateBuildId,
+		version: "2.0.0",
+	});
+	const after = await nodeCommand(db.pool, { op: "purge", nodeId: a.nodeId });
+	expect(after.sandboxes[0].state).toBe("deleting");
+	const queued = await db.pool.query(
+		"SELECT name FROM pgboss.job WHERE data->>'operationId' IN (SELECT id::text FROM runtime.operations WHERE sandbox_id=$1)",
+		[sandboxId],
+	);
+	expect(queued.rows).toEqual([{ name: "sandbox-op" }]);
+	await expect(
+		nodeCommand(db.pool, { op: "removal-plan", nodeId: randomUUID() }),
+	).rejects.toThrow(/Unknown sandbox node/);
 });
