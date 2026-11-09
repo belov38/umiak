@@ -359,6 +359,19 @@ def test_menu_node_remove_passes_delete_sandboxes(installed, monkeypatch):
     assert seen == [("pve2", True, False, True)]
 
 
+def test_remove_node_action_needs_no_node_action(installed, monkeypatch):
+    from umiak_installer import nodes
+
+    runner, current, tmp_path = installed
+    seen = []
+    monkeypatch.setattr(nodes, "remove_node", lambda runner, current, node, *, ui, delete_sandboxes: seen.append(node))
+    monkeypatch.setattr(nodes, "add_node", lambda *a, **k: seen.append("add"))
+    monkeypatch.setattr(nodes, "remember", lambda runner, current, path: current)
+    code = main.main(["--non-interactive", "--yes", "--action", "remove-node", "--node", "pve2"], runner=runner,
+                     bundle=new_bundle(tmp_path), out=lambda _: None, sleep=lambda _: None)
+    assert code == 0 and seen == ["pve2"]
+
+
 def test_menu_uninstall_non_interactive_needs_yes(installed):
     runner, current, tmp_path = installed
     printed = []

@@ -47,12 +47,16 @@ class UsageError(InstallerError):
     pass
 
 
+ADD_NODE, REMOVE_NODE = "Add a sandbox node", "Remove a sandbox node"
+NODES = "Sandbox nodes"  # --action nodes with --node-action add|remove (kept for scripts)
+
+
 def menu_options(current: state.InstallState | None) -> list[str]:
     if current is None:
         return ["Install"]
     if current.phase != "complete":
         return ["Resume install", "Uninstall"]
-    return ["Update", "Sign in a new browser", "Reset owner access", "Add or remove sandbox nodes", "Uninstall"]
+    return ["Update", "Sign in a new browser", "Reset owner access", ADD_NODE, REMOVE_NODE, "Uninstall"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -90,7 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 ACTIONS = {"update": "Update", "signin": "Sign in a new browser", "reset-owner": "Reset owner access",
-           "uninstall": "Uninstall", "nodes": "Add or remove sandbox nodes"}
+           "uninstall": "Uninstall", "add-node": ADD_NODE, "remove-node": REMOVE_NODE, "nodes": NODES}
 
 
 class Ui:
@@ -425,7 +429,7 @@ class Flow:
         self.progress("Other cluster nodes")
         ui.say(f"This cluster has {len(others)} more online node(s): {', '.join(others)}. Sandboxes can run there "
                "too; the installer adds a restricted node-agent to each node you choose.")
-        later = "You can add it later: rerun the installer and choose 'Add or remove sandbox nodes'."
+        later = f"You can add it later: rerun the installer and choose '{ADD_NODE}'."
         for node in others:
             if not ui.ask_yes(f"Add {node} as a sandbox node?"):
                 continue
@@ -613,10 +617,11 @@ class Flow:
             ui.say(style.ok("Owner access was reset."))
             style.action(ui.say, "Open this link to claim owner access again:", link,
                          "It is a one-time owner claim; do not share it.")
-        elif action == "Add or remove sandbox nodes":
+        elif action in (ADD_NODE, REMOVE_NODE, NODES):
             from . import nodes
             self.step = "Managing sandbox nodes"
-            operation = args.node_action or ui.ask("Node action (add/remove)", None, "--node-action")
+            operation = {ADD_NODE: "add", REMOVE_NODE: "remove"}.get(action) or args.node_action or ui.ask(
+                "Node action (add/remove)", None, "--node-action")
             if operation not in ("add", "remove"):
                 raise UsageError("--node-action must be add or remove")
             node = args.node
@@ -625,6 +630,8 @@ class Flow:
                          else [n for n in current.sandbox_nodes if n != current.node])
                 if operation == "add" and not names:
                     raise InstallerError("Every online cluster node is already a sandbox node")
+                if operation == "remove" and not names:
+                    raise InstallerError("No sandbox node besides the control-plane host to remove")
                 hint = f" ({', '.join(names)})" if names else ""
                 node = ui.ask(f"Sandbox node name{hint}", names[0] if len(names) == 1 else None, "--node")
             if operation == "add":
@@ -682,7 +689,7 @@ def _main(argv=None, runner: Runner | None = None, bundle: release.Release | Non
         options = menu_options(flow.current)
         if args.action:
             action = ACTIONS[args.action]
-            if action not in options:
+            if action not in options and not (action == NODES and ADD_NODE in options):
                 raise UsageError(f"{action} is not available now; available: {', '.join(options)}")
         elif ui.interactive:
             running = flow.current.release if flow.current else bundle.version

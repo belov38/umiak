@@ -1,10 +1,11 @@
 # Sandbox nodes in one Proxmox cluster
 
-Run the installer again on the original control-plane host and choose **Add or
-remove sandbox nodes**. For automation, pass `--action nodes --node-action add
---node pve2 --storage local-lvm --ram-cap-mb 4096 --non-interactive --yes` to
-the installer. Remove uses `--node-action remove --node pve2` instead; add
-`--delete-sandboxes` when the node still has sandboxes or snapshots. Update
+Run the installer again on the original control-plane host and choose **Add a
+sandbox node** or **Remove a sandbox node**. For automation, pass `--action
+add-node --node pve2 --storage local-lvm --ram-cap-mb 4096 --non-interactive
+--yes` to the installer. Remove uses `--action remove-node --node pve2` instead;
+add `--delete-sandboxes` when the node still has sandboxes or snapshots. The
+older `--action nodes --node-action add|remove` form still works. Update
 the control plane to a multi-node-capable release first; the installer checks
 capabilities before changing a target host.
 

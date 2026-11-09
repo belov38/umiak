@@ -35,7 +35,7 @@ on 2026-11-04 through the coordinator, subject to the live restrictions below.
 - Storage limits, RAM caps, clone concurrency and SSH endpoints are per node.
 - Templates are logical catalog entries; active builds are per
   `(template_slug, node_id)`, not a single global build.
-- Installer offers **Add or remove sandbox nodes** after S18 implementation
+- Installer offers **Add a sandbox node** / **Remove a sandbox node** after S18 implementation
   lands on main. Browser setup remains Templates + Smoke.
 - Removing a sandbox node deletes everything Umiak owns on that node
   (sandboxes, machines, snapshots, templates and their disks) after an

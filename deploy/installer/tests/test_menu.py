@@ -23,7 +23,7 @@ def test_menu_options_follow_state():
     assert main.menu_options(sample("ct-created")) == ["Resume install", "Uninstall"]
     assert main.menu_options(sample("prepared")) == ["Resume install", "Uninstall"]
     assert main.menu_options(sample("complete")) == [
-        "Update", "Sign in a new browser", "Reset owner access", "Add or remove sandbox nodes", "Uninstall",
+        "Update", "Sign in a new browser", "Reset owner access", "Add a sandbox node", "Remove a sandbox node", "Uninstall",
     ]
 
 
@@ -390,7 +390,7 @@ def test_interactive_install_offers_the_other_cluster_nodes(env, monkeypatch):
     assert run(FLAGS[2:], input_fn=answer) == 0
     assert "Add pve2 as a sandbox node? [Y/n]: " in prompts and added == ["pve2"]
     assert any("Could not add pve3: no LVM-thin storage" in line for line in printed)
-    assert any("Add or remove sandbox nodes" in line for line in printed)
+    assert any("Add a sandbox node" in line for line in printed)
     assert printed[-3] == f"  https://umiak.tail0000.ts.net/claim#{CODE}"
 
 

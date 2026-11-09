@@ -88,7 +88,7 @@ The installer detects current state (a control-plane container tagged
 
 - not installed → **Install**;
 - installed → **Update**, **Sign in a new browser**, **Reset owner access**,
-  **Uninstall** (S19 adds **Add or remove sandbox nodes**).
+  **Uninstall** (S19 adds **Add a sandbox node** / **Remove a sandbox node**).
 
 Re-running the same command is the only thing a user needs to remember.
 A `--non-interactive` mode with flags for every answer exists for tests.
