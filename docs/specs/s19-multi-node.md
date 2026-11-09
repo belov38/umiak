@@ -37,8 +37,11 @@ on 2026-11-04 through the coordinator, subject to the live restrictions below.
   `(template_slug, node_id)`, not a single global build.
 - Installer offers **Add or remove sandbox nodes** after S18 implementation
   lands on main. Browser setup remains Templates + Smoke.
-- Removal refuses with a useful blocker list; it never automatically deletes
-  sandboxes, snapshots or templates to make removal succeed.
+- Removing a sandbox node deletes everything Umiak owns on that node
+  (sandboxes, machines, snapshots, templates and their disks) after an
+  explicit confirmation that lists them (decision 2026-11-09: sandboxes are
+  ephemeral agent environments and hold no critical data). Anything the
+  purge cannot clear is refused with a plain-language blocker list.
 
 S19 originally excluded cross-node data transfer; S21 now provides verified
 template copies via standard pvesm. Cold fork/resume/snapshot moves, live migration,
@@ -194,6 +197,25 @@ resume deletion even after the VM disappears. Finalization verifies no active
 task, VM or local disks remain before freeing its lease and retiring history.
 An ambiguous delete response requires operator-supplied matching PVE task
 identity; it must not be treated as proven completion.
+
+Purge (decision 2026-11-09). Removal first shows the node's plan: sandboxes
+(slug, name, ID, VMIDs), machines without a live sandbox, snapshots by name and
+templates by slug, version and VMID; other nodes keep their own templates, and
+the control-plane CT, history and shared cluster key are retained. When
+sandboxes, machines or snapshots exist, a stronger confirmation is required:
+interactively the operator types the node name (`--yes` alone never implies
+it); non-interactively `--yes --delete-sandboxes`. A templates-only node needs
+the normal confirmation. The purge refuses before any change while a build or
+node preparation job (other than a template retirement intent), an unfinished
+volume transfer, an orphan build lease or an orphan disk exists. Otherwise it
+cordons the node under the node lock (no new placement or build) and requests
+the normal lifecycle deletes: system delete of each sandbox (reason
+`node_removal`), `snapshot-op delete` of ready/failed snapshots and
+`machine-op delete` of machines without a live sandbox. The worker performs
+them with its usual ownership checks and disk/lease accounting. After they
+finish, each template is retired through the verified template retirement
+below, then the node is retired and host cleanup runs. Every step is
+idempotent; a rerun after a partial failure continues where it stopped.
 
 If blocked, refuse removal without uninstalling the agent or changing SDN.
 An explicit cordon can be used to prevent new work while the operator

@@ -3,7 +3,8 @@
 Run the installer again on the original control-plane host and choose **Add or
 remove sandbox nodes**. For automation, pass `--action nodes --node-action add
 --node pve2 --storage local-lvm --ram-cap-mb 4096 --non-interactive --yes` to
-the installer. Remove uses `--node-action remove --node pve2` instead. Update
+the installer. Remove uses `--node-action remove --node pve2` instead; add
+`--delete-sandboxes` when the node still has sandboxes or snapshots. Update
 the control plane to a multi-node-capable release first; the installer checks
 capabilities before changing a target host.
 
@@ -57,12 +58,29 @@ cleanup runs after a restart.
 
 ## Removing a node
 
-Stop and delete its sandboxes and snapshots first. Explicitly retire its
-local templates. Removal lists remaining blocker IDs, including failed or
-pending cleanup, and refuses without uninstalling the node-agent. Once empty,
-the node is retired under the scheduler lock; local inventory is checked
-again before agent/config removal. A partial cleanup can be retried using the
-retained retired topology row. Re-adding preserves that row's ID/history.
+Removing a node deletes everything Umiak owns on it. The installer first
+lists the node's sandboxes (slug, name, ID, VMIDs), machines without a
+sandbox, snapshots and templates (slug, version, VMID). Other nodes keep their
+own templates and sandboxes. When sandboxes, machines or snapshots exist, type
+the node name to confirm, even with `--yes`; non-interactive runs need
+`--yes --delete-sandboxes`. A node with only templates needs the normal
+confirmation.
+
+The node is cordoned and every sandbox, snapshot and orphan machine is
+deleted through the normal worker delete path; the installer prints progress
+until they are gone. Then each local template is deleted and retired, the node
+is retired under the scheduler lock, and local inventory is checked again
+before agent/config removal. If deletion makes no progress for 10 minutes, the
+installer stops and lists what is left; check that the control plane is
+running and rerun the removal. Every step resumes where it stopped, including
+a template deletion interrupted mid-task and host cleanup after the node was
+already retired. Re-adding preserves the topology row's ID/history.
+
+Removal refuses before deleting anything, with a plain explanation, while a
+template build or node preparation is running or interrupted, a template copy
+to or from the node is unfinished, a finished build still holds a VMID lease,
+or a disk of an already deleted sandbox is still recorded. Resolve that first
+(see the recovery section below), then rerun.
 
 The control-plane CT is independent of its host's sandbox role and is retained.
 Other guests, `vmbr0`, unrelated firewall rules, global forwarding and dnsmasq
@@ -86,7 +104,9 @@ JSON
 ```
 
 The result includes node IDs, active/interrupted build job IDs and template
-build IDs. To explicitly delete and retire a verified Umiak template, send
+build IDs. `{"op":"removal-plan","nodeId":"<node UUID>"}` is read-only and
+shows what removal would delete plus its blockers; `{"op":"purge",...}`
+cordons the node and requests the deletes (the installer does this for you). To explicitly delete and retire a verified Umiak template, send
 `{"op":"retire-template","nodeId":"<node UUID>","buildId":"<build UUID>"}`
 through the same bridge. It refuses non-template guests, protected/out-of-range
 VMIDs, machine/snapshot references and an existing build reservation. A failed
