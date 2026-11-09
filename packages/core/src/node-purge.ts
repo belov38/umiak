@@ -180,12 +180,11 @@ export async function nodeRemovalPlan(
 	);
 	const node = n.rows[0]?.name;
 	if (node === undefined) throw new Error("Unknown sandbox node");
-	const [sandboxes, machines, snapshots, templates] = await Promise.all([
-		q.query<PurgeSandbox>(SANDBOXES_SQL, [nodeId]),
-		q.query<PurgeMachine>(MACHINES_SQL, [nodeId]),
-		q.query<PurgeSnapshot>(SNAPSHOTS_SQL, [nodeId]),
-		q.query<PurgeTemplate>(TEMPLATES_SQL, [nodeId]),
-	]);
+	// Sequential: q may be a single transaction client, which must not run queries concurrently.
+	const sandboxes = await q.query<PurgeSandbox>(SANDBOXES_SQL, [nodeId]);
+	const machines = await q.query<PurgeMachine>(MACHINES_SQL, [nodeId]);
+	const snapshots = await q.query<PurgeSnapshot>(SNAPSHOTS_SQL, [nodeId]);
+	const templates = await q.query<PurgeTemplate>(TEMPLATES_SQL, [nodeId]);
 	return {
 		node,
 		sandboxes: sandboxes.rows,

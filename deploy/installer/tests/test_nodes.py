@@ -598,3 +598,23 @@ def test_node_offered_after_install_needs_no_second_confirmation(tmp_path):
         nodes.add_node(runner, installed(), None, "pve2", ui=ui, console=Console(), host=host, confirmed=True)
     assert "Cancelled" not in str(error.value)  # it went past the confirmation to the reservation
     assert ui.prompts == []
+
+
+def test_remove_refuses_the_control_plane_host_before_any_call(tmp_path):
+    cp, host = Console(), Host()
+    with pytest.raises(InstallerError, match="runs the Umiak control plane"):
+        nodes.remove_node(FakeRunner(tmp_path), installed(), "pve", ui=FakeUi(yes=True), console=cp, host=host)
+    assert cp.calls == [] and host.calls == []
+
+
+def test_remove_asks_to_update_an_old_control_plane_without_removal_plan(tmp_path):
+    class OldConsole(Console):
+        def call(self, op, **data):
+            if op == "removal-plan":
+                raise CommandError(["pct"], 1, stderr="Unknown node console operation")
+            return super().call(op, **data)
+
+    cp, host = OldConsole(), Host()
+    with pytest.raises(InstallerError, match="Update the control plane first"):
+        nodes.remove_node(FakeRunner(tmp_path), installed(), "pve2", ui=FakeUi(yes=True), console=cp, host=host)
+    assert host.calls == []

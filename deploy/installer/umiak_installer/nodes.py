@@ -393,6 +393,9 @@ def remove_node(runner, current, node, *, ui, console=None, host=None, delete_sa
                 clock=time.monotonic):
     day2._require_node(runner, current)
     day2._require_complete(current)
+    if node == current.node:
+        # Host cleanup would wipe the installer's own state directory on this host.
+        raise InstallerError(f"{node} runs the Umiak control plane; uninstall Umiak instead of removing this node")
     _target(runner, node)
     console, host = console or NodeConsole(runner, current), host or HostConsole(runner)
     _capable(console)
@@ -412,7 +415,11 @@ def remove_node(runner, current, node, *, ui, console=None, host=None, delete_sa
             raise InstallerError("Cancelled; no sandbox node changes were applied")
         target = retired
     else:
-        plan = console.call("removal-plan", nodeId=target["nodeId"])
+        try:
+            plan = console.call("removal-plan", nodeId=target["nodeId"])
+        except CommandError as error:
+            # Control planes before node purge (<= 0.4.1) have no removal-plan operation.
+            raise InstallerError("Update the control plane first (menu: Update), then retry the node removal") from error
         ui.say(f"Removing sandbox node {node} deletes everything Umiak owns on it:")
         for line in _plan_lines(plan):
             ui.say(line)
