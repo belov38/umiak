@@ -12,6 +12,7 @@ export * from "./label.ts";
 export * from "./locks.ts";
 export * from "./node-inventory.ts";
 export * from "./node-maintenance.ts";
+export * from "./node-purge.ts";
 export * from "./notifier.ts";
 export * from "./placement.ts";
 export * from "./principal.ts";
