@@ -244,9 +244,18 @@ export async function nodeCommand(
 	}
 	if (!node) throw Error("Unknown active sandbox node");
 	if (request.op === "purge") {
+		// The IDs the operator confirmed; anything else live on the node refuses.
+		const confirmed = request.confirmed;
+		if (
+			!Array.isArray(confirmed) ||
+			!confirmed.every((id) => typeof id === "string")
+		)
+			throw Error(
+				"purge needs the confirmed sandbox, machine and snapshot IDs",
+			);
 		const boss = await makeJobs(pool);
 		try {
-			return await requestNodePurge(pool, boss.jobs, node.nodeId);
+			return await requestNodePurge(pool, boss.jobs, node.nodeId, confirmed);
 		} finally {
 			await boss.stop?.();
 		}

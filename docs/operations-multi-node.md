@@ -105,8 +105,11 @@ JSON
 
 The result includes node IDs, active/interrupted build job IDs and template
 build IDs. `{"op":"removal-plan","nodeId":"<node UUID>"}` is read-only and
-shows what removal would delete plus its blockers; `{"op":"purge",...}`
-cordons the node and requests the deletes (the installer does this for you). To explicitly delete and retire a verified Umiak template, send
+shows what removal would delete plus its blockers;
+`{"op":"purge","nodeId":"<node UUID>","confirmed":["<id>",...]}` cordons the
+node and requests the deletes of exactly the sandbox, machine and snapshot IDs
+from that plan; anything new on the node refuses it (the installer does this
+for you). To explicitly delete and retire a verified Umiak template, send
 `{"op":"retire-template","nodeId":"<node UUID>","buildId":"<build UUID>"}`
 through the same bridge. It refuses non-template guests, protected/out-of-range
 VMIDs, machine/snapshot references and an existing build reservation. A failed

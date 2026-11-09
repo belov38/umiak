@@ -4,6 +4,7 @@ import type { JobSender } from "./jobs.ts";
 import { lockNode } from "./locks.ts";
 import { DELETE_RETRY_LIMIT } from "./queues.ts";
 import { requestSystemDelete } from "./service/delete.ts";
+import { TERMINAL_OPERATION_STATES } from "./states.ts";
 
 // Node removal with purge (S19 "Safe removal", 2026-11-09 decision): every
 // Umiak object on the node is deleted through its normal lifecycle path (the
@@ -79,10 +80,12 @@ const SNAPSHOTS_SQL = `
  SELECT id::text, COALESCE(name, pending_name) AS name, kind, state FROM runtime.snapshots
  WHERE node_id = $1 AND state <> 'deleted' ORDER BY created_at, id`;
 
+/** An open retirement intent first: retireNodeTemplate refuses others while it is open. */
 const TEMPLATES_SQL = `
- SELECT id::text AS "buildId", template_slug AS slug, version, pve_vmid AS vmid, status
- FROM runtime.template_builds WHERE node_id = $1 AND status <> 'retired'
- ORDER BY template_slug, created_at, id`;
+ SELECT tb.id::text AS "buildId", tb.template_slug AS slug, tb.version, tb.pve_vmid AS vmid, tb.status
+ FROM runtime.template_builds tb WHERE tb.node_id = $1 AND tb.status <> 'retired'
+ ORDER BY EXISTS (SELECT 1 FROM runtime.node_build_jobs j WHERE j.retiring_build_id = tb.id
+  AND j.status IN ('running', 'interrupted')) DESC, tb.template_slug, tb.created_at, tb.id`;
 
 async function blockers(
 	q: Queryable,
@@ -255,10 +258,15 @@ async function deleteMachine(
 		);
 		const state = m.rows[0]?.state;
 		if (state === undefined || state === "deleted") return;
+		// machine-op delete skips legacy pool rows: release them even when already deleting.
+		await tx.client.query(
+			"UPDATE runtime.machines SET pool_key = NULL WHERE id = $1",
+			[id],
+		);
 		if (state !== "deleting")
 			await tx.client.query(
 				`UPDATE runtime.machines
-				 SET state = 'deleting', pool_key = NULL, error_code = COALESCE(error_code, 'operator'),
+				 SET state = 'deleting', error_code = COALESCE(error_code, 'operator'),
 				     error_detail = COALESCE(error_detail, 'node removal'),
 				     state_changed_at = now(), version = version + 1
 				 WHERE id = $1`,
@@ -273,16 +281,34 @@ async function deleteMachine(
 	});
 }
 
+/** Live items (not being deleted already) the operator did not confirm. */
+export function unconfirmedItems(
+	plan: NodeRemovalPlan,
+	confirmed: readonly string[],
+): string[] {
+	const ok = new Set(confirmed);
+	const fresh = <T extends { id: string; state: string }>(rows: T[]) =>
+		rows.filter((r) => r.state !== "deleting" && !ok.has(r.id));
+	return [
+		...fresh(plan.sandboxes).map((s) => `sandbox ${s.slug}`),
+		...fresh(plan.machines).map((m) => `machine VMID ${m.vmid ?? "-"}`),
+		...fresh(plan.snapshots).map((s) => `snapshot ${s.name ?? s.id}`),
+	];
+}
+
 /**
  * Cordons the node and requests the delete of every sandbox, snapshot and
- * orphan machine on it. Idempotent: a rerun only nudges unfinished deletes.
- * Refuses (nothing changed) while a blocker exists. Returns the plan after
- * the requests; the caller waits for the worker and then retires templates.
+ * orphan machine on it. `confirmed` are the IDs the operator was shown: a
+ * live item outside it refuses the purge. Idempotent: a rerun only nudges
+ * unfinished deletes. Refuses (nothing changed) while a blocker exists.
+ * Returns the plan after the requests; the caller waits for the worker and
+ * then retires templates.
  */
 export async function requestNodePurge(
 	pool: pg.Pool,
 	jobs: JobSender,
 	nodeId: string,
+	confirmed: readonly string[],
 ): Promise<NodeRemovalPlan> {
 	const plan = await withTx(pool, async (tx) => {
 		await lockNode(tx, nodeId);
@@ -290,18 +316,32 @@ export async function requestNodePurge(
 		const p = await nodeRemovalPlan(tx.client, nodeId);
 		if (p.blockers.length)
 			throw new Error(p.blockers.map((b) => b.message).join("; "));
+		const unconfirmed = unconfirmedItems(p, confirmed);
+		if (unconfirmed.length)
+			throw new Error(
+				`New items appeared on node ${p.node} since the list was shown: ${unconfirmed.join(", ")}; rerun the removal to review them`,
+			);
 		await tx.client.query(
 			"UPDATE runtime.nodes SET state = 'cordoned', updated_at = now() WHERE id = $1 AND state = 'active'",
 			[nodeId],
 		);
 		return p;
 	});
-	for (const s of plan.sandboxes) {
-		if (s.state === "deleting") continue;
-		await withTx(pool, (tx) =>
-			requestSystemDelete(tx, jobs, s.id, "node_removal"),
-		);
-	}
+	for (const s of plan.sandboxes)
+		await withTx(pool, async (tx) => {
+			const op = await requestSystemDelete(tx, jobs, s.id, "node_removal");
+			// An existing delete only returns its operation: send its job again.
+			if (
+				s.state === "deleting" &&
+				!TERMINAL_OPERATION_STATES.includes(op.state)
+			)
+				await jobs.send(
+					tx,
+					"sandbox-op",
+					{ operationId: op.id },
+					{ singletonKey: s.id, retryLimit: DELETE_RETRY_LIMIT },
+				);
+		});
 	for (const s of plan.snapshots) await deleteSnapshot(pool, jobs, s.id);
 	for (const m of plan.machines) await deleteMachine(pool, jobs, m.id);
 	return nodeRemovalPlan(pool, nodeId);

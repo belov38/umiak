@@ -138,6 +138,7 @@ def test_remove_deletes_sandboxes_with_progress_then_templates(tmp_path):
     nodes.remove_node(runner, installed(), "pve2", ui=ui, console=cp, host=host, sleep=lambda s: None)
     ops = [op for op, _ in cp.calls]
     assert ops.index("purge") < ops.index("retire-template") < ops.index("retire")
+    assert dict(cp.calls)["purge"] == {"nodeId": "b", "confirmed": ["0190-sbx", "0190-snp"]}
     progress = [line for line in said if "left" in line]
     assert progress == ["  Deleting on pve2: 1 sandbox, 1 snapshot left", "  Deleting on pve2: 1 snapshot left"]
     assert any("Deleting template linux 1.2.0 (VMID 20001)" in line for line in said)
@@ -182,6 +183,17 @@ def test_remove_stops_on_a_stalled_purge_and_says_what_is_left(tmp_path):
                           sleep=sleep, clock=lambda: now[0])
     assert "retire" not in [op for op, _ in cp.calls]
     assert host.calls == []
+
+
+def test_remove_stops_when_new_sandboxes_appear_while_waiting(tmp_path):
+    runner = FakeRunner(tmp_path)
+    busy = plan(sandboxes=[SANDBOX])
+    newcomer = dict(SANDBOX, id="0190-new", slug="late-heron", state="creating")
+    cp, host = Console(plans=[busy, busy, plan(sandboxes=[dict(SANDBOX, state="deleting"), newcomer])]), Host()
+    with pytest.raises(InstallerError, match="sandbox late-heron appeared on pve2.*Rerun the removal"):
+        nodes.remove_node(runner, installed(), "pve2", ui=FakeUi(answers=["y", "pve2"]), console=cp, host=host,
+                          sleep=lambda s: None)
+    assert "retire" not in [op for op, _ in cp.calls]
 
 
 def test_remove_explains_a_failed_template_delete(tmp_path):

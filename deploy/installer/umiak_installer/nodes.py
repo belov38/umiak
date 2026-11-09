@@ -336,10 +336,27 @@ def _reason(error):
     return lines[-1] if lines else str(error)
 
 
-def _wait_purged(console, node_id, plan, *, ui, sleep, clock):
+def _ids(plan):
+    return [item["id"] for key in ("sandboxes", "machines", "snapshots") for item in plan[key]]
+
+
+def _unconfirmed(plan, confirmed):
+    """Live items that appeared after the operator confirmed the list."""
+    items = [(f"sandbox {s['slug']}", s) for s in plan["sandboxes"]]
+    items += [(f"machine VMID {m['vmid'] or '-'}", m) for m in plan["machines"]]
+    items += [(f"snapshot {s['name'] or s['id']}", s) for s in plan["snapshots"]]
+    return [label for label, item in items if item["state"] != "deleting" and item["id"] not in confirmed]
+
+
+def _wait_purged(console, node_id, plan, confirmed, *, ui, sleep, clock):
     """Poll until the worker has deleted every sandbox, machine and snapshot; report progress."""
     node, last, changed = plan["node"], None, clock()
     while _left(plan):
+        if fresh := _unconfirmed(plan, confirmed):
+            raise InstallerError(
+                f"{', '.join(fresh)} appeared on {node} while it was being removed and was not deleted; the confirmed "
+                "deletions continue. Rerun the removal to review and delete it."
+            )
         if _left(plan) != last:
             last, changed = _left(plan), clock()
             ui.say(f"  Deleting on {node}: {last} left")
@@ -403,11 +420,12 @@ def remove_node(runner, current, node, *, ui, console=None, host=None, delete_sa
         if plan["blockers"]:
             raise InstallerError(f"Cannot remove {node} yet: " + "; ".join(b["message"] for b in plan["blockers"]))
         _confirm_purge(node, plan, ui=ui, delete_sandboxes=delete_sandboxes)
+        confirmed = _ids(plan)
         try:
-            plan = console.call("purge", nodeId=target["nodeId"])
+            plan = console.call("purge", nodeId=target["nodeId"], confirmed=confirmed)
         except CommandError as error:
             raise InstallerError(f"Could not start deleting on {node}: {_reason(error)}") from error
-        plan = _wait_purged(console, target["nodeId"], plan, ui=ui, sleep=sleep, clock=clock)
+        plan = _wait_purged(console, target["nodeId"], plan, set(confirmed), ui=ui, sleep=sleep, clock=clock)
         for template in plan["templates"]:
             label = f"{template['slug']} {template['version']} (VMID {template['vmid']})"
             ui.say(f"  Deleting template {label}")

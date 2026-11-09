@@ -710,7 +710,14 @@ it("removal-plan lists what purge deletes; purge sends the normal delete jobs th
 		buildId: a.templateBuildId,
 		version: "2.0.0",
 	});
-	const after = await nodeCommand(db.pool, { op: "purge", nodeId: a.nodeId });
+	await expect(
+		nodeCommand(db.pool, { op: "purge", nodeId: a.nodeId }),
+	).rejects.toThrow(/confirmed/);
+	const after = await nodeCommand(db.pool, {
+		op: "purge",
+		nodeId: a.nodeId,
+		confirmed: [sandboxId],
+	});
 	expect(after.sandboxes[0].state).toBe("deleting");
 	const queued = await db.pool.query(
 		"SELECT name FROM pgboss.job WHERE data->>'operationId' IN (SELECT id::text FROM runtime.operations WHERE sandbox_id=$1)",

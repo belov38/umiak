@@ -67,6 +67,13 @@ describe.skipIf(skipPg())("node removal purge (S19)", () => {
 		return { ...topo, sandboxId, slug, warmId };
 	}
 
+	const confirmed = (plan: {
+		sandboxes: { id: string }[];
+		machines: { id: string }[];
+		snapshots: { id: string }[];
+	}) =>
+		[...plan.sandboxes, ...plan.machines, ...plan.snapshots].map((x) => x.id);
+
 	it("lists sandboxes with VMIDs, saved snapshots, orphan machines and templates", async () => {
 		const n = await occupied();
 		const plan = await nodeRemovalPlan(db.pool, n.nodeId);
@@ -151,7 +158,8 @@ describe.skipIf(skipPg())("node removal purge (S19)", () => {
 	it("requests the normal lifecycle deletes, cordons the node and is idempotent", async () => {
 		const n = await occupied();
 		const jobs = new RecordingJobSender();
-		const after = await requestNodePurge(db.pool, jobs, n.nodeId);
+		const ids = confirmed(await nodeRemovalPlan(db.pool, n.nodeId));
+		const after = await requestNodePurge(db.pool, jobs, n.nodeId, ids);
 		expect(after.sandboxes[0]?.state).toBe("deleting");
 		expect(after.machines[0]?.state).toBe("deleting");
 		expect(after.snapshots[0]?.state).toBe("deleting");
@@ -176,7 +184,7 @@ describe.skipIf(skipPg())("node removal purge (S19)", () => {
 		]);
 
 		jobs.clear();
-		await requestNodePurge(db.pool, jobs, n.nodeId);
+		await requestNodePurge(db.pool, jobs, n.nodeId, ids);
 		expect(
 			(
 				await db.pool.query(
@@ -185,9 +193,10 @@ describe.skipIf(skipPg())("node removal purge (S19)", () => {
 				)
 			).rows[0].n,
 		).toBe(1);
-		// Deleting machines and snapshots are nudged again; the singleton key dedupes.
+		// Unfinished deletes are nudged again; the singleton key dedupes.
 		expect(jobs.sent.map((j) => j.queue).sort()).toEqual([
 			"machine-op",
+			"sandbox-op",
 			"snapshot-op",
 		]);
 	});
@@ -199,9 +208,9 @@ describe.skipIf(skipPg())("node removal purge (S19)", () => {
 			[`build-${n.nodeId}`, n.nodeId],
 		);
 		const jobs = new RecordingJobSender();
-		await expect(requestNodePurge(db.pool, jobs, n.nodeId)).rejects.toThrow(
-			/template build linux is running/,
-		);
+		await expect(
+			requestNodePurge(db.pool, jobs, n.nodeId, [n.sandboxId]),
+		).rejects.toThrow(/template build linux is running/);
 		expect(jobs.sent).toEqual([]);
 		expect(
 			(
@@ -211,5 +220,51 @@ describe.skipIf(skipPg())("node removal purge (S19)", () => {
 				)
 			).rows[0],
 		).toEqual({ node: "active", sandbox: "ready" });
+	});
+
+	it("refuses sandboxes, machines or snapshots that were not in the confirmed list", async () => {
+		const n = await occupied();
+		const jobs = new RecordingJobSender();
+		await expect(
+			requestNodePurge(db.pool, jobs, n.nodeId, [n.sandboxId]),
+		).rejects.toThrow(/appeared on node node-.* since the list was shown/);
+		expect(jobs.sent).toEqual([]);
+	});
+
+	it("clears the pool key of a machine already deleting so the worker deletes it", async () => {
+		const topo = await createTopology(db.pool);
+		const id = await insertMachine(db.pool, topo, {
+			state: "deleting",
+			poolKey: "legacy",
+		});
+		const jobs = new RecordingJobSender();
+		await requestNodePurge(db.pool, jobs, topo.nodeId, [id]);
+		expect(
+			(
+				await db.pool.query(
+					"SELECT pool_key FROM runtime.machines WHERE id=$1",
+					[id],
+				)
+			).rows[0].pool_key,
+		).toBeNull();
+		expect(jobs.sent.map((j) => j.queue)).toEqual(["machine-op"]);
+	});
+
+	it("lists a template with an open retirement intent first", async () => {
+		const n = await createTopology(db.pool, {
+			build: { templateSlug: "alpha" },
+		});
+		const zulu = randomUUID();
+		await db.pool.query(
+			`INSERT INTO runtime.template_builds (id, template_slug, version, os, provider_id, node_id, storage_id, pve_vmid, disk_layout, hw, boot_timeout_s, status)
+			 VALUES ($1, 'zulu', 'v1', 'linux', $2, $3, $4, 598, '{}', '{}', 300, 'deprecated')`,
+			[zulu, n.providerId, n.nodeId, n.storageId],
+		);
+		await db.pool.query(
+			"INSERT INTO runtime.node_build_jobs(id,node_id,template_slug,retiring_build_id,status) VALUES($1,$2,'zulu',$3,'interrupted')",
+			[`retire-${zulu}`, n.nodeId, zulu],
+		);
+		const plan = await nodeRemovalPlan(db.pool, n.nodeId);
+		expect(plan.templates.map((t) => t.slug)).toEqual(["zulu", "alpha"]);
 	});
 });

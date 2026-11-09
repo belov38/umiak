@@ -211,7 +211,9 @@ volume transfer, an orphan build lease or an orphan disk exists. Otherwise it
 cordons the node under the node lock (no new placement or build) and requests
 the normal lifecycle deletes: system delete of each sandbox (reason
 `node_removal`), `snapshot-op delete` of ready/failed snapshots and
-`machine-op delete` of machines without a live sandbox. The worker performs
+`machine-op delete` of machines without a live sandbox. The purge carries the
+IDs the operator confirmed; a live item outside them refuses it, and the
+installer stops if new items appear on the node while it waits. The worker performs
 them with its usual ownership checks and disk/lease accounting. After they
 finish, each template is retired through the verified template retirement
 below, then the node is retired and host cleanup runs. Every step is
